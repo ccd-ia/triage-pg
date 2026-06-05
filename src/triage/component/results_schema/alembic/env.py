@@ -5,7 +5,7 @@ import re
 
 import yaml
 from alembic import context
-from sqlalchemy import create_engine, pool, text
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL
 
 from triage.component.results_schema import Base
@@ -62,6 +62,22 @@ if "url" in config.attributes:
 
 if not url:
     url = os.environ.get("DBURL", None)
+
+if not url:
+    # project convention: DATABASE_URL or PG* env vars (loaded by direnv) — ADR-0003 local profile
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+if not url and os.environ.get("PGDATABASE") and os.environ.get("PGHOST"):
+    url = URL.create(
+        "postgresql+psycopg",
+        host=os.environ["PGHOST"],
+        port=os.environ.get("PGPORT"),
+        username=os.environ.get("PGUSER"),
+        password=os.environ.get("PGPASSWORD"),
+        database=os.environ["PGDATABASE"],
+    )
 
 if not url:
     db_config_file = context.get_x_argument("db_config_file").get(
@@ -127,8 +143,6 @@ def run_migrations_online():
             include_schemas=True,
             include_object=include_object,
         )
-        connection.execute(text('set search_path to "results", public'))
-
         with context.begin_transaction():
             context.run_migrations()
 
