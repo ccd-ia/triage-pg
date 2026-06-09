@@ -35,6 +35,7 @@ src/triage/component/postmodeling/model_groups_testing.ipynb
 .secrets
 .secrets/
 
-# Session handoff files
+# Session handoff files (Claude-generated, session-local — never committed)
+ai-docs/
 GIT_REMOTE
 TODO.org
