@@ -75,7 +75,8 @@ create table triage.model_groups (
 -- events with native lineage (ADR-0006), evaluations are recomputable SQL
 -- (ADR-0007). FK hardening from domain tables is deferred to the GC pass.
 create table triage.artifacts (
-    artifact_id     text primary key,              -- derivation hash (ADR-0013)
+    artifact_id     text primary key,              -- strict derivation hash (ADR-0013, ADR-0016)
+    logical_id      text not null,                 -- engine-version-free hash chain (ADR-0016 fallback)
     kind            triage.artifact_kind not null,
     cacheable       boolean not null default true, -- false: volatile inputs (ADR-0014)
     config          jsonb not null,                -- canonical own-config slice
@@ -88,6 +89,7 @@ create table triage.artifacts (
     created_at      timestamptz not null default now(),
     built_at        timestamptz
 );
+create index artifacts_logical_idx on triage.artifacts (logical_id);
 
 create table triage.artifact_inputs (
     artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,

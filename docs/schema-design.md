@@ -370,7 +370,8 @@ create table triage.run_source_pins (
 
 ```sql
 create table triage.artifacts (
-    artifact_id     text primary key,              -- derivation hash (ADR-0013)
+    artifact_id     text primary key,              -- strict derivation hash (ADR-0013, ADR-0016)
+    logical_id      text not null,                 -- engine-version-free hash chain (ADR-0016 fallback)
     kind            triage.artifact_kind not null,
     cacheable       boolean not null default true, -- false: volatile inputs (ADR-0014)
     config          jsonb not null,                -- canonical own-config slice
@@ -383,6 +384,7 @@ create table triage.artifacts (
     created_at      timestamptz not null default now(),
     built_at        timestamptz
 );
+create index artifacts_logical_idx on triage.artifacts (logical_id);
 
 create table triage.artifact_inputs (
     artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,
@@ -462,7 +464,8 @@ All six open questions are resolved; the DDL above reflects them.
 5. **Cohort/label contract — timechop stays** as the as_of_date/split generator feeding featurizer; **templated SQL** (`{as_of_date}`, `{label_timespan}`); the label query's required columns are **dictated by `problem_type`** (`outcome` | `duration, event_observed`).
 6. **Subsets & retrain.** Subsets: `triage.subsets` table kept now, the evaluation *feature* deferred (additive `WHERE` filter). Retrain: **no dedicated tables** — a retrained production model is just a `triage.models` row, its predictions are `predictions(split_kind='production')`; the workflow is deferred (ADR-0006). The old `retrain`/`retrain_models` tables and `triage_production` schema are dropped.
 7. **Source-data pinning (added 2026-06-11, ADR-0014).** Source tables enter artifact identity as **declared registry pins** (`triage.sources` / `source_versions`, §4.7), frozen per run into `run_source_pins`; unpinned = volatile (never cached, loud warning); fingerprints advisory-only. Part of the broader derivation-DAG design (`docs/derivation-dag.md`, ADR-0013).
-8. **DAG node granularity (added 2026-06-11, ADR-0015).** Data layer per as_of_date (features per adapter-defined **feature group** × date); matrices per split-side with the test matrix taking the train matrix as a parent (fitted imputation stats, ADR-0009); models last cached node — predictions/evaluations get no artifact rows. Derivation ids **replace** the inherited hashes: `model_hash` := artifact id, `matrix_uuid` := uuid5(artifact id), `cohort_hash` := per-date node id, and `labels.label_hash` joins the PK (fixes the missing label-definition discriminator). Remaining open: engine-version policy, GC/retention (which also decides FK hardening).
+8. **DAG node granularity (added 2026-06-11, ADR-0015).** Data layer per as_of_date (features per adapter-defined **feature group** × date); matrices per split-side with the test matrix taking the train matrix as a parent (fitted imputation stats, ADR-0009); models last cached node — predictions/evaluations get no artifact rows. Derivation ids **replace** the inherited hashes: `model_hash` := artifact id, `matrix_uuid` := uuid5(artifact id), `cohort_hash` := per-date node id, and `labels.label_hash` joins the PK (fixes the missing label-definition discriminator).
+9. **Engine versions in identity (added 2026-06-11, ADR-0016).** Per-kind compiler map (triage-pg on every kind; + featurizer on feature groups; + the estimator's distribution on models), release version strings; PostgreSQL/Python are runtimes — excluded from identity, recorded at run level. Strict by default; `artifacts.logical_id` (an engine-version-free hash chain over parents' logical ids) supports the opt-in `policy='logical'` fallback with a loud warning. Remaining open: GC/retention (which also decides FK hardening).
 
 ### Still deferred to the adapter-spec pass (not schema-blocking)
 
