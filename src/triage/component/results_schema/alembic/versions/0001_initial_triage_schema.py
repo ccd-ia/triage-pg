@@ -42,7 +42,8 @@ create table triage.experiments (
     experiment_hash text primary key,
     config          jsonb not null,
     problem_type    triage.problem_type not null,
-    created_at      timestamptz not null default now()
+    created_at      timestamptz not null default now(),
+    archived_at     timestamptz                    -- soft archive = GC root removal (ADR-0017)
 );
 
 create table triage.runs (
@@ -83,8 +84,9 @@ create table triage.artifacts (
     source_pins     jsonb not null default '{}'::jsonb,
     engine_versions jsonb not null default '{}'::jsonb,
     output_ref      text,                          -- table/date-slice, parquet URI, model URI
+    -- 'collected' = output GC'd, row kept for provenance; rebuilds on demand (ADR-0017)
     status          text not null default 'building'
-                      check (status in ('building', 'built', 'failed')),
+                      check (status in ('building', 'built', 'failed', 'collected')),
     built_by_run    uuid references triage.runs(run_id) on delete set null,
     created_at      timestamptz not null default now(),
     built_at        timestamptz
@@ -93,14 +95,27 @@ create index artifacts_logical_idx on triage.artifacts (logical_id);
 
 create table triage.artifact_inputs (
     artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,
-    parent_id   text not null references triage.artifacts(artifact_id),
+    -- RESTRICT: an edge is the child's provenance — a parent row cannot be
+    -- purged while any child still references it; purge deletes bottom-up (ADR-0017).
+    parent_id   text not null references triage.artifacts(artifact_id) on delete restrict,
     primary key (artifact_id, parent_id)
 );
 create index artifact_inputs_parent_idx on triage.artifact_inputs (parent_id);
 
+-- Usage edges: every artifact a run touched, built OR cache-hit. GC roots are
+-- computed from these — built_by_run alone is not a liveness edge, because a
+-- later run can depend on an artifact it did not build (ADR-0017).
+create table triage.run_artifacts (
+    run_id      uuid not null references triage.runs(run_id) on delete cascade,
+    artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,
+    used_at     timestamptz not null default now(),
+    primary key (run_id, artifact_id)
+);
+create index run_artifacts_artifact_idx on triage.run_artifacts (artifact_id);
+
 create table triage.matrices (
     matrix_uuid    uuid primary key,               -- = uuid5(artifact_id) (ADR-0015)
-    artifact_id    text references triage.artifacts(artifact_id) on delete set null,
+    artifact_id    text references triage.artifacts(artifact_id) on delete cascade,
     matrix_kind    triage.split_kind not null,
     storage_uri    text not null,
     storage_format text not null default 'parquet',
@@ -117,7 +132,9 @@ create table triage.matrices (
 create table triage.models (
     model_id                bigint generated always as identity primary key,
     model_group_id          bigint not null references triage.model_groups(model_group_id) on delete cascade,
-    model_hash              text   not null unique, -- = artifacts.artifact_id of the model node (ADR-0015)
+    model_hash              text   not null unique
+                              references triage.artifacts(artifact_id) on delete cascade,
+                            -- = artifacts.artifact_id of the model node (ADR-0015)
     run_id                  uuid   references triage.runs(run_id) on delete set null,
     train_matrix_uuid       uuid   references triage.matrices(matrix_uuid),
     train_end_time          date,
@@ -169,14 +186,16 @@ create table triage.run_source_pins (
 
 -- --------------------------------------------- cohort + labels (survival-ready)
 create table triage.cohorts (
-    cohort_hash text   not null,                   -- artifact_id of the cohort@(config, date) node (ADR-0015)
+    cohort_hash text   not null                    -- artifact_id of the cohort@(config, date) node (ADR-0015)
+                  references triage.artifacts(artifact_id) on delete cascade,
     entity_id   bigint not null,
     as_of_date  date   not null,
     primary key (cohort_hash, entity_id, as_of_date)
 );
 
 create table triage.labels (
-    label_hash     text     not null,              -- artifact_id of the labels@(config, date, timespan) node (ADR-0015)
+    label_hash     text     not null               -- artifact_id of the labels@(config, date, timespan) node (ADR-0015)
+                     references triage.artifacts(artifact_id) on delete cascade,
     entity_id      bigint   not null,
     as_of_date     date     not null,
     label_timespan interval not null,
@@ -198,7 +217,9 @@ create table triage.protected_groups (
 -- --------------------------------------- predictions (append-only, partitioned)
 create table triage.predictions (
     prediction_id bigint generated always as identity,
-    model_id      bigint not null references triage.models(model_id) on delete cascade,
+    -- RESTRICT: predictions are append-only history (ADR-0006); deleting a
+    -- predicted model must fail loudly, never silently eat its predictions (ADR-0017).
+    model_id      bigint not null references triage.models(model_id) on delete restrict,
     entity_id     bigint not null,
     as_of_date    date   not null,
     split_kind    triage.split_kind not null,
