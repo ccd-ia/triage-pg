@@ -22,10 +22,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-__all__ = ["VOLATILE", "Derivation", "canonical_json", "derive"]
+__all__ = ["VOLATILE", "Derivation", "as_uuid", "canonical_json", "derive"]
 
 # Sentinel standing in for the version of an unpinned source (ADR-0014).
 VOLATILE = "__volatile__"
+
+# Namespace for mapping derivation ids onto UUIDs (matrix_uuid, ADR-0015).
+_TRIAGE_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "triage-pg.ccd-ia")
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,15 @@ class Derivation:
 
     id: str
     cacheable: bool
+
+
+def as_uuid(derivation_id: str) -> uuid.UUID:
+    """Deterministically map a derivation id to a UUID.
+
+    Used where a uuid-typed key is kept for storage-naming convenience
+    (``matrices.matrix_uuid`` := ``as_uuid(artifact_id)``, ADR-0015).
+    """
+    return uuid.uuid5(_TRIAGE_NAMESPACE, derivation_id)
 
 
 def _normalize(value: Any) -> Any:
