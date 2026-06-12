@@ -21,6 +21,12 @@ from rich.table import Table
 from sqlalchemy.engine.url import URL
 from sqlalchemy.orm import sessionmaker
 
+from triage.artifacts import (
+    archive_experiment,
+    collect,
+    gc_candidates,
+    purge,
+)
 from triage.component.architect.entity_date_table_generators import (
     EntityDateTableGenerator,
 )
@@ -859,6 +865,84 @@ def source_show(
     if drifted:
         body += "\n[red]DRIFT: data changed since the current pin.[/red]"
     console.print(Panel.fit(body, title=f"Source: {name}"))
+
+
+@app.command("archive")
+def archive_command(
+    ctx: typer.Context,
+    experiment_hash: str = typer.Argument(
+        ..., help="Experiment to archive (removes it from the GC root set)."
+    ),
+) -> None:
+    """Soft-archive an experiment (ADR-0017). Reversible until a gc sweep."""
+    engine = get_engine(ctx)
+    archive_experiment(engine, experiment_hash)
+    console.print(
+        f"[green]Experiment '{experiment_hash}' archived — its artifacts become"
+        " collectible by 'triage gc' unless used elsewhere.[/green]"
+    )
+
+
+@app.command("gc")
+def gc_command(
+    ctx: typer.Context,
+    delete: bool = typer.Option(
+        False, "--delete", help="Collect dead artifacts' outputs (default: dry run)."
+    ),
+    do_purge: bool = typer.Option(
+        False,
+        "--purge",
+        help="Also delete the rows of dead collected/failed artifacts.",
+    ),
+    min_age: int = typer.Option(
+        0, "--min-age", help="Only touch artifacts built at least N days ago."
+    ),
+) -> None:
+    """Garbage-collect artifacts unreachable from any root (ADR-0017).
+
+    Roots: non-archived experiments' used artifacts + predicted models.
+    Default is a dry run; --delete collects outputs (rows stay, status
+    'collected', rebuild on demand); --purge removes dead collected/failed rows.
+    """
+    engine = get_engine(ctx)
+    candidates = gc_candidates(engine, min_age_days=min_age)
+
+    if not candidates:
+        console.print("[green]Nothing to collect — all artifacts are live.[/green]")
+    else:
+        table = Table(title="Collectible artifacts (dead)", box=box.SIMPLE_HEAVY)
+        table.add_column("Kind")
+        table.add_column("Artifact")
+        table.add_column("Output")
+        for row in candidates:
+            table.add_row(
+                str(row["kind"]), row["artifact_id"][:16] + "…", row["output_ref"] or ""
+            )
+        console.print(table)
+
+    if not delete and not do_purge:
+        console.print(
+            "[yellow]Dry run — nothing deleted. Use --delete to collect outputs,"
+            " --purge to drop dead collected/failed rows.[/yellow]"
+        )
+        return
+
+    if delete and candidates:
+        external = collect(engine, [row["artifact_id"] for row in candidates])
+        console.print(
+            f"[green]Collected {len(candidates)} artifact(s);"
+            f" in-PG slices deleted.[/green]"
+        )
+        if external:
+            console.print(
+                "[yellow]File-backed outputs to remove via the storage layer:[/yellow]"
+            )
+            for item in external:
+                console.print(f"  {item['kind']}: {item['output_ref'] or '(no ref)'}")
+
+    if do_purge:
+        purged = purge(engine, min_age_days=min_age)
+        console.print(f"[green]Purged {len(purged)} dead artifact row(s).[/green]")
 
 
 def execute() -> None:

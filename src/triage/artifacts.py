@@ -192,6 +192,215 @@ def mark_failed(engine: Engine, artifact_id: str) -> None:
         )
 
 
+def record_use(engine: Engine, run_id: str, artifact_ids: Sequence[str]) -> None:
+    """Record that a run used these artifacts — built OR cache-hit (ADR-0017).
+
+    These usage edges, not ``built_by_run``, are the GC root evidence: a run
+    depends on every artifact it consumed, including ones built by an earlier,
+    possibly later-archived run.
+    """
+    with engine.begin() as conn:
+        for artifact_id in artifact_ids:
+            conn.execute(
+                text("""
+                    insert into triage.run_artifacts (run_id, artifact_id)
+                    values (:run_id, :artifact_id) on conflict do nothing
+                    """),
+                {"run_id": run_id, "artifact_id": artifact_id},
+            )
+
+
+def archive_experiment(engine: Engine, experiment_hash: str) -> None:
+    """Soft-archive an experiment — removes it from the GC root set.
+
+    Idempotent: re-archiving keeps the original timestamp. Reversible until a
+    sweep actually collects (set archived_at back to null to restore).
+    """
+    with engine.begin() as conn:
+        updated = conn.execute(
+            text("""
+                update triage.experiments
+                set archived_at = coalesce(archived_at, now())
+                where experiment_hash = :hash
+                """),
+            {"hash": experiment_hash},
+        ).rowcount
+    if updated != 1:
+        raise ValueError(
+            f"Cannot archive experiment {experiment_hash!r}: no such experiment"
+        )
+
+
+# Liveness (ADR-0017): roots are (a) artifacts used by runs of non-archived
+# experiments (runs without an experiment are conservatively live) and
+# (b) predicted models (append-only predictions pin them regardless of
+# experiment lifecycle). Live = roots plus their full upstream closure.
+_DEAD_SQL = """
+with recursive roots as (
+    select distinct ra.artifact_id
+    from triage.run_artifacts ra
+    join triage.runs r using (run_id)
+    left join triage.experiments e using (experiment_hash)
+    where r.experiment_hash is null or e.archived_at is null
+    union
+    select m.model_hash
+    from triage.models m
+    where exists (select 1 from triage.predictions p where p.model_id = m.model_id)
+),
+live as (
+    select artifact_id from roots
+    union
+    select i.parent_id
+    from live l
+    join triage.artifact_inputs i on i.artifact_id = l.artifact_id
+)
+select a.*
+from triage.artifacts a
+where a.status = any(:statuses)
+  and coalesce(a.built_at, a.created_at)
+        <= now() - make_interval(days => :min_age_days)
+  and not exists (select 1 from live where live.artifact_id = a.artifact_id)
+order by a.kind, a.artifact_id
+"""
+
+
+def _dead_artifacts(
+    engine: Engine, statuses: Sequence[str], min_age_days: int
+) -> list[dict[str, Any]]:
+    with engine.connect() as conn:
+        rows = (
+            conn.execute(
+                text(_DEAD_SQL),
+                {"statuses": list(statuses), "min_age_days": min_age_days},
+            )
+            .mappings()
+            .all()
+        )
+    return [dict(row) for row in rows]
+
+
+def gc_candidates(engine: Engine, min_age_days: int = 0) -> list[dict[str, Any]]:
+    """Built artifacts that are dead: unreachable from any GC root."""
+    return _dead_artifacts(engine, statuses=["built"], min_age_days=min_age_days)
+
+
+def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]:
+    """Output GC: delete in-PG outputs and mark rows 'collected' (ADR-0017).
+
+    Rows, lineage, and pins stay — provenance is never collected, and a
+    collected artifact transparently rebuilds on its next cache miss.
+
+    cohort/labels date-slices are deleted here. File-backed outputs (matrices,
+    models) and adapter-owned feature tables are returned as
+    ``{artifact_id, kind, output_ref}`` for the caller to delete through the
+    storage layer — their rows are still marked 'collected' first, which is
+    safe: a leftover file is overwritten on rebuild, never served stale.
+    """
+    needs_external_deletion: list[dict[str, Any]] = []
+    with engine.begin() as conn:
+        for artifact_id in artifact_ids:
+            row = (
+                conn.execute(
+                    text(
+                        "select kind, status, output_ref from triage.artifacts"
+                        + " where artifact_id = :id"
+                    ),
+                    {"id": artifact_id},
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                raise ValueError(
+                    f"Cannot collect artifact {artifact_id!r}: no such artifact"
+                )
+            if row["status"] != "built":
+                raise ValueError(
+                    f"Cannot collect artifact {artifact_id!r} with status"
+                    + f" {row['status']!r}: only 'built' outputs are collectible"
+                )
+            if row["kind"] == "cohort":
+                conn.execute(
+                    text("delete from triage.cohorts where cohort_hash = :id"),
+                    {"id": artifact_id},
+                )
+            elif row["kind"] == "labels":
+                conn.execute(
+                    text("delete from triage.labels where label_hash = :id"),
+                    {"id": artifact_id},
+                )
+            else:
+                needs_external_deletion.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "kind": row["kind"],
+                        "output_ref": row["output_ref"],
+                    }
+                )
+            conn.execute(
+                text(
+                    "update triage.artifacts set status = 'collected'"
+                    + " where artifact_id = :id"
+                ),
+                {"id": artifact_id},
+            )
+    logger.info(
+        f"Collected {len(artifact_ids)} artifact(s);"
+        + f" {len(needs_external_deletion)} file-backed output(s) need storage-layer deletion"
+    )
+    return needs_external_deletion
+
+
+def purge(engine: Engine, min_age_days: int = 0) -> list[str]:
+    """Deep GC: delete the rows of dead collected/failed artifacts (ADR-0017).
+
+    Recomputes deadness itself (defense in depth) — only artifacts that are
+    both unreachable and already collected (or failed) are removed. Deletion
+    runs bottom-up (leaves of the dead subgraph first): the RESTRICT on
+    artifact_inputs.parent_id forbids removing a parent whose children still
+    reference it, so a dead parent with a not-yet-purgeable child is retained
+    until the child goes. The RESTRICT on predictions.model_id likewise makes
+    any attempt to purge a predicted model fail loudly instead of eating
+    append-only history.
+    """
+    dead = _dead_artifacts(
+        engine, statuses=["collected", "failed"], min_age_days=min_age_days
+    )
+    remaining = {row["artifact_id"] for row in dead}
+    purged: list[str] = []
+    while remaining:
+        with engine.begin() as conn:
+            deleted = (
+                conn.execute(
+                    text("""
+                        delete from triage.artifacts a
+                        where a.artifact_id = any(:ids)
+                          and not exists (
+                              select 1 from triage.artifact_inputs i
+                              where i.parent_id = a.artifact_id
+                          )
+                        returning a.artifact_id
+                        """),
+                    {"ids": list(remaining)},
+                )
+                .scalars()
+                .all()
+            )
+        if not deleted:
+            break  # the rest still have surviving children — retained for now
+        purged.extend(deleted)
+        remaining -= set(deleted)
+    if purged:
+        logger.info(f"Purged {len(purged)} dead artifact row(s)")
+    if remaining:
+        logger.info(
+            f"Retained {len(remaining)} dead artifact row(s) still referenced"
+            + " as parents by surviving children — purge again once those are"
+            + " collectible"
+        )
+    return purged
+
+
 _CLOSURE_SQL = """
 with recursive walk as (
     select a.artifact_id, a.kind, a.status, a.cacheable, 0 as depth
