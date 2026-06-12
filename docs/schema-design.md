@@ -104,6 +104,8 @@ create type triage.problem_type as enum
 create type triage.split_kind   as enum
     ('train', 'test', 'validation', 'production');
 create type triage.run_status   as enum ('started', 'completed', 'failed');
+create type triage.artifact_kind as enum
+    ('cohort', 'labels', 'feature_group', 'matrix', 'model');
 ```
 
 ### 4.2 Lineage: experiments → runs → model_groups → models → matrices
@@ -144,7 +146,8 @@ create table triage.model_groups (
 );
 
 create table triage.matrices (
-    matrix_uuid    uuid primary key,                  -- deterministic content hash
+    matrix_uuid    uuid primary key,                  -- = uuid5(artifact_id) (ADR-0015)
+    artifact_id    text references triage.artifacts(artifact_id) on delete set null,
     matrix_kind    triage.split_kind not null,
     storage_uri    text not null,                     -- s3://… or file://… (Parquet pointer, ADR-0005)
     storage_format text not null default 'parquet',
@@ -161,7 +164,7 @@ create table triage.matrices (
 create table triage.models (
     model_id                bigint generated always as identity primary key,
     model_group_id          bigint not null references triage.model_groups(model_group_id) on delete cascade,
-    model_hash              text   not null unique,    -- deterministic
+    model_hash              text   not null unique,    -- = artifacts.artifact_id of the model node (ADR-0015)
     run_id                  uuid   references triage.runs(run_id) on delete set null,
     train_matrix_uuid       uuid   references triage.matrices(matrix_uuid),
     train_end_time          date,
@@ -181,14 +184,17 @@ create table triage.models (
 
 ```sql
 create table triage.cohorts (
-    cohort_hash text   not null,                       -- identifies a cohort definition
+    cohort_hash text   not null,                       -- artifact_id of the cohort@(config, date) node (ADR-0015)
     entity_id   bigint not null,
     as_of_date  date   not null,
     primary key (cohort_hash, entity_id, as_of_date)
 );
 
 -- Realized ground truth per (entity, as_of_date). Survival-ready from day one.
+-- label_hash discriminates label definitions (ADR-0015) — without it, two
+-- different label queries would collide in the table.
 create table triage.labels (
+    label_hash     text     not null,                  -- artifact_id of the labels@(config, date, timespan) node
     entity_id      bigint   not null,
     as_of_date     date     not null,
     label_timespan interval not null,
@@ -196,7 +202,7 @@ create table triage.labels (
     duration       double precision,                   -- survival: time-to-event-or-censoring (nullable)
     event_observed boolean,                            -- survival: observed vs censored   (nullable)
     created_at     timestamptz not null default now(),
-    primary key (entity_id, as_of_date, label_timespan)
+    primary key (label_hash, entity_id, as_of_date, label_timespan)
 );
 ```
 
@@ -352,6 +358,40 @@ create table triage.run_source_pins (
 );
 ```
 
+### 4.8 Artifact DAG (ADR-0013, ADR-0015)
+
+> One row per cached, materialized artifact; identity = derivation hash over
+> the full input closure. Node grain per ADR-0015: cohort/labels/feature-group
+> per as_of_date, matrices per split-side, models — and nothing above models
+> (predictions are events, evaluations are recomputable SQL). Full design in
+> `docs/derivation-dag.md` §4. FK hardening from domain tables is deferred to
+> the GC pass. In the baseline migration this block is created **before**
+> `matrices` so `matrices.artifact_id` can reference it.
+
+```sql
+create table triage.artifacts (
+    artifact_id     text primary key,              -- derivation hash (ADR-0013)
+    kind            triage.artifact_kind not null,
+    cacheable       boolean not null default true, -- false: volatile inputs (ADR-0014)
+    config          jsonb not null,                -- canonical own-config slice
+    source_pins     jsonb not null default '{}'::jsonb,
+    engine_versions jsonb not null default '{}'::jsonb,
+    output_ref      text,                          -- table/date-slice, parquet URI, model URI
+    status          text not null default 'building'
+                      check (status in ('building', 'built', 'failed')),
+    built_by_run    uuid references triage.runs(run_id) on delete set null,
+    created_at      timestamptz not null default now(),
+    built_at        timestamptz
+);
+
+create table triage.artifact_inputs (
+    artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,
+    parent_id   text not null references triage.artifacts(artifact_id),
+    primary key (artifact_id, parent_id)
+);
+create index artifact_inputs_parent_idx on triage.artifact_inputs (parent_id);
+```
+
 ---
 
 ## 5. Representative views (the in-PG compute surface — ADR-0007)
@@ -421,7 +461,8 @@ All six open questions are resolved; the DDL above reflects them.
 4. **Protected attributes — dedicated long-format `triage.protected_groups`**, adapter-built from a user SQL query, kept separate from features (so they can be excluded from the model yet used for audit). Bias = pure SQL group-by.
 5. **Cohort/label contract — timechop stays** as the as_of_date/split generator feeding featurizer; **templated SQL** (`{as_of_date}`, `{label_timespan}`); the label query's required columns are **dictated by `problem_type`** (`outcome` | `duration, event_observed`).
 6. **Subsets & retrain.** Subsets: `triage.subsets` table kept now, the evaluation *feature* deferred (additive `WHERE` filter). Retrain: **no dedicated tables** — a retrained production model is just a `triage.models` row, its predictions are `predictions(split_kind='production')`; the workflow is deferred (ADR-0006). The old `retrain`/`retrain_models` tables and `triage_production` schema are dropped.
-7. **Source-data pinning (added 2026-06-11, ADR-0014).** Source tables enter artifact identity as **declared registry pins** (`triage.sources` / `source_versions`, §4.7), frozen per run into `run_source_pins`; unpinned = volatile (never cached, loud warning); fingerprints advisory-only. Part of the broader derivation-DAG design (`docs/derivation-dag.md`, ADR-0013) whose remaining questions (artifact-node granularity → `triage.artifacts`/`artifact_inputs` tables, engine-version policy, GC) are still open.
+7. **Source-data pinning (added 2026-06-11, ADR-0014).** Source tables enter artifact identity as **declared registry pins** (`triage.sources` / `source_versions`, §4.7), frozen per run into `run_source_pins`; unpinned = volatile (never cached, loud warning); fingerprints advisory-only. Part of the broader derivation-DAG design (`docs/derivation-dag.md`, ADR-0013).
+8. **DAG node granularity (added 2026-06-11, ADR-0015).** Data layer per as_of_date (features per adapter-defined **feature group** × date); matrices per split-side with the test matrix taking the train matrix as a parent (fitted imputation stats, ADR-0009); models last cached node — predictions/evaluations get no artifact rows. Derivation ids **replace** the inherited hashes: `model_hash` := artifact id, `matrix_uuid` := uuid5(artifact id), `cohort_hash` := per-date node id, and `labels.label_hash` joins the PK (fixes the missing label-definition discriminator). Remaining open: engine-version policy, GC/retention (which also decides FK hardening).
 
 ### Still deferred to the adapter-spec pass (not schema-blocking)
 

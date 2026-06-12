@@ -34,6 +34,8 @@ create type triage.problem_type as enum
 create type triage.split_kind as enum
     ('train', 'test', 'validation', 'production');
 create type triage.run_status as enum ('started', 'completed', 'failed');
+create type triage.artifact_kind as enum
+    ('cohort', 'labels', 'feature_group', 'matrix', 'model');
 
 -- ---------------------------------------------------------------- lineage
 create table triage.experiments (
@@ -67,8 +69,36 @@ create table triage.model_groups (
     created_at       timestamptz not null default now()
 );
 
+-- ------------------------------- artifact DAG (ADR-0013, ADR-0015)
+-- One row per cached, materialized artifact; identity = derivation hash over
+-- the full input closure. The DAG stops at models: predictions are append-only
+-- events with native lineage (ADR-0006), evaluations are recomputable SQL
+-- (ADR-0007). FK hardening from domain tables is deferred to the GC pass.
+create table triage.artifacts (
+    artifact_id     text primary key,              -- derivation hash (ADR-0013)
+    kind            triage.artifact_kind not null,
+    cacheable       boolean not null default true, -- false: volatile inputs (ADR-0014)
+    config          jsonb not null,                -- canonical own-config slice
+    source_pins     jsonb not null default '{}'::jsonb,
+    engine_versions jsonb not null default '{}'::jsonb,
+    output_ref      text,                          -- table/date-slice, parquet URI, model URI
+    status          text not null default 'building'
+                      check (status in ('building', 'built', 'failed')),
+    built_by_run    uuid references triage.runs(run_id) on delete set null,
+    created_at      timestamptz not null default now(),
+    built_at        timestamptz
+);
+
+create table triage.artifact_inputs (
+    artifact_id text not null references triage.artifacts(artifact_id) on delete cascade,
+    parent_id   text not null references triage.artifacts(artifact_id),
+    primary key (artifact_id, parent_id)
+);
+create index artifact_inputs_parent_idx on triage.artifact_inputs (parent_id);
+
 create table triage.matrices (
-    matrix_uuid    uuid primary key,
+    matrix_uuid    uuid primary key,               -- = uuid5(artifact_id) (ADR-0015)
+    artifact_id    text references triage.artifacts(artifact_id) on delete set null,
     matrix_kind    triage.split_kind not null,
     storage_uri    text not null,
     storage_format text not null default 'parquet',
@@ -85,7 +115,7 @@ create table triage.matrices (
 create table triage.models (
     model_id                bigint generated always as identity primary key,
     model_group_id          bigint not null references triage.model_groups(model_group_id) on delete cascade,
-    model_hash              text   not null unique,
+    model_hash              text   not null unique, -- = artifacts.artifact_id of the model node (ADR-0015)
     run_id                  uuid   references triage.runs(run_id) on delete set null,
     train_matrix_uuid       uuid   references triage.matrices(matrix_uuid),
     train_end_time          date,
@@ -137,13 +167,14 @@ create table triage.run_source_pins (
 
 -- --------------------------------------------- cohort + labels (survival-ready)
 create table triage.cohorts (
-    cohort_hash text   not null,
+    cohort_hash text   not null,                   -- artifact_id of the cohort@(config, date) node (ADR-0015)
     entity_id   bigint not null,
     as_of_date  date   not null,
     primary key (cohort_hash, entity_id, as_of_date)
 );
 
 create table triage.labels (
+    label_hash     text     not null,              -- artifact_id of the labels@(config, date, timespan) node (ADR-0015)
     entity_id      bigint   not null,
     as_of_date     date     not null,
     label_timespan interval not null,
@@ -151,7 +182,7 @@ create table triage.labels (
     duration       double precision,
     event_observed boolean,
     created_at     timestamptz not null default now(),
-    primary key (entity_id, as_of_date, label_timespan)
+    primary key (label_hash, entity_id, as_of_date, label_timespan)
 );
 
 create table triage.protected_groups (
