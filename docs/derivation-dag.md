@@ -1,8 +1,8 @@
 # triage-pg — Artifact Derivation DAG (Design)
 
-- Status: **In progress** — source-data pinning resolved 2026-06-11 (§3); node granularity resolved 2026-06-11 (§4); engine versions and GC still open (§5)
+- Status: **In progress** — source-data pinning (§3), node granularity (§4), and engine versions (§5) resolved 2026-06-11; GC and builder wiring still open (§6)
 - Date: 2026-06-11
-- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity)
+- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity), ADR-0016 (engine versions)
 - Related: ADR-0006 (append-only predictions), schema-design.md §4.7–4.8 (sources + artifacts DDL)
 
 ## 1. Requirement
@@ -191,16 +191,80 @@ edges — DDL in schema-design.md §4.8, operations in `src/triage/artifacts.py`
 (lookup/cache-hit, begin/mark-built/mark-failed, recursive-CTE closure and
 dependents queries).
 
-## 5. OPEN questions (next discussion rounds)
+## 5. RESOLVED — Engine versions (2026-06-11, ADR-0016)
 
-1. **Engine versions in identity vs reuse policy.** Guix includes the
-   toolchain. triage-pg + featurizer versions almost certainly enter the hash;
-   whether the sklearn version does (correct, but invalidates every model on
-   env upgrade) may split into strict identity + configurable reuse policy.
-2. **GC roots and retention.** Experiments as roots; unreachable artifacts
+### 5.1 The compiler-vs-runtime criterion
+
+A version enters identity iff it can change the artifact's **output bytes
+given identical config and inputs**. Engines are *compilers* — their releases
+change outputs by design: featurizer maps config → SQL (a boundary fix like
+`>=`→`<` moves events in/out of windows, changing feature values); sklearn
+gives different coefficients for the same (matrix, hyperparameters, seed)
+across versions and guarantees no cross-version equivalence; triage-pg's
+assembly/imputation logic determines matrix bytes. PostgreSQL and Python are
+*runtimes* — semantically transparent by contract (SQL semantics are
+standardized; Python behavior is captured by the hashed package versions).
+Same judgment Guix makes: hash the compiler and recipe, not the kernel.
+
+Documented residual risks accepted with the runtime exclusion: float
+aggregation order under parallel plans, collation changes affecting text
+ordering (the ranking path is already shielded by the deterministic
+entity_id tiebreak, schema-design §8.3), and pickle load-compat across Python
+minors (a load-time concern, not build identity). These are recorded at the
+**run** level (`runs.triage_version`, `runs.git_hash`) for forensics.
+
+### 5.2 Per-kind relevance map
+
+| Kind | Engines in identity |
+|---|---|
+| cohort / labels | triage-pg |
+| feature_group | triage-pg + featurizer |
+| matrix | triage-pg |
+| model | triage-pg + the estimator's distribution (e.g. scikit-learn) |
+
+Implemented by `derivation.engine_versions_for(kind, estimator_class_path)`.
+Invalidation propagates through DAG edges on its own: an sklearn bump rebuilds
+models only; a featurizer bump rebuilds feature groups → matrices → models.
+
+### 5.3 Release versions, not git hashes
+
+Identity uses installed release versions (`importlib.metadata`). Git hashes in
+identity would invalidate every cache on every commit — unusable while
+developing triage-pg itself. The contract: a dev change that alters build
+outputs requires a version bump (or an explicit `--force` rebuild);
+`runs.git_hash` keeps the forensic trail.
+
+### 5.4 Strict identity + opt-in logical fallback
+
+Engine versions **always** hash — two artifacts built by different engines are
+different artifacts. The configurable part is only what a miss caused purely
+by engine drift means. Each derivation therefore carries two parallel Merkle
+chains: the strict `id`, and a `logical_id` computed without engine versions
+**over the parents' logical ids** (so drift anywhere upstream doesn't break
+fallback matching transitively). `cache_hit(policy="exact")` is the default;
+`policy="logical"` falls back to the latest built artifact with the same
+`logical_id`, with a loud ENGINE-DRIFT REUSE warning naming both version sets.
+Escape hatch for known-benign bumps and laptop↔cloud version skew — never the
+silent default.
+
+### 5.5 Considered alternatives (rejected)
+
+- **No engine versions in identity** — after any engine upgrade the cache
+  silently serves outputs of the old behavior; invisible wrongness vs the
+  visible, bounded cost of a rebuild.
+- **Git hash in identity** — purity at the cost of disabling caching during
+  development.
+- **Full environment manifest (uv.lock hash)** — any dependency bump, even a
+  dev tool, invalidates the entire store.
+- **Manual engine epoch counters** — relies on humans remembering; the failure
+  mode pinning was designed to remove.
+
+## 6. OPEN questions (next discussion rounds)
+
+1. **GC roots and retention.** Experiments as roots; unreachable artifacts
    (especially Parquet matrices) collectible. Decides the deferred FK
    hardening (§4.4) and interacts with append-only predictions retention
    (ADR-0006: quarterly partitions, keep-forever default).
-3. **Builder wiring.** Which code paths compute and record derivations — lands
+2. **Builder wiring.** Which code paths compute and record derivations — lands
    with the adapter implementation (the CONTEXT.md Adapter responsibility
    "derivations (cache keys)").
