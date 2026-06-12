@@ -50,6 +50,13 @@ from triage.experiments import (
 )
 from triage.logging import configure_logging, get_logger
 from triage.predictlist import Retrainer, predict_forward_with_existed_model
+from triage.sources import (
+    bump_source,
+    check_drift,
+    get_source,
+    list_sources,
+    register_source,
+)
 from triage.util.conf import load_query_if_needed
 from triage.util.db import create_engine
 
@@ -62,6 +69,10 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Administer the Triage results schema and helpers.")
 app.add_typer(db_app, name="db")
+source_app = typer.Typer(
+    help="Manage declared data sources and their version pins (ADR-0014)."
+)
+app.add_typer(source_app, name="source")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -763,6 +774,91 @@ def db_up_command(
     else:
         console.print("[yellow]Starting existing triage_db container.[/yellow]")
         subprocess.run(["docker", "start", "triage_db"], check=True)
+
+
+@source_app.command("register")
+def source_register(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Source name used in configs."),
+    relation: str = typer.Option(
+        ...,
+        "--relation",
+        "-r",
+        help="Schema-qualified relation the source points at, e.g. semantic.events.",
+    ),
+    knowledge_date_column: Optional[str] = typer.Option(
+        None,
+        "--knowledge-date-column",
+        "-k",
+        help="Column used for the advisory max() fingerprint.",
+    ),
+    description: Optional[str] = typer.Option(None, "--description"),
+) -> None:
+    """Declare a source table (idempotent)."""
+    engine = get_engine(ctx)
+    register_source(
+        engine,
+        name,
+        relation,
+        knowledge_date_column=knowledge_date_column,
+        description=description,
+    )
+    console.print(f"[green]Source '{name}' registered -> {relation}[/green]")
+
+
+@source_app.command("bump")
+def source_bump(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Registered source to pin."),
+    version_label: Optional[str] = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="Version label for this load (default: UTC timestamp).",
+    ),
+) -> None:
+    """Record a new version pin after a data load."""
+    engine = get_engine(ctx)
+    label = bump_source(engine, name, version_label)
+    console.print(f"[green]Source '{name}' pinned at '{label}'.[/green]")
+
+
+@source_app.command("list")
+def source_list(ctx: typer.Context) -> None:
+    """List sources with their current pins (unpinned sources are volatile)."""
+    engine = get_engine(ctx)
+    sources = list_sources(engine)
+    if not sources:
+        console.print("[yellow]No sources registered.[/yellow]")
+        return
+    table = Table(title="Declared Sources", box=box.SIMPLE_HEAVY)
+    table.add_column("Source")
+    table.add_column("Relation")
+    table.add_column("Current pin")
+    table.add_column("Pinned at")
+    for source in sources:
+        pin = source["version_label"] or "[red]UNPINNED (volatile)[/red]"
+        pinned_at = str(source["registered_at"]) if source["registered_at"] else ""
+        table.add_row(source["source_name"], source["relation"], pin, pinned_at)
+    console.print(table)
+
+
+@source_app.command("show")
+def source_show(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Source to inspect."),
+) -> None:
+    """Show a source's registration, current pin, and drift status."""
+    engine = get_engine(ctx)
+    source = get_source(engine, name)
+    if source is None:
+        console.print(f"[red]Source '{name}' is not registered.[/red]")
+        raise typer.Exit(code=1)
+    drifted = check_drift(engine, name)
+    body = "\n".join(f"[cyan]{key}:[/cyan] {value}" for key, value in source.items())
+    if drifted:
+        body += "\n[red]DRIFT: data changed since the current pin.[/red]"
+    console.print(Panel.fit(body, title=f"Source: {name}"))
 
 
 def execute() -> None:
