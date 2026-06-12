@@ -97,6 +97,44 @@ create table triage.models (
     created_at              timestamptz not null default now()
 );
 
+-- ------------------------------------- source registry + pins (ADR-0014)
+-- Declared input tables and their load versions. Pins enter derivation
+-- hashes (ADR-0013); fingerprints are advisory drift detection only.
+create table triage.sources (
+    source_name           text primary key,
+    relation              text not null,     -- schema-qualified relation it points at
+    knowledge_date_column text,              -- enables max() advisory fingerprint
+    description           text,
+    created_at            timestamptz not null default now()
+);
+
+create table triage.source_versions (
+    source_name   text not null references triage.sources(source_name) on delete cascade,
+    version_label text not null,
+    registered_at timestamptz not null default now(),
+    fingerprint   jsonb,                     -- advisory {row_count, max_knowledge_date}
+    primary key (source_name, version_label)
+);
+
+-- Current pin = most recently registered version per source.
+create view triage.current_source_pins as
+select distinct on (source_name)
+       source_name, version_label, registered_at, fingerprint
+from   triage.source_versions
+order  by source_name, registered_at desc;
+
+-- Pins frozen at plan time for a run (the `guix describe` analog).
+-- source_name intentionally has NO FK: this is an immutable historical record
+-- that must capture declared-but-unregistered (volatile) sources too, and must
+-- survive registry changes.
+create table triage.run_source_pins (
+    run_id        uuid not null references triage.runs(run_id) on delete cascade,
+    source_name   text not null,
+    version_label text,                      -- null = volatile (unpinned at plan time)
+    fingerprint   jsonb,                     -- captured at build time (drift check)
+    primary key (run_id, source_name)
+);
+
 -- --------------------------------------------- cohort + labels (survival-ready)
 create table triage.cohorts (
     cohort_hash text   not null,

@@ -1,8 +1,8 @@
 # triage-pg — Results Schema Redesign (Proposal)
 
-- Status: **Proposal** — all six §8 open questions resolved 2026-06-05; ready to become a migration
+- Status: **Proposal** — all six §8 open questions resolved 2026-06-05; sources registry added 2026-06-11 (§4.7, §8.7); reflected in the alembic baseline
 - Date: 2026-06-04
-- Implements: ADR-0002 (db-per-project + registry), 0003 (plain-PG), 0005 (Parquet/S3 pointers), 0006 (append-only predictions), 0007 (in-PG eval + SQL bias), 0010 (problem_type + survival-ready labels), 0011 (feature importances persisted)
+- Implements: ADR-0002 (db-per-project + registry), 0003 (plain-PG), 0005 (Parquet/S3 pointers), 0006 (append-only predictions), 0007 (in-PG eval + SQL bias), 0010 (problem_type + survival-ready labels), 0011 (feature importances persisted), 0014 (source-data pinning)
 
 This proposes the greenfield schema that replaces old triage's results schema. It is a **clean break** (ADR-0001) — no migration path. Read §1 for what's wrong with the old schema, §3–4 for the new DDL, §8 for the decisions I need from you.
 
@@ -307,6 +307,51 @@ create table triage.individual_importances (
 );
 ```
 
+### 4.7 Source registry + pins (ADR-0013, ADR-0014)
+
+> Declared input tables and their load versions. Pins enter derivation hashes
+> (artifact identity, ADR-0013); the full design lives in
+> `docs/derivation-dag.md`. Fingerprints are **advisory drift detection only**
+> — never identity. A declared source with no pin is volatile: derivations
+> touching it are never cache hits, with a loud warning.
+
+```sql
+create table triage.sources (
+    source_name           text primary key,
+    relation              text not null,     -- schema-qualified relation it points at
+    knowledge_date_column text,              -- enables max() advisory fingerprint
+    description           text,
+    created_at            timestamptz not null default now()
+);
+
+create table triage.source_versions (
+    source_name   text not null references triage.sources(source_name) on delete cascade,
+    version_label text not null,
+    registered_at timestamptz not null default now(),
+    fingerprint   jsonb,                     -- advisory {row_count, max_knowledge_date}
+    primary key (source_name, version_label)
+);
+
+-- Current pin = most recently registered version per source.
+create view triage.current_source_pins as
+select distinct on (source_name)
+       source_name, version_label, registered_at, fingerprint
+from   triage.source_versions
+order  by source_name, registered_at desc;
+
+-- Pins frozen at plan time for a run (the `guix describe` analog).
+-- source_name intentionally has NO FK: this is an immutable historical record
+-- that must capture declared-but-unregistered (volatile) sources too, and must
+-- survive registry changes.
+create table triage.run_source_pins (
+    run_id        uuid not null references triage.runs(run_id) on delete cascade,
+    source_name   text not null,
+    version_label text,                      -- null = volatile (unpinned at plan time)
+    fingerprint   jsonb,                     -- captured at build time (drift check)
+    primary key (run_id, source_name)
+);
+```
+
 ---
 
 ## 5. Representative views (the in-PG compute surface — ADR-0007)
@@ -376,6 +421,7 @@ All six open questions are resolved; the DDL above reflects them.
 4. **Protected attributes — dedicated long-format `triage.protected_groups`**, adapter-built from a user SQL query, kept separate from features (so they can be excluded from the model yet used for audit). Bias = pure SQL group-by.
 5. **Cohort/label contract — timechop stays** as the as_of_date/split generator feeding featurizer; **templated SQL** (`{as_of_date}`, `{label_timespan}`); the label query's required columns are **dictated by `problem_type`** (`outcome` | `duration, event_observed`).
 6. **Subsets & retrain.** Subsets: `triage.subsets` table kept now, the evaluation *feature* deferred (additive `WHERE` filter). Retrain: **no dedicated tables** — a retrained production model is just a `triage.models` row, its predictions are `predictions(split_kind='production')`; the workflow is deferred (ADR-0006). The old `retrain`/`retrain_models` tables and `triage_production` schema are dropped.
+7. **Source-data pinning (added 2026-06-11, ADR-0014).** Source tables enter artifact identity as **declared registry pins** (`triage.sources` / `source_versions`, §4.7), frozen per run into `run_source_pins`; unpinned = volatile (never cached, loud warning); fingerprints advisory-only. Part of the broader derivation-DAG design (`docs/derivation-dag.md`, ADR-0013) whose remaining questions (artifact-node granularity → `triage.artifacts`/`artifact_inputs` tables, engine-version policy, GC) are still open.
 
 ### Still deferred to the adapter-spec pass (not schema-blocking)
 
