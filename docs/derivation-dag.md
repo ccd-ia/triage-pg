@@ -1,9 +1,9 @@
 # triage-pg — Artifact Derivation DAG (Design)
 
-- Status: **In progress** — source-data pinning resolved 2026-06-11 (§3); granularity, engine versions, and GC still open (§4)
+- Status: **In progress** — source-data pinning resolved 2026-06-11 (§3); node granularity resolved 2026-06-11 (§4); engine versions and GC still open (§5)
 - Date: 2026-06-11
-- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning)
-- Related: ADR-0006 (append-only predictions), schema-design.md §4.7 (sources DDL)
+- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity)
+- Related: ADR-0006 (append-only predictions), schema-design.md §4.7–4.8 (sources + artifacts DDL)
 
 ## 1. Requirement
 
@@ -110,20 +110,97 @@ leave both unchanged).
 - **Per-table triggers maintaining a version counter** — invasive DDL on data
   the project may not own stylistically; offers little over loader bumps.
 
-## 4. OPEN questions (next discussion rounds)
+## 4. RESOLVED — Node granularity (2026-06-11, ADR-0015)
 
-1. **Node granularity.** Candidate grain follows the pipeline units:
-   cohort@as_of_date, labels@(as_of_date, timespan, problem_type),
-   feature-group@as_of_date, matrix, model, prediction-run, evaluation. Too
-   coarse (per experiment) kills reuse; too fine (per feature column) bloats
-   the DAG. Decides the shape of `triage.artifacts` / `triage.artifact_inputs`.
-2. **Engine versions in identity vs reuse policy.** Guix includes the
+What gets an artifact node, layer by layer:
+
+| Layer | Node grain | Output |
+|---|---|---|
+| Cohort | (cohort config, as_of_date) | date-slice of `triage.cohorts` |
+| Labels | (label config, as_of_date, label_timespan) | date-slice of `triage.labels` |
+| Features | (feature group, as_of_date) | date-slice of the group's feature table |
+| Matrix | one per split-side (train / test) | one Parquet file |
+| Model | (class, hyperparameters, seed) × train matrix | one model artifact |
+
+### 4.1 Per-as_of_date data layer
+
+timechop makes consecutive splits overlap heavily in as_of_dates, so per-date
+nodes turn that overlap into cache hits — within an experiment, across
+config-iteration re-runs, and across experiments. Extending the date range
+builds only the new dates. This is also the main mitigation for the ADR-0008
+scale risk (featurizer re-runs its aggregation CTEs per as_of_date with no
+reuse): cached dates are simply never re-run.
+
+Scale check: 7 years monthly (84 dates) × (15 groups + cohort + labels) ≈ 1.4k
+data-layer nodes per configuration; with matrices, edges, and a 50-point model
+grid, ~20k rows per substantial experiment — trivial for PostgreSQL.
+
+### 4.2 Feature groups are an adapter concept
+
+featurizer itself is monolithic per run (one CTE tree, one wide output, the
+full date list in one pass — `planner.py`/`executor.py`) and has no group
+concept. The **adapter** defines a feature group as a named sub-config (a
+subset of entities/relationships/intervals) and invokes featurizer once per
+(group, as_of_date). This matches the old `feature_aggregations` mental model
+— tweaking one group, the most common iteration, rebuilds only that group.
+Cost accepted: shared parent-entity scans repeat per group. The exact
+group⇄sub-config mapping belongs to the featurizer ER-graph section of the
+adapter spec.
+
+### 4.3 The cached DAG stops at models
+
+Predictions are **append-only events** (ADR-0006) with native lineage columns
+(`model_id`, `matrix_uuid`) — recording them as artifact rows would duplicate
+lineage and fill the cache table with never-cacheable entries. Evaluations and
+bias metrics are **cheap recomputable SQL** (ADR-0007), idempotent on their
+primary keys. `triage.artifacts` therefore holds only expensive, materialized,
+cacheable things.
+
+### 4.4 One identity system
+
+Derivation ids **replace** the inherited content hashes rather than living
+alongside them (two identity systems would re-create the shallow-hash trap):
+
+- `models.model_hash` := the model node's `artifact_id`.
+- `matrices.matrix_uuid` := `uuid5(artifact_id)` (storage URIs keep a uuid);
+  `matrices.artifact_id` carries the join back to the DAG.
+- `cohorts.cohort_hash` := the cohort@(config, date) node's `artifact_id`.
+- `triage.labels` gains `label_hash` (the labels node's `artifact_id`) **in its
+  primary key** — fixing a latent hole: the previous PK had no label-definition
+  discriminator, so two different label queries would have collided.
+- `experiments.experiment_hash` stays a config hash — an experiment is a
+  *request/root*, not a built artifact.
+
+FK hardening between domain tables and `triage.artifacts` is deferred to the
+GC pass (delete/cascade semantics depend on retention decisions).
+
+### 4.5 Fit-based imputation lives inside the matrix node
+
+Stored matrices are post-imputation; the imputation policy is part of the
+matrix node's config; fitted train-split statistics persist as matrix metadata
+for provenance. The **test matrix takes the train matrix as a parent** —
+it consumes the fitted statistics (ADR-0009), so the leakage boundary is an
+explicit DAG edge. Changing imputation policy rebuilds matrices but reuses all
+cached per-date data nodes (a cheap join + fill).
+
+### 4.6 Storage
+
+`triage.artifacts` (id, kind, cacheable, canonical config, frozen pins, engine
+versions, output_ref, status, run, timestamps) + `triage.artifact_inputs`
+edges — DDL in schema-design.md §4.8, operations in `src/triage/artifacts.py`
+(lookup/cache-hit, begin/mark-built/mark-failed, recursive-CTE closure and
+dependents queries).
+
+## 5. OPEN questions (next discussion rounds)
+
+1. **Engine versions in identity vs reuse policy.** Guix includes the
    toolchain. triage-pg + featurizer versions almost certainly enter the hash;
    whether the sklearn version does (correct, but invalidates every model on
    env upgrade) may split into strict identity + configurable reuse policy.
-3. **GC roots and retention.** Experiments as roots; unreachable artifacts
-   (especially Parquet matrices) collectible. Interaction with append-only
-   predictions retention (ADR-0006: quarterly partitions, keep-forever default).
-4. **Builder wiring.** Which code paths compute and record derivations — lands
+2. **GC roots and retention.** Experiments as roots; unreachable artifacts
+   (especially Parquet matrices) collectible. Decides the deferred FK
+   hardening (§4.4) and interacts with append-only predictions retention
+   (ADR-0006: quarterly partitions, keep-forever default).
+3. **Builder wiring.** Which code paths compute and record derivations — lands
    with the adapter implementation (the CONTEXT.md Adapter responsibility
    "derivations (cache keys)").
