@@ -44,12 +44,26 @@ def get_artifact(engine: Engine, artifact_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def cache_hit(engine: Engine, derivation: Derivation) -> dict[str, Any] | None:
+def cache_hit(
+    engine: Engine, derivation: Derivation, policy: str = "exact"
+) -> dict[str, Any] | None:
     """Return the built artifact row for a derivation, or None to build.
 
     Volatile derivations never hit (their inputs are unpinned — the recorded
     output may be stale); neither do rows still building or failed.
+
+    policy (ADR-0016):
+        "exact"   — strict identity only (default).
+        "logical" — if the strict id misses, fall back to the latest built
+                    artifact with the same logical_id (identical config, pins,
+                    and logical ancestry; only engine versions differ), with a
+                    loud warning. Operator escape hatch for known-benign engine
+                    bumps; never the silent default.
     """
+    if policy not in ("exact", "logical"):
+        raise ValueError(
+            f"Unknown cache policy {policy!r}; expected 'exact' or 'logical'"
+        )
     if not derivation.cacheable:
         logger.info(
             f"Derivation {derivation.id[:12]}… is volatile (unpinned inputs)"
@@ -59,6 +73,33 @@ def cache_hit(engine: Engine, derivation: Derivation) -> dict[str, Any] | None:
     artifact = get_artifact(engine, derivation.id)
     if artifact is not None and artifact["status"] == "built":
         return artifact
+    if policy == "logical":
+        with engine.connect() as conn:
+            row = (
+                conn.execute(
+                    text("""
+                        select * from triage.artifacts
+                        where logical_id = :logical_id
+                          and artifact_id <> :id
+                          and status = 'built'
+                          and cacheable
+                        order by built_at desc
+                        limit 1
+                        """),
+                    {"logical_id": derivation.logical_id, "id": derivation.id},
+                )
+                .mappings()
+                .first()
+            )
+        if row is not None:
+            logger.warning(
+                f"ENGINE-DRIFT REUSE: derivation {derivation.id[:12]}… missed,"
+                + f" reusing artifact {row['artifact_id'][:12]}… built with"
+                + f" engine versions {row['engine_versions']} (policy='logical')."
+                + " Outputs may differ under the current engines — rebuild with"
+                + " policy='exact' to be certain."
+            )
+            return dict(row)
     return None
 
 
@@ -83,11 +124,11 @@ def begin_artifact(
             conn.execute(
                 text("""
                     insert into triage.artifacts
-                        (artifact_id, kind, cacheable, config, source_pins,
-                         engine_versions, built_by_run, status)
-                    values (:id, :kind, :cacheable, cast(:config as jsonb),
-                            cast(:pins as jsonb), cast(:versions as jsonb),
-                            :run_id, 'building')
+                        (artifact_id, logical_id, kind, cacheable, config,
+                         source_pins, engine_versions, built_by_run, status)
+                    values (:id, :logical_id, :kind, :cacheable,
+                            cast(:config as jsonb), cast(:pins as jsonb),
+                            cast(:versions as jsonb), :run_id, 'building')
                     on conflict (artifact_id) do update
                         set status = 'building',
                             built_at = null,
@@ -96,6 +137,7 @@ def begin_artifact(
                     """),
                 {
                     "id": derivation.id,
+                    "logical_id": derivation.logical_id,
                     "kind": kind,
                     "cacheable": derivation.cacheable,
                     "config": canonical_json(config),

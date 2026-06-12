@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import importlib.metadata
 import json
 import uuid
 from collections.abc import Mapping, Sequence
@@ -22,7 +23,14 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-__all__ = ["VOLATILE", "Derivation", "as_uuid", "canonical_json", "derive"]
+__all__ = [
+    "VOLATILE",
+    "Derivation",
+    "as_uuid",
+    "canonical_json",
+    "derive",
+    "engine_versions_for",
+]
 
 # Sentinel standing in for the version of an unpinned source (ADR-0014).
 VOLATILE = "__volatile__"
@@ -33,9 +41,16 @@ _TRIAGE_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "triage-pg.ccd-ia")
 
 @dataclass(frozen=True)
 class Derivation:
-    """An artifact identity: stable hex id + cache-hit eligibility."""
+    """An artifact identity: strict + logical hex ids and cache eligibility.
+
+    ``id`` is the strict identity (includes engine versions, ADR-0016);
+    ``logical_id`` is the engine-version-free Merkle chain used only by the
+    opt-in fallback reuse policy — it hashes over parents' logical ids so
+    engine drift anywhere upstream does not break fallback matching.
+    """
 
     id: str
+    logical_id: str
     cacheable: bool
 
 
@@ -130,15 +145,74 @@ def derive(
     cacheable = all(parent.cacheable for parent in parents) and all(
         version is not None for version in pins.values()
     )
-    envelope = {
+    base = {
         "kind": kind,
         "config": config,
-        "parents": sorted(parent.id for parent in parents),
         "source_pins": {
             name: (VOLATILE if version is None else version)
             for name, version in pins.items()
         },
+    }
+    strict_envelope = {
+        **base,
+        "parents": sorted(parent.id for parent in parents),
         "engine_versions": dict(engine_versions or {}),
     }
-    digest = hashlib.sha256(canonical_json(envelope).encode("ascii")).hexdigest()
-    return Derivation(id=digest, cacheable=cacheable)
+    logical_envelope = {
+        **base,
+        "parents": sorted(parent.logical_id for parent in parents),
+    }
+    return Derivation(
+        id=_hash(strict_envelope),
+        logical_id=_hash(logical_envelope),
+        cacheable=cacheable,
+    )
+
+
+def _hash(envelope: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_json(envelope).encode("ascii")).hexdigest()
+
+
+# Per-kind engine relevance (ADR-0016): each node kind hashes exactly the
+# "compilers" that determine its output bytes. PostgreSQL and Python are
+# runtimes, deliberately excluded — recorded at the run level instead.
+def engine_versions_for(
+    kind: str, estimator_class_path: str | None = None
+) -> dict[str, str]:
+    """The engine versions that enter a node of ``kind``'s identity.
+
+    triage-pg enters every kind; featurizer additionally enters feature
+    groups; the estimator's distribution (resolved from its class path)
+    additionally enters models.
+    """
+    versions = {"triage-pg": _distribution_version("triage-pg", "triage")}
+    if kind == "feature_group":
+        versions["featurizer"] = _distribution_version("featurizer")
+    if kind == "model":
+        if not estimator_class_path:
+            raise ValueError(
+                "engine_versions_for('model') requires the estimator class path"
+                + " — the estimator library's version enters model identity (ADR-0016)"
+            )
+        top_module = estimator_class_path.split(".")[0]
+        distributions = importlib.metadata.packages_distributions().get(top_module)
+        if not distributions:
+            raise ValueError(
+                f"Cannot resolve a distribution for estimator module {top_module!r}"
+                + f" (from {estimator_class_path!r}); is it installed?"
+            )
+        name = distributions[0]
+        versions[name] = importlib.metadata.version(name)
+    return versions
+
+
+def _distribution_version(*candidates: str) -> str:
+    for name in candidates:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    raise importlib.metadata.PackageNotFoundError(
+        f"None of the distributions {candidates!r} is installed — cannot pin"
+        + " its version into artifact identity (ADR-0016)"
+    )

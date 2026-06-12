@@ -1,12 +1,19 @@
-"""Tests for the derivation-hash primitive (ADR-0013)."""
+"""Tests for the derivation-hash primitive (ADR-0013, ADR-0016)."""
 
 import datetime
+import importlib.metadata
 import uuid
 from decimal import Decimal
 
 import pytest
 
-from triage.derivation import VOLATILE, Derivation, canonical_json, derive
+from triage.derivation import (
+    VOLATILE,
+    Derivation,
+    canonical_json,
+    derive,
+    engine_versions_for,
+)
 
 
 def test_same_inputs_same_id():
@@ -123,3 +130,54 @@ def test_derivation_is_hashable_value_object():
     derivation = derive("cohort", {"q": "select 1"})
     assert isinstance(derivation, Derivation)
     assert derivation in {derivation}
+
+
+def test_logical_id_ignores_engine_versions():
+    one = derive("model", {"c": 1}, engine_versions={"scikit-learn": "1.5.1"})
+    two = derive("model", {"c": 1}, engine_versions={"scikit-learn": "1.5.2"})
+    assert one.id != two.id  # strict identity sees the drift
+    assert one.logical_id == two.logical_id  # fallback chain does not
+
+
+def test_logical_id_tracks_config_and_pins():
+    base = derive("cohort", {"q": 1}, source_pins={"events": "v1"})
+    other_config = derive("cohort", {"q": 2}, source_pins={"events": "v1"})
+    other_pin = derive("cohort", {"q": 1}, source_pins={"events": "v2"})
+    assert base.logical_id != other_config.logical_id
+    assert base.logical_id != other_pin.logical_id
+
+
+def test_logical_chain_survives_upstream_engine_drift():
+    parent_v1 = derive("feature_group", {"g": 1}, engine_versions={"featurizer": "0.2"})
+    parent_v2 = derive("feature_group", {"g": 1}, engine_versions={"featurizer": "0.3"})
+    child_v1 = derive("matrix", {"m": 1}, parents=[parent_v1])
+    child_v2 = derive("matrix", {"m": 1}, parents=[parent_v2])
+    assert child_v1.id != child_v2.id  # drift propagates down the strict chain
+    assert child_v1.logical_id == child_v2.logical_id  # fallback still matches
+
+
+def test_engine_versions_for_cohort_is_triage_only():
+    versions = engine_versions_for("cohort")
+    assert set(versions) == {"triage-pg"}
+    assert versions["triage-pg"]
+
+
+def test_engine_versions_for_model_resolves_the_estimator():
+    versions = engine_versions_for("model", "sklearn.tree.DecisionTreeClassifier")
+    assert "triage-pg" in versions
+    assert versions["scikit-learn"] == importlib.metadata.version("scikit-learn")
+
+
+def test_engine_versions_for_model_requires_an_estimator():
+    with pytest.raises(ValueError, match="estimator"):
+        engine_versions_for("model")
+
+
+def test_engine_versions_for_feature_group_needs_featurizer():
+    try:
+        featurizer_version = importlib.metadata.version("featurizer")
+    except importlib.metadata.PackageNotFoundError:
+        with pytest.raises(importlib.metadata.PackageNotFoundError):
+            engine_versions_for("feature_group")
+    else:
+        assert engine_versions_for("feature_group")["featurizer"] == featurizer_version

@@ -141,3 +141,101 @@ def test_as_uuid_is_deterministic_and_distinct():
     other = derive("matrix", {"m": 2})
     assert as_uuid(one.id) == as_uuid(one.id)
     assert as_uuid(one.id) != as_uuid(other.id)
+
+
+@pytest.fixture
+def warning_messages():
+    """Collect loguru WARNING+ records emitted during a test."""
+    from loguru import logger as loguru_logger
+
+    messages = []
+    sink_id = loguru_logger.add(
+        lambda message: messages.append(str(message)), level="WARNING"
+    )
+    yield messages
+    loguru_logger.remove(sink_id)
+
+
+def test_logical_fallback_on_engine_drift(triage_db, warning_messages):
+    pins = {"events": "v1"}
+    old = derive(
+        "model",
+        {"c": "DT"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    build(
+        triage_db,
+        old,
+        "model",
+        {"c": "DT"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    new = derive(
+        "model",
+        {"c": "DT"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.2"},
+    )
+
+    assert cache_hit(triage_db, new) is None  # strict default: drift = miss
+    hit = cache_hit(triage_db, new, policy="logical")
+    assert hit is not None
+    assert hit["artifact_id"] == old.id
+    assert any("ENGINE-DRIFT REUSE" in message for message in warning_messages)
+
+
+def test_logical_fallback_never_returns_volatile_or_unbuilt(triage_db):
+    volatile = derive(
+        "model",
+        {"c": "DT"},
+        source_pins={"events": None},
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    build(
+        triage_db,
+        volatile,
+        "model",
+        {"c": "DT"},
+        source_pins={"events": None},
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    drifted_volatile = derive(
+        "model",
+        {"c": "DT"},
+        source_pins={"events": None},
+        engine_versions={"scikit-learn": "1.5.2"},
+    )
+    # volatile derivations skip lookup entirely, fallback included
+    assert cache_hit(triage_db, drifted_volatile, policy="logical") is None
+
+    pins = {"events": "v1"}
+    failed = derive(
+        "model",
+        {"c": "RF"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    begin_artifact(
+        triage_db,
+        failed,
+        "model",
+        {"c": "RF"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.1"},
+    )
+    mark_failed(triage_db, failed.id)
+    drifted = derive(
+        "model",
+        {"c": "RF"},
+        source_pins=pins,
+        engine_versions={"scikit-learn": "1.5.2"},
+    )
+    assert cache_hit(triage_db, drifted, policy="logical") is None
+
+
+def test_unknown_cache_policy_fails_fast(triage_db):
+    derivation = derive("cohort", {"q": 1}, source_pins={"events": "v1"})
+    with pytest.raises(ValueError, match="policy"):
+        cache_hit(triage_db, derivation, policy="yolo")
