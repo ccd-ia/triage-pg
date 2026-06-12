@@ -12,10 +12,11 @@ from collections import defaultdict
 import numpy as np
 import ohio.ext.pandas
 import pandas as pd
-from aequitas.bias import Bias
-from aequitas.fairness import Fairness
-from aequitas.group import Group
-from aequitas.preprocessing import preprocess_input_df
+
+# NOTE: aequitas is imported lazily inside _run_bias_audit — its import chain
+# loads fairgbm's binary wheel, which fails on some platforms (e.g. arm64
+# macOS) and would otherwise break importing all of catwalk. Aequitas is
+# slated for removal entirely (ADR-0007: bias metrics move to SQL).
 from sqlalchemy import cast, delete
 from sqlalchemy.dialects.postgresql import INTERVAL as Interval
 from sqlalchemy.orm import sessionmaker
@@ -823,6 +824,11 @@ class ModelEvaluator:
         """
         if protected_df.empty:
             return
+
+        from aequitas.bias import Bias
+        from aequitas.fairness import Fairness
+        from aequitas.group import Group
+        from aequitas.preprocessing import preprocess_input_df
 
         # to preprocess aequitas requires the following columns:
         # score, label value, model_id, protected attributes

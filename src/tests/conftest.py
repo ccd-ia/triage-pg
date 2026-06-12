@@ -9,8 +9,12 @@ from tests.utils import open_side_effect, populate_source_data, sample_config
 from triage import create_engine
 from triage.component.catwalk.db import ensure_db
 from triage.component.catwalk.storage import ProjectStorage
-from triage.component.postmodeling.crosstabs import CrosstabsConfigLoader
-from triage.experiments import SingleThreadedExperiment
+
+# NOTE: triage.experiments and triage.component.postmodeling.crosstabs are
+# imported lazily inside the fixtures that need them — their import chain
+# reaches aequitas/fairgbm, whose binary wheel fails to load on some platforms
+# (e.g. arm64 macOS), and a module-level import here would break collection
+# for every test in the suite.
 
 # Create postgresql process fixture (session-scoped, starts PostgreSQL once)
 postgresql_proc = factories.postgresql_proc(port=None)
@@ -140,6 +144,8 @@ def finished_experiment(shared_db_engine, shared_project_storage):
 
     Returns: (triage.experiments.SingleThreadedExperiment)
     """
+    from triage.experiments import SingleThreadedExperiment
+
     populate_source_data(shared_db_engine)
     base_config = sample_config()
     with mock.patch("triage.util.conf.open", side_effect=open_side_effect) as mock_file:
@@ -158,6 +164,8 @@ def finished_experiment_without_predictions(shared_db_engine, shared_project_sto
 
     Returns: (triage.experiments.SingleThreadedExperiment)
     """
+    from triage.experiments import SingleThreadedExperiment
+
     populate_source_data(shared_db_engine)
     base_config = sample_config()
     with mock.patch("triage.util.conf.open", side_effect=open_side_effect) as mock_file:
@@ -177,6 +185,8 @@ def crosstabs_config():
 
     Should work with after an experiment run with tests.utils.sample_config
     """
+    from triage.component.postmodeling.crosstabs import CrosstabsConfigLoader
+
     return CrosstabsConfigLoader(
         config={
             "output": {"schema": "test_results", "table": "crosstabs"},
