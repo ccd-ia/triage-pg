@@ -1,8 +1,8 @@
 # triage-pg — Artifact Derivation DAG (Design)
 
-- Status: **In progress** — source-data pinning (§3), node granularity (§4), and engine versions (§5) resolved 2026-06-11; GC and builder wiring still open (§6)
-- Date: 2026-06-11
-- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity), ADR-0016 (engine versions)
+- Status: **Design complete** — source-data pinning (§3), node granularity (§4), engine versions (§5), and GC/retention (§6) all resolved; only builder wiring (§7) remains, and it belongs to the adapter pass
+- Date: 2026-06-11 (GC resolved 2026-06-12)
+- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity), ADR-0016 (engine versions), ADR-0017 (GC roots & retention)
 - Related: ADR-0006 (append-only predictions), schema-design.md §4.7–4.8 (sources + artifacts DDL)
 
 ## 1. Requirement
@@ -259,12 +259,74 @@ silent default.
 - **Manual engine epoch counters** — relies on humans remembering; the failure
   mode pinning was designed to remove.
 
-## 6. OPEN questions (next discussion rounds)
+## 6. RESOLVED — GC roots & retention (2026-06-12, ADR-0017)
 
-1. **GC roots and retention.** Experiments as roots; unreachable artifacts
-   (especially Parquet matrices) collectible. Decides the deferred FK
-   hardening (§4.4) and interacts with append-only predictions retention
-   (ADR-0006: quarterly partitions, keep-forever default).
-2. **Builder wiring.** Which code paths compute and record derivations — lands
-   with the adapter implementation (the CONTEXT.md Adapter responsibility
-   "derivations (cache keys)").
+### 6.1 GC collects outputs, not history
+
+The storage that matters is Parquet matrices, model files, and in-PG
+date-slices; artifact *rows* are tiny and carry the provenance this design
+exists to provide. Because every closure is pinned, a deleted output is
+**re-derivable** (the Guix substitute property). So the default sweep deletes
+dead artifacts' outputs and flips rows to `status='collected'` — `cache_hit`
+only returns `'built'`, so collected artifacts transparently rebuild on next
+demand. Row deletion is a separate, explicit **purge** (rarely needed:
+project teardown is already `DROP DATABASE`, ADR-0002).
+
+### 6.2 Roots and liveness
+
+`built_by_run` is **not** a liveness edge — a later run cache-hits artifacts it
+didn't build. `triage.run_artifacts` records every artifact a run *used*
+(built or hit). Roots:
+
+1. artifacts used by runs of **non-archived** experiments (runs without an
+   experiment are conservatively live);
+2. **predicted models** — append-only predictions pin them regardless of
+   experiment lifecycle (you cannot audit a list whose model is gone).
+
+Live = roots plus their full **upstream closure** via `artifact_inputs`.
+`experiments.archived_at` (soft archive, `triage archive <hash>`) is the
+root-removal gesture — reversible until a sweep actually collects.
+
+### 6.3 Invocation and retention
+
+Keep-forever until someone runs `triage gc` — consistent with ADR-0006's
+keep-forever default and Guix's user-invoked gc. Dry run by default
+(reports collectible artifacts); `--delete` collects outputs; `--purge`
+removes dead collected/failed rows; `--min-age N` protects recent builds.
+cohort/label slices are deleted in-PG by `collect()`; file-backed outputs
+are returned to the caller for storage-layer deletion (lands with the
+storage adapter). No scheduled auto-GC: silent deletion of expensive
+artifacts is the wrong default, and file deletion is not pg_cron-able anyway.
+
+### 6.4 FK hardening (completes the §4.4 deferral)
+
+- `predictions.model_id` → **RESTRICT** (was the inherited CASCADE): purging a
+  predicted model fails loudly instead of silently eating append-only history;
+  ADR-0006 becomes DB-enforced. (Evaluations/bias keep CASCADE — recomputable
+  derivatives.)
+- `artifact_inputs.parent_id` → **RESTRICT**: an edge is the child's
+  provenance; purge therefore deletes bottom-up (leaves of the dead subgraph
+  first), retaining dead parents whose children still reference them.
+- `matrices.artifact_id`, `models.model_hash`, `cohorts.cohort_hash`,
+  `labels.label_hash` → **CASCADE** from `triage.artifacts`: a purged artifact
+  takes its domain rows with it, and the predictions RESTRICT backstops the
+  whole chain.
+
+### 6.5 Considered alternatives (rejected)
+
+- *Guix-style full deletion as the only mode* — destroys provenance of past
+  runs together with the cache; `run_source_pins`/lineage lose their referents.
+- *Hard-delete experiments as the root-removal gesture* — conflates "stop
+  retaining" with "erase the record"; irreversible immediately.
+- *Keep predictions CASCADE* — leaves the keep-forever guarantee to
+  application-code discipline.
+- *Scheduled auto-GC* — silent deletion of rebuildable-but-expensive
+  artifacts; storage-layer deletion can't run in-database anyway.
+
+## 7. OPEN — Builder wiring (adapter pass)
+
+Which code paths compute and record derivations — `derive()` →
+`cache_hit()` → `begin_artifact()`/`mark_built()` + `record_use()` per build —
+lands with the adapter implementation (the CONTEXT.md Adapter responsibility
+"derivations (cache keys)"), together with file-output deletion through the
+storage adapter.
