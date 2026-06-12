@@ -37,12 +37,24 @@ The standalone Deep Feature Synthesis SQL-generation engine that synthesizes poi
 _Avoid_: collate, feature generator
 
 **Adapter**:
-triage-pg-side glue mapping triage concepts (timechop splits, cohort, labels, imputation policy, cache keys) onto featurizer, storage, auth, and execution.
+triage-pg-side glue mapping triage concepts (timechop splits, cohort, labels, imputation policy, derivations/cache keys) onto featurizer, storage, auth, and execution.
 _Avoid_: connector, plugin, driver
 
 **Prediction**:
 An append-only scored row for an `(entity_id, as_of_date)` carrying a `scored_at` timestamp; never overwritten.
 _Avoid_: score, output, result
+
+**Source**:
+A declared input table read by cohort, label, or feature queries; only declared Sources enter artifact identity (no SQL parsing).
+_Avoid_: raw table, input data, from_obj
+
+**Source version (pin)**:
+The registry-recorded version label of a Source, bumped on each data load and frozen into derivation hashes at plan time; a Source without one is volatile (never cached, loudly warned).
+_Avoid_: snapshot, data hash, freshness stamp
+
+**Derivation**:
+An artifact's identity — the hash over its complete input closure: own config, parent Derivations, Source pins, and engine versions. Cache reuse, provenance, and GC key off it.
+_Avoid_: cache key (alone), UUID, content hash
 
 ## Relationships
 
@@ -50,6 +62,7 @@ _Avoid_: score, output, result
 - An **Experiment** runs within one **Project**, under one **Profile**.
 - An **Experiment** builds **Matrices** keyed by (**Cohort** entity × **as_of_date**); the **Feature engine** generates the features and an **Adapter** assembles the **Matrix**.
 - A trained model produces append-only **Predictions**; evaluation, leaderboards, and bias metrics run in PostgreSQL over the **Predictions** table.
+- An **Experiment** freezes the current **Source version** of every declared **Source** at plan time; every artifact's **Derivation** embeds those pins plus its parents' Derivations (Merkle DAG).
 
 ## Flagged ambiguities
 

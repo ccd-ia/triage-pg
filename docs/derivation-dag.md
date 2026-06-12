@@ -1,0 +1,129 @@
+# triage-pg — Artifact Derivation DAG (Design)
+
+- Status: **In progress** — source-data pinning resolved 2026-06-11 (§3); granularity, engine versions, and GC still open (§4)
+- Date: 2026-06-11
+- Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning)
+- Related: ADR-0006 (append-only predictions), schema-design.md §4.7 (sources DDL)
+
+## 1. Requirement
+
+Every built artifact — cohort, labels, features, matrix, model, predictions,
+evaluations — must have a **real dependency tree à la Guix**: its identity is a
+hash over its **complete input closure**, and its dependency edges are explicit
+and queryable. Four properties fall out, exactly as they do in the Guix store:
+
+1. **Exact cache reuse** — same inputs ⇒ same hash ⇒ skip the build.
+2. **Minimal incremental rebuilds** — a changed input invalidates precisely the
+   downstream cone, nothing else.
+3. **Provenance** — any artifact can answer "what exact inputs produced you?"
+   in SQL.
+4. **GC by reachability** — artifacts unreachable from any retained root
+   (experiment) can be deleted; matters most for Parquet matrices on disk/S3.
+
+### Why the inherited hashing falls short
+
+Old triage's hashes are deterministic over **config text only**: matrix UUIDs
+over a metadata dict (`architect/planner.py`), the experiment hash over the
+config (`catwalk/utils.py`), model hashes over class path + hyperparameters +
+matrix metadata + seed (`catwalk/model_trainers.py`), cohort/label table names
+over the query strings (`experiments/base.py`). None of them cover the **state
+of the source data**, the **code version**, or the **identity of upstream
+artifacts** — so cache validity rests on a manual contract, stated verbatim in
+the old docs: *"if the source data has changed, ensure that `replace` is set to
+True."* The only pinning pattern that existed was advisory: put an
+entity-matching model id into `user_metadata` so it perturbs the experiment
+hash. This design makes that idea first-class and universal.
+
+## 2. Identity scheme (sketch)
+
+```
+artifact_id = H( kind
+              ∥ canonical(own_config)         -- the artifact's config slice
+              ∥ sorted(parent_artifact_ids)   -- upstream artifacts (Merkle DAG)
+              ∥ sorted(source_pins)           -- (source_name, version_label) pairs (§3)
+              ∥ sorted(engine_versions) )     -- triage-pg, featurizer, … (§4, open)
+```
+
+- `H` = SHA-256; `canonical(·)` = canonical JSON (sorted keys, normalized
+  scalars/dates/intervals). Implemented in `src/triage/derivation.py`.
+- Parents make it a **Merkle DAG**: a matrix's id embeds the feature/cohort/
+  label ids, a model's id embeds the matrix id, and so on — any upstream change
+  ripples down automatically.
+- **Build = lookup-or-create**: derivation id present and output exists ⇒ cache
+  hit, reuse; otherwise build and record. This replaces the `replace` flag as
+  the cache-correctness mechanism (a `--force` stays as an operator override).
+- **Predictions are events, not cache entries** (ADR-0006): a scoring run's
+  rows carry lineage (model id, matrix id) but are append-only and never
+  deduplicated; `scored_at` is wall-clock history, not an input.
+
+## 3. RESOLVED — Source-data pinning (2026-06-11, ADR-0014)
+
+The hardest input to pin: a Postgres table has no cheap content hash. Decisions:
+
+### 3.1 Sources are explicitly declared inputs
+
+Cohort, label, and feature configs **declare** the source tables they read; SQL
+is never parsed to discover them. Like Guix inputs, an undeclared input does
+not exist for identity purposes. This converges with the featurizer ER-graph
+config (adapter-spec pass): that config already enumerates the entity/event
+tables.
+
+### 3.2 Pins come from a registry table
+
+`triage.sources` + `triage.source_versions` (DDL in schema-design.md §4.7).
+Whoever loads data **bumps** the version: the ETL/loader as the natural caller,
+`triage source bump <name>` for manual loads. A bump records a `version_label`
+plus an advisory fingerprint (§3.4).
+
+At experiment **plan time** the adapter resolves each declared source to its
+current pin and **freezes** the sorted `(source_name, version_label)` pairs into
+every downstream derivation hash. The run records the resolved pin set in
+`triage.run_source_pins` — the `guix describe` analog: any artifact's closure
+can answer "built against `events` at `v2026-06-10`".
+
+### 3.3 Unpinned source ⇒ volatile, never cached, loud warning
+
+A declared source with no registered version is an **impure input**: every
+derivation touching it is marked non-cacheable (always rebuilt downstream), and
+a warning explains how to register/bump. Rationale: zero setup friction for
+teaching/DirtyDuck, while *never silently stale* — the failure mode of manual
+pinning is a wasted rebuild, not a wrong cache hit.
+
+### 3.4 Advisory drift detection (in v1)
+
+At bump and at build time we capture a cheap fingerprint per source —
+`row_count` plus `max(knowledge_date_column)` when declared. If a later run
+sees the fingerprint move while the pin did not, it **warns loudly** ("source
+changed but nobody bumped the pin"). Fingerprints are advisory only — they
+**never enter identity**, because they are unsound as identity (a backfill can
+leave both unchanged).
+
+### 3.5 Considered alternatives (rejected)
+
+- **Config-inline version stamps** — per-experiment copies drift; it is
+  `replace=True` with extra steps unless every config author is disciplined.
+- **Automatic fingerprint-as-identity** (`max(updated_at)`, row counts) —
+  unsound: false cache hits on backfills/corrections; not all tables carry an
+  update column.
+- **Full content hashing** of source tables — sound but prohibitively expensive
+  at consulting scale; would dominate pipeline runtime.
+- **Per-table triggers maintaining a version counter** — invasive DDL on data
+  the project may not own stylistically; offers little over loader bumps.
+
+## 4. OPEN questions (next discussion rounds)
+
+1. **Node granularity.** Candidate grain follows the pipeline units:
+   cohort@as_of_date, labels@(as_of_date, timespan, problem_type),
+   feature-group@as_of_date, matrix, model, prediction-run, evaluation. Too
+   coarse (per experiment) kills reuse; too fine (per feature column) bloats
+   the DAG. Decides the shape of `triage.artifacts` / `triage.artifact_inputs`.
+2. **Engine versions in identity vs reuse policy.** Guix includes the
+   toolchain. triage-pg + featurizer versions almost certainly enter the hash;
+   whether the sklearn version does (correct, but invalidates every model on
+   env upgrade) may split into strict identity + configurable reuse policy.
+3. **GC roots and retention.** Experiments as roots; unreachable artifacts
+   (especially Parquet matrices) collectible. Interaction with append-only
+   predictions retention (ADR-0006: quarterly partitions, keep-forever default).
+4. **Builder wiring.** Which code paths compute and record derivations — lands
+   with the adapter implementation (the CONTEXT.md Adapter responsibility
+   "derivations (cache keys)").
