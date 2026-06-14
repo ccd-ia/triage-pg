@@ -22,6 +22,7 @@ An effort to modernize triage *in place* (PR #994 on dssg/triage) accumulated to
 - **A modern feature engine.** Feature generation moves from Collate to [`featurizer`](https://github.com/nanounanue/featurizer), a PostgreSQL-native Deep Feature Synthesis engine that is point-in-time-correct via as-of joins.
 - **More problem types.** Beyond binary classification: regression-as-ranking, pure regression, and a survival-ready label schema, selected by a `problem_type` switch.
 - **Append-only, monitoring-ready predictions** — timestamped and partitioned, so prediction history is captured from day one.
+- **Guix-style artifact derivation DAG.** Every built artifact (cohort, labels, feature groups, matrices, models) is identified by a hash over its *complete input closure*, with explicit dependency edges recorded in the project database. Caching is by derivation (no manual `replace=True` vigilance), provenance is queryable in SQL, and garbage collection works by reachability from live roots. See [`docs/derivation-dag.md`](docs/derivation-dag.md) and ADRs 0013–0017.
 - **Multi-tenant by database.** One PostgreSQL database per project plus a registry control plane, with two deployment profiles: a **local** profile (standalone PostgreSQL — laptops, teaching, tests) and a **cloud** profile (RDS/Aurora + IAM auth + S3 + AWS Batch).
 - **Smaller surface.** No standalone postmodeling module (it dissolves into SQL views + a dashboard); `rq` and multicore orchestration removed; modern tooling throughout (uv, ruff, loguru, typer, psycopg3, Python 3.12).
 

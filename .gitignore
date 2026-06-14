@@ -39,3 +39,6 @@ src/triage/component/postmodeling/model_groups_testing.ipynb
 ai-docs/
 GIT_REMOTE
 TODO.org
+
+# Claude Code hook logs (runtime output, session-local)
+logs/
