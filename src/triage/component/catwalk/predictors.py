@@ -13,14 +13,12 @@ from sqlalchemy.orm import sessionmaker
 
 from triage.component.results_schema import Model
 from triage.util.db import scoped_session
-from triage.util.random import generate_python_random_seed
 
 from .utils import (
     AVAILABLE_TIEBREAKERS,
     db_retry,
     retrieve_model_hash_from_id,
     save_db_objects,
-    sort_predictions_and_labels,
 )
 
 
@@ -323,48 +321,31 @@ class Predictor:
             df["label_value"] = matrix_store.labels
             df["score"] = predictions
 
-            logger.spam(
-                f"Sorting predictions for model {model_id} using {self.rank_order}"
-            )
+            logger.spam(f"Ranking predictions for model {model_id}")
 
-            if self.rank_order == "best":
-                df.sort_values(
-                    by=["score", "label_value"],
-                    inplace=True,
-                    ascending=[False, False],
-                    na_position="last",
-                )
-            elif self.rank_order == "worst":
-                df.sort_values(
-                    by=["score", "label_value"],
-                    inplace=True,
-                    ascending=[False, True],
-                    na_position="first",
-                )
-            elif self.rank_order == "random":
-                df["random"] = np.random.rand(len(df))
-                df.sort_values(
-                    by=["score", "random"], inplace=True, ascending=[False, False]
-                )
-                df.drop("random", axis=1)
-            else:
-                raise ValueError(
-                    f"Rank order specified in condiguration file not recognized: {self.rank_order} "
-                )
-
-            df["rank_abs_no_ties"] = df["score"].rank(ascending=False, method="first")
-            # uses the lowest rank in the group
-            df["rank_abs_with_ties"] = df["score"].rank(ascending=False, method="min")
-            # No gaps between groups (so it reaches 1.0). We are using rank_abs_no_ties so we can
-            # respect that order (instead of using the mathematical formula,  as was done before)
-            df["rank_pct_no_ties"] = df["rank_abs_no_ties"].rank(
-                ascending=True, method="dense", pct=True
-            )
-            df["rank_pct_with_ties"] = df["score"].rank(
-                ascending=False, method="dense", pct=True
-            )
-
+            # Deterministic ranking mirroring the greenfield triage.prediction_ranks
+            # view (schema-design §8.3): order by score desc, then entity_id, so
+            # ties break on the (stable) entity identifier — no random sort seed,
+            # no num_sort_trials (ADR-0010). The window-function equivalents are:
+            #   rank_abs <-> row_number()  over (order by score desc, entity_id)
+            #   rank_pct <-> percent_rank() over (order by score desc, entity_id)
             df.reset_index(inplace=True)
+            df.sort_values(
+                by=["score", "entity_id"],
+                inplace=True,
+                ascending=[False, True],
+            )
+
+            n = len(df)
+            # row_number(): strict 1..n, ties already broken by entity_id.
+            df["rank_abs_no_ties"] = range(1, n + 1)
+            # rank over scores using the lowest rank in each tie group (SQL rank()).
+            df["rank_abs_with_ties"] = df["score"].rank(ascending=False, method="min")
+            # percent_rank(): (rank_with_ties - 1) / (n - 1); 0.0 for the single-row case.
+            df["rank_pct_no_ties"] = (
+                (df["rank_abs_with_ties"] - 1) / (n - 1) if n > 1 else 0.0
+            )
+            df["rank_pct_with_ties"] = df["rank_pct_no_ties"]
             logger.debug(
                 f"Predictions on {matrix_store.matrix_type.string_name} matrix {matrix_store.uuid} from model {model_id} sorted using {self.rank_order}"
             )
