@@ -6,7 +6,6 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
-import gzip
 import io
 import os
 import pathlib
@@ -124,7 +123,9 @@ class S3Store(Store):
                 out += self.__wrapped__.write(chunk)
 
     def __init__(self, path_head, *path_parts, **config):
-        self.path = str(pathlib.PurePosixPath(path_head.replace("s3://", ""), *path_parts))
+        self.path = str(
+            pathlib.PurePosixPath(path_head.replace("s3://", ""), *path_parts)
+        )
         self.config = config
 
     @property
@@ -320,7 +321,9 @@ class MatrixStorageEngine:
         matrix_directory (string, optional) A directory to store matrices. Defaults to 'matrices'
     """
 
-    def __init__(self, project_storage, matrix_storage_class=None, matrix_directory=None):
+    def __init__(
+        self, project_storage, matrix_storage_class=None, matrix_directory=None
+    ):
         self.project_storage = project_storage
         self.matrix_storage_class = matrix_storage_class or CSVMatrixStore
         self.directories = [matrix_directory or "matrices"]
@@ -333,7 +336,9 @@ class MatrixStorageEngine:
 
         Returns: (MatrixStore) a reference to the matrix and its companion metadata
         """
-        return self.matrix_storage_class(self.project_storage, self.directories, matrix_uuid)
+        return self.matrix_storage_class(
+            self.project_storage, self.directories, matrix_uuid
+        )
 
 
 class MatrixStore:
@@ -356,11 +361,17 @@ class MatrixStore:
     _matrix_label_tuple = None
     indices = ["entity_id", "as_of_date"]
 
-    def __init__(self, project_storage, directories, matrix_uuid, matrix=None, metadata=None):
+    def __init__(
+        self, project_storage, directories, matrix_uuid, matrix=None, metadata=None
+    ):
         self.should_cache = False
         self.matrix_uuid = matrix_uuid
-        self.matrix_base_store = project_storage.get_store(directories, f"{matrix_uuid}.{self.suffix}")
-        self.metadata_base_store = project_storage.get_store(directories, f"{matrix_uuid}.yaml")
+        self.matrix_base_store = project_storage.get_store(
+            directories, f"{matrix_uuid}.{self.suffix}"
+        )
+        self.metadata_base_store = project_storage.get_store(
+            directories, f"{matrix_uuid}.yaml"
+        )
 
         self.metadata = metadata
         if matrix is not None:
@@ -381,11 +392,27 @@ class MatrixStore:
             self.should_cache = False
 
     def _preprocess_and_split_matrix(self, matrix_with_labels):
-        """Perform desired preprocessing that we generally want to do after loading a matrix
+        """Perform desired preprocessing that we generally want to do after loading a matrix.
 
-        This includes setting the index (depending on the storage, may not be serializable)
-        and downcasting.
+        This includes setting the (entity_id, as_of_date) index and splitting
+        off the label vector. This is the single, deliberate point where a
+        polars frame (returned by `_load()` from Parquet) becomes the pandas
+        DataFrame that the model seam, prediction-writing, and the matrix-store
+        public API (`design_matrix`, `labels`, `index`) depend on. We do NOT
+        convert eagerly at load time (ADR-0005).
+
+        Accepts either a polars DataFrame (the storage load path) or a pandas
+        DataFrame (the in-memory `matrix=` constructor path).
         """
+        if isinstance(matrix_with_labels, pl.DataFrame):
+            df = matrix_with_labels.to_pandas()
+            # pandas 2 defaults datetimes to microsecond resolution; the index
+            # has historically been datetime64[ns], so normalize before
+            # building the index.
+            if "as_of_date" in df.columns:
+                df["as_of_date"] = df["as_of_date"].astype("datetime64[ns]")
+            matrix_with_labels = df
+
         if matrix_with_labels.index.names != self.indices:
             matrix_with_labels.set_index(self.indices, inplace=True)
         index_of_date = matrix_with_labels.index.names.index("as_of_date")
@@ -460,7 +487,9 @@ class MatrixStore:
         if include_label:
             return columns
         else:
-            return [col for col in columns if col != self.metadata.get("label_name", None)]
+            return [
+                col for col in columns if col != self.metadata.get("label_name", None)
+            ]
 
     @property
     def label_column_name(self):
@@ -490,7 +519,11 @@ class MatrixStore:
     @property
     def num_entities(self):
         """The number of entities in the matrix"""
-        return len(self.design_matrix.index.levels[self.design_matrix.index.names.index("entity_id")])
+        return len(
+            self.design_matrix.index.levels[
+                self.design_matrix.index.names.index("entity_id")
+            ]
+        )
 
     @property
     def matrix_type(self):
@@ -507,10 +540,8 @@ class MatrixStore:
         elif self.metadata["matrix_type"] == "production":
             return ProductionMatrixType
         else:
-            raise Exception(
-                """matrix metadata for matrix {} must contain 'matrix_type'
-             = "train" or "test" """.format(self.uuid)
-            )
+            raise Exception("""matrix metadata for matrix {} must contain 'matrix_type'
+             = "train" or "test" """.format(self.uuid))
 
     def matrix_with_sorted_columns(self, columns):
         """Return the matrix with columns sorted in the given column order
@@ -577,17 +608,25 @@ class MatrixStore:
 
 
 class CSVMatrixStore(MatrixStore):
-    """Store and access compressed matrices using CSV"""
+    """Store and access matrices using Parquet (CONTEXT.md: "matrices are Parquet"; ADR-0005).
 
-    suffix = "csv.gz"
+    The class name is retained for backwards compatibility with the experiment
+    wiring; the on-disk format is Parquet, not CSV.
+    """
+
+    suffix = "parquet"
 
     @property
     def head_of_matrix(self):
         try:
             with self.matrix_base_store.open("rb") as fd:
-                head_of_matrix = pd.read_csv(fd, compression="gzip", nrows=1)
+                # Read only the first row group / row with polars, then hand the
+                # single-row frame to pandas for the index-shaped head used by
+                # `columns()` / `empty`.
+                head_pl = pl.read_parquet(fd, n_rows=1)
+                head_of_matrix = head_pl.to_pandas()
                 head_of_matrix.set_index(self.indices, inplace=True)
-        except FileNotFoundError as fnfe:
+        except FileNotFoundError:
             logger.exception(f"Matrix {self.uuid} not found Returning Empty data frame")
             head_of_matrix = pd.DataFrame()
 
@@ -612,13 +651,22 @@ class CSVMatrixStore(MatrixStore):
         return path_
 
     def _load(self):
+        """Load the matrix from Parquet as a polars DataFrame.
+
+        Parquet is self-describing, so the dtypes (Float32 features, the
+        entity_id integer, and the as_of_date timestamp) survive the round-trip
+        and we no longer need to parse strings or downcast on read.
+
+        We deliberately keep the result in polars and do NOT convert to pandas
+        here: the eager load-time `to_pandas()` was the expensive step we are
+        removing (ADR-0005, CONTEXT.md "matrices are Parquet"). The single,
+        intentional polars->pandas conversion happens later in
+        `_preprocess_and_split_matrix`, which builds the (entity_id, as_of_date)
+        index that the model seam and prediction-writing depend on.
+
+        For S3-backed stores we download to /tmp, read it, then delete the
+        local copy.
         """
-        Loads a CSV file as a polars data frame while downcasting then creates a pandas data frame.
-        If the CSV file is stored on S3 we downloaded to /tmp and then read it with polars (as a gzip),
-        after reading it we delete the file.
-        If the CSV file is stored on FSystem we read it directly with polars (as a gzip).
-        """
-        # if S3FileSystem then download the CSV.gzip to FileSystem, then ser
         file_in_tmp = False
         if isinstance(self.matrix_base_store, S3Store):
             logger.info("file in S3")
@@ -632,41 +680,12 @@ class CSVMatrixStore(MatrixStore):
             filename_ = str(self.matrix_base_store.path)
 
         start = time.time()
-        logger.debug(f"load matrix with polars {filename_}")
-        df_pl = pl.read_csv(filename_, infer_schema_length=0).with_columns(
-            pl.all().exclude(["entity_id", "as_of_date"]).cast(pl.Float32, strict=False)
-        )
-        end = time.time()
-
-        logger.debug(f"time for loading matrix as polar df (sec): {(end - start) / 60}")
-
-        # casting entity_id and as_of_date
-        logger.debug(f"casting entity_id and as_of_date")
-        start = time.time()
-        # define if as_of_date is date or datetime for correct cast
-        if len(df_pl.get_column("as_of_date").head(1)[0].split()) > 1:
-            format = "%Y-%m-%d %H:%M:%S"
-        else:
-            format = "%Y-%m-%d"
-
-        df_pl = df_pl.with_columns(pl.col("as_of_date").str.to_datetime(format))
-        df_pl = df_pl.with_columns(pl.col("entity_id").cast(pl.Int32, strict=False))
+        logger.debug(f"load matrix from parquet with polars {filename_}")
+        df_pl = pl.read_parquet(filename_)
         end = time.time()
         logger.debug(
-            f"time casting entity_id and as_of_date of matrix with uuid {self.matrix_uuid} (sec): {(end - start) / 60}"
+            f"time for loading matrix as polars df (sec): {(end - start) / 60}"
         )
-        # converting from polars to pandas
-        logger.debug(f"about to convert polars df into pandas df")
-        start = time.time()
-        df = df_pl.to_pandas()
-        end = time.time()
-        logger.debug(f"Time converting from polars to pandas (sec): {(end - start) / 60}")
-        # on pandas 2 the default unit for datetime is micro sec but we need ns
-        # so we change it before make it part of the index
-        df["as_of_date"] = df.as_of_date.astype("datetime64[ns]")
-        df.set_index(["entity_id", "as_of_date"], inplace=True)
-        logger.debug(f"df index data types:\n{df.index.dtypes}")
-        logger.spam(f"Pandas DF memory usage: {df.memory_usage(deep=True).sum() / 1000000} MB")
 
         # if the file was downloaded from S3 we delete it!
         if file_in_tmp:
@@ -675,13 +694,15 @@ class CSVMatrixStore(MatrixStore):
                 os.remove(filename_)
                 logger.debug(f"Downloaded file from S3 {filename_} deleted")
             except OSError as e:
-                logger.debug(f"Unexpected error deleting download file from S3 in {filename_}: {e}")
+                logger.debug(
+                    f"Unexpected error deleting download file from S3 in {filename_}: {e}"
+                )
 
-        return df
+        return df_pl
 
     def _load_as_df(self):
         with self.matrix_base_store.open("rb") as fd:
-            return pd.read_csv(fd, compression="gzip", parse_dates=["as_of_date"])
+            return pl.read_parquet(fd).to_pandas()
 
     def save_matrix_metadata(self):
         with self.metadata_base_store.open("wb") as fd:
@@ -693,9 +714,16 @@ class CSVMatrixStore(MatrixStore):
         self.matrix_base_store.client.put_file(lpath=local_path, rpath=remote_path)
 
     def save(self):
-        logger.debug("About to compress")
-        self.matrix_base_store.write(gzip.compress(self.full_matrix_for_saving.to_csv(None).encode("utf-8")))
-        logger.debug(f"Compression done! Matrix written")
+        logger.debug("About to write matrix as parquet")
+        # full_matrix_for_saving is a pandas DataFrame carrying the
+        # (entity_id, as_of_date) MultiIndex. Reset it so those become regular
+        # columns, matching what `_load()` reads back from Parquet (where they
+        # are columns that `_preprocess_and_split_matrix` re-indexes).
+        full_matrix = self.full_matrix_for_saving.reset_index()
+        buf = io.BytesIO()
+        pl.from_pandas(full_matrix).write_parquet(buf)
+        self.matrix_base_store.write(buf.getvalue())
+        logger.debug("Matrix written as parquet")
 
         with self.metadata_base_store.open("wb") as fd:
             yaml.dump(self.metadata, fd, encoding="utf-8")

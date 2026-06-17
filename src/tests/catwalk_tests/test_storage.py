@@ -171,11 +171,14 @@ def matrix_stores():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         project_storage = ProjectStorage(tmpdir)
-        tmpcsv = os.path.join(tmpdir, "df.csv.gz")
+        tmpparquet = os.path.join(tmpdir, "df.parquet")
         tmpyaml = os.path.join(tmpdir, "df.yaml")
         with open(tmpyaml, "w") as outfile:
             yaml.dump(METADATA, outfile, default_flow_style=False)
-        df.to_csv(tmpcsv, compression="gzip")
+        # Matrices are stored as Parquet (CONTEXT.md / ADR-0005). Reset the
+        # index so entity_id / as_of_date are columns, matching how the store
+        # reads them back.
+        df.reset_index().to_parquet(tmpparquet)
         csv = CSVMatrixStore(project_storage, [], "df")
         # first test with caching
         with csv.cache():
