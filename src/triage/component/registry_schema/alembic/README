@@ -1,0 +1,3 @@
+Registry control-plane database configuration (ADR-0002). Separate alembic
+history from the per-project results schema; version table is
+registry_schema_versions.

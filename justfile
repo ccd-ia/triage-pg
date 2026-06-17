@@ -15,6 +15,13 @@ alembic *ARGS:
         -x db_config_file=database.yaml \
         {{ARGS}}
 
+# Run registry-DB alembic commands (e.g., just alembic-registry upgrade head)
+alembic-registry *ARGS:
+    PYTHONPATH=src uv run alembic \
+        -c src/triage/component/registry_schema/alembic.ini \
+        -x db_config_file=database.yaml \
+        {{ARGS}}
+
 # Run tests
 test *ARGS:
     uv run pytest {{ARGS}}
