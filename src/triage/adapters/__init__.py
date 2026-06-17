@@ -15,6 +15,7 @@ from triage.adapters.model import (
     build_model,
     score_and_evaluate,
 )
+from triage.adapters.run import RunResult, SplitResult, run_experiment
 from triage.adapters.temporal import TemporalConfig
 
 __all__ = [
@@ -22,11 +23,14 @@ __all__ = [
     "ImputationRule",
     "MatrixResult",
     "ModelResult",
+    "RunResult",
     "ScoreEvaluateResult",
+    "SplitResult",
     "TemporalConfig",
     "build_cohort",
     "build_labels",
     "build_matrix",
     "build_model",
+    "run_experiment",
     "score_and_evaluate",
 ]

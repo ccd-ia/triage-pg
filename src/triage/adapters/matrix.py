@@ -411,13 +411,22 @@ def build_matrix(
         engine_versions=engine_versions_for(FEATURE_GROUP_KIND),
     )
 
-    # ---- matrix node: temporal + feature-group + imputation policy + kind + timespan.
+    # ---- matrix node: temporal + feature-group + imputation policy + kind + timespan
+    # + this matrix's own as_of_dates + lookback. The split's as_of_dates and lookback
+    # determine the matrix's rows (each split inner-joins its OWN dates against the shared
+    # cohort/labels), so two splits sharing one global temporal_config still produce
+    # distinct matrices — they must hash to distinct artifact ids, else a later split's
+    # matrix would cache-hit an earlier split's content (a different row set). Note this
+    # is the matrix's *own* date slice entering its *own* identity — unlike the cohort and
+    # labels, which deliberately span ALL split dates and never fold per-split dates in.
     matrix_config = {
         "temporal_config": temporal_config.canonical(),
         "feature_group": fg_config["featurizer"],
         "imputation_policy": imputation_policy.canonical(),
         "matrix_kind": matrix_kind,
         "label_timespan": label_timespan,
+        "as_of_dates": sorted(d.isoformat() for d in as_of_dates),
+        "lookback": lookback,
     }
     matrix_parent_derivs = [fg_derivation, cohort_deriv, labels_deriv]
     if train_matrix_artifact_id is not None:
