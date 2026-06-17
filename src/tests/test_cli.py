@@ -27,20 +27,6 @@ def test_cli_singlethreadedexperiment():
         instance.run.assert_called_once()
 
 
-def test_cli_multicoreexperiment():
-    with patch("triage.cli.MultiCoreExperiment", autospec=True) as exp_mock:
-        invoke(
-            "experiment",
-            "example/config/experiment.yaml",
-            "--n-processes",
-            "2",
-            "--n-db-processes",
-            "2",
-            "--no-validate",
-        )
-        exp_mock.assert_called_once()
-
-
 def test_cli_show_timechop():
     with patch("triage.cli.SingleThreadedExperiment", autospec=True) as exp_mock:
         exp_instance = exp_mock.return_value
@@ -69,12 +55,6 @@ def test_cli_audition():
         runner_instance.run.assert_called_once()
 
 
-def test_cli_crosstabs():
-    with patch("triage.cli.run_crosstabs", autospec=True) as run_mock:
-        invoke("crosstabs", "example/config/postmodeling_crosstabs.yaml")
-        run_mock.assert_called_once()
-
-
 def test_featuretest():
     with patch("triage.cli.FeatureGenerator", autospec=True) as feature_mock:
         with patch("triage.cli.EntityDateTableGenerator", autospec=True) as cohort_mock:
@@ -84,9 +64,7 @@ def test_featuretest():
 
 
 def test_cli_predictlist():
-    with patch(
-        "triage.cli.predict_forward_with_existed_model", autospec=True
-    ) as predict_mock:
+    with patch("triage.cli.predict_forward_with_existed_model", autospec=True) as predict_mock:
         invoke("predictlist", "40", "2019-06-04")
         predict_mock.assert_called_once()
         args = predict_mock.call_args[0]

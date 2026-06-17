@@ -29,11 +29,9 @@ import yaml
 from triage.component.results_schema import (
     ListPrediction,
     ListPredictionMetadata,
-    TestAequitas,
     TestEvaluation,
     TestPrediction,
     TestPredictionMetadata,
-    TrainAequitas,
     TrainEvaluation,
     TrainPrediction,
     TrainPredictionMetadata,
@@ -109,7 +107,6 @@ class S3Store(Store):
     """
 
     class S3FileWrapper(wrapt.ObjectProxy):
-
         # don't allow wrapped object to take wrapper's place
         # upon __enter__
         def __enter__(self):
@@ -127,9 +124,7 @@ class S3Store(Store):
                 out += self.__wrapped__.write(chunk)
 
     def __init__(self, path_head, *path_parts, **config):
-        self.path = str(
-            pathlib.PurePosixPath(path_head.replace("s3://", ""), *path_parts)
-        )
+        self.path = str(pathlib.PurePosixPath(path_head.replace("s3://", ""), *path_parts))
         self.config = config
 
     @property
@@ -325,9 +320,7 @@ class MatrixStorageEngine:
         matrix_directory (string, optional) A directory to store matrices. Defaults to 'matrices'
     """
 
-    def __init__(
-        self, project_storage, matrix_storage_class=None, matrix_directory=None
-    ):
+    def __init__(self, project_storage, matrix_storage_class=None, matrix_directory=None):
         self.project_storage = project_storage
         self.matrix_storage_class = matrix_storage_class or CSVMatrixStore
         self.directories = [matrix_directory or "matrices"]
@@ -340,9 +333,7 @@ class MatrixStorageEngine:
 
         Returns: (MatrixStore) a reference to the matrix and its companion metadata
         """
-        return self.matrix_storage_class(
-            self.project_storage, self.directories, matrix_uuid
-        )
+        return self.matrix_storage_class(self.project_storage, self.directories, matrix_uuid)
 
 
 class MatrixStore:
@@ -365,17 +356,11 @@ class MatrixStore:
     _matrix_label_tuple = None
     indices = ["entity_id", "as_of_date"]
 
-    def __init__(
-        self, project_storage, directories, matrix_uuid, matrix=None, metadata=None
-    ):
+    def __init__(self, project_storage, directories, matrix_uuid, matrix=None, metadata=None):
         self.should_cache = False
         self.matrix_uuid = matrix_uuid
-        self.matrix_base_store = project_storage.get_store(
-            directories, f"{matrix_uuid}.{self.suffix}"
-        )
-        self.metadata_base_store = project_storage.get_store(
-            directories, f"{matrix_uuid}.yaml"
-        )
+        self.matrix_base_store = project_storage.get_store(directories, f"{matrix_uuid}.{self.suffix}")
+        self.metadata_base_store = project_storage.get_store(directories, f"{matrix_uuid}.yaml")
 
         self.metadata = metadata
         if matrix is not None:
@@ -475,9 +460,7 @@ class MatrixStore:
         if include_label:
             return columns
         else:
-            return [
-                col for col in columns if col != self.metadata.get("label_name", None)
-            ]
+            return [col for col in columns if col != self.metadata.get("label_name", None)]
 
     @property
     def label_column_name(self):
@@ -507,11 +490,7 @@ class MatrixStore:
     @property
     def num_entities(self):
         """The number of entities in the matrix"""
-        return len(
-            self.design_matrix.index.levels[
-                self.design_matrix.index.names.index("entity_id")
-            ]
-        )
+        return len(self.design_matrix.index.levels[self.design_matrix.index.names.index("entity_id")])
 
     @property
     def matrix_type(self):
@@ -528,8 +507,10 @@ class MatrixStore:
         elif self.metadata["matrix_type"] == "production":
             return ProductionMatrixType
         else:
-            raise Exception("""matrix metadata for matrix {} must contain 'matrix_type'
-             = "train" or "test" """.format(self.uuid))
+            raise Exception(
+                """matrix metadata for matrix {} must contain 'matrix_type'
+             = "train" or "test" """.format(self.uuid)
+            )
 
     def matrix_with_sorted_columns(self, columns):
         """Return the matrix with columns sorted in the given column order
@@ -657,7 +638,7 @@ class CSVMatrixStore(MatrixStore):
         )
         end = time.time()
 
-        logger.debug(f"time for loading matrix as polar df (sec): {(end-start)/60}")
+        logger.debug(f"time for loading matrix as polar df (sec): {(end - start) / 60}")
 
         # casting entity_id and as_of_date
         logger.debug(f"casting entity_id and as_of_date")
@@ -672,22 +653,20 @@ class CSVMatrixStore(MatrixStore):
         df_pl = df_pl.with_columns(pl.col("entity_id").cast(pl.Int32, strict=False))
         end = time.time()
         logger.debug(
-            f"time casting entity_id and as_of_date of matrix with uuid {self.matrix_uuid} (sec): {(end-start)/60}"
+            f"time casting entity_id and as_of_date of matrix with uuid {self.matrix_uuid} (sec): {(end - start) / 60}"
         )
         # converting from polars to pandas
         logger.debug(f"about to convert polars df into pandas df")
         start = time.time()
         df = df_pl.to_pandas()
         end = time.time()
-        logger.debug(f"Time converting from polars to pandas (sec): {(end-start)/60}")
+        logger.debug(f"Time converting from polars to pandas (sec): {(end - start) / 60}")
         # on pandas 2 the default unit for datetime is micro sec but we need ns
         # so we change it before make it part of the index
         df["as_of_date"] = df.as_of_date.astype("datetime64[ns]")
         df.set_index(["entity_id", "as_of_date"], inplace=True)
         logger.debug(f"df index data types:\n{df.index.dtypes}")
-        logger.spam(
-            f"Pandas DF memory usage: {df.memory_usage(deep=True).sum()/1000000} MB"
-        )
+        logger.spam(f"Pandas DF memory usage: {df.memory_usage(deep=True).sum() / 1000000} MB")
 
         # if the file was downloaded from S3 we delete it!
         if file_in_tmp:
@@ -696,9 +675,7 @@ class CSVMatrixStore(MatrixStore):
                 os.remove(filename_)
                 logger.debug(f"Downloaded file from S3 {filename_} deleted")
             except OSError as e:
-                logger.debug(
-                    f"Unexpected error deleting download file from S3 in {filename_}: {e}"
-                )
+                logger.debug(f"Unexpected error deleting download file from S3 in {filename_}: {e}")
 
         return df
 
@@ -717,9 +694,7 @@ class CSVMatrixStore(MatrixStore):
 
     def save(self):
         logger.debug("About to compress")
-        self.matrix_base_store.write(
-            gzip.compress(self.full_matrix_for_saving.to_csv(None).encode("utf-8"))
-        )
+        self.matrix_base_store.write(gzip.compress(self.full_matrix_for_saving.to_csv(None).encode("utf-8")))
         logger.debug(f"Compression done! Matrix written")
 
         with self.metadata_base_store.open("wb") as fd:
@@ -735,7 +710,6 @@ class TestMatrixType:
     string_name = "test"
     evaluation_obj = TestEvaluation
     prediction_obj = TestPrediction
-    aequitas_obj = TestAequitas
     prediction_metadata_obj = TestPredictionMetadata
     is_test = True
 
@@ -744,7 +718,6 @@ class TrainMatrixType:
     string_name = "train"
     evaluation_obj = TrainEvaluation
     prediction_obj = TrainPrediction
-    aequitas_obj = TrainAequitas
     prediction_metadata_obj = TrainPredictionMetadata
     is_test = False
 

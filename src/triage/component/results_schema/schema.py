@@ -36,9 +36,7 @@ schemas = (
 
 event.listen(Base.metadata, "before_create", DDL(schemas))
 
-group_proc_filename = os.path.join(
-    os.path.dirname(__file__), "sql", "model_group_stored_procedure.sql"
-)
+group_proc_filename = os.path.join(os.path.dirname(__file__), "sql", "model_group_stored_procedure.sql")
 with open(group_proc_filename) as fd:
     stmt = fd.read()
 
@@ -53,7 +51,6 @@ event.listen(Base.metadata, "before_create", DDL(stmt.replace("%", "%%")))
 
 
 class Experiment(Base):
-
     __tablename__ = "experiments"
     __table_args__ = {"schema": "triage_metadata"}
 
@@ -85,7 +82,6 @@ class TriageRunStatus(enum.Enum):
 
 
 class TriageRun(Base):
-
     __tablename__ = "triage_runs"
     __table_args__ = {"schema": "triage_metadata"}
 
@@ -123,7 +119,6 @@ class TriageRun(Base):
 
 
 class Subset(Base):
-
     __tablename__ = "subsets"
     __table_args__ = {"schema": "triage_metadata"}
 
@@ -133,7 +128,6 @@ class Subset(Base):
 
 
 class ModelGroup(Base):
-
     __tablename__ = "model_groups"
     __table_args__ = {"schema": "triage_metadata"}
 
@@ -145,13 +139,10 @@ class ModelGroup(Base):
 
 
 class ListPrediction(Base):
-
     __tablename__ = "predictions"
     __table_args__ = {"schema": "triage_production"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     entity_id = Column(BigInteger, primary_key=True)
     as_of_date = Column(DateTime, primary_key=True)
     score = Column(Numeric)
@@ -170,12 +161,8 @@ class ListPredictionMetadata(Base):
     __tablename__ = "prediction_metadata"
     __table_args__ = {"schema": "triage_production"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
-    matrix_uuid = Column(
-        Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
+    matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True)
     tiebreaker_ordering = Column(Text)
     random_seed = Column(Integer)
     predictions_saved = Column(Boolean)
@@ -195,7 +182,6 @@ class ExperimentMatrix(Base):
 
 
 class Matrix(Base):
-
     __tablename__ = "matrices"
     __table_args__ = {"schema": "triage_metadata"}
 
@@ -208,21 +194,16 @@ class Matrix(Base):
     lookback_duration = Column(Interval)
     feature_start_time = Column(DateTime)
     matrix_metadata = Column(JSONB)
-    built_by_experiment = Column(
-        String, ForeignKey("triage_metadata.experiments.experiment_hash")
-    )
+    built_by_experiment = Column(String, ForeignKey("triage_metadata.experiments.experiment_hash"))
     feature_dictionary = Column(JSONB)
 
 
 class Model(Base):
-
     __tablename__ = "models"
     __table_args__ = {"schema": "triage_metadata"}
 
     model_id = Column(Integer, primary_key=True)
-    model_group_id = Column(
-        Integer, ForeignKey("triage_metadata.model_groups.model_group_id")
-    )
+    model_group_id = Column(Integer, ForeignKey("triage_metadata.model_groups.model_group_id"))
     model_hash = Column(String, unique=True, index=True)
     run_time = Column(DateTime)
     batch_run_time = Column(DateTime)
@@ -231,9 +212,7 @@ class Model(Base):
     model_comment = Column(Text)
     batch_comment = Column(Text)
     config = Column(JSON)
-    built_in_triage_run = Column(
-        Integer, ForeignKey("triage_metadata.triage_runs.id"), nullable=True
-    )
+    built_in_triage_run = Column(Integer, ForeignKey("triage_metadata.triage_runs.id"), nullable=True)
     train_end_time = Column(DateTime)
     test = Column(Boolean)
     train_matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"))
@@ -263,9 +242,7 @@ class ExperimentModel(Base):
     )
     model_hash = Column(String, primary_key=True)
 
-    model_rel = relationship(
-        "Model", primaryjoin=(Model.model_hash == model_hash), foreign_keys=model_hash
-    )
+    model_rel = relationship("Model", primaryjoin=(Model.model_hash == model_hash), foreign_keys=model_hash)
     experiment_rel = relationship("Experiment")
 
 
@@ -273,24 +250,17 @@ class RetrainModel(Base):
     __tablename__ = "retrain_models"
     __table_args__ = {"schema": "triage_metadata"}
 
-    retrain_hash = Column(
-        String, ForeignKey("triage_metadata.retrain.retrain_hash"), primary_key=True
-    )
+    retrain_hash = Column(String, ForeignKey("triage_metadata.retrain.retrain_hash"), primary_key=True)
     model_hash = Column(String, primary_key=True)
-    model_rel = relationship(
-        "Model", primaryjoin=(Model.model_hash == model_hash), foreign_keys=model_hash
-    )
+    model_rel = relationship("Model", primaryjoin=(Model.model_hash == model_hash), foreign_keys=model_hash)
     retrain_rel = relationship("Retrain")
 
 
 class FeatureImportance(Base):
-
     __tablename__ = "feature_importances"
     __table_args__ = {"schema": "train_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     model = relationship(Model)
     feature = Column(String, primary_key=True)
     feature_importance = Column(Numeric)
@@ -306,9 +276,7 @@ class TestPrediction(Base):
     __tablename__ = "predictions"
     __table_args__ = {"schema": "test_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     entity_id = Column(BigInteger, primary_key=True)
     as_of_date = Column(DateTime, primary_key=True)
     score = Column(Numeric(6, 5))
@@ -325,13 +293,10 @@ class TestPrediction(Base):
 
 
 class TrainPrediction(Base):
-
     __tablename__ = "predictions"
     __table_args__ = {"schema": "train_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     entity_id = Column(BigInteger, primary_key=True)
     as_of_date = Column(DateTime, primary_key=True)
     score = Column(Numeric(6, 5))
@@ -353,12 +318,8 @@ class TestPredictionMetadata(Base):
     __tablename__ = "prediction_metadata"
     __table_args__ = {"schema": "test_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
-    matrix_uuid = Column(
-        Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
+    matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True)
     tiebreaker_ordering = Column(Text)
     random_seed = Column(Integer)
     predictions_saved = Column(Boolean)
@@ -368,25 +329,18 @@ class TrainPredictionMetadata(Base):
     __tablename__ = "prediction_metadata"
     __table_args__ = {"schema": "train_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
-    matrix_uuid = Column(
-        Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
+    matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"), primary_key=True)
     tiebreaker_ordering = Column(Text)
     random_seed = Column(Integer)
     predictions_saved = Column(Boolean)
 
 
 class IndividualImportance(Base):
-
     __tablename__ = "individual_importances"
     __table_args__ = {"schema": "test_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     entity_id = Column(BigInteger, primary_key=True)
     as_of_date = Column(DateTime, primary_key=True)
     feature = Column(String, primary_key=True)
@@ -403,9 +357,7 @@ class TestEvaluation(Base):
     __tablename__ = "evaluations"
     __table_args__ = {"schema": "test_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     subset_hash = Column(String, primary_key=True, default="")
     evaluation_start_time = Column(DateTime, primary_key=True)
     evaluation_end_time = Column(DateTime, primary_key=True)
@@ -428,13 +380,10 @@ class TestEvaluation(Base):
 
 
 class TrainEvaluation(Base):
-
     __tablename__ = "evaluations"
     __table_args__ = {"schema": "train_results"}
 
-    model_id = Column(
-        Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True
-    )
+    model_id = Column(Integer, ForeignKey("triage_metadata.models.model_id"), primary_key=True)
     subset_hash = Column(String, primary_key=True, default="")
     evaluation_start_time = Column(DateTime, primary_key=True)
     evaluation_end_time = Column(DateTime, primary_key=True)
@@ -456,161 +405,7 @@ class TrainEvaluation(Base):
     model_rel = relationship("Model")
 
 
-class TestAequitas(Base):
-    __test__ = False  # Not a pytest test class
-
-    __tablename__ = "aequitas"
-    __table_args__ = {"schema": "test_results"}
-    model_id = Column(
-        Integer,
-        ForeignKey("triage_metadata.models.model_id"),
-        primary_key=True,
-        index=True,
-    )
-    subset_hash = Column(String, primary_key=True, default="")
-    tie_breaker = Column(String, primary_key=True)
-    evaluation_start_time = Column(DateTime, primary_key=True, index=True)
-    evaluation_end_time = Column(DateTime, primary_key=True, index=True)
-    matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"))
-    parameter = Column(String, primary_key=True, index=True)
-    attribute_name = Column(String, primary_key=True, index=True)
-    attribute_value = Column(String, primary_key=True, index=True)
-    total_entities = Column(Integer)
-    group_label_pos = Column(Integer)
-    group_label_neg = Column(Integer)
-    group_size = Column(Integer)
-    group_size_pct = Column(Numeric)
-    prev = Column(Numeric)
-    pp = Column(Integer)
-    pn = Column(Integer)
-    fp = Column(Integer)
-    fn = Column(Integer)
-    tn = Column(Integer)
-    tp = Column(Integer)
-    ppr = Column(Numeric)
-    pprev = Column(Numeric)
-    tpr = Column(Numeric)
-    tnr = Column(Numeric)
-    for_ = Column("for", Numeric)
-    fdr = Column(Numeric)
-    fpr = Column(Numeric)
-    fnr = Column(Numeric)
-    npv = Column(Numeric)
-    precision = Column(Numeric)
-    ppr_disparity = Column(Numeric)
-    ppr_ref_group_value = Column(String)
-    pprev_disparity = Column(Numeric)
-    pprev_ref_group_value = Column(String)
-    precision_disparity = Column(Numeric)
-    precision_ref_group_value = Column(String)
-    fdr_disparity = Column(Numeric)
-    fdr_ref_group_value = Column(String)
-    for_disparity = Column(Numeric)
-    for_ref_group_value = Column(String)
-    fpr_disparity = Column(Numeric)
-    fpr_ref_group_value = Column(String)
-    fnr_disparity = Column(Numeric)
-    fnr_ref_group_value = Column(String)
-    tpr_disparity = Column(Numeric)
-    tpr_ref_group_value = Column(String)
-    tnr_disparity = Column(Numeric)
-    tnr_ref_group_value = Column(String)
-    npv_disparity = Column(Numeric)
-    npv_ref_group_value = Column(String)
-    Statistical_Parity = Column(Boolean)
-    Impact_Parity = Column(Boolean)
-    FDR_Parity = Column(Boolean)
-    FPR_Parity = Column(Boolean)
-    FOR_Parity = Column(Boolean)
-    FNR_Parity = Column(Boolean)
-    TypeI_Parity = Column(Boolean)
-    TypeII_Parity = Column(Boolean)
-    Equalized_Odds = Column(Boolean)
-    Unsupervised_Fairness = Column(Boolean)
-    Supervised_Fairness = Column(Boolean)
-
-    matrix_rel = relationship("Matrix")
-    model_rel = relationship("Model")
-
-
-class TrainAequitas(Base):
-    __tablename__ = "aequitas"
-    __table_args__ = {"schema": "train_results"}
-    model_id = Column(
-        Integer,
-        ForeignKey("triage_metadata.models.model_id"),
-        primary_key=True,
-        index=True,
-    )
-    subset_hash = Column(String, primary_key=True, default="")
-    tie_breaker = Column(String, primary_key=True)
-    evaluation_start_time = Column(DateTime, primary_key=True, index=True)
-    evaluation_end_time = Column(DateTime, primary_key=True, index=True)
-    matrix_uuid = Column(Text, ForeignKey("triage_metadata.matrices.matrix_uuid"))
-    parameter = Column(String, primary_key=True, index=True)
-    attribute_name = Column(String, primary_key=True, index=True)
-    attribute_value = Column(String, primary_key=True, index=True)
-    total_entities = Column(Integer)
-    group_label_pos = Column(Integer)
-    group_label_neg = Column(Integer)
-    group_size = Column(Integer)
-    group_size_pct = Column(Numeric)
-    prev = Column(Numeric)
-    pp = Column(Integer)
-    pn = Column(Integer)
-    fp = Column(Integer)
-    fn = Column(Integer)
-    tn = Column(Integer)
-    tp = Column(Integer)
-    ppr = Column(Numeric)
-    pprev = Column(Numeric)
-    tpr = Column(Numeric)
-    tnr = Column(Numeric)
-    for_ = Column("for", Numeric)
-    fdr = Column(Numeric)
-    fpr = Column(Numeric)
-    fnr = Column(Numeric)
-    npv = Column(Numeric)
-    precision = Column(Numeric)
-    ppr_disparity = Column(Numeric)
-    ppr_ref_group_value = Column(String)
-    pprev_disparity = Column(Numeric)
-    pprev_ref_group_value = Column(String)
-    precision_disparity = Column(Numeric)
-    precision_ref_group_value = Column(String)
-    fdr_disparity = Column(Numeric)
-    fdr_ref_group_value = Column(String)
-    for_disparity = Column(Numeric)
-    for_ref_group_value = Column(String)
-    fpr_disparity = Column(Numeric)
-    fpr_ref_group_value = Column(String)
-    fnr_disparity = Column(Numeric)
-    fnr_ref_group_value = Column(String)
-    tpr_disparity = Column(Numeric)
-    tpr_ref_group_value = Column(String)
-    tnr_disparity = Column(Numeric)
-    tnr_ref_group_value = Column(String)
-    npv_disparity = Column(Numeric)
-    npv_ref_group_value = Column(String)
-    Statistical_Parity = Column(Boolean)
-    Impact_Parity = Column(Boolean)
-    FDR_Parity = Column(Boolean)
-    FPR_Parity = Column(Boolean)
-    FOR_Parity = Column(Boolean)
-    FNR_Parity = Column(Boolean)
-    TypeI_Parity = Column(Boolean)
-    TypeII_Parity = Column(Boolean)
-    Equalized_Odds = Column(Boolean)
-    Unsupervised_Fairness = Column(Boolean)
-    Supervised_Fairness = Column(Boolean)
-
-    matrix_rel = relationship("Matrix")
-    model_rel = relationship("Model")
-
-
-hash_partitioning_filename = os.path.join(
-    os.path.dirname(__file__), "sql", "predictions_hash_partitioning.sql"
-)
+hash_partitioning_filename = os.path.join(os.path.dirname(__file__), "sql", "predictions_hash_partitioning.sql")
 with open(hash_partitioning_filename) as fd:
     stmt = fd.read()
 

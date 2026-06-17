@@ -26,11 +26,9 @@ from .schema import (
     Retrain,
     RetrainModel,
     Subset,
-    TestAequitas,
     TestEvaluation,
     TestPrediction,
     TestPredictionMetadata,
-    TrainAequitas,
     TrainEvaluation,
     TrainPrediction,
     TrainPredictionMetadata,
@@ -61,8 +59,6 @@ __all__ = (
     "TestPredictionMetadata",
     "TrainPredictionMetadata",
     "ListPredictionMetadata",
-    "TestAequitas",
-    "TrainAequitas",
     "mark_db_as_upgraded",
     "upgrade_db",
 )
@@ -85,9 +81,7 @@ def upgrade_db(db_engine=None, dburl=None, revision="head"):
     elif dburl:
         command.upgrade(alembic_config(dburl=dburl), revision)
     else:
-        raise ValueError(
-            "Must pass either a db_config_filehandle or a db_engine or a dburl"
-        )
+        raise ValueError("Must pass either a db_config_filehandle or a db_engine or a dburl")
 
 
 def downgrade_db(db_engine=None, dburl=None, revision="-1"):
@@ -96,9 +90,7 @@ def downgrade_db(db_engine=None, dburl=None, revision="-1"):
     elif dburl:
         command.downgrade(alembic_config(dburl=dburl), revision)
     else:
-        raise ValueError(
-            "Must pass either a db_config_filehandle or a db_engine or a dburl"
-        )
+        raise ValueError("Must pass either a db_config_filehandle or a db_engine or a dburl")
 
 
 def stamp_db(revision, dburl):
@@ -119,24 +111,16 @@ def upgrade_if_clean(dburl):
     script_ = script.ScriptDirectory.from_config(alembic_cfg)
     if not table_exists("results_schema_versions", engine):
         logger.info(
-            "No results_schema_versions table exists, which means that this installation "
-            "is fresh. Upgrading db."
+            "No results_schema_versions table exists, which means that this installation is fresh. Upgrading db."
         )
         upgrade_db(dburl=dburl)
         return
     with engine.begin() as conn:
-        current_revision = conn.execute(
-            text("select version_num from results_schema_versions limit 1")
-        ).scalar_one()
-        logger.debug(
-            "Database's triage_metadata schema version is %s", current_revision
-        )
+        current_revision = conn.execute(text("select version_num from results_schema_versions limit 1")).scalar_one()
+        logger.debug("Database's triage_metadata schema version is %s", current_revision)
         triage_head = script_.get_current_head()
         logger.debug("Code's triage_metadata schema version is %s", triage_head)
-        database_is_ahead = not any(
-            migration.revision == current_revision
-            for migration in script_.walk_revisions()
-        )
+        database_is_ahead = not any(migration.revision == current_revision for migration in script_.walk_revisions())
         if database_is_ahead:
             raise ValueError(
                 f"Your database's results schema version, {current_revision}, is not a known "

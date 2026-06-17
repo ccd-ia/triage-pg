@@ -51,12 +51,12 @@ CONFIG_QUERY_DATA = {
 }
 
 MOCK_FILES = {
-    os.path.join(
-        os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['label']['filepath']}"
-    ): CONFIG_QUERY_DATA["label"]["query"],
-    os.path.join(
-        os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['cohort']['filepath']}"
-    ): CONFIG_QUERY_DATA["cohort"]["query"],
+    os.path.join(os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['label']['filepath']}"): CONFIG_QUERY_DATA["label"][
+        "query"
+    ],
+    os.path.join(os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['cohort']['filepath']}"): CONFIG_QUERY_DATA[
+        "cohort"
+    ]["query"],
 }
 
 
@@ -139,9 +139,7 @@ class MockMatrixStore(MatrixStore):
             return fake_labels(self.label_count)
 
 
-def fake_trained_model(
-    db_engine, train_matrix_uuid="efgh", train_end_time=datetime.datetime(2016, 1, 1)
-):
+def fake_trained_model(db_engine, train_matrix_uuid="efgh", train_end_time=datetime.datetime(2016, 1, 1)):
     """Creates and stores a trivial trained model and training matrix
 
     Args:
@@ -215,9 +213,7 @@ def matrix_creator():
     return pd.DataFrame.from_dict(source_dict)
 
 
-def get_matrix_store(
-    project_storage, db_engine, matrix=None, metadata=None, write_to_db=True
-):
+def get_matrix_store(project_storage, db_engine, matrix=None, metadata=None, write_to_db=True):
     """Return a matrix store associated with the given project storage.
     Also adds an entry in the matrices table if it doesn't exist already
 
@@ -234,9 +230,7 @@ def get_matrix_store(
 
     # matrix["as_of_date"] = matrix["as_of_date"].apply(pd.Timestamp)
     matrix.set_index(MatrixStore.indices, inplace=True)
-    matrix_store = project_storage.matrix_storage_engine().get_store(
-        filename_friendly_hash(metadata)
-    )
+    matrix_store = project_storage.matrix_storage_engine().get_store(filename_friendly_hash(metadata))
     matrix_store.metadata = metadata
     new_matrix = matrix.copy()
     labels = new_matrix.pop(matrix_store.label_column_name)
@@ -247,12 +241,7 @@ def get_matrix_store(
         SessionLocal = sessionmaker(bind=db_engine)
         session = SessionLocal()
         try:
-            if (
-                session.query(Matrix)
-                .filter(Matrix.matrix_uuid == matrix_store.uuid)
-                .count()
-                == 0
-            ):
+            if session.query(Matrix).filter(Matrix.matrix_uuid == matrix_store.uuid).count() == 0:
                 set_session(session)
                 MatrixFactory(matrix_uuid=matrix_store.uuid)
                 session.commit()
@@ -339,31 +328,29 @@ def populate_source_data(db_engine):
     ]
 
     with db_engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table cat_complaints (
                 entity_id int,
                 as_of_date date,
                 cat_sightings int
                 )
-                """))
+                """)
+        )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table entity_zip_codes (
                 entity_id int,
                 zip_code text
                 )
-                """))
-
-        conn.execute(
-            text(
-                "create table zip_code_demographics (zip_code text, ethnicity text, as_of_date date)"
-            )
+                """)
         )
+
+        conn.execute(text("create table zip_code_demographics (zip_code text, ethnicity text, as_of_date date)"))
         for demographic_row in zip_code_demographics:
             conn.execute(
-                text(
-                    "insert into zip_code_demographics values (:zip_code, :ethnicity, :as_of_date)"
-                ),
+                text("insert into zip_code_demographics values (:zip_code, :ethnicity, :as_of_date)"),
                 {
                     "zip_code": demographic_row[0],
                     "ethnicity": demographic_row[1],
@@ -380,18 +367,18 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table zip_code_events (
                 zip_code text,
                 as_of_date date,
                 num_events int
                 )
-                """))
+                """)
+        )
         for zip_code_event in zip_code_events:
             conn.execute(
-                text(
-                    "insert into zip_code_events values (:zip_code, :as_of_date, :num_events)"
-                ),
+                text("insert into zip_code_events values (:zip_code, :as_of_date, :num_events)"),
                 {
                     "zip_code": zip_code_event[0],
                     "as_of_date": zip_code_event[1],
@@ -401,9 +388,7 @@ def populate_source_data(db_engine):
 
         for complaint in complaints:
             conn.execute(
-                text(
-                    "insert into cat_complaints values (:entity_id, :as_of_date, :cat_sightings)"
-                ),
+                text("insert into cat_complaints values (:entity_id, :as_of_date, :cat_sightings)"),
                 {
                     "entity_id": complaint[0],
                     "as_of_date": complaint[1],
@@ -411,13 +396,15 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table events (
                 entity_id int,
                 outcome int,
                 outcome_date date
                 )
-                """))
+                """)
+        )
 
         for event in events:
             conn.execute(
@@ -453,12 +440,8 @@ def sample_config(query_source="filepath"):
     }
 
     scoring_config = {
-        "testing_metric_groups": [
-            {"metrics": ["precision@"], "thresholds": {"top_n": [2]}}
-        ],
-        "training_metric_groups": [
-            {"metrics": ["precision@"], "thresholds": {"top_n": [3]}}
-        ],
+        "testing_metric_groups": [{"metrics": ["precision@"], "thresholds": {"top_n": [2]}}],
+        "training_metric_groups": [{"metrics": ["precision@"], "thresholds": {"top_n": [3]}}],
         "subsets": [
             {
                 "name": "evens",
@@ -507,7 +490,8 @@ def sample_config(query_source="filepath"):
         "include_missing_labels_in_train_as": False,
     }
 
-    # bias_audit_config disabled because aequitas 1.0.0 is incompatible with pandas 2.x
+    # bias_audit_config disabled: Aequitas removed (ADR-0007); SQL bias group-bys
+    # will replace it in a later phase.
     # bias_audit_config = {
     #     "from_obj_query": "select * from zip_code_demographics join entity_zip_codes using (zip_code)",
     #     "attribute_columns": ["ethnicity"],
@@ -535,7 +519,7 @@ def sample_config(query_source="filepath"):
         "cohort_config": cohort_config,
         "temporal_config": temporal_config,
         "grid_config": grid_config,
-        # bias_audit_config disabled - aequitas 1.0.0 incompatible with pandas 2.x
+        # bias_audit_config disabled: Aequitas removed (ADR-0007).
         # "bias_audit_config": bias_audit_config,
         "prediction": {"rank_tiebreaker": "random"},
         "scoring": scoring_config,

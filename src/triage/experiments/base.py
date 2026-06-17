@@ -60,7 +60,6 @@ from triage.component.catwalk.utils import (
     missing_model_hashes,
     save_experiment_and_get_hash,
 )
-from triage.component.postmodeling.experiment_summarizer import ExperimentReport
 from triage.component.timechop import Timechop
 from triage.database_reflection import table_has_data
 from triage.experiments import CONFIG_VERSION
@@ -138,34 +137,22 @@ class ExperimentBase(ABC):
 
         experiment_kwargs = bind_kwargs(
             self.__class__,
-            **{
-                key: value
-                for (key, value) in locals().items()
-                if key not in {"db_engine", "config", "self"}
-            },
+            **{key: value for (key, value) in locals().items() if key not in {"db_engine", "config", "self"}},
         )
 
         self._check_config_version(config)
         self.config = config
 
         if self.config.get("cohort_config") is not None:
-            self.config["cohort_config"] = load_query_if_needed(
-                self.config["cohort_config"]
-            )
+            self.config["cohort_config"] = load_query_if_needed(self.config["cohort_config"])
         if self.config.get("label_config") is not None:
-            self.config["label_config"] = load_query_if_needed(
-                self.config["label_config"]
-            )
+            self.config["label_config"] = load_query_if_needed(self.config["label_config"])
 
         self.project_storage = ProjectStorage(project_path)
         self.model_storage_engine = ModelStorageEngine(self.project_storage)
-        self.matrix_storage_engine = MatrixStorageEngine(
-            self.project_storage, matrix_storage_class
-        )
+        self.matrix_storage_engine = MatrixStorageEngine(self.project_storage, matrix_storage_class)
         self.project_path = project_path
-        logger.verbose(
-            f"Matrices and trained models will be saved in {self.project_path}"
-        )
+        logger.verbose(f"Matrices and trained models will be saved in {self.project_path}")
         self.replace = replace
         if self.replace:
             logger.notice(
@@ -200,8 +187,7 @@ class ExperimentBase(ABC):
         self.materialize_subquery_fromobjs = materialize_subquery_fromobjs
         if not self.materialize_subquery_fromobjs:
             logger.notice(
-                "Materialize from_objs is set to false. "
-                "The from_objs will be calculated on the fly every time."
+                "Materialize from_objs is set to false. The from_objs will be calculated on the fly every time."
             )
 
         self.features_ignore_cohort = features_ignore_cohort
@@ -218,13 +204,9 @@ class ExperimentBase(ABC):
         # only fill default values for full runs
         if not partial_run:
             ## Defaults to sane values
-            self.config["temporal_config"] = fill_timechop_config_missing(
-                self.config, self.db_engine
-            )
+            self.config["temporal_config"] = fill_timechop_config_missing(self.config, self.db_engine)
             ## Defaults to all the feature_aggregation's prefixes
-            self.config["feature_group_definition"] = fill_feature_group_definition(
-                self.config
-            )
+            self.config["feature_group_definition"] = fill_feature_group_definition(self.config)
 
         grid_config = fill_model_grid_presets(self.config)
         self.config.pop("model_grid_preset", None)
@@ -241,9 +223,7 @@ class ExperimentBase(ABC):
 
         self.random_seed = self.config.pop("random_seed", random.randint(1, 10000000))
 
-        logger.verbose(
-            f"Using random seed [{self.random_seed}] for running the experiment"
-        )
+        logger.verbose(f"Using random seed [{self.random_seed}] for running the experiment")
         random.seed(self.random_seed)
 
         ###################### RUBICON ######################
@@ -269,9 +249,7 @@ class ExperimentBase(ABC):
                 "removed after model training and testing"
             )
 
-        self.cleanup_timeout = (
-            self.cleanup_timeout if cleanup_timeout is None else cleanup_timeout
-        )
+        self.cleanup_timeout = self.cleanup_timeout if cleanup_timeout is None else cleanup_timeout
 
         self.profile = profile
         if self.profile:
@@ -285,9 +263,9 @@ class ExperimentBase(ABC):
             config_version = "v1"
         if config_version != CONFIG_VERSION:
             raise ValueError(
-                "Experiment config '{}' "
-                "does not match current version '{}'. "
-                "Will not run experiment.".format(config_version, CONFIG_VERSION)
+                "Experiment config '{}' does not match current version '{}'. Will not run experiment.".format(
+                    config_version, CONFIG_VERSION
+                )
             )
 
     def initialize_components(self):
@@ -311,24 +289,19 @@ class ExperimentBase(ABC):
             self.labels_table_name = "labels_{}".format(self.experiment_hash)
             self.label_generator = LabelGeneratorNoOp()
             logger.warning(
-                "label_config missing or unrecognized. Without labels, "
-                "you will not be able to make matrices."
+                "label_config missing or unrecognized. Without labels, you will not be able to make matrices."
             )
         record_labels_table_name(self.run_id, self.db_engine, self.labels_table_name)
 
         cohort_config = self.config.get("cohort_config", {})
         self.cohort_table_generator = None
         if "query" in cohort_config:
-            self.cohort_hash = filename_friendly_hash(
-                self.config["cohort_config"]["query"]
-            )
+            self.cohort_hash = filename_friendly_hash(self.config["cohort_config"]["query"])
         elif "query" in self.config.get("label_config", {}):
             logger.info(
                 "cohort_config missing or unrecognized, but labels are configured. Labels will be used as the cohort."
             )
-            self.cohort_hash = filename_friendly_hash(
-                self.config["label_config"]["query"]
-            )
+            self.cohort_hash = filename_friendly_hash(self.config["label_config"]["query"])
         else:
             self.features_ignore_cohort = True
             self.cohort_hash = None
@@ -336,9 +309,7 @@ class ExperimentBase(ABC):
             self.cohort_table_generator = CohortTableGeneratorNoOp()
 
         if not self.cohort_table_generator:
-            self.cohort_table_name = "cohort_{}_{}".format(
-                cohort_config.get("name", "default"), self.cohort_hash
-            )
+            self.cohort_table_name = "cohort_{}_{}".format(cohort_config.get("name", "default"), self.cohort_hash)
             self.cohort_table_generator = EntityDateTableGenerator(
                 entity_date_table_name=self.cohort_table_name,
                 db_engine=self.db_engine,
@@ -383,19 +354,13 @@ class ExperimentBase(ABC):
             features_ignore_cohort=self.features_ignore_cohort,
         )
 
-        self.feature_group_creator = FeatureGroupCreator(
-            self.config.get("feature_group_definition", {"all": [True]})
-        )
+        self.feature_group_creator = FeatureGroupCreator(self.config.get("feature_group_definition", {"all": [True]}))
 
-        self.feature_group_mixer = FeatureGroupMixer(
-            self.config.get("feature_group_strategies", ["all"])
-        )
+        self.feature_group_mixer = FeatureGroupMixer(self.config.get("feature_group_strategies", ["all"]))
 
         self.planner = Planner(
             feature_start_time=dt_from_str(split_config["feature_start_time"]),
-            label_names=[
-                self.config.get("label_config", {}).get("name", DEFAULT_LABEL_NAME)
-            ],
+            label_names=[self.config.get("label_config", {}).get("name", DEFAULT_LABEL_NAME)],
             label_types=["binary"],
             cohort_names=[self.config.get("cohort_config", {}).get("name", None)],
             user_metadata=self.config.get("user_metadata", {}),
@@ -446,18 +411,14 @@ class ExperimentBase(ABC):
             model_storage_engine=self.model_storage_engine,
             save_predictions=self.save_predictions,
             replace=self.replace,
-            rank_order=self.config.get("prediction", {}).get(
-                "rank_tiebreaker", "worst"
-            ),
+            rank_order=self.config.get("prediction", {}).get("rank_tiebreaker", "worst"),
         )
 
         if "individual_importance" in self.config:
             self.individual_importance_calculator = IndividualImportanceCalculator(
                 db_engine=self.db_engine,
                 n_ranks=self.config.get("individual_importance", {}).get("n_ranks", 5),
-                methods=self.config.get("individual_importance", {}).get(
-                    "methods", ["uniform"]
-                ),
+                methods=self.config.get("individual_importance", {}).get("methods", ["uniform"]),
                 replace=self.replace,
             )
         else:
@@ -469,12 +430,8 @@ class ExperimentBase(ABC):
 
         self.evaluator = ModelEvaluator(
             db_engine=self.db_engine,
-            testing_metric_groups=self.config.get("scoring", {}).get(
-                "testing_metric_groups", []
-            ),
-            training_metric_groups=self.config.get("scoring", {}).get(
-                "training_metric_groups", []
-            ),
+            testing_metric_groups=self.config.get("scoring", {}).get("testing_metric_groups", []),
+            training_metric_groups=self.config.get("scoring", {}).get("training_metric_groups", []),
             bias_config=self.config.get("bias_audit_config", {}),
         )
 
@@ -492,9 +449,7 @@ class ExperimentBase(ABC):
         )
 
     def get_for_update(self):
-        return get_for_update(
-            self.db_engine, results_schema.Experiment, self.experiment_hash
-        )
+        return get_for_update(self.db_engine, results_schema.Experiment, self.experiment_hash)
 
     @cachedproperty
     def split_definitions(self):
@@ -534,9 +489,7 @@ class ExperimentBase(ABC):
         for split_index, split in enumerate(split_definitions):
             train_times = split["train_matrix"]["as_of_times"]
             test_times = [
-                as_of_time
-                for test_matrix in split["test_matrices"]
-                for as_of_time in test_matrix["as_of_times"]
+                as_of_time for test_matrix in split["test_matrices"] for as_of_time in test_matrix["as_of_times"]
             ]
             logger.spam(
                 f"""Split index {split_index}:"""
@@ -561,12 +514,10 @@ class ExperimentBase(ABC):
         all_as_of_times = []
         for split in self.split_definitions:
             all_as_of_times.extend(split["train_matrix"]["as_of_times"])
-            logger.spam(
-                f'Adding as_of_times from train matrix: {split["train_matrix"]["as_of_times"]}'
-            )
+            logger.spam(f"Adding as_of_times from train matrix: {split['train_matrix']['as_of_times']}")
             for test_matrix in split["test_matrices"]:
                 logger.spam(
-                    f'Adding as_of_times from test matrix: {test_matrix["as_of_times"]}',
+                    f"Adding as_of_times from test matrix: {test_matrix['as_of_times']}",
                 )
                 all_as_of_times.extend(test_matrix["as_of_times"])
 
@@ -577,9 +528,7 @@ class ExperimentBase(ABC):
         logger.debug(
             f"Computed {len(distinct_as_of_times)} distinct as_of_times for label and feature generation",
         )
-        logger.spam(
-            "You can view all as_of_times by inspecting `.all_as_of_times` on this Experiment"
-        )
+        logger.spam("You can view all as_of_times by inspecting `.all_as_of_times` on this Experiment")
         with self.get_for_update() as experiment:
             experiment.as_of_times = len(distinct_as_of_times)
         return distinct_as_of_times
@@ -615,12 +564,8 @@ class ExperimentBase(ABC):
             being lists of SQL commands
 
         """
-        logger.spam(
-            f"Calculating feature aggregation tasks for {len(self.all_as_of_times)} as_of_times"
-        )
-        return self.feature_generator.generate_all_table_tasks(
-            self.collate_aggregations, task_type="aggregation"
-        )
+        logger.spam(f"Calculating feature aggregation tasks for {len(self.all_as_of_times)} as_of_times")
+        return self.feature_generator.generate_all_table_tasks(self.collate_aggregations, task_type="aggregation")
 
     @cachedproperty
     def feature_imputation_table_tasks(self):
@@ -633,12 +578,8 @@ class ExperimentBase(ABC):
             being lists of SQL commands
 
         """
-        logger.spam(
-            f"Calculating feature imputation tasks for {len(self.all_as_of_times)} as_of_times"
-        )
-        return self.feature_generator.generate_all_table_tasks(
-            self.collate_aggregations, task_type="imputation"
-        )
+        logger.spam(f"Calculating feature imputation tasks for {len(self.all_as_of_times)} as_of_times")
+        return self.feature_generator.generate_all_table_tasks(self.collate_aggregations, task_type="imputation")
 
     @cachedproperty
     def master_feature_dictionary(self):
@@ -651,15 +592,11 @@ class ExperimentBase(ABC):
         """
         result = self.feature_dictionary_creator.feature_dictionary(
             feature_table_names=self.feature_imputation_table_tasks.keys(),
-            index_column_lookup=self.feature_generator.index_column_lookup(
-                self.collate_aggregations
-            ),
+            index_column_lookup=self.feature_generator.index_column_lookup(self.collate_aggregations),
         )
         logger.debug(f"Computed master feature dictionary: {result}")
         with self.get_for_update() as experiment:
-            experiment.total_features = sum(
-                1 for _feature in itertools.chain.from_iterable(result.values())
-            )
+            experiment.total_features = sum(1 for _feature in itertools.chain.from_iterable(result.values()))
         return result
 
     @cachedproperty
@@ -746,22 +683,14 @@ class ExperimentBase(ABC):
         Results are stored in the database, not returned
         """
         logger.info("Setting up labels")
-        self.label_generator.generate_all_labels(
-            self.labels_table_name, self.all_as_of_times, self.all_label_timespans
-        )
-        logger.success(
-            f"Labels set up in the table {self.labels_table_name} successfully "
-        )
+        self.label_generator.generate_all_labels(self.labels_table_name, self.all_as_of_times, self.all_label_timespans)
+        logger.success(f"Labels set up in the table {self.labels_table_name} successfully ")
 
     @experiment_entrypoint
     def generate_cohort(self):
         logger.info("Setting up cohort")
-        self.cohort_table_generator.generate_entity_date_table(
-            as_of_dates=self.all_as_of_times
-        )
-        logger.success(
-            f"Cohort set up in the table {self.cohort_table_name} successfully"
-        )
+        self.cohort_table_generator.generate_entity_date_table(as_of_dates=self.all_as_of_times)
+        logger.success(f"Cohort set up in the table {self.cohort_table_name} successfully")
 
     @experiment_entrypoint
     def generate_protected_groups(self):
@@ -819,20 +748,14 @@ class ExperimentBase(ABC):
         )
 
     def build_matrices(self):
-        associate_matrices_with_experiment(
-            self.experiment_hash, self.matrix_build_tasks.keys(), self.db_engine
-        )
+        associate_matrices_with_experiment(self.experiment_hash, self.matrix_build_tasks.keys(), self.db_engine)
         logger.info("Building matrices")
-        logger.verbose(
-            f"It is necessary to build {len(self.matrix_build_tasks.keys())} matrices"
-        )
+        logger.verbose(f"It is necessary to build {len(self.matrix_build_tasks.keys())} matrices")
         with self.get_for_update() as experiment:
             experiment.matrices_needed = len(self.matrix_build_tasks.keys())
         record_matrix_building_started(self.run_id, self.db_engine)
         self.process_matrix_build_tasks(self.matrix_build_tasks)
-        logger.success(
-            f"Matrices were stored in {self.project_path}/matrices successfully"
-        )
+        logger.success(f"Matrices were stored in {self.project_path}/matrices successfully")
 
     @experiment_entrypoint
     def generate_matrices(self):
@@ -850,9 +773,7 @@ class ExperimentBase(ABC):
     def _all_train_test_batches(self):
         """A batch is a model_group to be train, test and evaluated"""
         if "grid_config" not in self.config:
-            logger.warning(
-                "No grid_config was passed in the experiment config. No models will be trained"
-            )
+            logger.warning("No grid_config was passed in the experiment config. No models will be trained")
             return
 
         return self.model_train_tester.generate_task_batches(
@@ -870,25 +791,14 @@ class ExperimentBase(ABC):
 
         with self.get_for_update() as experiment:
             experiment.grid_size = sum(
-                1
-                for _param in self.trainer.flattened_grid_config(
-                    self.config.get("grid_config")
-                )
+                1 for _param in self.trainer.flattened_grid_config(self.config.get("grid_config"))
             )
-            logger.info(
-                f"{experiment.grid_size} models groups will be trained, tested and evaluated"
-            )
+            logger.info(f"{experiment.grid_size} models groups will be trained, tested and evaluated")
 
         logger.info(f"Training, testing and evaluating models")
         logger.verbose(f"{len(batches)} train/test tasks found.")
-        model_hashes = set(
-            task["train_kwargs"]["model_hash"]
-            for batch in batches
-            for task in batch.tasks
-        )
-        associate_models_with_experiment(
-            self.experiment_hash, model_hashes, self.db_engine
-        )
+        model_hashes = set(task["train_kwargs"]["model_hash"] for batch in batches for task in batch.tasks)
+        associate_models_with_experiment(self.experiment_hash, model_hashes, self.db_engine)
         with self.get_for_update() as experiment:
             experiment.models_needed = len(model_hashes)
         record_model_building_started(self.run_id, self.db_engine)
@@ -907,9 +817,6 @@ class ExperimentBase(ABC):
             self.generate_subsets()
             self.generate_protected_groups()
             self.train_and_test_models()
-            # Skip summary report for partial runs (incomplete configurations)
-            if not self.partial_run:
-                self._summary_report()
             self._log_end_of_run_report()
         except Exception:
             logger.error("Uh oh... Houston we have a problem")
@@ -918,16 +825,7 @@ class ExperimentBase(ABC):
             if self.cleanup:
                 self.clean_up_matrix_building_tables()
                 self.clean_up_subset_tables()
-                logger.notice(
-                    "Cleanup flag was set to True, so label, cohort and subset tables were deleted"
-                )
-
-    def _summary_report(self):
-        logger.debug(
-            f"experiment hash to send to experiment report for summary: {self.experiment_hash}"
-        )
-        er = ExperimentReport(self.db_engine, [self.experiment_hash])
-        er.generate_summary()
+                logger.notice("Cleanup flag was set to True, so label, cohort and subset tables were deleted")
 
     def _log_end_of_run_report(self):
         missing_matrices = missing_matrix_uuids(self.experiment_hash, self.db_engine)
@@ -939,9 +837,7 @@ class ExperimentBase(ABC):
                 f"Inspect the logs for any matrix building errors. Full list: {missing_matrices}",
             )
         else:
-            logger.success(
-                "All matrices that were supposed to be build were built. Awesome!"
-            )
+            logger.success("All matrices that were supposed to be build were built. Awesome!")
 
         missing_models = missing_model_hashes(self.experiment_hash, self.db_engine)
         if len(missing_models) > 0:
@@ -952,9 +848,7 @@ class ExperimentBase(ABC):
                 f"Inspect the logs for any training errors. Full list: {missing_models}"
             )
         else:
-            logger.success(
-                "All models that were supposed to be trained were trained. Awesome!"
-            )
+            logger.success("All models that were supposed to be trained were trained. Awesome!")
 
     def clean_up_matrix_building_tables(self):
         logger.debug("Cleaning up cohort and labels tables")
@@ -973,16 +867,11 @@ class ExperimentBase(ABC):
     def _run_profile(self):
         cp = cProfile.Profile()
         cp.runcall(self._run)
-        store = self.project_storage.get_store(
-            ["profiling_stats"], f"{int(time.time())}.profile"
-        )
+        store = self.project_storage.get_store(["profiling_stats"], f"{int(time.time())}.profile")
         with store.open("wb") as fd:
             cp.create_stats()
             marshal.dump(cp.stats, fd)
-            logger.spam(
-                f"Profiling stats of this Triage run calculated and written to {store}"
-                f"in cProfile format."
-            )
+            logger.spam(f"Profiling stats of this Triage run calculated and written to {store}in cProfile format.")
 
     @experiment_entrypoint
     def run(self):

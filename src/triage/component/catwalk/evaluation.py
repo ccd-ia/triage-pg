@@ -12,11 +12,6 @@ from collections import defaultdict
 import numpy as np
 import ohio.ext.pandas
 import pandas as pd
-
-# NOTE: aequitas is imported lazily inside _run_bias_audit — its import chain
-# loads fairgbm's binary wheel, which fails on some platforms (e.g. arm64
-# macOS) and would otherwise break importing all of catwalk. Aequitas is
-# slated for removal entirely (ADR-0007: bias metrics move to SQL).
 from sqlalchemy import cast, delete
 from sqlalchemy.dialects.postgresql import INTERVAL as Interval
 from sqlalchemy.orm import sessionmaker
@@ -65,11 +60,7 @@ def subset_labels_and_predictions(
     # The subset isn't specific to the cohort, so inner join to the labels/predictions
     labels_subset = labels.align(subset_df, join="inner")[0]
     predictions_subset = indexed_predictions.align(subset_df, join="inner")[0].values
-    protected_df_subset = (
-        protected_df
-        if protected_df.empty
-        else protected_df.align(subset_df, join="inner")[0]
-    )
+    protected_df_subset = protected_df if protected_df.empty else protected_df.align(subset_df, join="inner")[0]
     logger.spam(
         f"{len(labels_subset)} entities in subset out of {len(labels)} in matrix.",
     )
@@ -90,9 +81,7 @@ def query_subset_table(db_engine, as_of_dates, subset_table_name):
         active in the subset
     """
     as_of_dates_sql = "[{}]".format(
-        ", ".join(
-            "'{}'".format(date.strftime("%Y-%m-%d %H:%M:%S.%f")) for date in as_of_dates
-        )
+        ", ".join("'{}'".format(date.strftime("%Y-%m-%d %H:%M:%S.%f")) for date in as_of_dates)
     )
     query_string = f"""
         with dates as (
@@ -132,12 +121,8 @@ def generate_binary_at_x(test_predictions, x_value, unit="top_n"):
     else:
         cutoff_index = int(x_value)
     num_ones = cutoff_index if cutoff_index <= len_predictions else len_predictions
-    num_zeroes = (
-        len_predictions - cutoff_index if cutoff_index <= len_predictions else 0
-    )
-    test_predictions_binary = np.concatenate(
-        (np.ones(num_ones, np.int8), np.zeros(num_zeroes, np.int8))
-    )
+    num_zeroes = len_predictions - cutoff_index if cutoff_index <= len_predictions else 0
+    test_predictions_binary = np.concatenate((np.ones(num_ones, np.int8), np.zeros(num_zeroes, np.int8)))
     return test_predictions_binary
 
 
@@ -243,14 +228,9 @@ class ModelEvaluator:
     def _validate_metrics(self, custom_metrics):
         for name, met in custom_metrics.items():
             if not hasattr(met, "greater_is_better"):
-                raise ValueError(
-                    f"Custom metric {name} missing greater_is_better " f"attribute"
-                )
+                raise ValueError(f"Custom metric {name} missing greater_is_better attribute")
             elif met.greater_is_better not in (True, False):
-                raise ValueError(
-                    "For custom metric {name} greater_is_better must be "
-                    "boolean True or False"
-                )
+                raise ValueError("For custom metric {name} greater_is_better must be boolean True or False")
 
     def _build_parameter_string(
         self,
@@ -275,9 +255,7 @@ class ModelEvaluator:
         if threshold_specified_by_user:
             short_threshold_unit = "pct" if threshold_unit == "percentile" else "abs"
             full_params[short_threshold_unit] = threshold_value
-        parameter_string = "/".join(
-            ["{}_{}".format(val, key) for key, val in full_params.items()]
-        )
+        parameter_string = "/".join(["{}_{}".format(val, key) for key, val in full_params.items()])
         return parameter_string
 
     def _filter_nan_labels(self, predicted_classes: np.array, labels: np.array):
@@ -358,9 +336,7 @@ class ModelEvaluator:
         )
         metrics = []
         if "thresholds" not in group:
-            logger.notice(
-                "Not a thresholded group, generating evaluation based on all predictions"
-            )
+            logger.notice("Not a thresholded group, generating evaluation based on all predictions")
             metrics = metrics + generate_metrics(
                 threshold_unit="percentile",
                 threshold_value=100,
@@ -369,15 +345,11 @@ class ModelEvaluator:
 
         for pct_thresh in group.get("thresholds", {}).get("percentiles", []):
             logger.debug(f"Processing percent threshold {pct_thresh}")
-            metrics = metrics + generate_metrics(
-                threshold_unit="percentile", threshold_value=pct_thresh
-            )
+            metrics = metrics + generate_metrics(threshold_unit="percentile", threshold_value=pct_thresh)
 
         for abs_thresh in group.get("thresholds", {}).get("top_n", []):
             logger.debug(f"Processing absolute threshold {abs_thresh}")
-            metrics = metrics + generate_metrics(
-                threshold_unit="top_n", threshold_value=abs_thresh
-            )
+            metrics = metrics + generate_metrics(threshold_unit="top_n", threshold_value=abs_thresh)
         return metrics
 
     def _flatten_metric_config_groups(self, metric_config_groups):
@@ -389,11 +361,7 @@ class ModelEvaluator:
         Returns:
             (list) MetricDefinition objects
         """
-        return [
-            item
-            for group in metric_config_groups
-            for item in self._flatten_metric_config_group(group)
-        ]
+        return [item for group in metric_config_groups for item in self._flatten_metric_config_group(group)]
 
     def metric_definitions_from_matrix_type(self, matrix_type):
         """Retrieve the correct metric config groups for the matrix type and flatten them into metric definitions
@@ -437,8 +405,7 @@ class ModelEvaluator:
                     eval_obj.model_id == model_id,
                     eval_obj.evaluation_start_time == matrix_store.as_of_dates[0],
                     eval_obj.evaluation_end_time == matrix_store.as_of_dates[-1],
-                    eval_obj.as_of_date_frequency
-                    == cast(matrix_store.metadata["as_of_date_frequency"], Interval),
+                    eval_obj.as_of_date_frequency == cast(matrix_store.metadata["as_of_date_frequency"], Interval),
                     eval_obj.subset_hash == subset_hash,
                 )
                 .distinct(eval_obj.metric, eval_obj.parameter)
@@ -454,19 +421,18 @@ class ModelEvaluator:
             )
 
         if evals_needed:
-            logger.notice(
-                f"Needed evaluations for model {model_id} on matrix {matrix_store.uuid} are missing"
-            )
+            logger.notice(f"Needed evaluations for model {model_id} on matrix {matrix_store.uuid} are missing")
             return True
 
         # now check bias config if there
-        # if no bias config, no aequitas audits needed, so just return False at this point
+        # if no bias config, no bias audits needed, so just return False at this point
+        # (Aequitas was removed per ADR-0007; SQL bias group-bys replace it in a later phase.)
         if not self.bias_config:
-            logger.notice(f"No aequitas audit configured, so no evaluation needed")
+            logger.notice("No bias audit configured, so no evaluation needed")
             return False
 
-        # if we do have bias config, return True. Too complicated with aequitas' visibility
-        # at present to check whether all the needed records are needed.
+        # if we do have bias config, return True. We can't yet check whether all
+        # the needed records are present, so re-run to be safe.
         return True
 
     def _compute_evaluations(self, predictions_proba, labels, metric_definitions):
@@ -483,20 +449,12 @@ class ModelEvaluator:
         for (
             (threshold_unit, threshold_value),
             metrics_for_threshold,
-        ) in itertools.groupby(
-            metric_definitions, lambda m: (m.threshold_unit, m.threshold_value)
-        ):
-            predicted_classes = generate_binary_at_x(
-                predictions_proba, threshold_value, unit=threshold_unit
-            )
+        ) in itertools.groupby(metric_definitions, lambda m: (m.threshold_unit, m.threshold_value)):
+            predicted_classes = generate_binary_at_x(predictions_proba, threshold_value, unit=threshold_unit)
             # filter out null labels
-            predicted_classes_with_labels, present_labels = self._filter_nan_labels(
-                predicted_classes, labels
-            )
+            predicted_classes_with_labels, present_labels = self._filter_nan_labels(predicted_classes, labels)
             num_labeled_examples = len(present_labels)
-            num_labeled_above_threshold = np.count_nonzero(
-                predicted_classes_with_labels
-            )
+            num_labeled_above_threshold = np.count_nonzero(predicted_classes_with_labels)
             num_positive_labels = np.count_nonzero(present_labels)
             for metric_def in metrics_for_threshold:
                 # using threshold configuration, convert probabilities to predicted classes
@@ -533,9 +491,7 @@ class ModelEvaluator:
                 evals.append(result)
         return evals
 
-    def evaluate(
-        self, predictions_proba, matrix_store, model_id, protected_df=None, subset=None
-    ):
+    def evaluate(self, predictions_proba, matrix_store, model_id, protected_df=None, subset=None):
         """Evaluate a model based on predictions, and save the results
 
         Args:
@@ -551,9 +507,7 @@ class ModelEvaluator:
         # predictions for the included entity-date pairs
         logger.debug(f"Evaluating a subset? {subset}")
         if subset:
-            logger.verbose(
-                f"Subsetting labels and predictions of model {model_id} on matrix {matrix_store.uuid}"
-            )
+            logger.verbose(f"Subsetting labels and predictions of model {model_id} on matrix {matrix_store.uuid}")
             labels, predictions_proba, protected_df = subset_labels_and_predictions(
                 subset_df=query_subset_table(
                     self.db_engine,
@@ -585,9 +539,7 @@ class ModelEvaluator:
             logger.spam(
                 f"Evaluation with protected_df, bias configuration in yaml. Symmetric difference: {symmetric_diff}"
             )
-            if (protected_df.index.shape != labels.index.shape) or (
-                not symmetric_diff.empty
-            ):
+            if (protected_df.index.shape != labels.index.shape) or (not symmetric_diff.empty):
                 only_in_protected_groups = protected_df.index.difference(labels.index)
                 only_in_matrix = labels.index.difference(protected_df.index)
 
@@ -621,9 +573,7 @@ class ModelEvaluator:
         )
         worst_lookup = {
             (eval.metric, eval.parameter): eval
-            for eval in self._compute_evaluations(
-                predictions_proba_worst, labels_worst, metric_defs
-            )
+            for eval in self._compute_evaluations(predictions_proba_worst, labels_worst, metric_defs)
         }
         logger.debug(
             f"Predictions from {model_id} sorted by worst case scenario, i.e. all negative and NULL labels first"
@@ -642,9 +592,7 @@ class ModelEvaluator:
         )
         best_lookup = {
             (eval.metric, eval.parameter): eval
-            for eval in self._compute_evaluations(
-                predictions_proba_best, labels_best, metric_defs
-            )
+            for eval in self._compute_evaluations(predictions_proba_best, labels_best, metric_defs)
         }
         logger.debug(
             f"Predictions from {model_id} sorted by best case scenario, i.e. all positive labels first, NULL labels at the end"
@@ -661,13 +609,9 @@ class ModelEvaluator:
             if (
                 worst_eval.value is None
                 or best_eval.value is None
-                or math.isclose(
-                    worst_eval.value, best_eval.value, rel_tol=RELATIVE_TOLERANCE
-                )
+                or math.isclose(worst_eval.value, best_eval.value, rel_tol=RELATIVE_TOLERANCE)
             ):
-                evals_without_trials[(worst_eval.metric, worst_eval.parameter)] = (
-                    worst_eval.value
-                )
+                evals_without_trials[(worst_eval.metric, worst_eval.parameter)] = worst_eval.value
             else:
                 metric_defs_to_trial.append(metric_def)
 
@@ -691,12 +635,8 @@ class ModelEvaluator:
                 tiebreaker="random",
                 sort_seed=sort_seed,
             )
-            for random_eval in self._compute_evaluations(
-                predictions_proba_random, labels_random, metric_defs_to_trial
-            ):
-                random_eval_accumulator[
-                    (random_eval.metric, random_eval.parameter)
-                ].append(random_eval.value)
+            for random_eval in self._compute_evaluations(predictions_proba_random, labels_random, metric_defs_to_trial):
+                random_eval_accumulator[(random_eval.metric, random_eval.parameter)].append(random_eval.value)
 
         # 5. flatten best, worst, stochastic results for each metric definition
         # into database records
@@ -713,13 +653,7 @@ class ModelEvaluator:
                 num_sort_trials = 0
             else:
                 # Convert to numpy array for numeric computation
-                trial_results = np.array(
-                    [
-                        value
-                        for value in random_eval_accumulator[metric_key]
-                        if value is not None
-                    ]
-                )
+                trial_results = np.array([value for value in random_eval_accumulator[metric_key] if value is not None])
                 stochastic_value = float(np.mean(trial_results))
                 try:
                     # Use numpy for stdev (ddof=1 for sample standard deviation)
@@ -740,9 +674,7 @@ class ModelEvaluator:
                 metric=metric_def.metric,
                 parameter=metric_def.parameter_string,
                 num_labeled_examples=worst_lookup[metric_key].num_labeled_examples,
-                num_labeled_above_threshold=worst_lookup[
-                    metric_key
-                ].num_labeled_above_threshold,
+                num_labeled_above_threshold=worst_lookup[metric_key].num_labeled_above_threshold,
                 num_positive_labels=worst_lookup[metric_key].num_positive_labels,
                 worst_value=worst_lookup[metric_key].value,
                 best_value=best_lookup[metric_key].value,
@@ -762,141 +694,6 @@ class ModelEvaluator:
             evaluations,
             matrix_type.evaluation_obj,
         )
-        if protected_df is not None:
-            self._write_audit_to_db(
-                model_id=model_id,
-                protected_df=protected_df.reindex(df_index_worst),
-                predictions_proba=predictions_proba_worst,
-                labels=labels_worst,
-                tie_breaker="worst",
-                subset_hash=subset_hash,
-                matrix_type=matrix_type,
-                evaluation_start_time=evaluation_start_time,
-                evaluation_end_time=evaluation_end_time,
-                matrix_uuid=matrix_store.uuid,
-            )
-            self._write_audit_to_db(
-                model_id=model_id,
-                protected_df=protected_df.reindex(df_index_best),
-                predictions_proba=predictions_proba_best,
-                labels=labels_best,
-                tie_breaker="best",
-                subset_hash=subset_hash,
-                matrix_type=matrix_type,
-                evaluation_start_time=evaluation_start_time,
-                evaluation_end_time=evaluation_end_time,
-                matrix_uuid=matrix_store.uuid,
-            )
-
-    def _write_audit_to_db(
-        self,
-        model_id,
-        protected_df,
-        predictions_proba,
-        labels,
-        tie_breaker,
-        subset_hash,
-        matrix_type,
-        evaluation_start_time,
-        evaluation_end_time,
-        matrix_uuid,
-    ):
-        """
-        Runs the bias audit and saves the result in the bias table.
-
-        Args:
-            model_id (int) primary key of the model
-            protected_df (pandas.DataFrame) A dataframe with protected group attributes:
-            predictions_proba (np.array) List of prediction probabilities
-            labels (pandas.Series): List of labels
-            tie_breaker: 'best' or 'worst' case tiebreaking rule that the predictions and labels were sorted by
-            subset_hash (str) the hash of the subset, if any, that the
-                evaluation is made on
-            matrix_type (triage.component.catwalk.storage.MatrixType)
-                The type of matrix used
-            evaluation_start_time (pandas._libs.tslibs.timestamps.Timestamp)
-                first as_of_date included in the evaluation period
-            evaluation_end_time (pandas._libs.tslibs.timestamps.Timestamp) last
-                as_of_date included in the evaluation period
-            matrix_uuid: the uuid of the matrix
-        Returns:
-
-        """
-        if protected_df.empty:
-            return
-
-        from aequitas.bias import Bias
-        from aequitas.fairness import Fairness
-        from aequitas.group import Group
-        from aequitas.preprocessing import preprocess_input_df
-
-        # to preprocess aequitas requires the following columns:
-        # score, label value, model_id, protected attributes
-        # fill out the protected_df, which just has protected attributes at this point
-        protected_df = protected_df.copy()
-        protected_df["model_id"] = model_id
-        protected_df["score"] = predictions_proba
-        protected_df["label_value"] = labels
-        aequitas_df, attr_cols_input = preprocess_input_df(protected_df)
-
-        # create group crosstabs
-        g = Group()
-        score_thresholds = {}
-        score_thresholds["rank_abs"] = self.bias_config["thresholds"].get("top_n", [])
-        # convert 0-100 percentile to 0-1 that Aequitas expects
-        score_thresholds["rank_pct"] = [
-            value / 100.0
-            for value in self.bias_config["thresholds"].get("percentiles", [])
-        ]
-        groups_model, attr_cols = g.get_crosstabs(
-            aequitas_df, score_thresholds=score_thresholds, attr_cols=attr_cols_input
-        )
-        # analyze bias from reference groups
-        bias = Bias()
-        ref_groups_method = self.bias_config.get("ref_groups_method", None)
-        if ref_groups_method == "predefined" and self.bias_config["ref_groups"]:
-            bias_df = bias.get_disparity_predefined_groups(
-                groups_model, aequitas_df, self.bias_config["ref_groups"]
-            )
-        elif ref_groups_method == "majority":
-            bias_df = bias.get_disparity_major_group(groups_model, aequitas_df)
-        else:
-            bias_df = bias.get_disparity_min_metric(groups_model, aequitas_df)
-
-        # analyze fairness for each group
-        f = Fairness(tau=0.8)  # the default fairness threshold is 0.8
-        group_value_df = f.get_group_value_fairness(bias_df)
-        group_value_df["subset_hash"] = subset_hash
-        group_value_df["tie_breaker"] = tie_breaker
-        group_value_df["evaluation_start_time"] = evaluation_start_time
-        group_value_df["evaluation_end_time"] = evaluation_end_time
-        group_value_df["matrix_uuid"] = matrix_uuid
-        group_value_df = group_value_df.rename(
-            index=str, columns={"score_threshold": "parameter", "for": "for_"}
-        )
-        if group_value_df.empty:
-            raise ValueError(f"""
-            Bias audit: aequitas_audit() failed.
-            Returned empty dataframe for model_id = {model_id}, and subset_hash = {subset_hash}
-            and matrix_type = {matrix_type}""")
-
-        with scoped_session(self.db_engine) as session:
-            for index, row in group_value_df.iterrows():
-                session.query(matrix_type.aequitas_obj).filter_by(
-                    model_id=row["model_id"],
-                    evaluation_start_time=row["evaluation_start_time"],
-                    evaluation_end_time=row["evaluation_end_time"],
-                    subset_hash=row["subset_hash"],
-                    parameter=row["parameter"],
-                    tie_breaker=row["tie_breaker"],
-                    matrix_uuid=row["matrix_uuid"],
-                    attribute_name=row["attribute_name"],
-                    attribute_value=row["attribute_value"],
-                ).delete()
-
-            session.bulk_insert_mappings(
-                matrix_type.aequitas_obj, group_value_df.to_dict(orient="records")
-            )
 
     @db_retry
     def _write_to_db(
@@ -934,8 +731,7 @@ class ModelEvaluator:
                 evaluation_table_obj.model_id == model_id,
                 evaluation_table_obj.evaluation_start_time == evaluation_start_time,
                 evaluation_table_obj.evaluation_end_time == evaluation_end_time,
-                evaluation_table_obj.as_of_date_frequency
-                == cast(as_of_date_frequency, Interval),
+                evaluation_table_obj.as_of_date_frequency == cast(as_of_date_frequency, Interval),
                 evaluation_table_obj.subset_hash == subset_hash,
             )
             session.execute(stmt)

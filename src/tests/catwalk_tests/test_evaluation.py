@@ -73,13 +73,15 @@ def populate_subset_data(db_engine, subset, entity_ids, as_of_date=TRAIN_END_TIM
     query_where_clause = re.search("where.*[0-9]", subset["query"]).group()
 
     with db_engine.begin() as conn:
-        conn.execute(text(f"""
+        conn.execute(
+            text(f"""
                 create table {table_name} (
                     entity_id int,
                     as_of_date date,
                     active bool
                 )
-                """))
+                """)
+        )
 
     for entity_id in entity_ids:
         insert_query = f"""
@@ -136,9 +138,7 @@ def test_all_same_labels(db_engine_with_results_schema, db_session):
             init_as_of_dates=[TRAIN_END_TIME],
         )
 
-        model_evaluator.evaluate(
-            trained_model.predict_proba(labels)[:, 1], fake_matrix_store, model_id
-        )
+        model_evaluator.evaluate(trained_model.predict_proba(labels)[:, 1], fake_matrix_store, model_id)
 
         with db_engine_with_results_schema.connect() as conn:
             for metric, best, worst, stochastic in conn.execute(
@@ -197,9 +197,7 @@ def test_subset_labels_and_predictions(db_engine_with_results_schema):
         elif subset["name"] == "empty":
             expected_result = 0
 
-        populate_subset_data(
-            db_engine_with_results_schema, subset, list(range(num_entities))
-        )
+        populate_subset_data(db_engine_with_results_schema, subset, list(range(num_entities)))
         (
             subset_labels,
             subset_predictions,
@@ -300,18 +298,11 @@ def test_evaluating_early_warning(db_engine_with_results_schema, db_session):
 
     # ensure that the matrix uuid is present
     with db_engine_with_results_schema.connect() as conn:
-        matrix_uuids = [
-            row[0]
-            for row in conn.execute(
-                text("select matrix_uuid from test_results.evaluations")
-            )
-        ]
+        matrix_uuids = [row[0] for row in conn.execute(text("select matrix_uuid from test_results.evaluations"))]
         assert all(matrix_uuid == "efgh" for matrix_uuid in matrix_uuids)
 
         # Evaluate the training metrics and test
-        model_evaluator.evaluate(
-            trained_model.predict_proba(labels)[:, 1], fake_train_matrix_store, model_id
-        )
+        model_evaluator.evaluate(trained_model.predict_proba(labels)[:, 1], fake_train_matrix_store, model_id)
 
         records = [
             row[0]
@@ -334,9 +325,7 @@ def test_evaluating_early_warning(db_engine_with_results_schema, db_session):
             if subset is None:
                 where_hash = ""
             else:
-                populate_subset_data(
-                    db_engine_with_results_schema, subset, list(range(num_entities))
-                )
+                populate_subset_data(db_engine_with_results_schema, subset, list(range(num_entities)))
                 SubsetFactory(subset_hash=filename_friendly_hash(subset))
                 db_session.commit()
                 where_hash = f"and subset_hash = '{filename_friendly_hash(subset)}'"
@@ -426,12 +415,7 @@ def test_evaluating_early_warning(db_engine_with_results_schema, db_session):
             assert records == ["accuracy", "roc_auc"]
 
         # ensure that the matrix uuid is present
-        matrix_uuids = [
-            row[0]
-            for row in conn.execute(
-                text("select matrix_uuid from train_results.evaluations")
-            )
-        ]
+        matrix_uuids = [row[0] for row in conn.execute(text("select matrix_uuid from train_results.evaluations"))]
         assert all(matrix_uuid == "1234" for matrix_uuid in matrix_uuids)
 
 
@@ -446,9 +430,7 @@ def test_model_scoring_inspections(db_engine_with_results_schema):
             "metrics": ["accuracy"]
         },
     ]
-    training_metric_groups = [
-        {"metrics": ["accuracy"], "thresholds": {"percentiles": [50.0]}}
-    ]
+    training_metric_groups = [{"metrics": ["accuracy"], "thresholds": {"percentiles": [50.0]}}]
 
     model_evaluator = ModelEvaluator(
         testing_metric_groups,
@@ -462,12 +444,8 @@ def test_model_scoring_inspections(db_engine_with_results_schema):
     training_labels = np.array([0, 0, 1, 1, 1, 0, 1, 1])
     training_prediction_probas = np.array([0.6, 0.4, 0.55, 0.70, 0.3, 0.2, 0.8, 0.6])
 
-    fake_train_matrix_store = MockMatrixStore(
-        "train", "efgh", 5, db_engine_with_results_schema, training_labels
-    )
-    fake_test_matrix_store = MockMatrixStore(
-        "test", "1234", 5, db_engine_with_results_schema, testing_labels
-    )
+    fake_train_matrix_store = MockMatrixStore("train", "efgh", 5, db_engine_with_results_schema, training_labels)
+    fake_test_matrix_store = MockMatrixStore("test", "1234", 5, db_engine_with_results_schema, testing_labels)
 
     trained_model, model_id = fake_trained_model(
         db_engine_with_results_schema,
@@ -475,9 +453,7 @@ def test_model_scoring_inspections(db_engine_with_results_schema):
     )
 
     # Evaluate testing matrix and test the results
-    model_evaluator.evaluate(
-        testing_prediction_probas, fake_test_matrix_store, model_id
-    )
+    model_evaluator.evaluate(testing_prediction_probas, fake_test_matrix_store, model_id)
 
     with db_engine_with_results_schema.connect() as conn:
         for record in conn.execute(
@@ -501,9 +477,7 @@ def test_model_scoring_inspections(db_engine_with_results_schema):
                 assert record.num_labeled_above_threshold == 2
 
     # Evaluate the training matrix and test the results
-    model_evaluator.evaluate(
-        training_prediction_probas, fake_train_matrix_store, model_id
-    )
+    model_evaluator.evaluate(training_prediction_probas, fake_train_matrix_store, model_id)
 
     with db_engine_with_results_schema.connect() as conn:
         for record in conn.execute(
@@ -540,22 +514,20 @@ def test_evaluation_with_sort_ties(db_engine_with_results_schema):
     testing_labels = np.array([1, 0, 1, 0, 0])
     testing_prediction_probas = np.array([0.56, 0.55, 0.5, 0.5, 0.3])
 
-    fake_test_matrix_store = MockMatrixStore(
-        "test", "1234", 5, db_engine_with_results_schema, testing_labels
-    )
+    fake_test_matrix_store = MockMatrixStore("test", "1234", 5, db_engine_with_results_schema, testing_labels)
 
     trained_model, model_id = fake_trained_model(
         db_engine_with_results_schema,
         train_end_time=TRAIN_END_TIME,
     )
-    model_evaluator.evaluate(
-        testing_prediction_probas, fake_test_matrix_store, model_id
-    )
+    model_evaluator.evaluate(testing_prediction_probas, fake_test_matrix_store, model_id)
     with db_engine_with_results_schema.connect() as conn:
-        for record in conn.execute(text(f"""select * from test_results.evaluations
+        for record in conn.execute(
+            text(f"""select * from test_results.evaluations
                 where model_id = {model_id} 
                 and evaluation_start_time = '{fake_test_matrix_store.as_of_dates[0]}'
-                order by 1""")):
+                order by 1""")
+        ):
             # sqlalchemy 2 returns a Row object
             assert record.num_labeled_examples == 5
             assert record.num_positive_labels == 2
@@ -567,9 +539,7 @@ def test_evaluation_with_sort_ties(db_engine_with_results_schema):
             assert record.standard_deviation
 
 
-def test_ModelEvaluator_needs_evaluation_no_bias_audit(
-    db_engine_with_results_schema, db_session
-):
+def test_ModelEvaluator_needs_evaluation_no_bias_audit(db_engine_with_results_schema, db_session):
     # TEST SETUP:
 
     # create two models: one that has zero evaluations,
@@ -710,9 +680,7 @@ def test_ModelEvaluator_needs_evaluation_no_bias_audit(
         )
 
 
-def test_ModelEvaluator_needs_evaluation_with_bias_audit(
-    db_engine_with_results_schema, db_session
-):
+def test_ModelEvaluator_needs_evaluation_with_bias_audit(db_engine_with_results_schema, db_session):
     # test that if a bias audit config is passed, and there are no matching bias audits
     # in the database, needs_evaluation returns true
     # this all assumes that evaluations are populated. those tests are in the 'no_bias_audit' test
@@ -762,70 +730,6 @@ def test_ModelEvaluator_needs_evaluation_with_bias_audit(
     )
 
 
-@pytest.mark.skip(reason="aequitas 1.0.0 incompatible with pandas 2.x groupby behavior")
-def test_evaluation_with_protected_df(db_engine_with_results_schema, db_session):
-    # Test that if a protected_df is passed (along with bias config, the only real needed one
-    # being threshold info), an Aequitas report is written to the database.
-    model_evaluator = ModelEvaluator(
-        testing_metric_groups=[
-            {
-                "metrics": ["precision@"],
-                "thresholds": {"top_n": [3]},
-            },
-        ],
-        training_metric_groups=[],
-        bias_config={"thresholds": {"top_n": [2]}},
-        db_engine=db_engine_with_results_schema,
-    )
-    testing_labels = np.array([1, 0])
-    testing_prediction_probas = np.array([0.56, 0.55])
-
-    fake_test_matrix_store = MockMatrixStore(
-        "test", "1234", 5, db_engine_with_results_schema, testing_labels
-    )
-
-    trained_model, model_id = fake_trained_model(
-        db_engine_with_results_schema,
-        train_end_time=TRAIN_END_TIME,
-    )
-
-    # Use object dtype for string columns to maintain compatibility with aequitas
-    # (pandas 2.x defaults to pyarrow string type which aequitas doesn't recognize)
-    entity_ids = fake_test_matrix_store.design_matrix.index.levels[0].tolist()
-    protected_df = pd.DataFrame(
-        {
-            "entity_id": entity_ids,
-            "protectedattribute1": pd.Series(
-                ["value1"] * len(entity_ids), dtype=object
-            ),
-        }
-    )
-
-    model_evaluator.evaluate(
-        testing_prediction_probas, fake_test_matrix_store, model_id, protected_df
-    )
-
-    with db_engine_with_results_schema.connect() as conn:
-        result = conn.execute(
-            text(f"""
-                select * from test_results.aequitas
-                where model_id = :model_id
-                and evaluation_start_time = :evaluation_start_time
-                order by 1
-                """),
-            {
-                "model_id": model_id,
-                "evaluation_start_time": fake_test_matrix_store.as_of_dates[0],
-            },
-        )
-
-    for record in result.mappings():
-        assert record["model_id"] == model_id
-        assert record["parameter"] == "2_abs"
-        assert record["attribute_name"] == "protectedattribute1"
-        assert record["attribute_value"] == "value1"
-
-
 def test_error_evaluation_with_mismatch_protected_df(db_engine_with_results_schema):
     """Reproducing the error for mismatch between the protected_df and cohort entities"""
 
@@ -843,9 +747,7 @@ def test_error_evaluation_with_mismatch_protected_df(db_engine_with_results_sche
     testing_labels = np.array([1, 0])
     testing_prediction_probas = np.array([0.56, 0.55])
 
-    fake_test_matrix_store = MockMatrixStore(
-        "test", "1234", 5, db_engine_with_results_schema, testing_labels
-    )
+    fake_test_matrix_store = MockMatrixStore("test", "1234", 5, db_engine_with_results_schema, testing_labels)
 
     trained_model, model_id = fake_trained_model(
         db_engine_with_results_schema,
@@ -854,15 +756,11 @@ def test_error_evaluation_with_mismatch_protected_df(db_engine_with_results_sche
 
     # creating a protected df with fewer entities thn the matrix
     # Use object dtype for string columns to maintain compatibility with aequitas
-    entity_ids_fewer = fake_test_matrix_store.design_matrix.index.levels[0].tolist()[
-        :-5
-    ]
+    entity_ids_fewer = fake_test_matrix_store.design_matrix.index.levels[0].tolist()[:-5]
     protected_df_fewer_entities = pd.DataFrame(
         {
             "entity_id": entity_ids_fewer,
-            "protectedattribute1": pd.Series(
-                ["value1"] * len(entity_ids_fewer), dtype=object
-            ),
+            "protectedattribute1": pd.Series(["value1"] * len(entity_ids_fewer), dtype=object),
         }
     )
 
@@ -873,16 +771,12 @@ def test_error_evaluation_with_mismatch_protected_df(db_engine_with_results_sche
     protected_df_more_entities = pd.DataFrame(
         {
             "entity_id": entity_ids_more,
-            "protectedattribute1": pd.Series(
-                ["value2"] * len(entity_ids_more), dtype=object
-            ),
+            "protectedattribute1": pd.Series(["value2"] * len(entity_ids_more), dtype=object),
         }
     )
 
     # protected_df_correct
-    for i, protected_df in enumerate(
-        [protected_df_fewer_entities, protected_df_more_entities]
-    ):
+    for i, protected_df in enumerate([protected_df_fewer_entities, protected_df_more_entities]):
         with pytest.raises(ValueError) as err_info:
             model_evaluator.evaluate(
                 testing_prediction_probas,
@@ -890,99 +784,6 @@ def test_error_evaluation_with_mismatch_protected_df(db_engine_with_results_sche
                 model_id,
                 protected_df,
             )
-
-
-@pytest.mark.skip(reason="aequitas 1.0.0 incompatible with pandas 2.x groupby behavior")
-def test_evaluation_sorting_with_protected_df(db_engine_with_results_schema):
-    # Test that if a protected_df is passed (along with bias config, the only real needed one
-    # being threshold info), an Aequitas report is written to the database.
-    model_evaluator = ModelEvaluator(
-        testing_metric_groups=[
-            {
-                "metrics": ["precision@"],
-                "thresholds": {"top_n": [3]},
-            },
-        ],
-        training_metric_groups=[],
-        bias_config={"thresholds": {"top_n": [2]}},
-        db_engine=db_engine_with_results_schema,
-    )
-    testing_labels = np.array([1, 1, 1, 0, 1])
-    testing_prediction_probas = np.array([0.56, 0.55, 0.92, 0.85, 0.24])
-
-    fake_test_matrix_store = MockMatrixStore(
-        "test",
-        "1234",
-        5,
-        db_engine_with_results_schema,
-        metadata_overrides={"as_of_times": [TRAIN_END_TIME]},
-        matrix=pd.DataFrame.from_dict(
-            {
-                "entity_id": [1, 2, 3, 4, 5],
-                "as_of_date": [pd.Timestamp(2016, 1, 1)] * 5,
-                "feature_one": [3, 4, 3, 4, 3],
-                "feature_two": [5, 6, 5, 6, 5],
-                "label": testing_labels,
-            }
-        ).set_index(MatrixStore.indices),
-        init_labels=pd.DataFrame(
-            {
-                "label_value": testing_labels,
-                "entity_id": [1, 2, 3, 4, 5],
-                "as_of_date": [pd.Timestamp(2016, 1, 1)] * 5,
-            }
-        )
-        .set_index(["entity_id", "as_of_date"])
-        .label_value,
-        init_as_of_dates=[TRAIN_END_TIME],
-    )
-
-    trained_model, model_id = fake_trained_model(
-        db_engine_with_results_schema,
-        train_end_time=TRAIN_END_TIME,
-    )
-
-    # Use object dtype for string columns to maintain compatibility with aequitas
-    protected_df = pd.DataFrame(
-        {
-            "protectedattribute1": pd.Series(
-                ["low", "low", "low", "high", "high"], dtype=object
-            )
-        },
-        index=fake_test_matrix_store.design_matrix.index,
-    )
-    # should be low has 3 records, all 1's; high has 2 records, one 1
-
-    expected = {
-        "low": {"group_size": 3, "group_label_neg": 0, "group_label_pos": 3},
-        "high": {"group_size": 2, "group_label_neg": 1, "group_label_pos": 1},
-    }
-
-    model_evaluator.evaluate(
-        testing_prediction_probas, fake_test_matrix_store, model_id, protected_df
-    )
-
-    with db_engine_with_results_schema.connect() as conn:
-        result = conn.execute(
-            text("""
-                select * from test_results.aequitas
-                where model_id = :model_id 
-                and evaluation_start_time = :evaluation_start_time
-                order by 1
-                """),
-            {
-                "model_id": model_id,
-                "evaluation_start_time": fake_test_matrix_store.as_of_dates[0],
-            },
-        )
-
-        for record in result.mappings():
-            assert record["model_id"] == model_id
-            assert record["parameter"] == "2_abs"
-            assert record["attribute_name"] == "protectedattribute1"
-
-            for col, value in expected[record["attribute_value"]].items():
-                assert record[col] == value
 
 
 def test_generate_binary_at_x():
@@ -994,8 +795,6 @@ def test_generate_binary_at_x():
         np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0]),
     )
 
-    assert_array_equal(
-        generate_binary_at_x(input_array, 2), np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
-    )
+    assert_array_equal(generate_binary_at_x(input_array, 2), np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0]))
 
     assert_array_equal(generate_binary_at_x(np.array([]), 2), np.array([]))

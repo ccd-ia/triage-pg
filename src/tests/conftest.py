@@ -10,11 +10,9 @@ from triage import create_engine
 from triage.component.catwalk.db import ensure_db
 from triage.component.catwalk.storage import ProjectStorage
 
-# NOTE: triage.experiments and triage.component.postmodeling.crosstabs are
-# imported lazily inside the fixtures that need them — their import chain
-# reaches aequitas/fairgbm, whose binary wheel fails to load on some platforms
-# (e.g. arm64 macOS), and a module-level import here would break collection
-# for every test in the suite.
+# NOTE: triage.experiments is imported lazily inside the fixtures that need it
+# to keep test collection cheap; a module-level import here would pull in the
+# experiment orchestration stack for every test in the suite.
 
 # Create postgresql process fixture (session-scoped, starts PostgreSQL once)
 postgresql_proc = factories.postgresql_proc(port=None)
@@ -121,7 +119,9 @@ def shared_db_engine(postgresql_proc):
         version=postgresql_proc.version,
         password=postgresql_proc.password or "",
     ):
-        connection_url = f"postgresql+psycopg://{postgresql_proc.user}@{postgresql_proc.host}:{postgresql_proc.port}/{db_name}"
+        connection_url = (
+            f"postgresql+psycopg://{postgresql_proc.user}@{postgresql_proc.host}:{postgresql_proc.port}/{db_name}"
+        )
         engine = create_engine(connection_url)
         yield engine
         engine.dispose()
@@ -177,50 +177,6 @@ def finished_experiment_without_predictions(shared_db_engine, shared_project_sto
         )
     experiment.run()
     return experiment
-
-
-@pytest.fixture(scope="module")
-def crosstabs_config():
-    """Example crosstabs config.
-
-    Should work with after an experiment run with tests.utils.sample_config
-    """
-    from triage.component.postmodeling.crosstabs import CrosstabsConfigLoader
-
-    return CrosstabsConfigLoader(
-        config={
-            "output": {"schema": "test_results", "table": "crosstabs"},
-            "thresholds": {
-                "rank_abs": [50],
-                "rank_pct": [],
-            },
-            "entity_id_list": [],
-            "models_list_query": "select unnest(ARRAY[1]) :: int as model_id",
-            "as_of_dates_query": "select unnest(ARRAY['2012-06-01']) :: date as as_of_date",
-            "models_dates_join_query": """
-    select model_id,
-          as_of_date
-          from models_list_query m
-          cross join as_of_dates_query a join (select distinct model_id, as_of_date from test_results.predictions) p
-          using (model_id, as_of_date)""",
-            "features_query": """
-select m.model_id, f1.*
- from features.entity_features_aggregation_imputed f1 join
- models_dates_join_query m using (as_of_date)""",
-            "predictions_query": """
-select model_id,
-      as_of_date,
-      entity_id,
-      score,
-      label_value,
-      coalesce(rank_abs_no_ties, row_number() over (partition by (model_id, as_of_date) order by score desc)) as rank_abs,
-      coalesce(rank_pct_no_ties*100, ntile(100) over (partition by (model_id, as_of_date) order by score desc)) as rank_pct
-  from test_results.predictions
-  JOIN models_dates_join_query USING(model_id, as_of_date)
-  where model_id IN (select model_id from models_list_query)
-  AND as_of_date in (select as_of_date from as_of_dates_query)""",
-        }
-    )
 
 
 @pytest.fixture(scope="module")
@@ -316,9 +272,7 @@ def sample_grid_config():
             "max_features": ["sqrt"],
             "min_samples_split": [2, 5],
         },
-        "sklearn.ensemble.GradientBoostingClassifier": {
-            "loss": ["deviance", "exponential"]
-        },
+        "sklearn.ensemble.GradientBoostingClassifier": {"loss": ["deviance", "exponential"]},
         "triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression": {
             "penalty": ["l1", "l2"],
             "C": [0.01, 1],
