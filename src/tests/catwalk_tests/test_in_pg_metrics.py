@@ -35,17 +35,10 @@ AS_OF_DATE = "2014-01-01"
 
 
 @pytest.fixture
-def greenfield_engine(postgresql):
-    """Fresh pytest-postgresql DB with the greenfield ``triage`` schema + the
-    0002 metric functions applied via alembic (0001 -> 0002)."""
-    connection_url = (
-        f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:"
-        f"{postgresql.info.port}/{postgresql.info.dbname}"
-    )
-    engine = create_engine(connection_url)
-    upgrade_db(db_engine=engine, revision="head")
-    yield engine
-    engine.dispose()
+def greenfield_engine(db_engine_greenfield):
+    """Greenfield ``triage`` schema + the 0002 metric functions, via the shared
+    ``db_engine_greenfield`` conftest fixture (alembic 0001 -> head)."""
+    return db_engine_greenfield
 
 
 # A small KNOWN fixture. 10 labeled entities. (score, outcome) pairs chosen so
@@ -361,9 +354,7 @@ def test_bias_metrics_group_by_and_disparity(greenfield_engine):
     groups = ["A", "A", "A", "A", "A", "A", "B", "B", "B", "B"]
     _seed_protected_groups(engine, ENTITY_IDS, groups)
 
-    n = compute_bias_in_db(
-        engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs"
-    )
+    n = compute_bias_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs")
     assert n > 0
 
     # Top-5 selected = entities {1,2,3,4,5}. Group A members selected = {1,2,3,4,5}
@@ -522,12 +513,7 @@ def test_0002_downgrade_then_reupgrade(postgresql):
         with engine.begin() as conn:
             assert fn_count(conn) == 0
             # the base schema from 0001 survives
-            assert (
-                conn.execute(
-                    text("select to_regclass('triage.evaluations')")
-                ).scalar_one()
-                is not None
-            )
+            assert conn.execute(text("select to_regclass('triage.evaluations')")).scalar_one() is not None
 
         # re-upgrade rebuilds them
         upgrade_db(db_engine=engine, revision="head")

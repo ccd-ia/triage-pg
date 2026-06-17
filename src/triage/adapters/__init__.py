@@ -5,7 +5,15 @@ The adapters own the triage-pg ↔ featurizer seam: timechop splits → featuriz
 This package is the first piece of the adapter-spec pass; see ``docs/adapter-spec.md``.
 """
 
+from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
+from triage.adapters.labels import build_labels
 from triage.adapters.temporal import TemporalConfig
 
-__all__ = ["ImputationPolicy", "ImputationRule", "TemporalConfig"]
+__all__ = [
+    "ImputationPolicy",
+    "ImputationRule",
+    "TemporalConfig",
+    "build_cohort",
+    "build_labels",
+]

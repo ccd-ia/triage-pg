@@ -45,6 +45,23 @@ def fixture_db_engine(postgresql):
 
 
 @pytest.fixture(scope="function")
+def db_engine_greenfield(db_engine):
+    """Fresh pytest-postgresql DB with the greenfield ``triage`` schema applied.
+
+    Runs the per-project alembic migrations (results_schema/alembic.ini, 0001 ->
+    head) against the throwaway ``db_engine`` database, creating the greenfield
+    ``triage.*`` schema (artifacts/runs/cohorts/labels/... + the 0002 metric
+    functions). This is the schema the greenfield builders (cohort, labels,
+    matrix, model) write to — distinct from ``db_engine_with_results_schema``,
+    which builds the *inherited* ORM schema via ``Base.metadata.create_all``.
+    """
+    from triage.component.results_schema import upgrade_db
+
+    upgrade_db(db_engine=db_engine, revision="head")
+    yield db_engine
+
+
+@pytest.fixture(scope="function")
 def db_engine_with_results_schema(db_engine):
     from tests.results_tests.factories import ScopedSession
 
