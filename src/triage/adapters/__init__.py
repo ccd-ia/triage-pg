@@ -8,12 +8,15 @@ This package is the first piece of the adapter-spec pass; see ``docs/adapter-spe
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.labels import build_labels
+from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.temporal import TemporalConfig
 
 __all__ = [
     "ImputationPolicy",
     "ImputationRule",
+    "MatrixResult",
     "TemporalConfig",
     "build_cohort",
     "build_labels",
+    "build_matrix",
 ]
