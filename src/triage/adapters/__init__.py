@@ -9,14 +9,24 @@ from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix
+from triage.adapters.model import (
+    ModelResult,
+    ScoreEvaluateResult,
+    build_model,
+    score_and_evaluate,
+)
 from triage.adapters.temporal import TemporalConfig
 
 __all__ = [
     "ImputationPolicy",
     "ImputationRule",
     "MatrixResult",
+    "ModelResult",
+    "ScoreEvaluateResult",
     "TemporalConfig",
     "build_cohort",
     "build_labels",
     "build_matrix",
+    "build_model",
+    "score_and_evaluate",
 ]
