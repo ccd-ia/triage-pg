@@ -1,9 +1,7 @@
-import datetime
 import functools
 import importlib
 import os
 import random
-import tempfile
 from contextlib import contextmanager
 from functools import cached_property
 from unittest import mock
@@ -12,16 +10,11 @@ import matplotlib
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
-from sqlalchemy.orm import sessionmaker
 
-from tests.results_tests.factories import MatrixFactory, set_session
-from triage import create_engine
-from triage.component.catwalk.db import ensure_db
-from triage.component.catwalk.storage import MatrixStore, ProjectStorage
-from triage.component.catwalk.utils import filename_friendly_hash
-from triage.component.results_schema import Matrix, Model
-from triage.experiments import CONFIG_VERSION
-from triage.util.structs import FeatureNameList
+# CONFIG_VERSION was historically imported from triage.experiments, which has
+# been removed in the greenfield cutover. The value is inlined here so the
+# remaining (greenfield) tests that build sample configs keep working.
+CONFIG_VERSION = "v8"
 
 matplotlib.use("Agg")
 
@@ -51,12 +44,12 @@ CONFIG_QUERY_DATA = {
 }
 
 MOCK_FILES = {
-    os.path.join(os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['label']['filepath']}"): CONFIG_QUERY_DATA["label"][
-        "query"
-    ],
-    os.path.join(os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['cohort']['filepath']}"): CONFIG_QUERY_DATA[
-        "cohort"
-    ]["query"],
+    os.path.join(
+        os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['label']['filepath']}"
+    ): CONFIG_QUERY_DATA["label"]["query"],
+    os.path.join(
+        os.path.abspath(os.getcwd()), f"{CONFIG_QUERY_DATA['cohort']['filepath']}"
+    ): CONFIG_QUERY_DATA["cohort"]["query"],
 }
 
 
@@ -66,138 +59,6 @@ def open_side_effect(name):
 
 def fake_labels(length):
     return np.array([random.choice([True, False]) for i in range(0, length)])
-
-
-class MockTrainedModel:
-    def predict_proba(self, dataset):
-        return np.random.rand(len(dataset), len(dataset))
-
-
-class MockMatrixStore(MatrixStore):
-    def __init__(
-        self,
-        matrix_type,
-        matrix_uuid,
-        label_count,
-        db_engine,
-        init_labels=None,
-        metadata_overrides=None,
-        matrix=None,
-        init_as_of_dates=None,
-    ):
-        base_metadata = {
-            "feature_start_time": datetime.date(2014, 1, 1),
-            "end_time": datetime.date(2015, 1, 1),
-            "as_of_date_frequency": "1y",
-            "matrix_id": "some_matrix",
-            "label_name": "label",
-            "label_timespan": "3month",
-            "indices": MatrixStore.indices,
-            "matrix_type": matrix_type,
-            "as_of_times": [datetime.date(2014, 10, 1), datetime.date(2014, 7, 1)],
-        }
-        metadata_overrides = metadata_overrides or {}
-        base_metadata.update(metadata_overrides)
-        if matrix is None:
-            matrix = pd.DataFrame.from_dict(
-                {
-                    "entity_id": [1, 2],
-                    "as_of_date": [pd.Timestamp(2014, 10, 1), pd.Timestamp(2014, 7, 1)],
-                    "feature_one": [3, 4],
-                    "feature_two": [5, 6],
-                    "label": [7, 8],
-                }
-            ).set_index(MatrixStore.indices)
-        if init_labels is None:
-            init_labels = []
-        labels = matrix.pop("label")
-        self.matrix_label_tuple = matrix, labels
-        self.metadata = base_metadata
-        self.label_count = label_count
-        self.init_labels = pd.Series(init_labels, dtype="float64")
-        self.matrix_uuid = matrix_uuid
-        self.init_as_of_dates = init_as_of_dates or []
-
-        SessionLocal = sessionmaker(bind=db_engine)
-        session = SessionLocal()
-        try:
-            session.add(Matrix(matrix_uuid=matrix_uuid))
-            session.commit()
-        finally:
-            session.close()
-
-    @property
-    def as_of_dates(self):
-        """The list of as-of-dates in the matrix"""
-        return self.init_as_of_dates or self.metadata["as_of_times"]
-
-    @property
-    def labels(self):
-        if len(self.init_labels) > 0:
-            return self.init_labels
-        else:
-            return fake_labels(self.label_count)
-
-
-def fake_trained_model(db_engine, train_matrix_uuid="efgh", train_end_time=datetime.datetime(2016, 1, 1)):
-    """Creates and stores a trivial trained model and training matrix
-
-    Args:
-        db_engine (sqlalchemy.engine)
-
-    Returns:
-        (int) model id for database retrieval
-    """
-    SessionLocal = sessionmaker(bind=db_engine)
-    session = SessionLocal()
-
-    try:
-        session.merge(Matrix(matrix_uuid=train_matrix_uuid))
-
-        # Create the fake trained model and store in db
-        trained_model = MockTrainedModel()
-        db_model = Model(
-            model_hash="abcd",
-            train_matrix_uuid=train_matrix_uuid,
-            train_end_time=train_end_time,
-        )
-        session.add(db_model)
-        session.commit()
-        model_id = db_model.model_id
-        return trained_model, model_id
-    finally:
-        session.close()
-
-
-def matrix_metadata_creator(**override_kwargs):
-    """Create a sample valid matrix metadata with optional overrides
-
-    Args:
-    **override_kwargs: Keys and values to override in the metadata
-
-    Returns: (dict)
-    """
-    base_metadata = {
-        "feature_start_time": datetime.date(2012, 12, 20),
-        "end_time": datetime.date(2016, 12, 20),
-        "label_name": "label",
-        "as_of_date_frequency": "1w",
-        "max_training_history": "5y",
-        "matrix_id": "tester-1",
-        "state": "active",
-        "cohort_name": "default",
-        "label_timespan": "1y",
-        "metta-uuid": "1234",
-        "matrix_type": "test",
-        "feature_names": FeatureNameList(["ft1", "ft2"]),
-        "feature_groups": ["all: True"],
-        "indices": MatrixStore.indices,
-        "as_of_times": [datetime.date(2016, 12, 20)],
-    }
-    for override_key, override_value in override_kwargs.items():
-        base_metadata[override_key] = override_value
-
-    return base_metadata
 
 
 def matrix_creator():
@@ -211,60 +72,6 @@ def matrix_creator():
         "label": [0, 1],
     }
     return pd.DataFrame.from_dict(source_dict)
-
-
-def get_matrix_store(project_storage, db_engine, matrix=None, metadata=None, write_to_db=True):
-    """Return a matrix store associated with the given project storage.
-    Also adds an entry in the matrices table if it doesn't exist already
-
-    Args:
-        project_storage (triage.component.catwalk.storage.ProjectStorage) A project's storage
-        matrix (dataframe, optional): A matrix to store. Defaults to the output of matrix_creator()
-        metadata (dict, optional): matrix metadata.
-            defaults to the output of matrix_metadata_creator()
-    """
-    if matrix is None:
-        matrix = matrix_creator()
-    if not metadata:
-        metadata = matrix_metadata_creator()
-
-    # matrix["as_of_date"] = matrix["as_of_date"].apply(pd.Timestamp)
-    matrix.set_index(MatrixStore.indices, inplace=True)
-    matrix_store = project_storage.matrix_storage_engine().get_store(filename_friendly_hash(metadata))
-    matrix_store.metadata = metadata
-    new_matrix = matrix.copy()
-    labels = new_matrix.pop(matrix_store.label_column_name)
-    matrix_store.matrix_label_tuple = new_matrix, labels
-    matrix_store.save()
-    matrix_store.clear_cache()
-    if write_to_db:
-        SessionLocal = sessionmaker(bind=db_engine)
-        session = SessionLocal()
-        try:
-            if session.query(Matrix).filter(Matrix.matrix_uuid == matrix_store.uuid).count() == 0:
-                set_session(session)
-                MatrixFactory(matrix_uuid=matrix_store.uuid)
-                session.commit()
-        finally:
-            session.close()
-
-    return matrix_store
-
-
-@contextmanager
-def rig_engines():
-    """Set up a db engine and project storage engine
-
-    DEPRECATED: Use the `rig_engines` pytest fixture instead.
-    This context manager is provided for backwards compatibility only.
-
-    Yields (tuple) (database engine, project storage engine)
-    """
-    raise NotImplementedError(
-        "rig_engines() context manager has been removed. "
-        "Use the rig_engines pytest fixture from conftest.py instead. "
-        "Update your test to accept 'rig_engines' as a parameter."
-    )
 
 
 def populate_source_data(db_engine):
@@ -328,29 +135,31 @@ def populate_source_data(db_engine):
     ]
 
     with db_engine.begin() as conn:
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table cat_complaints (
                 entity_id int,
                 as_of_date date,
                 cat_sightings int
                 )
-                """)
-        )
+                """))
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table entity_zip_codes (
                 entity_id int,
                 zip_code text
                 )
-                """)
-        )
+                """))
 
-        conn.execute(text("create table zip_code_demographics (zip_code text, ethnicity text, as_of_date date)"))
+        conn.execute(
+            text(
+                "create table zip_code_demographics (zip_code text, ethnicity text, as_of_date date)"
+            )
+        )
         for demographic_row in zip_code_demographics:
             conn.execute(
-                text("insert into zip_code_demographics values (:zip_code, :ethnicity, :as_of_date)"),
+                text(
+                    "insert into zip_code_demographics values (:zip_code, :ethnicity, :as_of_date)"
+                ),
                 {
                     "zip_code": demographic_row[0],
                     "ethnicity": demographic_row[1],
@@ -367,18 +176,18 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table zip_code_events (
                 zip_code text,
                 as_of_date date,
                 num_events int
                 )
-                """)
-        )
+                """))
         for zip_code_event in zip_code_events:
             conn.execute(
-                text("insert into zip_code_events values (:zip_code, :as_of_date, :num_events)"),
+                text(
+                    "insert into zip_code_events values (:zip_code, :as_of_date, :num_events)"
+                ),
                 {
                     "zip_code": zip_code_event[0],
                     "as_of_date": zip_code_event[1],
@@ -388,7 +197,9 @@ def populate_source_data(db_engine):
 
         for complaint in complaints:
             conn.execute(
-                text("insert into cat_complaints values (:entity_id, :as_of_date, :cat_sightings)"),
+                text(
+                    "insert into cat_complaints values (:entity_id, :as_of_date, :cat_sightings)"
+                ),
                 {
                     "entity_id": complaint[0],
                     "as_of_date": complaint[1],
@@ -396,15 +207,13 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table events (
                 entity_id int,
                 outcome int,
                 outcome_date date
                 )
-                """)
-        )
+                """))
 
         for event in events:
             conn.execute(
@@ -440,8 +249,12 @@ def sample_config(query_source="filepath"):
     }
 
     scoring_config = {
-        "testing_metric_groups": [{"metrics": ["precision@"], "thresholds": {"top_n": [2]}}],
-        "training_metric_groups": [{"metrics": ["precision@"], "thresholds": {"top_n": [3]}}],
+        "testing_metric_groups": [
+            {"metrics": ["precision@"], "thresholds": {"top_n": [2]}}
+        ],
+        "training_metric_groups": [
+            {"metrics": ["precision@"], "thresholds": {"top_n": [3]}}
+        ],
         "subsets": [
             {
                 "name": "evens",
@@ -492,15 +305,6 @@ def sample_config(query_source="filepath"):
 
     # bias_audit_config disabled: Aequitas removed (ADR-0007); SQL bias group-bys
     # will replace it in a later phase.
-    # bias_audit_config = {
-    #     "from_obj_query": "select * from zip_code_demographics join entity_zip_codes using (zip_code)",
-    #     "attribute_columns": ["ethnicity"],
-    #     "knowledge_date_column": "as_of_date",
-    #     "entity_id_column": "entity_id",
-    #     "ref_groups_method": "predefined",
-    #     "ref_groups": {"ethnicity": "white"},
-    #     "thresholds": {"percentiles": [], "top_n": [2]},
-    # }
 
     return {
         "config_version": CONFIG_VERSION,
@@ -520,11 +324,9 @@ def sample_config(query_source="filepath"):
         "temporal_config": temporal_config,
         "grid_config": grid_config,
         # bias_audit_config disabled: Aequitas removed (ADR-0007).
-        # "bias_audit_config": bias_audit_config,
         "prediction": {"rank_tiebreaker": "random"},
         "scoring": scoring_config,
         "user_metadata": {"custom_key": "custom_value"},
-        # "individual_importance": {"n_ranks": 2},
     }
 
 

@@ -4,19 +4,11 @@ import re
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from sqlalchemy import text
 
-from triage.component.catwalk.db import ensure_db
 from triage.component.catwalk.utils import (
-    associate_matrices_with_experiment,
-    associate_models_with_experiment,
     filename_friendly_hash,
-    missing_matrix_uuids,
-    missing_model_hashes,
-    save_experiment_and_get_hash,
     sort_predictions_and_labels,
 )
-from triage.component.results_schema.schema import Matrix, Model
 
 
 def test_filename_friendly_hash():
@@ -57,68 +49,6 @@ def test_filename_friendly_hash_stability():
     other_nested_data = {"one": "two", "three": {"six": "seven", "four": "five"}}
     new_output = filename_friendly_hash(other_nested_data)
     assert output == new_output
-
-
-def test_save_experiment_and_get_hash(db_engine):
-    # no reason to make assertions on the config itself, use a basic dict
-    experiment_config = {"one": "two"}
-    ensure_db(db_engine)
-    exp_hash = save_experiment_and_get_hash(experiment_config, db_engine)
-    assert isinstance(exp_hash, str)
-    new_hash = save_experiment_and_get_hash(experiment_config, db_engine)
-    assert new_hash == exp_hash
-
-
-def test_missing_model_hashes(db_engine):
-    ensure_db(db_engine)
-
-    experiment_hash = save_experiment_and_get_hash({}, db_engine)
-    model_hashes = ["abcd", "bcde", "cdef"]
-
-    # if we associate model hashes with an experiment but don't actually train the models
-    # they should show up as missing
-    associate_models_with_experiment(experiment_hash, model_hashes, db_engine)
-    assert set(missing_model_hashes(experiment_hash, db_engine)) == set(model_hashes)
-
-    # if we insert a model row they should no longer be considered missing
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                f"insert into {Model.__table__.fullname} (model_hash) values (:model_hash)"
-            ),
-            {
-                "model_hash": model_hashes[0],
-            },
-        )
-    assert set(missing_model_hashes(experiment_hash, db_engine)) == set(
-        model_hashes[1:]
-    )
-
-
-def test_missing_matrix_uuids(db_engine):
-    ensure_db(db_engine)
-
-    experiment_hash = save_experiment_and_get_hash({}, db_engine)
-    matrix_uuids = ["abcd", "bcde", "cdef"]
-
-    # if we associate matrix uuids with an experiment but don't actually build the matrices
-    # they should show up as missing
-    associate_matrices_with_experiment(experiment_hash, matrix_uuids, db_engine)
-    assert set(missing_matrix_uuids(experiment_hash, db_engine)) == set(matrix_uuids)
-
-    # if we insert a matrix row they should no longer be considered missing
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                f"insert into {Matrix.__table__.fullname} (matrix_uuid) values (:matrix_uuid)"
-            ),
-            {
-                "matrix_uuid": matrix_uuids[0],
-            },
-        )
-    assert set(missing_matrix_uuids(experiment_hash, db_engine)) == set(
-        matrix_uuids[1:]
-    )
 
 
 def test_sort_predictions_and_labels():

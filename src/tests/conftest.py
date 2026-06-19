@@ -1,18 +1,10 @@
 import tempfile
-from unittest import mock
 
 import pytest
 from pytest_postgresql import factories
 
-from tests.results_tests.factories import init_engine
-from tests.utils import open_side_effect, populate_source_data, sample_config
 from triage import create_engine
-from triage.component.catwalk.db import ensure_db
 from triage.component.catwalk.storage import ProjectStorage
-
-# NOTE: triage.experiments is imported lazily inside the fixtures that need it
-# to keep test collection cheap; a module-level import here would pull in the
-# experiment orchestration stack for every test in the suite.
 
 # Create postgresql process fixture (session-scoped, starts PostgreSQL once)
 postgresql_proc = factories.postgresql_proc(port=None)
@@ -32,15 +24,6 @@ def fixture_db_engine(postgresql):
     connection_url = f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
     engine = create_engine(connection_url)
     yield engine
-    # Clean up factory session before disposing engine.
-    # This prevents "AdminShutdown" errors when the session tries to rollback
-    # on a connection to a database that's about to be dropped by pytest-postgresql.
-    try:
-        from tests.results_tests.factories import ScopedSession
-
-        ScopedSession.remove()
-    except Exception:
-        pass  # Session might not be initialized yet, or already cleaned up
     engine.dispose()
 
 
@@ -62,30 +45,6 @@ def db_engine_greenfield(db_engine):
 
 
 @pytest.fixture(scope="function")
-def db_engine_with_results_schema(db_engine):
-    from tests.results_tests.factories import ScopedSession
-
-    ensure_db(db_engine)
-    init_engine(db_engine)
-    yield db_engine
-    # Clean up the factory session to prevent stale connections
-    ScopedSession.remove()
-
-
-@pytest.fixture(scope="function")
-def db_session(db_engine_with_results_schema):
-    """Provide the ScopedSession for tests that use factory_boy factories.
-
-    This fixture depends on db_engine_with_results_schema to ensure the
-    session is properly configured before use.
-    """
-    from tests.results_tests.factories import ScopedSession
-
-    yield ScopedSession()
-    # The ScopedSession is cleaned up by db_engine_with_results_schema
-
-
-@pytest.fixture(scope="function")
 def project_path():
     with tempfile.TemporaryDirectory() as temp_dir:
         yield temp_dir
@@ -98,19 +57,6 @@ def project_storage(project_path):
     Yields (catwalk.storage.ProjectStorage)
     """
     yield ProjectStorage(project_path)
-
-
-@pytest.fixture(scope="function")
-def rig_engines(db_engine, project_storage):
-    """Set up a db engine and project storage engine with results schema.
-
-    Yields (tuple) (database engine, project storage engine)
-
-    This replaces the context manager in utils.py for pytest compatibility.
-    """
-    ensure_db(db_engine)
-    init_engine(db_engine)
-    yield db_engine, project_storage
 
 
 @pytest.fixture(scope="module")
@@ -136,9 +82,7 @@ def shared_db_engine(postgresql_proc):
         version=postgresql_proc.version,
         password=postgresql_proc.password or "",
     ):
-        connection_url = (
-            f"postgresql+psycopg://{postgresql_proc.user}@{postgresql_proc.host}:{postgresql_proc.port}/{db_name}"
-        )
+        connection_url = f"postgresql+psycopg://{postgresql_proc.user}@{postgresql_proc.host}:{postgresql_proc.port}/{db_name}"
         engine = create_engine(connection_url)
         yield engine
         engine.dispose()
@@ -153,47 +97,6 @@ def shared_project_storage():
     with tempfile.TemporaryDirectory() as temp_dir:
         project_storage = ProjectStorage(temp_dir)
         yield project_storage
-
-
-@pytest.fixture(scope="module")
-def finished_experiment(shared_db_engine, shared_project_storage):
-    """A successfully-run experiment. Its database schemas and project storage can be queried.
-
-    Returns: (triage.experiments.SingleThreadedExperiment)
-    """
-    from triage.experiments import SingleThreadedExperiment
-
-    populate_source_data(shared_db_engine)
-    base_config = sample_config()
-    with mock.patch("triage.util.conf.open", side_effect=open_side_effect) as mock_file:
-        experiment = SingleThreadedExperiment(
-            base_config,
-            db_engine=shared_db_engine,
-            project_path=shared_project_storage.project_path,
-        )
-    experiment.run()
-    return experiment
-
-
-@pytest.fixture(scope="module")
-def finished_experiment_without_predictions(shared_db_engine, shared_project_storage):
-    """A successfully-run experiment. Its database schemas and project storage can be queried.
-
-    Returns: (triage.experiments.SingleThreadedExperiment)
-    """
-    from triage.experiments import SingleThreadedExperiment
-
-    populate_source_data(shared_db_engine)
-    base_config = sample_config()
-    with mock.patch("triage.util.conf.open", side_effect=open_side_effect) as mock_file:
-        experiment = SingleThreadedExperiment(
-            base_config,
-            db_engine=shared_db_engine,
-            project_path=shared_project_storage.project_path,
-            save_predictions=False,
-        )
-    experiment.run()
-    return experiment
 
 
 @pytest.fixture(scope="module")
@@ -289,7 +192,9 @@ def sample_grid_config():
             "max_features": ["sqrt"],
             "min_samples_split": [2, 5],
         },
-        "sklearn.ensemble.GradientBoostingClassifier": {"loss": ["deviance", "exponential"]},
+        "sklearn.ensemble.GradientBoostingClassifier": {
+            "loss": ["deviance", "exponential"]
+        },
         "triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression": {
             "penalty": ["l1", "l2"],
             "C": [0.01, 1],

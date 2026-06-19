@@ -25,16 +25,6 @@ import s3fs
 import wrapt
 import yaml
 
-from triage.component.results_schema import (
-    ListPrediction,
-    ListPredictionMetadata,
-    TestEvaluation,
-    TestPrediction,
-    TestPredictionMetadata,
-    TrainEvaluation,
-    TrainPrediction,
-    TrainPredictionMetadata,
-)
 from triage.util.pandas import downcast_matrix
 
 
@@ -736,21 +726,13 @@ class CSVMatrixStore(MatrixStore):
 
 class TestMatrixType:
     string_name = "test"
-    evaluation_obj = TestEvaluation
-    prediction_obj = TestPrediction
-    prediction_metadata_obj = TestPredictionMetadata
     is_test = True
 
 
 class TrainMatrixType:
     string_name = "train"
-    evaluation_obj = TrainEvaluation
-    prediction_obj = TrainPrediction
-    prediction_metadata_obj = TrainPredictionMetadata
     is_test = False
 
 
 class ProductionMatrixType(object):
     string_name = "production"
-    prediction_obj = ListPrediction
-    prediction_metadata_obj = ListPredictionMetadata

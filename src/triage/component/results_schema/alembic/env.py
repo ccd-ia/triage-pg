@@ -8,17 +8,13 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL
 
-from triage.component.results_schema import Base
-
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata
+# The greenfield migrations are raw ``op.execute`` statements; autogenerate is
+# never used, so there is no ORM ``Base.metadata`` to target.
+target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

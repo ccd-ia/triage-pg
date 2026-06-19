@@ -9,13 +9,11 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
-from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date
 
 from psycopg.types.range import DateRange, TimestamptzRange
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import Session
 
 
 def serialize_to_database(obj):
@@ -66,34 +64,3 @@ class SerializableDbEngine(wrapt.ObjectProxy):
 
 
 create_engine = functools.partial(SerializableDbEngine, json_serializer=json_dumps)
-
-
-@contextmanager
-def scoped_session(db_engine):
-    """Provide a transactional scope around a series of operations."""
-    # session = sessionmaker(db_engine, future=True)
-    session = Session(
-        bind=db_engine,
-        future=True,
-        expire_on_commit=False,
-    )
-
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-@contextmanager
-def get_for_update(db_engine, orm_class, primary_key):
-    """Gets object from the database to updated it"""
-    logger.spam(f"ORM class: {orm_class} with primary key {primary_key}")
-    with scoped_session(db_engine) as session:
-        obj = session.get(orm_class, primary_key)
-        logger.spam(f"obj from get_for_update: {obj}")
-        yield obj
-        session.merge(obj)
