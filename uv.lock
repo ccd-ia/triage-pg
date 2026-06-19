@@ -584,8 +584,8 @@ wheels = [
 
 [[package]]
 name = "featurizer"
-version = "0.2.0"
-source = { editable = "../featurizer" }
+version = "0.3.0"
+source = { git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.3.0#7833e7f71e2d13ba703e7be822a6330f1b7d021c" }
 dependencies = [
     { name = "icecream" },
     { name = "loguru" },
@@ -598,37 +598,6 @@ dependencies = [
 [package.optional-dependencies]
 parquet = [
     { name = "pyarrow" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "icecream" },
-    { name = "loguru" },
-    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.5" },
-    { name = "networkx", marker = "extra == 'bridge'", specifier = ">=3" },
-    { name = "networkx", marker = "extra == 'viz'", specifier = ">=3" },
-    { name = "pandas" },
-    { name = "pgvector", marker = "extra == 'bridge'", specifier = ">=0.2" },
-    { name = "plotly", marker = "extra == 'viz'", specifier = ">=5" },
-    { name = "psycopg" },
-    { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=24.0.0" },
-    { name = "pyyaml" },
-    { name = "records" },
-    { name = "scikit-learn", marker = "extra == 'bridge'", specifier = ">=1.0" },
-    { name = "scikit-learn", marker = "extra == 'viz'", specifier = ">=1.0" },
-    { name = "scipy", marker = "extra == 'viz'", specifier = ">=1.8" },
-    { name = "seaborn", marker = "extra == 'viz'", specifier = ">=0.12" },
-    { name = "sentence-transformers", marker = "extra == 'bridge'", specifier = ">=2.2" },
-    { name = "umap-learn", marker = "extra == 'viz'", specifier = ">=0.5" },
-]
-provides-extras = ["viz", "bridge", "parquet"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.31.7" },
-    { name = "jupyter-console", specifier = ">=6.6.3" },
-    { name = "pytest", specifier = ">=8.2" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
 ]
 
 [[package]]
@@ -2788,7 +2757,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=4.4" },
     { name = "dickens", specifier = ">=2.1.1" },
     { name = "factory-boy", marker = "extra == 'dev'", specifier = "==3.2.1" },
-    { name = "featurizer", extras = ["parquet"], editable = "../featurizer" },
+    { name = "featurizer", extras = ["parquet"], git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.3.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.46.1" },
     { name = "icecream", specifier = ">=2.1.8" },
