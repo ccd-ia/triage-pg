@@ -8,7 +8,7 @@ import textwrap
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import typer
 import yaml
@@ -19,7 +19,6 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from sqlalchemy.engine.url import URL
-from sqlalchemy.orm import sessionmaker
 
 from triage.adapters.forward import predict_forward
 from triage.adapters.retrain import retrain_and_predict
@@ -31,27 +30,16 @@ from triage.artifacts import (
     gc_candidates,
     purge,
 )
-from triage.component.architect.entity_date_table_generators import (
-    EntityDateTableGenerator,
-)
-from triage.component.architect.feature_generators import FeatureGenerator
 from triage.component.audition import AuditionRunner
 from triage.component.catwalk.grid import flatten_grid_config
-from triage.component.catwalk.storage import CSVMatrixStore, ProjectStorage, Store
+from triage.component.catwalk.storage import Store
 from triage.component.results_schema import (
-    TriageRun,
-    TriageRunStatus,
     db_history,
     downgrade_db,
     stamp_db,
     upgrade_db,
 )
 from triage.component.timechop import Timechop
-from triage.component.timechop.plotting import visualize_chops
-from triage.experiments import (
-    CONFIG_VERSION,
-    SingleThreadedExperiment,
-)
 from triage.logging import configure_logging, get_logger
 from triage.sources import (
     bump_source,
@@ -60,7 +48,6 @@ from triage.sources import (
     list_sources,
     register_source,
 )
-from triage.util.conf import load_query_if_needed
 from triage.util.db import create_engine
 
 logger = get_logger(__name__)
@@ -80,7 +67,9 @@ app.add_typer(source_app, name="source")
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
 
-MATRIX_STORAGE_MAP = {"csv": CSVMatrixStore}
+# Config-version label shown by `analyze-config`; inlined here now that the inherited
+# experiments package (its former home) is removed in the greenfield strip.
+CONFIG_VERSION = "v8"
 
 
 @dataclass
@@ -274,38 +263,6 @@ def load_experiment_config(config_path: str) -> Dict[str, Any]:
         return yaml.full_load(fd) or {}
 
 
-def prepare_experiment(
-    ctx: typer.Context,
-    config: Dict[str, Any],
-    project_path: pathlib.Path,
-    *,
-    replace: bool,
-    materialize_fromobjs: bool,
-    features_ignore_cohort: bool,
-    matrix_storage_format: str,
-    profile: bool,
-    save_predictions: bool,
-    skip_validation: bool,
-    additional_bigtrain_classnames: Optional[Iterable[str]],
-) -> tuple[Dict[str, Any], Any]:
-    engine = get_engine(ctx)
-    matrix_storage_class = MATRIX_STORAGE_MAP[matrix_storage_format]
-    kwargs = dict(
-        config=config,
-        db_engine=engine,
-        project_path=str(project_path),
-        replace=replace,
-        materialize_subquery_fromobjs=materialize_fromobjs,
-        features_ignore_cohort=features_ignore_cohort,
-        matrix_storage_class=matrix_storage_class,
-        profile=profile,
-        save_predictions=save_predictions,
-        skip_validation=skip_validation,
-        additional_bigtrain_classnames=list(additional_bigtrain_classnames or []),
-    )
-    return kwargs, engine
-
-
 @app.callback()
 def triage_callback(
     ctx: typer.Context,
@@ -340,41 +297,6 @@ def triage_callback(
     logger.info("Using database %s", db_url)
     if setup_path:
         logger.info("Setup module: %s", setup_path)
-
-
-@app.command("featuretest")
-def feature_test(
-    ctx: typer.Context,
-    feature_config_file: str = typer.Argument(
-        ..., help="Feature config YAML containing feature_aggregations."
-    ),
-    as_of_date: datetime = typer.Argument(
-        ..., callback=parse_date, help="Date (YYYY-MM-DD) to build features for."
-    ),
-) -> None:
-    engine = get_engine(ctx)
-    full_config = load_yaml_from_store(feature_config_file)
-    feature_config = full_config["feature_aggregations"]
-    cohort_config = load_query_if_needed(full_config.get("cohort_config"))
-
-    state_table = "features_test.test_cohort"
-    if cohort_config:
-        EntityDateTableGenerator(
-            entity_date_table_name=state_table,
-            db_engine=engine,
-            query=cohort_config["query"],
-            replace=True,
-        ).generate_entity_date_table(as_of_dates=[as_of_date])
-
-    FeatureGenerator(engine, "features_test").create_features_before_imputation(
-        feature_aggregation_config=feature_config,
-        feature_dates=[as_of_date],
-        state_table=state_table,
-    )
-    console.print(
-        f"[green]Feature test completed for {as_of_date.date()}[/green]",
-        justify="left",
-    )
 
 
 @app.command("run")
@@ -426,132 +348,6 @@ def run_command(
         f"[cyan]Experiment:[/cyan] {result.experiment_hash[:12]}…"
         f"  [cyan]storage:[/cyan] {project_path}"
     )
-
-
-@app.command("experiment")
-def experiment_command(
-    ctx: typer.Context,
-    config: str = typer.Argument(..., help="Experiment configuration file."),
-    project_path: pathlib.Path = typer.Option(
-        pathlib.Path.cwd(),
-        "--project-path",
-        help="Directory or URI to store matrices and models.",
-    ),
-    n_db_processes: int = typer.Option(
-        1, "--n-db-processes", callback=natural_number, help="DB worker count."
-    ),
-    n_processes: int = typer.Option(
-        1, "--n-processes", callback=natural_number, help="Model worker count."
-    ),
-    n_bigtrain_processes: int = typer.Option(
-        1,
-        "--n-bigtrain-processes",
-        callback=natural_number,
-        help="Worker count for large estimators.",
-    ),
-    add_bigtrain_class: Optional[List[str]] = typer.Option(
-        None,
-        "--add-bigtrain-class",
-        help=(
-            "Additional classifier paths to train with the big-model batch. Use multiple times for multiple classes."
-        ),
-    ),
-    matrix_format: str = typer.Option(
-        "csv",
-        "--matrix-format",
-        help="Matrix storage backend.",
-        show_choices=list(MATRIX_STORAGE_MAP.keys()),
-    ),
-    replace: bool = typer.Option(
-        False, "--replace", help="Replace existing artifacts."
-    ),
-    validate: bool = typer.Option(
-        True, "--validate/--no-validate", help="Validate config before running."
-    ),
-    validate_only: bool = typer.Option(
-        False, "--validate-only", help="Only validate the config and exit."
-    ),
-    profile: bool = typer.Option(
-        False,
-        "--profile",
-        help="Profile experiment runtime with cProfile (implies serialized run).",
-    ),
-    materialize_fromobjs: bool = typer.Option(
-        True,
-        "--materialize-fromobjs/--no-materialize-fromobjs",
-        help="Create tables for feature from-objects subqueries.",
-    ),
-    save_predictions: bool = typer.Option(
-        True,
-        "--save-predictions/--no-save-predictions",
-        help="Persist individual predictions to the database.",
-    ),
-    features_ignore_cohort: bool = typer.Option(
-        False,
-        "--features-ignore-cohort",
-        help="Store features independently of the cohort definition.",
-    ),
-    show_timechop: bool = typer.Option(
-        False,
-        "--show-timechop",
-        help="Render the timechop diagram to <project-path>/images.",
-    ),
-) -> None:
-    matrix_format = matrix_format.lower()
-    if matrix_format not in MATRIX_STORAGE_MAP:
-        raise typer.BadParameter(
-            f"Unsupported matrix format '{matrix_format}'. Available: {', '.join(MATRIX_STORAGE_MAP.keys())}"
-        )
-    config_data = load_experiment_config(config)
-    kwargs, _engine = prepare_experiment(
-        ctx,
-        config_data,
-        project_path,
-        replace=replace,
-        materialize_fromobjs=materialize_fromobjs,
-        features_ignore_cohort=features_ignore_cohort,
-        matrix_storage_format=matrix_format,
-        profile=profile,
-        save_predictions=save_predictions,
-        skip_validation=not validate,
-        additional_bigtrain_classnames=add_bigtrain_class,
-    )
-
-    console.print(
-        f"[cyan]Triage config version:[/cyan] {config_data.get('config_version', CONFIG_VERSION)}"
-    )
-    console.print(f"[cyan]Project path:[/cyan] {project_path}")
-
-    if n_db_processes > 1 or n_processes > 1 or n_bigtrain_processes > 1:
-        console.print(
-            "[yellow]Multi-process execution was removed (ADR-0005); "
-            "running in-process. The --n-*-processes flags are ignored.[/yellow]"
-        )
-
-    try:
-        experiment = SingleThreadedExperiment(**kwargs)
-    except Exception as exc:
-        console.print(f"[red]Failed to initialize experiment: {exc}[/red]")
-        raise typer.Exit(code=1) from exc
-
-    if validate_only:
-        console.print("[yellow]Validating configuration...[/yellow]")
-        experiment.validate()
-        console.print("[green]Validation completed.[/green]")
-        return
-
-    if show_timechop:
-        experiment_name = pathlib.Path(config).stem
-        project_storage = ProjectStorage(str(project_path))
-        target_store = project_storage.get_store(["images"], f"{experiment_name}.png")
-        with target_store.open("wb") as fd:
-            visualize_chops(experiment.chopper, save_target=fd)
-        console.print("[green]Timechop image saved.[/green]")
-        return
-
-    console.print("[yellow]Running experiment...[/yellow]")
-    experiment.run()
-    console.print("[green]Experiment completed successfully.[/green]")
 
 
 @app.command("audition")
