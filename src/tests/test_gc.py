@@ -9,6 +9,7 @@ from triage.artifacts import (
     begin_artifact,
     cache_hit,
     collect,
+    delete_outputs,
     gc_candidates,
     get_artifact,
     mark_built,
@@ -192,6 +193,44 @@ def test_collect_returns_file_backed_outputs_for_the_storage_layer(triage_db):
             "output_ref": "file:///tmp/m.parquet",
         }
     ]
+
+
+def test_delete_outputs_removes_files_through_the_storage_layer(triage_db, tmp_path):
+    matrix_file = tmp_path / "m.parquet"
+    matrix_file.write_bytes(b"parquet-bytes")
+    model_file = tmp_path / "model.joblib"
+    model_file.write_bytes(b"joblib-bytes")
+
+    matrix = build(
+        triage_db, derive("matrix", {"m": 1}, source_pins=PINS), "matrix", {"m": 1}
+    )
+    model = build(
+        triage_db, derive("model", {"k": 1}, source_pins=PINS), "model", {"k": 1}
+    )
+    # mark_built records the on-disk path as the output_ref (bare path, the greenfield form)
+    mark_built(triage_db, matrix.id, output_ref=str(matrix_file))
+    mark_built(triage_db, model.id, output_ref=str(model_file))
+
+    external = collect(triage_db, [matrix.id, model.id])
+    result = delete_outputs(external)
+
+    assert not matrix_file.exists()
+    assert not model_file.exists()
+    assert set(result["deleted"]) == {str(matrix_file), str(model_file)}
+    assert result["absent"] == []
+
+
+def test_delete_outputs_tolerates_already_absent_files(triage_db, tmp_path):
+    gone = tmp_path / "gone.parquet"  # never created
+    matrix = build(
+        triage_db, derive("matrix", {"m": 2}, source_pins=PINS), "matrix", {"m": 2}
+    )
+    mark_built(triage_db, matrix.id, output_ref=str(gone))
+
+    result = delete_outputs(collect(triage_db, [matrix.id]))
+
+    assert result["deleted"] == []
+    assert result["absent"] == [str(gone)]
 
 
 def test_collect_refuses_non_built_artifacts(triage_db):

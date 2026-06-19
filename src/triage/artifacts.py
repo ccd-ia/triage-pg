@@ -20,7 +20,9 @@ artifact — provenance still matters — but :func:`cache_hit` never returns th
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -349,6 +351,65 @@ def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]
         + f" {len(needs_external_deletion)} file-backed output(s) need storage-layer deletion"
     )
     return needs_external_deletion
+
+
+def _delete_output_file(output_ref: str) -> bool:
+    """Delete one file-backed artifact output, returning whether a file was removed.
+
+    Matches the greenfield write path: matrices/models are plain filesystem paths
+    (``adapters/matrix.py`` Parquet, ``adapters/model.py`` joblib), with ``s3://`` URIs
+    supported for future remote storage. A bare path or ``file://`` URI is a local file;
+    anything else dispatches by scheme. Returns ``False`` when the file is already absent
+    (collect already marked the row 'collected'; a leftover would only be overwritten on
+    rebuild). Real I/O errors propagate (fail fast, CLAUDE.md error policy).
+    """
+    parsed = urlparse(output_ref)
+    if parsed.scheme == "s3":
+        import s3fs
+
+        fs = s3fs.S3FileSystem()
+        if not fs.exists(output_ref):
+            return False
+        fs.rm(output_ref)
+        return True
+    # local filesystem: a bare path (scheme '') or a file:// URI
+    path = Path(parsed.path) if parsed.scheme == "file" else Path(output_ref)
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def delete_outputs(external: Sequence[Mapping[str, Any]]) -> dict[str, list[str]]:
+    """Delete the file-backed outputs returned by :func:`collect` (ADR-0017).
+
+    ``external`` is collect's ``[{artifact_id, kind, output_ref}, ...]``. This is the
+    storage-layer deletion step that derivation-dag.md §7 deferred "until the storage
+    adapter lands". A missing file is logged and skipped, never an error; a row without an
+    ``output_ref`` is logged and skipped. Returns ``{'deleted': [...], 'absent': [...]}``.
+    """
+    deleted: list[str] = []
+    absent: list[str] = []
+    for item in external:
+        ref = item.get("output_ref")
+        if not ref:
+            logger.warning(
+                f"Artifact {item['artifact_id']} ({item['kind']}) is file-backed but has"
+                + " no output_ref; nothing to delete"
+            )
+            continue
+        if _delete_output_file(ref):
+            deleted.append(ref)
+        else:
+            absent.append(ref)
+            logger.warning(
+                f"Output already absent for {item['kind']} {item['artifact_id']}: {ref}"
+            )
+    logger.info(
+        f"Deleted {len(deleted)} file-backed output(s);"
+        + f" {len(absent)} already absent"
+    )
+    return {"deleted": deleted, "absent": absent}
 
 
 def purge(engine: Engine, min_age_days: int = 0) -> list[str]:

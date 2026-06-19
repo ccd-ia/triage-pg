@@ -24,6 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from triage.artifacts import (
     archive_experiment,
     collect,
+    delete_outputs,
     gc_candidates,
     purge,
 )
@@ -69,7 +70,9 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Administer the Triage results schema and helpers.")
 app.add_typer(db_app, name="db")
-source_app = typer.Typer(help="Manage declared data sources and their version pins (ADR-0014).")
+source_app = typer.Typer(
+    help="Manage declared data sources and their version pins (ADR-0014)."
+)
 app.add_typer(source_app, name="source")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
@@ -97,7 +100,9 @@ def parse_date(value: str | datetime) -> datetime:
     try:
         return datetime.strptime(value, "%Y-%m-%d")
     except ValueError as exc:
-        raise typer.BadParameter(f"{value} is an invalid date (expected YYYY-MM-DD)") from exc
+        raise typer.BadParameter(
+            f"{value} is an invalid date (expected YYYY-MM-DD)"
+        ) from exc
 
 
 def load_file_from_store(path: str) -> str:
@@ -143,9 +148,13 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
         if environ_url:
             # Convert to psycopg3 driver if using postgresql:// or postgresql+psycopg2://
             if environ_url.startswith("postgresql://"):
-                environ_url = environ_url.replace("postgresql://", "postgresql+psycopg://", 1)
+                environ_url = environ_url.replace(
+                    "postgresql://", "postgresql+psycopg://", 1
+                )
             elif environ_url.startswith("postgresql+psycopg2://"):
-                environ_url = environ_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+                environ_url = environ_url.replace(
+                    "postgresql+psycopg2://", "postgresql+psycopg://", 1
+                )
             return environ_url
 
         # Try PostgreSQL standard environment variables
@@ -201,7 +210,9 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
         # Use render_as_string with hide_password=False to preserve the actual password
         return url.render_as_string(hide_password=False)
     except KeyError as exc:
-        raise typer.BadParameter("database.yaml is missing required keys: host, user, pass, port, db") from exc
+        raise typer.BadParameter(
+            "database.yaml is missing required keys: host, user, pass, port, db"
+        ) from exc
 
 
 def resolve_setup_path(setup: Optional[pathlib.Path]) -> Optional[pathlib.Path]:
@@ -332,8 +343,12 @@ def triage_callback(
 @app.command("featuretest")
 def feature_test(
     ctx: typer.Context,
-    feature_config_file: str = typer.Argument(..., help="Feature config YAML containing feature_aggregations."),
-    as_of_date: datetime = typer.Argument(..., callback=parse_date, help="Date (YYYY-MM-DD) to build features for."),
+    feature_config_file: str = typer.Argument(
+        ..., help="Feature config YAML containing feature_aggregations."
+    ),
+    as_of_date: datetime = typer.Argument(
+        ..., callback=parse_date, help="Date (YYYY-MM-DD) to build features for."
+    ),
 ) -> None:
     engine = get_engine(ctx)
     full_config = load_yaml_from_store(feature_config_file)
@@ -369,8 +384,12 @@ def experiment_command(
         "--project-path",
         help="Directory or URI to store matrices and models.",
     ),
-    n_db_processes: int = typer.Option(1, "--n-db-processes", callback=natural_number, help="DB worker count."),
-    n_processes: int = typer.Option(1, "--n-processes", callback=natural_number, help="Model worker count."),
+    n_db_processes: int = typer.Option(
+        1, "--n-db-processes", callback=natural_number, help="DB worker count."
+    ),
+    n_processes: int = typer.Option(
+        1, "--n-processes", callback=natural_number, help="Model worker count."
+    ),
     n_bigtrain_processes: int = typer.Option(
         1,
         "--n-bigtrain-processes",
@@ -390,9 +409,15 @@ def experiment_command(
         help="Matrix storage backend.",
         show_choices=list(MATRIX_STORAGE_MAP.keys()),
     ),
-    replace: bool = typer.Option(False, "--replace", help="Replace existing artifacts."),
-    validate: bool = typer.Option(True, "--validate/--no-validate", help="Validate config before running."),
-    validate_only: bool = typer.Option(False, "--validate-only", help="Only validate the config and exit."),
+    replace: bool = typer.Option(
+        False, "--replace", help="Replace existing artifacts."
+    ),
+    validate: bool = typer.Option(
+        True, "--validate/--no-validate", help="Validate config before running."
+    ),
+    validate_only: bool = typer.Option(
+        False, "--validate-only", help="Only validate the config and exit."
+    ),
     profile: bool = typer.Option(
         False,
         "--profile",
@@ -439,7 +464,9 @@ def experiment_command(
         additional_bigtrain_classnames=add_bigtrain_class,
     )
 
-    console.print(f"[cyan]Triage config version:[/cyan] {config_data.get('config_version', CONFIG_VERSION)}")
+    console.print(
+        f"[cyan]Triage config version:[/cyan] {config_data.get('config_version', CONFIG_VERSION)}"
+    )
     console.print(f"[cyan]Project path:[/cyan] {project_path}")
 
     if n_db_processes > 1 or n_processes > 1 or n_bigtrain_processes > 1:
@@ -483,8 +510,12 @@ def audition_command(
         "-c",
         help="Audition configuration file.",
     ),
-    validate: bool = typer.Option(True, "--validate/--no-validate", help="Validate configuration first."),
-    validate_only: bool = typer.Option(False, "--validate-only", help="Only validate audition config."),
+    validate: bool = typer.Option(
+        True, "--validate/--no-validate", help="Validate configuration first."
+    ),
+    validate_only: bool = typer.Option(
+        False, "--validate-only", help="Only validate audition config."
+    ),
     directory: Optional[pathlib.Path] = typer.Option(
         None, "--directory", "-d", help="Directory to store generated plots."
     ),
@@ -506,7 +537,9 @@ def retrain_predict_command(
     ctx: typer.Context,
     model_group_id: int = typer.Argument(..., callback=natural_number),
     prediction_date: datetime = typer.Argument(..., callback=parse_date),
-    project_path: pathlib.Path = typer.Option(pathlib.Path.cwd(), "--project-path", help="Artifact storage path."),
+    project_path: pathlib.Path = typer.Option(
+        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    ),
 ) -> None:
     engine = get_engine(ctx)
     retrainer = Retrainer(engine, str(project_path), model_group_id)
@@ -520,7 +553,9 @@ def predictlist_command(
     ctx: typer.Context,
     model_id: int = typer.Argument(..., callback=natural_number),
     as_of_date: datetime = typer.Argument(..., callback=parse_date),
-    project_path: pathlib.Path = typer.Option(pathlib.Path.cwd(), "--project-path", help="Artifact storage path."),
+    project_path: pathlib.Path = typer.Option(
+        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    ),
 ) -> None:
     engine = get_engine(ctx)
     predict_forward_with_existed_model(engine, str(project_path), model_id, as_of_date)
@@ -541,7 +576,9 @@ def analyze_config(
     matrix_sets = chopper.chop_time()
     total_train = len(matrix_sets)
     total_test = sum(len(m["test_matrices"]) for m in matrix_sets)
-    as_of_counts = [len(matrix["train_matrix"]["as_of_times"]) for matrix in matrix_sets]
+    as_of_counts = [
+        len(matrix["train_matrix"]["as_of_times"]) for matrix in matrix_sets
+    ]
     avg_train_as_of = sum(as_of_counts) / total_train if total_train else 0
 
     label_config = config_data.get("label_config", {})
@@ -551,7 +588,9 @@ def analyze_config(
     table.add_column("Statistic")
     table.add_column("Value", justify="right")
     table.add_row("Config Version", config_data.get("config_version", CONFIG_VERSION))
-    table.add_row("Feature Aggregations", str(len(config_data.get("feature_aggregations", []))))
+    table.add_row(
+        "Feature Aggregations", str(len(config_data.get("feature_aggregations", [])))
+    )
     table.add_row("Cohorts", "1" if cohort_config else "Default (labels-driven)")
     table.add_row("Train matrix sets", str(total_train))
     table.add_row("Test matrices", str(total_test))
@@ -597,7 +636,9 @@ def db_upgrade(
 @db_app.command("downgrade")
 def db_downgrade(
     ctx: typer.Context,
-    revision: str = typer.Option("-1", "--revision", "-r", help="Schema revision to downgrade to."),
+    revision: str = typer.Option(
+        "-1", "--revision", "-r", help="Schema revision to downgrade to."
+    ),
 ) -> None:
     downgrade_db(revision=revision, dburl=get_state(ctx).db_url)
     console.print("[green]Database downgraded.[/green]")
@@ -641,11 +682,15 @@ def db_up_command(
     if inspect.returncode != 0:
         console.print("[yellow]Provisioning new Postgres container...[/yellow]")
         if DEFAULT_DATABASE_FILE.exists():
-            console.print("[red]database.yaml already exists; refusing to overwrite.[/red]")
+            console.print(
+                "[red]database.yaml already exists; refusing to overwrite.[/red]"
+            )
             raise typer.Exit(1)
         db_password = ""
         if password:
-            db_password = typer.prompt("Enter a password for your new database user", hide_input=True)
+            db_password = typer.prompt(
+                "Enter a password for your new database user", hide_input=True
+            )
         run = subprocess.run(
             [
                 "docker",
@@ -683,7 +728,9 @@ def db_up_command(
             "db": "triage",
         }
         DEFAULT_DATABASE_FILE.write_text(yaml.dump(config))
-        console.print("[green]Database created. Credentials written to database.yaml.[/green]")
+        console.print(
+            "[green]Database created. Credentials written to database.yaml.[/green]"
+        )
     elif "running" in inspect.stdout:
         console.print("[green]triage_db container is already running.[/green]")
     else:
@@ -779,7 +826,9 @@ def source_show(
 @app.command("archive")
 def archive_command(
     ctx: typer.Context,
-    experiment_hash: str = typer.Argument(..., help="Experiment to archive (removes it from the GC root set)."),
+    experiment_hash: str = typer.Argument(
+        ..., help="Experiment to archive (removes it from the GC root set)."
+    ),
 ) -> None:
     """Soft-archive an experiment (ADR-0017). Reversible until a gc sweep."""
     engine = get_engine(ctx)
@@ -793,13 +842,17 @@ def archive_command(
 @app.command("gc")
 def gc_command(
     ctx: typer.Context,
-    delete: bool = typer.Option(False, "--delete", help="Collect dead artifacts' outputs (default: dry run)."),
+    delete: bool = typer.Option(
+        False, "--delete", help="Collect dead artifacts' outputs (default: dry run)."
+    ),
     do_purge: bool = typer.Option(
         False,
         "--purge",
         help="Also delete the rows of dead collected/failed artifacts.",
     ),
-    min_age: int = typer.Option(0, "--min-age", help="Only touch artifacts built at least N days ago."),
+    min_age: int = typer.Option(
+        0, "--min-age", help="Only touch artifacts built at least N days ago."
+    ),
 ) -> None:
     """Garbage-collect artifacts unreachable from any root (ADR-0017).
 
@@ -818,7 +871,9 @@ def gc_command(
         table.add_column("Artifact")
         table.add_column("Output")
         for row in candidates:
-            table.add_row(str(row["kind"]), row["artifact_id"][:16] + "…", row["output_ref"] or "")
+            table.add_row(
+                str(row["kind"]), row["artifact_id"][:16] + "…", row["output_ref"] or ""
+            )
         console.print(table)
 
     if not delete and not do_purge:
@@ -830,11 +885,17 @@ def gc_command(
 
     if delete and candidates:
         external = collect(engine, [row["artifact_id"] for row in candidates])
-        console.print(f"[green]Collected {len(candidates)} artifact(s); in-PG slices deleted.[/green]")
+        console.print(
+            f"[green]Collected {len(candidates)} artifact(s); in-PG slices deleted.[/green]"
+        )
         if external:
-            console.print("[yellow]File-backed outputs to remove via the storage layer:[/yellow]")
-            for item in external:
-                console.print(f"  {item['kind']}: {item['output_ref'] or '(no ref)'}")
+            result = delete_outputs(external)
+            console.print(
+                f"[green]Deleted {len(result['deleted'])} file-backed output(s)"
+                f" via the storage layer.[/green]"
+            )
+            for ref in result["absent"]:
+                console.print(f"[yellow]  already absent: {ref}[/yellow]")
 
     if do_purge:
         purged = purge(engine, min_age_days=min_age)
