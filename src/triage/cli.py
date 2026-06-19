@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 
 from triage.adapters.forward import predict_forward
 from triage.adapters.retrain import retrain_and_predict
+from triage.adapters.run import run_experiment
 from triage.artifacts import (
     archive_experiment,
     collect,
@@ -373,6 +374,57 @@ def feature_test(
     console.print(
         f"[green]Feature test completed for {as_of_date.date()}[/green]",
         justify="left",
+    )
+
+
+@app.command("run")
+def run_command(
+    ctx: typer.Context,
+    config: str = typer.Argument(
+        ...,
+        help="Greenfield experiment config YAML (problem_type, temporal_config,"
+        " cohort_config, label_config, feature_config, grid_config, sources).",
+    ),
+    project_path: pathlib.Path = typer.Option(
+        pathlib.Path.cwd(),
+        "--project-path",
+        help="Directory or URI to store Parquet matrices + joblib models.",
+    ),
+    random_seed: int = typer.Option(
+        0,
+        "--random-seed",
+        help="Deterministic seed stored on the run + passed to models.",
+    ),
+    profile: str = typer.Option(
+        "local", "--profile", help="Run profile: 'local' or 'cloud'."
+    ),
+    cache_policy: str = typer.Option(
+        "exact", "--cache-policy", help="Artifact cache policy: 'exact' or 'logical'."
+    ),
+) -> None:
+    """Run a greenfield experiment end-to-end (cohort→labels→matrix→model→eval, ADR-0012).
+
+    The single CLI entry point onto ``triage.adapters.run.run_experiment`` — the headless
+    core that drives the whole artifact-DAG pipeline from one config.
+    """
+    engine = get_engine(ctx)
+    config_data = load_experiment_config(config)
+    result = run_experiment(
+        engine,
+        config_data,
+        storage_dir=str(project_path),
+        random_seed=random_seed,
+        profile=profile,
+        cache_policy=cache_policy,
+    )
+    console.print(
+        f"[green]Run {str(result.run_id)[:8]}… completed:[/green]"
+        f" {result.num_models} model(s), {result.num_predictions} prediction(s),"
+        f" {result.num_evaluations} evaluation(s)."
+    )
+    console.print(
+        f"[cyan]Experiment:[/cyan] {result.experiment_hash[:12]}…"
+        f"  [cyan]storage:[/cyan] {project_path}"
     )
 
 
