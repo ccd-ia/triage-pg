@@ -93,7 +93,7 @@ class ModelGroupPerformancePlotter:
                     raw_value,
                     mg.model_type as model_type
                 from {dist_table} as dist
-                join triage_metadata.model_groups mg using (model_group_id)
+                join triage.model_groups mg using (model_group_id)
                 where model_group_id in ({model_group_ids})
                 union
                 select

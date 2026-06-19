@@ -37,34 +37,23 @@ class PreAudition:
         Args:
             labed_def: (string) Label definition in triage schema
 
+        Not implemented for the greenfield ``triage.*`` schema: the greenfield
+        ``triage.model_groups.config`` column is populated by
+        ``triage.adapters.model._select_or_insert_model_group``, which writes
+        only ``model_group_hash``/``model_type``/``hyperparameters``/
+        ``feature_list`` — it carries no ``label_definition`` key. Label-based
+        model-group selection therefore has nothing to filter on until the model
+        adapter records ``label_definition`` in ``config``. The mainline
+        ``AuditionRunner`` path uses ``get_model_groups(query)`` +
+        ``get_train_end_times`` instead, so this stub does not block audition.
         """
-        query = """
-            SELECT DISTINCT(model_group_id)
-            FROM triage_metadata.model_groups
-            WHERE model_config->>'label_definition' = :label_definition
-            {baseline_clause}
-            """
-
-        with self.db_engine.connect() as conn:
-            model_groups = pd.read_sql(
-                text(query.format(baseline_clause=self.nonbaseline_where)),
-                con=conn,
-                params={"label_definition": label_def},
-            )
-        self.model_groups = list(model_groups["model_group_id"])
-
-        with self.db_engine.connect() as conn:
-            baseline_model_groups = pd.read_sql(
-                text(query.format(baseline_clause=self.baseline_where)),
-                con=conn,
-                params={"label_definition": label_def},
-            )
-        self.baseline_model_groups = list(baseline_model_groups["model_group_id"])
-
-        return {
-            "model_groups": self.model_groups,
-            "baseline_model_groups": self.baseline_model_groups,
-        }
+        raise NotImplementedError(
+            "Label-based model-group selection is not available on the greenfield "
+            "triage schema: triage.model_groups.config does not yet carry a "
+            "'label_definition' key (see triage.adapters.model."
+            "_select_or_insert_model_group). Use get_model_groups_from_experiment "
+            "or get_model_groups(query) to select model groups for audition."
+        )
 
     def get_model_groups_from_experiment(self, experiment_hash):
         """A function to pull model groups based on experiment_hash in order
@@ -75,9 +64,9 @@ class PreAudition:
         """
         query = """
             SELECT DISTINCT(model_group_id)
-            FROM triage_metadata.models
-            JOIN triage_metadata.experiment_models using (model_hash)
-            WHERE experiment_hash = :experiment_hash
+            FROM triage.models m
+            JOIN triage.runs r ON m.run_id = r.run_id
+            WHERE r.experiment_hash = :experiment_hash
             {baseline_clause}
             """
 
@@ -130,18 +119,22 @@ class PreAudition:
 
             query = f"""
             SELECT DISTINCT train_end_time
-            FROM triage_metadata.models
+            FROM triage.models
             WHERE model_group_id IN ({model_groups_stmt})
                 AND train_end_time >= :after
             ORDER BY train_end_time
             ;
             """
         logger.spam(f"pre audition get train end times with query: {query}")
-        end_times = sorted(
-            list(
-                pd.read_sql(text(query), con=self.db_engine, params={"after": after})[
-                    "train_end_time"
-                ]
-            )
+        # greenfield triage.models.train_end_time is a DATE, so pandas reads it
+        # as datetime.date; the inherited schema used a TIMESTAMP (-> Timestamp).
+        # Normalize to pandas Timestamps so the downstream pandas comparisons
+        # against the distance table's datetime64 train_end_time column (in
+        # regrets / model_group_performance / thresholding) keep working.
+        train_end_time_col = pd.to_datetime(
+            pd.read_sql(text(query), con=self.db_engine, params={"after": after})[
+                "train_end_time"
+            ]
         )
+        end_times = sorted(train_end_time_col.tolist())
         return end_times

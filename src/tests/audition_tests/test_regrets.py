@@ -12,11 +12,11 @@ from triage.component.audition.selection_rules import (
 from .utils import create_sample_distance_table
 
 
-def test_selection_rule_picker(db_engine):
-    distance_table, model_groups = create_sample_distance_table(db_engine)
+def test_selection_rule_picker(db_engine_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
 
     def pick_spiky(df, train_end_time):
-        return [model_groups["spiky"].model_group_id]
+        return [model_groups["spiky"]]
 
     selection_rule_picker = SelectionRulePicker(distance_from_best_table=distance_table)
 
@@ -24,7 +24,7 @@ def test_selection_rule_picker(db_engine):
         bound_selection_rule=BoundSelectionRule(
             descriptive_name="spiky", function=pick_spiky, args={}
         ),
-        model_group_ids=[mg.model_group_id for mg in model_groups.values()],
+        model_group_ids=list(model_groups.values()),
         train_end_times=["2014-01-01", "2015-01-01", "2016-01-01"],
         regret_metric="precision@",
         regret_parameter="100_abs",
@@ -37,8 +37,8 @@ def test_selection_rule_picker(db_engine):
     assert [result["raw_value"] for result in results] == [0.45, 0.84, 0.45]
 
 
-def test_selection_rule_picker_with_args(db_engine):
-    distance_table, model_groups = create_sample_distance_table(db_engine)
+def test_selection_rule_picker_with_args(db_engine_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
 
     def pick_highest_avg(df, train_end_time, metric, parameter):
         assert len(df["train_end_time"].unique()) == 2
@@ -55,7 +55,7 @@ def test_selection_rule_picker_with_args(db_engine):
                 function=pick_highest_avg,
                 args={"metric": "recall@", "parameter": "100_abs"},
             ),
-            model_group_ids=[mg.model_group_id for mg in model_groups.values()],
+            model_group_ids=list(model_groups.values()),
             train_end_times=["2015-01-01"],
             regret_metric="precision@",
             regret_parameter="100_abs",
@@ -65,8 +65,8 @@ def test_selection_rule_picker_with_args(db_engine):
     assert regrets == [0.3]
 
 
-def test_SelectionPlotter_create_plot_dataframe(db_engine):
-    distance_table, model_groups = create_sample_distance_table(db_engine)
+def test_SelectionPlotter_create_plot_dataframe(db_engine_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
     plotter = SelectionRulePlotter(
         selection_rule_picker=SelectionRulePicker(distance_table)
     )
@@ -83,7 +83,7 @@ def test_SelectionPlotter_create_plot_dataframe(db_engine):
                 args={"metric": "precision@", "parameter": "100_abs"},
             ),
         ],
-        model_group_ids=[mg.model_group_id for mg in model_groups.values()],
+        model_group_ids=list(model_groups.values()),
         train_end_times=["2014-01-01", "2015-01-01", "2016-01-01"],
         regret_metric="precision@",
         regret_parameter="100_abs",
@@ -103,9 +103,9 @@ def test_SelectionPlotter_create_plot_dataframe(db_engine):
         assert np.isclose(value, 1.0 / 3)
 
 
-def test_SelectionPlotter_plot(db_engine):
+def test_SelectionPlotter_plot(db_engine_greenfield):
     with patch("triage.component.audition.regrets.plot_cats") as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(db_engine)
+        distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
         plotter = SelectionRulePlotter(
             selection_rule_picker=SelectionRulePicker(distance_table)
         )
@@ -122,7 +122,7 @@ def test_SelectionPlotter_plot(db_engine):
                     args={"metric": "precision@", "parameter": "100_abs"},
                 ),
             ],
-            model_group_ids=[mg.model_group_id for mg in model_groups.values()],
+            model_group_ids=list(model_groups.values()),
             train_end_times=["2014-01-01", "2015-01-01", "2016-01-01"],
             regret_metric="precision@",
             regret_parameter="100_abs",

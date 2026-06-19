@@ -62,11 +62,11 @@ def test_SelectionRulePerformancePlotter_generate_plot_data():
     }
 
 
-def test_SelectionRulePerformancePlotter_plot_regrets(db_engine):
+def test_SelectionRulePerformancePlotter_plot_regrets(db_engine_greenfield):
     with patch(
         "triage.component.audition.selection_rule_performance.plot_cats"
     ) as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(db_engine)
+        distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
         plotter = SelectionRulePerformancePlotter(SelectionRulePicker(distance_table))
         plotter.plot(
             bound_selection_rules=[
@@ -92,11 +92,11 @@ def test_SelectionRulePerformancePlotter_plot_regrets(db_engine):
     assert kwargs["y_col"] == "regret"
 
 
-def test_SelectionRulePerformancePlotter_plot_metrics(db_engine):
+def test_SelectionRulePerformancePlotter_plot_metrics(db_engine_greenfield):
     with patch(
         "triage.component.audition.selection_rule_performance.plot_cats"
     ) as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(db_engine)
+        distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
         plotter = SelectionRulePerformancePlotter(SelectionRulePicker(distance_table))
         plotter.plot(
             bound_selection_rules=[

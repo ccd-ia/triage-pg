@@ -63,7 +63,7 @@ class DistanceFromBestTable:
                 row should be a dict with keys:
                         'metric' (e.g. 'precision@')
                         'parameter' (e.g. '100_abs')
-                All models should have the test_results.evaluations table populated
+                All models should have the triage.evaluations table populated
                 for all given model group ids, train end times, and metric/param combos
         """
         logger.debug("Populating data to distance table")
@@ -73,25 +73,18 @@ class DistanceFromBestTable:
                     text(
                         """
                         insert into {new_table}
-                        WITH first_evals AS (
-                            SELECT *, row_number() OVER (
-                                PARTITION BY model_id
-                                ORDER BY evaluation_start_time ASC, evaluation_end_time ASC
-                                ) AS eval_rn
-                            FROM test_results.evaluations
-                            WHERE metric='{metric}' AND parameter='{parameter}' AND subset_hash=''
-                        ),
-                        metric_values AS (
+                        WITH metric_values AS (
                             SELECT
                                 m.model_group_id,
                                 m.train_end_time,
-                                {metric_agg_fcn}(ev.stochastic_value) as value
-                        FROM first_evals ev
-                        JOIN triage_metadata.{models_table} m USING(model_id)
-                        JOIN triage_metadata.model_groups mg USING(model_group_id)
-                        WHERE m.model_group_id IN ({model_group_ids})
+                                {metric_agg_fcn}(ev.value) as value
+                        FROM triage.evaluations ev
+                        JOIN triage.{models_table} m USING(model_id)
+                        JOIN triage.model_groups mg USING(model_group_id)
+                        WHERE ev.metric='{metric}' AND ev.parameter='{parameter}'
+                                AND ev.subset_hash='' AND ev.split_kind = 'test'
+                                AND m.model_group_id IN ({model_group_ids})
                                 AND train_end_time in ({train_end_times})
-                                AND ev.eval_rn = 1
                         GROUP BY model_group_id, train_end_time
                         ),
                         model_ranks AS (
@@ -193,7 +186,7 @@ class DistanceFromBestTable:
                 row should be a dict with keys:
                         'metric' (e.g. 'precision@')
                         'parameter' (e.g. '100_abs')
-                All models should have the test_results.evaluations table populated
+                All models should have the triage.evaluations table populated
                 for all given model group ids, train end times, and metric/param combos
             delete (boolean, optional) Delete any previous version of the
                 distance table if it exists
@@ -224,13 +217,19 @@ class DistanceFromBestTable:
 
         Args:
             model_group_ids (list) the desired model group ids
-            train_end_date (string) the desired train end time
+            train_end_date (string|date|datetime) the desired train end time
 
         Returns: (pandas.DataFrame) The data from the table corresponding
             to those model group ids and train end time
         """
         base_df = self.as_dataframe(model_group_ids)
-        return base_df[base_df["train_end_time"] == train_end_time]
+        # The distance table stores train_end_time as a timestamp (pandas reads
+        # it as datetime64). The caller may pass a string, a datetime.date (the
+        # greenfield triage.models.train_end_time type), or a datetime, so
+        # normalize both sides to Timestamps before comparing — a raw `==`
+        # between datetime64 and a date object is element-wise False.
+        target = pd.Timestamp(train_end_time)
+        return base_df[pd.to_datetime(base_df["train_end_time"]) == target]
 
 
 class BestDistancePlotter:
@@ -308,7 +307,7 @@ class BestDistancePlotter:
                     AVG(CASE WHEN dist_from_best_case <= distance THEN 1 ELSE 0 END) AS pct_of_time
             FROM {distance_table} dist
             JOIN x_vals USING(model_group_id)
-            JOIN triage_metadata.model_groups mg using (model_group_id)
+            JOIN triage.model_groups mg using (model_group_id)
             WHERE
                 dist.metric='{metric}'
                 AND dist.parameter='{parameter}'
