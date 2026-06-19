@@ -36,7 +36,7 @@ from triage.component.architect.entity_date_table_generators import (
 )
 from triage.component.architect.feature_generators import FeatureGenerator
 from triage.component.audition import AuditionRunner
-from triage.component.catwalk.model_trainers import flatten_grid_config
+from triage.component.catwalk.grid import flatten_grid_config
 from triage.component.catwalk.storage import CSVMatrixStore, ProjectStorage, Store
 from triage.component.results_schema import (
     TriageRun,

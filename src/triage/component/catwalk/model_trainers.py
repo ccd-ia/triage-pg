@@ -13,7 +13,6 @@ from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 from joblib import parallel_backend
-from sklearn.model_selection import ParameterGrid
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
@@ -23,6 +22,7 @@ from triage.tracking import built_model, errored_model, skipped_model
 from triage.util.random import generate_python_random_seed
 
 from .feature_importances import get_feature_importances
+from .grid import NO_FEATURE_IMPORTANCE, flatten_grid_config
 from .model_grouping import ModelGrouper
 from .utils import (
     db_retry,
@@ -33,20 +33,10 @@ from .utils import (
     save_db_objects,
 )
 
-NO_FEATURE_IMPORTANCE = (
-    "Algorithm does not support a standard way" + " to calculate feature importance."
-)
-
-
-def flatten_grid_config(grid_config):
-    """Flattens a model/parameter grid configuration into individually
-    trainable model/parameter pairs
-
-    Yields: (tuple) classpath and parameters
-    """
-    for class_path, parameter_config in grid_config.items():
-        for parameters in ParameterGrid(parameter_config):
-            yield class_path, parameters
+# NO_FEATURE_IMPORTANCE and flatten_grid_config moved to catwalk/grid.py (a dependency-free
+# leaf) and are re-exported here so the inherited training path keeps working until it is
+# deleted with the rest of the old flow.
+__all__ = ["NO_FEATURE_IMPORTANCE", "flatten_grid_config", "ModelTrainer"]
 
 
 class ModelTrainer:

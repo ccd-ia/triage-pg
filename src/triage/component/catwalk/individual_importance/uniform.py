@@ -1,5 +1,7 @@
-from triage.component.catwalk.model_trainers import NO_FEATURE_IMPORTANCE
 from sqlalchemy import text
+
+from triage.component.catwalk.grid import NO_FEATURE_IMPORTANCE
+
 
 def _entity_feature_values(matrix, feature_name, as_of_date):
     """Finds the value of the given feature for each entity in a matrix
@@ -22,9 +24,11 @@ def _entity_feature_values(matrix, feature_name, as_of_date):
         index_values, feature_value = row
         entity_id = index_values[index_of_entity]
         if type(index_values[index_of_date].date()) != type(as_of_date):
-            raise TypeError("Types of date in matrix and input must match, "
-                            f"Matrix was {type(index_values[index_of_date].date())}",
-                            f"Input was {type(as_of_date)}")
+            raise TypeError(
+                "Types of date in matrix and input must match, "
+                f"Matrix was {type(index_values[index_of_date].date())}",
+                f"Input was {type(as_of_date)}",
+            )
         if index_values[index_of_date].date() == as_of_date:
             results.append((entity_id, feature_value))
     return results
@@ -46,24 +50,24 @@ def uniform_distribution(db_engine, model_id, as_of_date, test_matrix_store, n_r
         global_feature_importances = [
             row
             for row in conn.execute(
-                text(
-                    f"""
+                text(f"""
                         select feature, feature_importance
-                        from train_results.feature_importances where model_id = :model_id
+                        from triage.feature_importances where model_id = :model_id
                         order by feature_importance desc limit :n_ranks
-                    """
-                ),
+                    """),
                 {
                     "model_id": model_id,
                     "n_ranks": n_ranks,
-                }
+                },
             )
         ]
 
     results = []
 
     for feature_name, feature_importance in global_feature_importances:
-        efv = _entity_feature_values(test_matrix_store.design_matrix, feature_name, as_of_date)
+        efv = _entity_feature_values(
+            test_matrix_store.design_matrix, feature_name, as_of_date
+        )
         for entity_id, feature_value in efv:
             results.append(
                 {
