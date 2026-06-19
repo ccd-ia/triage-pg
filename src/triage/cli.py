@@ -21,6 +21,8 @@ from rich.table import Table
 from sqlalchemy.engine.url import URL
 from sqlalchemy.orm import sessionmaker
 
+from triage.adapters.forward import predict_forward
+from triage.adapters.retrain import retrain_and_predict
 from triage.artifacts import (
     archive_experiment,
     collect,
@@ -50,7 +52,6 @@ from triage.experiments import (
     SingleThreadedExperiment,
 )
 from triage.logging import configure_logging, get_logger
-from triage.predictlist import Retrainer, predict_forward_with_existed_model
 from triage.sources import (
     bump_source,
     check_drift,
@@ -542,9 +543,12 @@ def retrain_predict_command(
     ),
 ) -> None:
     engine = get_engine(ctx)
-    retrainer = Retrainer(engine, str(project_path), model_group_id)
-    retrainer.retrain(prediction_date)
-    retrainer.predict(prediction_date)
+    retrain_and_predict(
+        engine,
+        model_group_id,
+        prediction_date.date(),
+        storage_dir=str(project_path),
+    )
     console.print("[green]Retrain and predict completed.[/green]")
 
 
@@ -558,7 +562,12 @@ def predictlist_command(
     ),
 ) -> None:
     engine = get_engine(ctx)
-    predict_forward_with_existed_model(engine, str(project_path), model_id, as_of_date)
+    predict_forward(
+        engine,
+        model_id,
+        as_of_date.date(),
+        storage_dir=str(project_path),
+    )
     console.print("[green]Prediction list generated.[/green]")
 
 

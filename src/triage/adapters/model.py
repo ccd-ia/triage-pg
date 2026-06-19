@@ -79,6 +79,7 @@ logger = get_logger(__name__)
 __all__ = [
     "build_model",
     "score_and_evaluate",
+    "score_matrix",
     "ModelResult",
     "ScoreEvaluateResult",
     "MODEL_KIND",
@@ -123,7 +124,9 @@ def _import_estimator(class_path: str):
     """Import an estimator class from its dotted ``module.ClassName`` path."""
     module_path, _, class_name = class_path.rpartition(".")
     if not module_path:
-        raise ValueError(f"class_path {class_path!r} must be a dotted 'module.ClassName' path")
+        raise ValueError(
+            f"class_path {class_path!r} must be a dotted 'module.ClassName' path"
+        )
     import importlib
 
     module = importlib.import_module(module_path)
@@ -131,7 +134,8 @@ def _import_estimator(class_path: str):
         return getattr(module, class_name)
     except AttributeError as exc:
         raise ValueError(
-            f"estimator class {class_name!r} not found in module {module_path!r}" + f" (from class_path {class_path!r})"
+            f"estimator class {class_name!r} not found in module {module_path!r}"
+            + f" (from class_path {class_path!r})"
         ) from exc
 
 
@@ -232,7 +236,9 @@ def build_model(
     feature_list = list(train_matrix_result.feature_names)
     canonical_hp = _canonical_hyperparameters(hyperparameters)
 
-    train_deriv = _reconstruct_derivation(db_engine, train_matrix_artifact_id, "train matrix")
+    train_deriv = _reconstruct_derivation(
+        db_engine, train_matrix_artifact_id, "train matrix"
+    )
 
     model_config = {
         "class_path": class_path,
@@ -253,7 +259,9 @@ def build_model(
     # ---- cache: an already-built model is reused wholesale (estimator reloaded from disk).
     hit = cache_hit(db_engine, model_derivation, policy=policy)
     if hit is not None:
-        logger.info(f"Model {model_derivation.id[:12]}… already built — reusing (cache hit)")
+        logger.info(
+            f"Model {model_derivation.id[:12]}… already built — reusing (cache hit)"
+        )
         record_use(db_engine, run_id, [model_derivation.id])
         existing = _existing_model_row(db_engine, model_derivation.id)
         return ModelResult(
@@ -279,7 +287,9 @@ def build_model(
     )
 
     try:
-        estimator, x_columns = _fit_estimator(train_matrix_result, class_path, hyperparameters, random_seed)
+        estimator, x_columns = _fit_estimator(
+            train_matrix_result, class_path, hyperparameters, random_seed
+        )
         artifact_uri = _serialize_estimator(estimator, storage_dir, model_derivation.id)
         model_size_bytes = Path(artifact_uri).stat().st_size
 
@@ -360,7 +370,6 @@ def _fit_estimator(
     cannot learn from an absent target, and the F2 matrix keeps them as a left-join NULL.
     """
     import numpy as np
-    import polars as pl
 
     estimator_cls = _import_estimator(class_path)
     estimator = _instantiate(estimator_cls, hyperparameters, random_seed)
@@ -371,9 +380,12 @@ def _fit_estimator(
             f"train matrix {train_matrix_result.storage_uri} has no 'outcome' column —"
             + " classification/regression training requires a label (ADR-0010)"
         )
-    y = frame.get_column("outcome").to_numpy()
-
-    labeled = ~pl.Series(y).is_null().to_numpy()
+    # Detect unlabeled rows on the Polars column directly: a NULL outcome becomes NaN once the
+    # column is materialized to numpy, and pl.Series(numpy_with_nan).is_null() would miss it —
+    # letting NaN labels reach the estimator. is_not_null() on the source column is exact.
+    outcome = frame.get_column("outcome")
+    labeled = outcome.is_not_null().to_numpy()
+    y = outcome.to_numpy()
     n_labeled = int(labeled.sum())
     if n_labeled == 0:
         raise ValueError(
@@ -385,7 +397,8 @@ def _fit_estimator(
 
     estimator.fit(x_fit, y_fit)
     logger.debug(
-        f"Fitted {class_path} on {n_labeled}/{frame.height} labeled rows ×" + f" {len(feature_columns)} features"
+        f"Fitted {class_path} on {n_labeled}/{frame.height} labeled rows ×"
+        + f" {len(feature_columns)} features"
     )
     return estimator, feature_columns
 
@@ -446,7 +459,10 @@ def _select_or_insert_model_group(
     """
     with db_engine.begin() as conn:
         existing = conn.execute(
-            text("select model_group_id from triage.model_groups" + " where model_group_hash = :h"),
+            text(
+                "select model_group_id from triage.model_groups"
+                + " where model_group_hash = :h"
+            ),
             {"h": group_hash},
         ).scalar_one_or_none()
         if existing is not None:
@@ -469,7 +485,10 @@ def _select_or_insert_model_group(
         if model_group_id is None:
             # A concurrent insert won the race; re-read the now-present row.
             model_group_id = conn.execute(
-                text("select model_group_id from triage.model_groups" + " where model_group_hash = :h"),
+                text(
+                    "select model_group_id from triage.model_groups"
+                    + " where model_group_hash = :h"
+                ),
                 {"h": group_hash},
             ).scalar_one()
     return model_group_id
@@ -545,7 +564,9 @@ def _feature_importance_values(estimator, n_features: int):
     return values
 
 
-def _persist_feature_importances(db_engine: Engine, model_id: int, estimator, feature_columns: Sequence[str]) -> None:
+def _persist_feature_importances(
+    db_engine: Engine, model_id: int, estimator, feature_columns: Sequence[str]
+) -> None:
     """INSERT ``triage.feature_importances`` rows with absolute + percentile ranks (ADR-0011).
 
     ``rank_abs`` is the 1-based rank by ``abs(importance)`` descending (deterministic
@@ -555,7 +576,9 @@ def _persist_feature_importances(db_engine: Engine, model_id: int, estimator, fe
 
     values = _feature_importance_values(estimator, len(feature_columns))
     if values is None:
-        logger.debug(f"model_id={model_id} estimator exposes no feature importances — none persisted")
+        logger.debug(
+            f"model_id={model_id} estimator exposes no feature importances — none persisted"
+        )
         return
 
     pairs = list(zip(feature_columns, values, strict=True))
@@ -595,7 +618,10 @@ def _existing_model_row(db_engine: Engine, model_artifact_id: str) -> dict[str, 
     with db_engine.connect() as conn:
         row = (
             conn.execute(
-                text("select model_id, model_group_id, artifact_uri" + " from triage.models where model_hash = :h"),
+                text(
+                    "select model_id, model_group_id, artifact_uri"
+                    + " from triage.models where model_hash = :h"
+                ),
                 {"h": model_artifact_id},
             )
             .mappings()
@@ -684,11 +710,15 @@ def score_and_evaluate(
     Raises:
         ValueError: on a marked-failed-style misconfiguration (missing keys, bad bias args).
     """
-    cfg = dict(metric_config) if metric_config is not None else dict(DEFAULT_CLASSIFICATION_CONFIG)
+    cfg = (
+        dict(metric_config)
+        if metric_config is not None
+        else dict(DEFAULT_CLASSIFICATION_CONFIG)
+    )
     test_matrix_uuid = str(as_uuid(test_matrix_result.matrix_artifact_id))
 
     try:
-        scores = _build_scores(estimator, test_matrix_result)
+        scores = score_matrix(estimator, test_matrix_result)
         num_predictions = record_predictions(
             db_engine,
             model_id,
@@ -708,7 +738,10 @@ def score_and_evaluate(
         num_bias = 0
         if compute_bias:
             if not bias_parameter:
-                raise ValueError("compute_bias=True requires bias_parameter (a top-k threshold," + " e.g. '10_pct')")
+                raise ValueError(
+                    "compute_bias=True requires bias_parameter (a top-k threshold,"
+                    + " e.g. '10_pct')"
+                )
             num_bias = compute_bias_in_db(
                 db_engine,
                 model_id,
@@ -739,17 +772,26 @@ def score_and_evaluate(
     )
 
 
-def _build_scores(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]:
-    """Build the append-only score rows from a test matrix's keys + the estimator's scores.
+def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]:
+    """Build the append-only score rows from a matrix's keys + the estimator's scores.
 
     One row per matrix row: ``{entity_id, as_of_date, score}``. The estimator scores X (the
     ``feature_names`` columns); the keys come from the matrix's ``entity_id`` / ``as_of_date``
     columns in the same row order, so scores align with the entities that produced them.
+
+    This is the shared scoring step for both :func:`score_and_evaluate` (test/validation) and
+    forward scoring (:mod:`triage.adapters.forward`), which has no labels to evaluate — it
+    reads only X and the keys, never ``outcome``, so an unlabeled production matrix scores
+    fine. To score against a specific feature geometry (e.g. the train matrix's columns when a
+    forward matrix's data-dependent columns differ), pass a ``matrix_result`` whose
+    ``feature_names`` is that geometry; X is selected by exactly that list.
     """
     x, _feature_columns, frame = _design_X(matrix_result)
     for key in _KEY_COLS:
         if key not in frame.columns:
-            raise ValueError(f"test matrix {matrix_result.storage_uri} is missing key column {key!r}")
+            raise ValueError(
+                f"test matrix {matrix_result.storage_uri} is missing key column {key!r}"
+            )
     scores = _score_column(estimator, x)
     entity_ids = frame.get_column("entity_id").to_list()
     as_of_dates = frame.get_column("as_of_date").to_list()
@@ -759,5 +801,7 @@ def _build_scores(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]
             "as_of_date": as_of_date,
             "score": float(score),
         }
-        for entity_id, as_of_date, score in zip(entity_ids, as_of_dates, scores, strict=True)
+        for entity_id, as_of_date, score in zip(
+            entity_ids, as_of_dates, scores, strict=True
+        )
     ]

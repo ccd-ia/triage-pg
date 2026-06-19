@@ -388,10 +388,11 @@ def build_matrix(
             f"matrix_kind {matrix_kind!r} is not a triage.split_kind"
             + " ('train'|'test'|'validation'|'production')"
         )
-    if matrix_kind == "test" and train_matrix_artifact_id is None:
+    if matrix_kind in ("test", "production") and train_matrix_artifact_id is None:
         raise ValueError(
-            "a test matrix requires train_matrix_artifact_id — the train-fitted imputation"
-            + " statistics flow to test along that parent edge (ADR-0009, adapter-spec §3.6)"
+            f"a {matrix_kind} matrix requires train_matrix_artifact_id — the train-fitted"
+            + " imputation statistics flow along that parent edge, so test/production reuse"
+            + " the train fit rather than refitting (ADR-0009, adapter-spec §3.6)"
         )
     if matrix_kind == "train" and train_matrix_artifact_id is not None:
         raise ValueError("a train matrix must not take a train_matrix parent")

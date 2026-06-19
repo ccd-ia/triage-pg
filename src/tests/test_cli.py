@@ -64,20 +64,21 @@ def test_featuretest():
 
 
 def test_cli_predictlist():
-    with patch("triage.cli.predict_forward_with_existed_model", autospec=True) as predict_mock:
+    with patch("triage.cli.predict_forward", autospec=True) as predict_mock:
         invoke("predictlist", "40", "2019-06-04")
         predict_mock.assert_called_once()
         args = predict_mock.call_args[0]
-        assert args[2] == 40
-        assert args[3] == datetime.datetime(2019, 6, 4)
+        assert args[1] == 40
+        assert args[2] == datetime.date(2019, 6, 4)
 
 
 def test_cli_retrain_predict():
-    with patch("triage.cli.Retrainer", autospec=True) as retrain_mock:
+    with patch("triage.cli.retrain_and_predict", autospec=True) as retrain_mock:
         invoke("retrainpredict", "3", "2021-04-04")
         retrain_mock.assert_called_once()
         args = retrain_mock.call_args[0]
-        assert args[2] == 3
+        assert args[1] == 3
+        assert args[2] == datetime.date(2021, 4, 4)
 
 
 def test_analyze_config():
