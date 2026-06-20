@@ -44,6 +44,46 @@ def db_engine_greenfield(db_engine):
     yield db_engine
 
 
+@pytest.fixture(name="db_url", scope="function")
+def fixture_db_url(postgresql):
+    """The ``postgresql+psycopg://`` SQLAlchemy URL for the throwaway test DB.
+
+    For alembic-machinery tests (the migration layer kept on SQLAlchemy, ADR-0019) and to
+    drive ``upgrade_db(dburl=...)``.
+    """
+    return f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
+
+
+@pytest.fixture(name="db_pool", scope="function")
+def fixture_db_pool(postgresql):
+    """psycopg3 ``ConnectionPool`` over the throwaway test DB (ADR-0019).
+
+    The greenfield application-side connection source; replaces the SQLAlchemy ``db_engine``
+    fixture as adapters are converted. Shares the same ``postgresql`` (function-scoped) DB as
+    ``db_url`` within a test.
+    """
+    from triage.util.db import connection_pool
+
+    conninfo = f"postgresql://{postgresql.info.user}@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
+    pool = connection_pool(conninfo)
+    yield pool
+    pool.close()
+
+
+@pytest.fixture(scope="function")
+def db_pool_greenfield(db_url, db_pool):
+    """Fresh test DB with the greenfield ``triage`` schema applied, yielding a psycopg3 pool.
+
+    The pool-based counterpart of ``db_engine_greenfield``: runs the per-project alembic
+    migrations (0001 -> head) via ``upgrade_db(dburl=...)`` against the same throwaway DB the
+    ``db_pool`` connects to, then yields that pool.
+    """
+    from triage.component.results_schema import upgrade_db
+
+    upgrade_db(dburl=db_url, revision="head")
+    yield db_pool
+
+
 @pytest.fixture(scope="function")
 def project_path():
     with tempfile.TemporaryDirectory() as temp_dir:

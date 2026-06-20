@@ -1,6 +1,13 @@
-"""Functions to retrieve basic information about tables in a Postgres database"""
+"""Functions to retrieve basic information about tables in a Postgres database.
 
-from sqlalchemy import MetaData, Table, quoted_name, text
+psycopg3-native (ADR-0019): each function takes a ``psycopg_pool.ConnectionPool`` and runs
+catalog queries directly (``to_regclass`` + ``information_schema``). Table/column identifiers
+that must be embedded in SQL go through ``psycopg.sql.Identifier`` (never string-formatted),
+and data values are always bound. ``column_type`` returns the Postgres ``data_type`` name
+(e.g. ``'character varying'``, ``'integer'``), not a SQLAlchemy type class.
+"""
+
+from psycopg import sql
 
 
 def split_table(table_name):
@@ -20,92 +27,67 @@ def split_table(table_name):
         raise ValueError("Table name in unknown format")
 
 
-def table_object(table_name):
-    """Produce a table object for the given table name
-
-    This does not load data about the table from the engine yet,
-    so it is safe to call for a table that doesn't exist.
-
-    Args:
-        table_name (string) A table name (with schema)
-        db_engine (sqlalchemy.engine)
-
-    Returns: (sqlalchemy.Table)
-    """
+def _table_identifier(table_name):
+    """A ``psycopg.sql.Identifier`` for a (possibly schema-qualified) table name."""
     schema, table = split_table(table_name)
-    meta = MetaData(schema=schema)
-    return Table(table, meta)
+    if schema:
+        return sql.Identifier(schema, table)
+    return sql.Identifier(table)
 
 
-def reflected_table(table_name, db_engine):
-    """Produce a loaded table object for the given table name
-
-    Will attempt to load the metadata about the table from the database
-    So this will fail if the table doesn't exist.
-
-    Args:
-        table_name (string) A table name (with schema)
-        db_engine (sqlalchemy.engine)
-
-    Returns: (sqlalchemy.Table) A loaded table object
-    """
-    schema, table = split_table(table_name)
-    meta = MetaData(schema=schema)
-
-    # Unwrap if it's a SerializableDbEngine
-    engine = getattr(db_engine, "__wrapped__", db_engine)
-
-    return Table(table, meta, autoload_with=engine)
-
-
-def table_exists(table_name, db_engine):
+def table_exists(table_name, pool):
     """Checks whether the table exists
 
     Args:
         table_name (string) A table name (with schema)
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
     Returns: (boolean) Whether or not the table exists in the database
     """
-    schema, table = split_table(table_name)
-    inspector = db_engine.get_inspector()  # get the inspector from SerializableDbEngine
-    return inspector.has_table(table, schema=schema)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select to_regclass(%(qn)s) is not null as exists",
+            {"qn": table_name},
+        ).fetchone()
+    return bool(row["exists"])
 
 
-def table_has_data(table_name, db_engine):
+def table_has_data(table_name, pool):
     """Check whether the table contains any data
 
     Args:
         table_name (string) A table name (with schema)
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
     Returns: (boolean) Whether or not the table has any data
     """
-    if not table_exists(table_name, db_engine):
+    if not table_exists(table_name, pool):
         return False
 
-    sql = text(f"select * from {quoted_name(table_name, quote=True)} limit 1")
-    with db_engine.connect() as conn:
-        return conn.execute(sql).first() is not None
+    query = sql.SQL("select 1 from {} limit 1").format(_table_identifier(table_name))
+    with pool.connection() as conn:
+        return conn.execute(query).fetchone() is not None
 
 
-def table_row_count(table_name, db_engine):
+def table_row_count(table_name, pool):
     """Return the length of the table.
 
     The table is expected to exist.
 
     Args:
         table_name (string) A table name (with schema)
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
     Returns: (int) The number of rows in the table
     """
-    sql = text(f"select count(*) from {quoted_name(table_name, quote=True)}")
-    with db_engine.connect() as conn:
-        return conn.execute(sql).scalar_one()
+    query = sql.SQL("select count(*) as n from {}").format(
+        _table_identifier(table_name)
+    )
+    with pool.connection() as conn:
+        return conn.execute(query).fetchone()["n"]
 
 
-def table_has_duplicates(table_name, column_list, db_engine):
+def table_has_duplicates(table_name, column_list, pool):
     """Check whether the table has duplicate rows on the set of columns.
 
     The table is expected to exist and contain the columns in column_list.
@@ -113,30 +95,27 @@ def table_has_duplicates(table_name, column_list, db_engine):
     Args:
         table_name (string) A table name (with schema)
         column_list (list) A list of column names
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
     Returns: (boolean) Whether or not duplicates are found
     """
-    if not table_has_data(table_name, db_engine):
+    if not table_has_data(table_name, pool):
         return False
 
-    cols = ", ".join(str(quoted_name(c, quote=True)) for c in column_list)
-    sql = text(f"""
-        WITH counts AS (
-            SELECT
-               {cols},
-               COUNT(*) AS num_records
-            FROM {quoted_name(table_name, quote=True)}
-            GROUP BY {cols}
-        )
-        SELECT MAX(num_records) FROM counts
-    """)
+    cols = sql.SQL(", ").join(sql.Identifier(c) for c in column_list)
+    query = sql.SQL(
+        "with counts as ("
+        "  select {cols}, count(*) as num_records"
+        "  from {tbl}"
+        "  group by {cols}"
+        ") select max(num_records) as max_records from counts"
+    ).format(cols=cols, tbl=_table_identifier(table_name))
 
-    with db_engine.connect() as conn:
-        return conn.execute(sql).scalar_one() > 1
+    with pool.connection() as conn:
+        return conn.execute(query).fetchone()["max_records"] > 1
 
 
-def table_has_column(table_name, column, db_engine):
+def table_has_column(table_name, column, pool):
     """Check whether the table contains a column of the given name
 
     The table is expected to exist.
@@ -144,40 +123,61 @@ def table_has_column(table_name, column, db_engine):
     Args:
         table_name (string) A table name (with schema)
         column (string) A column name
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
     Returns: (boolean) Whether or not the table contains the column
     """
     schema, table = split_table(table_name)
-    inspector = db_engine.get_inspector()  # get inspector from SerializableDbEngine
-    columns = inspector.get_columns(table, schema=schema)
-    # inspect returns column metadata dictionaries
-    return any(col["name"] == column for col in columns)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select 1 from information_schema.columns"
+            " where table_name = %(table)s and column_name = %(column)s"
+            " and table_schema = coalesce(%(schema)s, current_schema())"
+            " limit 1",
+            {"table": table, "column": column, "schema": schema},
+        ).fetchone()
+    return row is not None
 
 
-def column_type(table_name, column, db_engine):
-    """Find the database type of the given column in the given table
+def column_type(table_name, column, pool):
+    """Find the Postgres ``data_type`` of the given column in the given table.
 
-    The table is expected to exist, and contain a column of the given name
+    The table is expected to exist, and contain a column of the given name.
 
     Args:
         table_name (string) A table name (with schema)
         column (string) A column name
-        db_engine (sqlalchemy.engine)
+        pool (psycopg_pool.ConnectionPool)
 
-    Returns: (sqlalchemy.types) The DDL type of the column; For instance,
-        sqlalchemy.types.BOOLEAN instead of
-        sqlalchemy.types.Boolean
+    Returns: (str) the ``information_schema`` ``data_type`` name, e.g. ``'character varying'``,
+        ``'integer'``, ``'boolean'``, ``'timestamp without time zone'``.
     """
     schema, table = split_table(table_name)
-    inspector = db_engine.get_inspector()  # get inspector from SerializableDbEngine
-    columns = inspector.get_columns(table, schema=schema)
-    for col in columns:
-        if col["name"] == column:
-            return type(col["type"])
-    raise KeyError(f"Column {column} not found")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select data_type from information_schema.columns"
+            " where table_name = %(table)s and column_name = %(column)s"
+            " and table_schema = coalesce(%(schema)s, current_schema())",
+            {"table": table, "column": column, "schema": schema},
+        ).fetchone()
+    if row is None:
+        raise KeyError(f"Column {column} not found")
+    return row["data_type"]
 
 
-def schema_tables(schema_name, db_engine):
-    inspector = db_engine.get_inspector()
-    return inspector.get_table_names(schema=schema_name)
+def schema_tables(schema_name, pool):
+    """The base-table names in the given schema.
+
+    Args:
+        schema_name (string) A schema name
+        pool (psycopg_pool.ConnectionPool)
+
+    Returns: (list) of table names (str)
+    """
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "select table_name from information_schema.tables"
+            " where table_schema = %(schema)s and table_type = 'BASE TABLE'",
+            {"schema": schema_name},
+        ).fetchall()
+    return [row["table_name"] for row in rows]
