@@ -14,8 +14,6 @@ retiring the inherited sklearn ``evaluation.py`` path) is Phase F's adapter pass
 
 import json
 
-from sqlalchemy import text
-
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -64,14 +62,12 @@ def evaluate_in_db(
     if metric_config is None:
         metric_config = DEFAULT_CLASSIFICATION_CONFIG
 
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         result = conn.execute(
-            text(
-                "select triage.evaluate_model("
-                ":model_id, cast(:split_kind as triage.split_kind), "
-                "cast(:as_of_date as date), cast(:label_timespan as interval), "
-                "cast(:metric_config as jsonb), :subset_hash)"
-            ),
+            "select triage.evaluate_model("
+            "%(model_id)s, cast(%(split_kind)s as triage.split_kind), "
+            "cast(%(as_of_date)s as date), cast(%(label_timespan)s as interval), "
+            "cast(%(metric_config)s as jsonb), %(subset_hash)s) as written",
             {
                 "model_id": model_id,
                 "split_kind": split_kind,
@@ -81,7 +77,7 @@ def evaluate_in_db(
                 "subset_hash": subset_hash,
             },
         )
-        written = result.scalar_one()
+        written = result.fetchone()["written"]
     logger.debug(
         "in-PG evaluation wrote %s rows for model_id=%s as_of_date=%s",
         written,
@@ -123,14 +119,12 @@ def compute_bias_in_db(
     if ref_groups is None:
         ref_groups = {}
 
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         result = conn.execute(
-            text(
-                "select triage.compute_bias_metrics("
-                ":model_id, cast(:split_kind as triage.split_kind), "
-                "cast(:as_of_date as date), cast(:label_timespan as interval), "
-                ":parameter, cast(:ref_groups as jsonb))"
-            ),
+            "select triage.compute_bias_metrics("
+            "%(model_id)s, cast(%(split_kind)s as triage.split_kind), "
+            "cast(%(as_of_date)s as date), cast(%(label_timespan)s as interval), "
+            "%(parameter)s, cast(%(ref_groups)s as jsonb)) as written",
             {
                 "model_id": model_id,
                 "split_kind": split_kind,
@@ -140,7 +134,7 @@ def compute_bias_in_db(
                 "ref_groups": json.dumps(ref_groups),
             },
         )
-        written = result.scalar_one()
+        written = result.fetchone()["written"]
     logger.debug(
         "in-PG bias metrics wrote %s rows for model_id=%s parameter=%s",
         written,

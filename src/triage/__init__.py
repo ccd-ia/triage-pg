@@ -8,7 +8,3 @@ from .logging import configure_logging
 
 # Configure logging on import with default settings
 configure_logging()
-
-from .util.db import create_engine
-
-__all__ = ("create_engine",)

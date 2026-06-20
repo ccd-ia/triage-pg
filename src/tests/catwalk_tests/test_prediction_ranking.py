@@ -12,79 +12,58 @@ back from the ``triage.prediction_ranks`` view (both created by the
 * ``prediction_ranks`` ranks the latest scores deterministically by
   ``score desc, entity_id`` (``rank_abs`` = row_number, ``rank_pct`` =
   percent_rank), with ties broken on entity_id and NO random sort seed.
-
-Like ``test_in_pg_metrics.py``, this stands the greenfield ``triage`` schema up
-via alembic directly: the project's ``db_engine_with_results_schema`` fixture
-builds the *inherited* ORM schema, not the greenfield one these functions
-target.
 """
 
 import pytest
-from sqlalchemy import text
 
-from triage import create_engine
 from triage.component.catwalk.prediction_ranking import (
     fetch_ranks,
     rank_predictions,
     record_predictions,
 )
-from triage.component.results_schema import upgrade_db
 
 AS_OF_DATE = "2014-01-01"
 
 
 @pytest.fixture
-def greenfield_engine(postgresql):
+def greenfield_engine(db_pool_greenfield):
     """Fresh pytest-postgresql DB with the greenfield ``triage`` schema applied
-    via alembic (0001 -> head)."""
-    connection_url = (
-        f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:"
-        f"{postgresql.info.port}/{postgresql.info.dbname}"
-    )
-    engine = create_engine(connection_url)
-    upgrade_db(db_engine=engine, revision="head")
-    yield engine
-    engine.dispose()
+    via alembic (0001 -> head), as a psycopg3 pool."""
+    return db_pool_greenfield
 
 
-def _seed_model(engine):
+def _seed_model(pool):
     """Insert the lineage rows a prediction needs (artifact -> model_group ->
     model), returning the new model_id. Mirrors the 0001 FK chain
     (predictions.model_id -> models.model_id, models.model_hash ->
     artifacts.artifact_id)."""
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
-                "values ('model-art-1', 'model-logical-1', 'model', '{}'::jsonb)"
-            )
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
+            "values ('model-art-1', 'model-logical-1', 'model', '{}'::jsonb)"
         )
         conn.execute(
-            text(
-                "insert into triage.model_groups "
-                "(model_group_hash, model_type, hyperparameters, feature_list) "
-                "values ('mg1', 'sklearn.tree.DecisionTreeClassifier', '{}'::jsonb, "
-                "ARRAY['f1','f2'])"
-            )
+            "insert into triage.model_groups "
+            "(model_group_hash, model_type, hyperparameters, feature_list) "
+            "values ('mg1', 'sklearn.tree.DecisionTreeClassifier', '{}'::jsonb, "
+            "ARRAY['f1','f2'])"
         )
         model_id = conn.execute(
-            text(
-                "insert into triage.models "
-                "(model_group_id, model_hash, train_end_time) "
-                "select model_group_id, 'model-art-1', date '2013-07-01' "
-                "from triage.model_groups where model_group_hash = 'mg1' "
-                "returning model_id"
-            )
-        ).scalar_one()
+            "insert into triage.models "
+            "(model_group_id, model_hash, train_end_time) "
+            "select model_group_id, 'model-art-1', date '2013-07-01' "
+            "from triage.model_groups where model_group_hash = 'mg1' "
+            "returning model_id"
+        ).fetchone()["model_id"]
     return model_id
 
 
-def _row_count(engine, model_id):
-    with engine.connect() as conn:
+def _row_count(pool, model_id):
+    with pool.connection() as conn:
         return conn.execute(
-            text("select count(*) from triage.predictions where model_id = :m"),
+            "select count(*) as n from triage.predictions where model_id = %(m)s",
             {"m": model_id},
-        ).scalar_one()
+        ).fetchone()["n"]
 
 
 # --------------------------------------------------------------- append-only write
@@ -119,18 +98,16 @@ def test_record_predictions_is_append_only(greenfield_engine):
     # Two physical rows for the same key -> append-only, not upsert.
     assert _row_count(engine, model_id) == 2
 
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select score, scored_at from triage.predictions "
-                "where model_id = :m and entity_id = 1 and as_of_date = :d "
-                "order by scored_at"
-            ),
+            "select score, scored_at from triage.predictions "
+            "where model_id = %(m)s and entity_id = 1 and as_of_date = %(d)s "
+            "order by scored_at",
             {"m": model_id, "d": AS_OF_DATE},
-        ).all()
-    assert [float(r.score) for r in rows] == [0.10, 0.90]
+        ).fetchall()
+    assert [float(r["score"]) for r in rows] == [0.10, 0.90]
     # the appended row is strictly newer (or equal — never older)
-    assert rows[1].scored_at >= rows[0].scored_at
+    assert rows[1]["scored_at"] >= rows[0]["scored_at"]
 
 
 def test_latest_predictions_collapses_history(greenfield_engine):

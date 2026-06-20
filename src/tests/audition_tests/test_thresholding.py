@@ -1,5 +1,4 @@
 import pytest
-from sqlalchemy import text
 
 from triage.component.audition.distance_from_best import DistanceFromBestTable
 from triage.component.audition.thresholding import (
@@ -11,7 +10,7 @@ from .utils import insert_model, insert_model_group
 
 
 def filter_train_end_times(engine, train_end_times):
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         # Deterministic ids 1..5 so the asserted result sets are stable.
         insert_model_group(conn, "modelType1", model_group_id=1)
         insert_model_group(conn, "modelType2", model_group_id=2)
@@ -49,28 +48,24 @@ def filter_train_end_times(engine, train_end_times):
     return model_group_ids
 
 
-def test_have_same_train_end_times(db_engine_greenfield):
+def test_have_same_train_end_times(db_pool_greenfield):
     custom_train_end_times = ["2014-01-01", "2015-01-01", "2016-01-01", "2017-01-01"]
     # The filter will only let those models pass only if the model's train end times
     # contain the custom train end times
-    pass_model_groups = filter_train_end_times(
-        db_engine_greenfield, custom_train_end_times
-    )
+    pass_model_groups = filter_train_end_times(db_pool_greenfield, custom_train_end_times)
     assert pass_model_groups == {1, 3}
 
 
-def test_have_partial_train_end_times(db_engine_greenfield):
+def test_have_partial_train_end_times(db_pool_greenfield):
     custom_train_end_times = ["2014-01-01", "2015-01-01", "2016-01-01"]
-    pass_model_groups = filter_train_end_times(
-        db_engine_greenfield, custom_train_end_times
-    )
+    pass_model_groups = filter_train_end_times(db_pool_greenfield, custom_train_end_times)
     assert pass_model_groups == {1, 3, 5}
 
 
-def test_have_unmatched_train_end_times(db_engine_greenfield):
+def test_have_unmatched_train_end_times(db_pool_greenfield):
     custom_train_end_times = ["2014-01-01", "2019-01-01"]
     with pytest.raises(ValueError):
-        filter_train_end_times(db_engine_greenfield, custom_train_end_times)
+        filter_train_end_times(db_pool_greenfield, custom_train_end_times)
 
 
 METRIC_FILTERS = [
@@ -96,7 +91,7 @@ METRIC_FILTERS = [
 
 
 def setup_thresholder_data(engine, metric_filters):
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         insert_model_group(conn, "modelType1", model_group_id=1)
         insert_model_group(conn, "modelType2", model_group_id=2)
         insert_model_group(conn, "modelType3", model_group_id=3)
@@ -178,12 +173,12 @@ def setup_thresholder_data(engine, metric_filters):
         (6, "2016-01-01", "false positives@", "100_abs", 40, 30, 10, 10),
     ]
 
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         for dist_row in distance_rows:
             conn.execute(
-                text(
-                    "insert into dist_table values (:col1, :col2, :col3, :col4, :col5, :col6, :col7, :col8)"
-                ),
+                "insert into dist_table values"
+                " (%(col1)s, %(col2)s, %(col3)s, %(col4)s, %(col5)s, %(col6)s,"
+                " %(col7)s, %(col8)s)",
                 {
                     "col1": dist_row[0],
                     "col2": dist_row[1],
@@ -211,43 +206,35 @@ def dataframe_as_of(thresholder, train_end_time):
     )
 
 
-def test_thresholder_2014_close(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
-    assert thresholder.model_groups_close_to_best_case(
-        dataframe_as_of(thresholder, "2014-01-01")
-    ) == {1, 2}
+def test_thresholder_2014_close(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
+    assert thresholder.model_groups_close_to_best_case(dataframe_as_of(thresholder, "2014-01-01")) == {1, 2}
 
 
-def test_thresholder_2015_close(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
-    assert thresholder.model_groups_close_to_best_case(
-        dataframe_as_of(thresholder, "2015-01-01")
-    ) == {2}
+def test_thresholder_2015_close(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
+    assert thresholder.model_groups_close_to_best_case(dataframe_as_of(thresholder, "2015-01-01")) == {2}
 
 
-def test_thresholder_2014_threshold(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
-    assert thresholder.model_groups_past_threshold(
-        dataframe_as_of(thresholder, "2014-01-01")
-    ) == {1}
+def test_thresholder_2014_threshold(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
+    assert thresholder.model_groups_past_threshold(dataframe_as_of(thresholder, "2014-01-01")) == {1}
 
 
-def test_thresholder_2015_threshold(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
-    assert thresholder.model_groups_past_threshold(
-        dataframe_as_of(thresholder, "2015-01-01")
-    ) == {1, 2, 4}
+def test_thresholder_2015_threshold(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
+    assert thresholder.model_groups_past_threshold(dataframe_as_of(thresholder, "2015-01-01")) == {1, 2, 4}
 
 
-def test_thresholder_all_rules(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
+def test_thresholder_all_rules(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
     # The multi-date version of this function should have
     # the mins ANDed together and the closes ORed together
     assert thresholder.model_groups_passing_rules() == {1}
 
 
-def test_update_filters(db_engine_greenfield):
-    thresholder = setup_thresholder_data(db_engine_greenfield, METRIC_FILTERS)
+def test_update_filters(db_pool_greenfield):
+    thresholder = setup_thresholder_data(db_pool_greenfield, METRIC_FILTERS)
     assert thresholder.model_group_ids == {1}
     thresholder.update_filters([])
     assert thresholder.model_group_ids == {1, 2, 4, 5, 6}

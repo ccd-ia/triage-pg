@@ -1,8 +1,7 @@
 """Tests for GC roots, liveness, collect, and purge (ADR-0017)."""
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from psycopg import IntegrityError
 
 from triage.artifacts import (
     archive_experiment,
@@ -23,69 +22,69 @@ PINS = {"events": "v1"}
 
 
 @pytest.fixture
-def triage_db(db_engine):
-    upgrade_db(db_engine=db_engine)
-    return db_engine
+def triage_db(db_url, db_pool):
+    upgrade_db(dburl=db_url)
+    return db_pool
 
 
-def make_experiment(engine, experiment_hash="exp1"):
-    with engine.begin() as conn:
+def make_experiment(pool, experiment_hash="exp1"):
+    with pool.connection() as conn:
         conn.execute(
-            text("""
+            """
                 insert into triage.experiments (experiment_hash, config, problem_type)
-                values (:hash, '{}', 'classification')
-                """),
+                values (%(hash)s, '{}', 'classification')
+                """,
             {"hash": experiment_hash},
         )
     return experiment_hash
 
 
-def make_run(engine, experiment_hash=None):
-    with engine.begin() as conn:
+def make_run(pool, experiment_hash=None):
+    with pool.connection() as conn:
         return str(
             conn.execute(
-                text("""
+                """
                     insert into triage.runs (experiment_hash, profile)
-                    values (:hash, 'local') returning run_id
-                    """),
+                    values (%(hash)s, 'local') returning run_id
+                    """,
                 {"hash": experiment_hash},
-            ).scalar_one()
+            ).fetchone()["run_id"]
         )
 
 
-def build(engine, derivation, kind, config, parents=()):
-    begin_artifact(engine, derivation, kind, config, source_pins=PINS, parents=parents)
-    mark_built(engine, derivation.id)
+def build(pool, derivation, kind, config, parents=()):
+    begin_artifact(pool, derivation, kind, config, source_pins=PINS, parents=parents)
+    mark_built(pool, derivation.id)
     return derivation
 
 
-def make_model_row(engine, model_artifact_id):
-    with engine.begin() as conn:
+def make_model_row(pool, model_artifact_id):
+    with pool.connection() as conn:
         model_group_id = conn.execute(
-            text("""
+            """
                 insert into triage.model_groups
                     (model_group_hash, model_type, hyperparameters, feature_list)
-                values (:hash, 'DT', '{}', '{}') returning model_group_id
-                """),
+                values (%(hash)s, 'DT', '{}', '{}') returning model_group_id
+                """,
             {"hash": f"mg-{model_artifact_id[:8]}"},
-        ).scalar_one()
+        ).fetchone()["model_group_id"]
         return conn.execute(
-            text("""
+            """
                 insert into triage.models (model_group_id, model_hash)
-                values (:group_id, :hash) returning model_id
-                """),
+                values (%(group_id)s, %(hash)s) returning model_id
+                """,
             {"group_id": model_group_id, "hash": model_artifact_id},
-        ).scalar_one()
+        ).fetchone()["model_id"]
 
 
-def add_prediction(engine, model_id):
-    with engine.begin() as conn:
+def add_prediction(pool, model_id):
+    with pool.connection() as conn:
         conn.execute(
-            text("""
+            """
                 insert into triage.predictions
                     (model_id, entity_id, as_of_date, split_kind, score)
-                values (:model_id, 1, '2026-01-01', 'test', 0.5)
-                """),
+                values (%(model_id)s, 1, '2026-01-01', 'test', 0.5)
+                """,
             {"model_id": model_id},
         )
 
@@ -155,23 +154,21 @@ def test_collect_deletes_slices_keeps_provenance_and_rebuilds(triage_db):
     cohort = build(
         triage_db, derive("cohort", {"q": 1}, source_pins=PINS), "cohort", {"q": 1}
     )
-    with triage_db.begin() as conn:
+    with triage_db.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
-                " values (:hash, 1, '2026-01-01'), (:hash, 2, '2026-01-01')"
-            ),
+            "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
+            " values (%(hash)s, 1, '2026-01-01'), (%(hash)s, 2, '2026-01-01')",
             {"hash": cohort.id},
         )
 
     external = collect(triage_db, [cohort.id])
     assert external == []  # cohort outputs are in-PG, nothing for the storage layer
 
-    with triage_db.connect() as conn:
+    with triage_db.connection() as conn:
         remaining = conn.execute(
-            text("select count(*) from triage.cohorts where cohort_hash = :hash"),
+            "select count(*) as n from triage.cohorts where cohort_hash = %(hash)s",
             {"hash": cohort.id},
-        ).scalar_one()
+        ).fetchone()["n"]
     assert remaining == 0
 
     artifact = get_artifact(triage_db, cohort.id)
@@ -254,10 +251,10 @@ def test_purge_deletes_dead_rows_and_cascades(triage_db):
     assert set(purged) == {cohort.id, matrix_derivation.id}
     assert get_artifact(triage_db, cohort.id) is None
 
-    with triage_db.connect() as conn:
+    with triage_db.connection() as conn:
         edges = conn.execute(
-            text("select count(*) from triage.artifact_inputs")
-        ).scalar_one()
+            "select count(*) as n from triage.artifact_inputs"
+        ).fetchone()["n"]
     assert edges == 0
 
 
@@ -302,9 +299,9 @@ def test_predictions_fk_restricts_model_deletion(triage_db):
     add_prediction(triage_db, model_id)
 
     with pytest.raises(IntegrityError):
-        with triage_db.begin() as conn:
+        with triage_db.connection() as conn:
             conn.execute(
-                text("delete from triage.models where model_id = :id"),
+                "delete from triage.models where model_id = %(id)s",
                 {"id": model_id},
             )
 
@@ -312,21 +309,17 @@ def test_predictions_fk_restricts_model_deletion(triage_db):
 def test_archive_is_idempotent_and_fails_on_unknown(triage_db):
     experiment = make_experiment(triage_db)
     archive_experiment(triage_db, experiment)
-    with triage_db.connect() as conn:
+    with triage_db.connection() as conn:
         first = conn.execute(
-            text(
-                "select archived_at from triage.experiments where experiment_hash = :h"
-            ),
+            "select archived_at from triage.experiments where experiment_hash = %(h)s",
             {"h": experiment},
-        ).scalar_one()
+        ).fetchone()["archived_at"]
     archive_experiment(triage_db, experiment)  # idempotent, keeps timestamp
-    with triage_db.connect() as conn:
+    with triage_db.connection() as conn:
         second = conn.execute(
-            text(
-                "select archived_at from triage.experiments where experiment_hash = :h"
-            ),
+            "select archived_at from triage.experiments where experiment_hash = %(h)s",
             {"h": experiment},
-        ).scalar_one()
+        ).fetchone()["archived_at"]
     assert first == second
 
     with pytest.raises(ValueError, match="no such experiment"):

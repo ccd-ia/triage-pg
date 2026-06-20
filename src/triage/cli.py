@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote as _urlquote
 
 import typer
 import yaml
@@ -18,7 +19,6 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-from sqlalchemy.engine.url import URL
 
 from triage.adapters.forward import predict_forward
 from triage.adapters.retrain import retrain_and_predict
@@ -48,7 +48,7 @@ from triage.sources import (
     list_sources,
     register_source,
 )
-from triage.util.db import create_engine
+from triage.util.db import connection_pool
 
 logger = get_logger(__name__)
 console = Console()
@@ -162,21 +162,13 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
 
         # If we have at least host and database, build URL from environment
         if pg_host and pg_database:
-            url_components = {
-                "drivername": "postgresql+psycopg",  # Use psycopg (version 3)
-                "host": pg_host,
-                "username": pg_user or "postgres",
-                "database": pg_database,
-                "port": int(pg_port) if pg_port else 5432,
-            }
-
-            # Only add password if it's not None
-            if pg_password:
-                url_components["password"] = pg_password
-
-            url = URL.create(**url_components)
-            # Use render_as_string with hide_password=False to preserve the actual password
-            return url.render_as_string(hide_password=False)
+            return _compose_db_url(
+                host=pg_host,
+                user=pg_user or "postgres",
+                password=pg_password,
+                database=pg_database,
+                port=int(pg_port) if pg_port else 5432,
+            )
 
         # No configuration found
         raise typer.BadParameter(
@@ -190,20 +182,34 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
 
     # Build URL from yaml config
     try:
-        url = URL.create(
-            "postgresql+psycopg",  # Use psycopg (version 3)
+        return _compose_db_url(
             host=config["host"],
-            username=config["user"],
-            database=config["db"],
+            user=config["user"],
             password=config["pass"],
+            database=config["db"],
             port=config["port"],
         )
-        # Use render_as_string with hide_password=False to preserve the actual password
-        return url.render_as_string(hide_password=False)
     except KeyError as exc:
         raise typer.BadParameter(
             "database.yaml is missing required keys: host, user, pass, port, db"
         ) from exc
+
+
+def _compose_db_url(
+    *,
+    host: str,
+    user: str,
+    database: str,
+    port: int,
+    password: Optional[str] = None,
+) -> str:
+    """Build a ``postgresql+psycopg://`` URL (the SQLAlchemy/alembic form; the app pool
+    strips ``+psycopg``). Credentials are percent-encoded so special characters survive.
+    """
+    auth = _urlquote(str(user), safe="")
+    if password:
+        auth += ":" + _urlquote(str(password), safe="")
+    return f"postgresql+psycopg://{auth}@{host}:{port}/{database}"
 
 
 def resolve_setup_path(setup: Optional[pathlib.Path]) -> Optional[pathlib.Path]:
@@ -231,9 +237,9 @@ def get_state(ctx: typer.Context) -> CLIState:
     return state
 
 
-def get_engine(ctx: typer.Context):
+def get_pool(ctx: typer.Context):
     state = get_state(ctx)
-    return create_engine(state.db_url)
+    return connection_pool(state.db_url)
 
 
 def short_description(value: Optional[str]) -> str:
@@ -329,7 +335,7 @@ def run_command(
     The single CLI entry point onto ``triage.adapters.run.run_experiment`` — the headless
     core that drives the whole artifact-DAG pipeline from one config.
     """
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     config_data = load_experiment_config(config)
     result = run_experiment(
         engine,
@@ -369,7 +375,7 @@ def audition_command(
         None, "--directory", "-d", help="Directory to store generated plots."
     ),
 ) -> None:
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     config_data = load_yaml_from_store(config)
     runner = AuditionRunner(config_data, engine, str(directory) if directory else None)
     if validate or validate_only:
@@ -390,7 +396,7 @@ def retrain_predict_command(
         pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
     ),
 ) -> None:
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     retrain_and_predict(
         engine,
         model_group_id,
@@ -409,7 +415,7 @@ def predictlist_command(
         pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
     ),
 ) -> None:
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     predict_forward(
         engine,
         model_id,
@@ -614,7 +620,7 @@ def source_register(
     description: Optional[str] = typer.Option(None, "--description"),
 ) -> None:
     """Declare a source table (idempotent)."""
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     register_source(
         engine,
         name,
@@ -637,7 +643,7 @@ def source_bump(
     ),
 ) -> None:
     """Record a new version pin after a data load."""
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     label = bump_source(engine, name, version_label)
     console.print(f"[green]Source '{name}' pinned at '{label}'.[/green]")
 
@@ -645,7 +651,7 @@ def source_bump(
 @source_app.command("list")
 def source_list(ctx: typer.Context) -> None:
     """List sources with their current pins (unpinned sources are volatile)."""
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     sources = list_sources(engine)
     if not sources:
         console.print("[yellow]No sources registered.[/yellow]")
@@ -668,7 +674,7 @@ def source_show(
     name: str = typer.Argument(..., help="Source to inspect."),
 ) -> None:
     """Show a source's registration, current pin, and drift status."""
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     source = get_source(engine, name)
     if source is None:
         console.print(f"[red]Source '{name}' is not registered.[/red]")
@@ -688,7 +694,7 @@ def archive_command(
     ),
 ) -> None:
     """Soft-archive an experiment (ADR-0017). Reversible until a gc sweep."""
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     archive_experiment(engine, experiment_hash)
     console.print(
         f"[green]Experiment '{experiment_hash}' archived — its artifacts become"
@@ -717,7 +723,7 @@ def gc_command(
     Default is a dry run; --delete collects outputs (rows stay, status
     'collected', rebuild on demand); --purge removes dead collected/failed rows.
     """
-    engine = get_engine(ctx)
+    engine = get_pool(ctx)
     candidates = gc_candidates(engine, min_age_days=min_age)
 
     if not candidates:

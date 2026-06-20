@@ -16,9 +16,7 @@ config = {
         "parameter": "50_abs",
         "threshold_value": 0.0,
     },
-    "model_groups": {
-        "query": "SELECT DISTINCT(model_group_id) FROM triage.model_groups"
-    },
+    "model_groups": {"query": "SELECT DISTINCT(model_group_id) FROM triage.model_groups"},
     "rules": [
         {
             "selection_rules": [
@@ -76,7 +74,7 @@ def _seed_audition_data(db_engine, num_model_groups=10):
     ]
 
     model_group_ids = []
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         for model_type in model_types:
             mgid = insert_model_group(conn, model_type)
             model_group_ids.append(mgid)
@@ -97,8 +95,8 @@ def _seed_audition_data(db_engine, num_model_groups=10):
     return model_group_ids, train_end_times
 
 
-def test_Audition(db_engine_greenfield):
-    db_engine = db_engine_greenfield
+def test_Audition(db_pool_greenfield):
+    db_engine = db_pool_greenfield
     _seed_audition_data(db_engine)
 
     with tempfile.TemporaryDirectory() as td:
@@ -108,12 +106,10 @@ def test_Audition(db_engine_greenfield):
             assert len(os.listdir(os.getcwd())) == 6
 
 
-def test_Auditioner(db_engine_greenfield):
-    db_engine = db_engine_greenfield
+def test_Auditioner(db_pool_greenfield):
+    db_engine = db_pool_greenfield
     num_model_groups = 10
-    model_group_ids, train_end_times = _seed_audition_data(
-        db_engine, num_model_groups=num_model_groups
-    )
+    model_group_ids, train_end_times = _seed_audition_data(db_engine, num_model_groups=num_model_groups)
 
     # define a very loose filtering that should admit all model groups
     no_filtering = [

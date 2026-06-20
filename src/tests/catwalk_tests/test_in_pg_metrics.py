@@ -8,22 +8,13 @@ alembic, inserts a small KNOWN fixture into models/matrices/predictions/labels/
 protected_groups, calls the functions, and asserts the resulting
 ``triage.evaluations`` / ``triage.bias_metrics`` rows equal hand-computed (and
 sklearn-computed) reference values.
-
-NOTE on the fixture choice: the project's ``db_engine_with_results_schema``
-fixture builds the *inherited* ORM schema (``triage_metadata`` / ``train_results``
-/ ``test_results``), NOT the greenfield ``triage`` schema these functions target.
-So this test applies the alembic migrations (0001 + 0002) directly to a fresh
-pytest-postgresql database, which is the only path that creates the greenfield
-schema + the functions together.
 """
 
 import math
 
 import pytest
 from sklearn import metrics as skmetrics
-from sqlalchemy import text
 
-from triage import create_engine
 from triage.component.catwalk.in_pg_evaluation import (
     compute_bias_in_db,
     evaluate_in_db,
@@ -35,10 +26,10 @@ AS_OF_DATE = "2014-01-01"
 
 
 @pytest.fixture
-def greenfield_engine(db_engine_greenfield):
+def greenfield_engine(db_pool_greenfield):
     """Greenfield ``triage`` schema + the 0002 metric functions, via the shared
-    ``db_engine_greenfield`` conftest fixture (alembic 0001 -> head)."""
-    return db_engine_greenfield
+    ``db_pool_greenfield`` conftest fixture (alembic 0001 -> head), as a pool."""
+    return db_pool_greenfield
 
 
 # A small KNOWN fixture. 10 labeled entities. (score, outcome) pairs chosen so
@@ -54,84 +45,68 @@ LABELS = [1, 1, 0, 1, 0, 1, 0, 0, 1, 0]
 ENTITY_IDS = list(range(1, 11))
 
 
-def _seed_model(engine):
+def _seed_model(pool):
     """Insert the lineage rows a prediction needs (artifact -> model_group ->
     model), returning the new model_id. Mirrors the 0001 FK chain."""
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         # experiment + run for built_by_run / provenance (nullable, but tidy)
         conn.execute(
-            text(
-                "insert into triage.experiments (experiment_hash, config, problem_type) "
-                "values ('exp1', '{}'::jsonb, 'classification')"
-            )
+            "insert into triage.experiments (experiment_hash, config, problem_type) "
+            "values ('exp1', '{}'::jsonb, 'classification')"
         )
         # model node artifact (models.model_hash references artifacts.artifact_id)
         conn.execute(
-            text(
-                "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
-                "values ('model-art-1', 'model-logical-1', 'model', '{}'::jsonb)"
-            )
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
+            "values ('model-art-1', 'model-logical-1', 'model', '{}'::jsonb)"
         )
         conn.execute(
-            text(
-                "insert into triage.model_groups "
-                "(model_group_hash, model_type, hyperparameters, feature_list) "
-                "values ('mg1', 'sklearn.tree.DecisionTreeClassifier', '{}'::jsonb, "
-                "ARRAY['f1','f2'])"
-            )
+            "insert into triage.model_groups "
+            "(model_group_hash, model_type, hyperparameters, feature_list) "
+            "values ('mg1', 'sklearn.tree.DecisionTreeClassifier', '{}'::jsonb, "
+            "ARRAY['f1','f2'])"
         )
         model_id = conn.execute(
-            text(
-                "insert into triage.models "
-                "(model_group_id, model_hash, train_end_time) "
-                "select model_group_id, 'model-art-1', date '2013-07-01' "
-                "from triage.model_groups where model_group_hash = 'mg1' "
-                "returning model_id"
-            )
-        ).scalar_one()
+            "insert into triage.models "
+            "(model_group_id, model_hash, train_end_time) "
+            "select model_group_id, 'model-art-1', date '2013-07-01' "
+            "from triage.model_groups where model_group_hash = 'mg1' "
+            "returning model_id"
+        ).fetchone()["model_id"]
     return model_id
 
 
-def _seed_predictions_and_labels(engine, model_id, scores, labels, entity_ids):
-    with engine.begin() as conn:
+def _seed_predictions_and_labels(pool, model_id, scores, labels, entity_ids):
+    with pool.connection() as conn:
         # labels node artifact (labels.label_hash references artifacts.artifact_id)
         conn.execute(
-            text(
-                "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
-                "values ('labels-art-1', 'labels-logical-1', 'labels', '{}'::jsonb)"
-            )
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
+            "values ('labels-art-1', 'labels-logical-1', 'labels', '{}'::jsonb)"
         )
         for eid, score, label in zip(entity_ids, scores, labels):
             conn.execute(
-                text(
-                    "insert into triage.predictions "
-                    "(model_id, entity_id, as_of_date, split_kind, score) "
-                    "values (:m, :e, :d, 'test', :s)"
-                ),
+                "insert into triage.predictions "
+                "(model_id, entity_id, as_of_date, split_kind, score) "
+                "values (%(m)s, %(e)s, %(d)s, 'test', %(s)s)",
                 {"m": model_id, "e": eid, "d": AS_OF_DATE, "s": score},
             )
             conn.execute(
-                text(
-                    "insert into triage.labels "
-                    "(label_hash, entity_id, as_of_date, label_timespan, outcome) "
-                    "values ('labels-art-1', :e, :d, cast(:ts as interval), :o)"
-                ),
+                "insert into triage.labels "
+                "(label_hash, entity_id, as_of_date, label_timespan, outcome) "
+                "values ('labels-art-1', %(e)s, %(d)s, cast(%(ts)s as interval), %(o)s)",
                 {"e": eid, "d": AS_OF_DATE, "ts": LABEL_TIMESPAN, "o": float(label)},
             )
 
 
-def _eval_row(engine, model_id, metric, parameter=""):
-    with engine.begin() as conn:
+def _eval_row(pool, model_id, metric, parameter=""):
+    with pool.connection() as conn:
         row = conn.execute(
-            text(
-                "select value, value_worst, value_best, value_expected, value_std, "
-                "num_labeled, num_positive from triage.evaluations "
-                "where model_id = :m and metric = :metric and parameter = :p "
-                "and as_of_date = :d"
-            ),
+            "select value, value_worst, value_best, value_expected, value_std, "
+            "num_labeled, num_positive from triage.evaluations "
+            "where model_id = %(m)s and metric = %(metric)s and parameter = %(p)s "
+            "and as_of_date = %(d)s",
             {"m": model_id, "metric": metric, "p": parameter, "d": AS_OF_DATE},
-        ).one()
-    return row._mapping
+        ).fetchone()
+    return row
 
 
 # ----------------------------------------------------------------- classification
@@ -269,11 +244,6 @@ def test_precision_at_k_tie_bounds(greenfield_engine):
     value_best bracket the deterministic realized value."""
     engine = greenfield_engine
     model_id = _seed_model(engine)
-    # Scores: a 3-way tie at .80 straddles the k=2 boundary. Within the tie group
-    # of 3 rows (entities 2,3,4) two are positive, one negative; one of them is
-    # the second selected slot. So selected at k=2 = {e1} + 1 from the tie group.
-    # best  = e1(+) + 1 positive from tie  = 2/2 = 1.0
-    # worst = e1(+) + 1 negative from tie  = 1/2 = 0.5
     scores = [0.95, 0.80, 0.80, 0.80, 0.50, 0.40, 0.30, 0.20, 0.10, 0.05]
     labels = [1, 1, 0, 1, 0, 0, 0, 0, 0, 0]
     _seed_predictions_and_labels(engine, model_id, scores, labels, ENTITY_IDS)
@@ -330,15 +300,13 @@ def test_regression_metrics_match_sklearn(greenfield_engine):
 # ------------------------------------------------------------------------- bias
 
 
-def _seed_protected_groups(engine, entity_ids, groups, attribute_name="race"):
-    with engine.begin() as conn:
+def _seed_protected_groups(pool, entity_ids, groups, attribute_name="race"):
+    with pool.connection() as conn:
         for eid, g in zip(entity_ids, groups):
             conn.execute(
-                text(
-                    "insert into triage.protected_groups "
-                    "(entity_id, as_of_date, attribute_name, attribute_value) "
-                    "values (:e, :d, :a, :v)"
-                ),
+                "insert into triage.protected_groups "
+                "(entity_id, as_of_date, attribute_name, attribute_value) "
+                "values (%(e)s, %(d)s, %(a)s, %(v)s)",
                 {"e": eid, "d": AS_OF_DATE, "a": attribute_name, "v": g},
             )
 
@@ -349,51 +317,44 @@ def test_bias_metrics_group_by_and_disparity(greenfield_engine):
     engine = greenfield_engine
     model_id = _seed_model(engine)
     _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
-    # group A: entities 1-6 (6 members), group B: entities 7-10 (4 members).
-    # A is larger -> reference group.
     groups = ["A", "A", "A", "A", "A", "A", "B", "B", "B", "B"]
     _seed_protected_groups(engine, ENTITY_IDS, groups)
 
-    n = compute_bias_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs")
+    n = compute_bias_in_db(
+        engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs"
+    )
     assert n > 0
 
-    # Top-5 selected = entities {1,2,3,4,5}. Group A members selected = {1,2,3,4,5}
-    # = 5 of 6; group B selected = none of 4.
-    # selection_rate A = 5/6, B = 0/4 = 0.
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select attribute_value, value, ref_group_value, disparity "
-                "from triage.bias_metrics "
-                "where model_id = :m and metric = 'selection_rate' "
-                "and attribute_name = 'race' order by attribute_value"
-            ),
+            "select attribute_value, value, ref_group_value, disparity "
+            "from triage.bias_metrics "
+            "where model_id = %(m)s and metric = 'selection_rate' "
+            "and attribute_name = 'race' order by attribute_value",
             {"m": model_id},
-        ).all()
-    by_group = {row.attribute_value: row for row in rows}
-    assert by_group["A"].value == pytest.approx(5 / 6)
-    assert by_group["B"].value == pytest.approx(0.0)
+        ).fetchall()
+    by_group = {row["attribute_value"]: row for row in rows}
+    assert by_group["A"]["value"] == pytest.approx(5 / 6)
+    assert by_group["B"]["value"] == pytest.approx(0.0)
     # reference group is the larger one, A
-    assert by_group["A"].ref_group_value == "A"
-    assert by_group["B"].ref_group_value == "A"
+    assert by_group["A"]["ref_group_value"] == "A"
+    assert by_group["B"]["ref_group_value"] == "A"
     # disparity of A vs itself == 1.0; B vs A == 0.
-    assert by_group["A"].disparity == pytest.approx(1.0)
-    assert by_group["B"].disparity == pytest.approx(0.0)
+    assert by_group["A"]["disparity"] == pytest.approx(1.0)
+    assert by_group["B"]["disparity"] == pytest.approx(0.0)
 
     # group_size is a count -> no disparity
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         gsize = conn.execute(
-            text(
-                "select attribute_value, value, disparity from triage.bias_metrics "
-                "where model_id = :m and metric = 'group_size' "
-                "and attribute_name = 'race' order by attribute_value"
-            ),
+            "select attribute_value, value, disparity from triage.bias_metrics "
+            "where model_id = %(m)s and metric = 'group_size' "
+            "and attribute_name = 'race' order by attribute_value",
             {"m": model_id},
-        ).all()
-    gmap = {r.attribute_value: r for r in gsize}
-    assert gmap["A"].value == pytest.approx(6)
-    assert gmap["B"].value == pytest.approx(4)
-    assert gmap["A"].disparity is None
+        ).fetchall()
+    gmap = {r["attribute_value"]: r for r in gsize}
+    assert gmap["A"]["value"] == pytest.approx(6)
+    assert gmap["B"]["value"] == pytest.approx(4)
+    assert gmap["A"]["disparity"] is None
 
 
 def test_bias_metrics_explicit_reference_group(greenfield_engine):
@@ -412,17 +373,15 @@ def test_bias_metrics_explicit_reference_group(greenfield_engine):
         parameter="5_abs",
         ref_groups={"race": "B"},
     )
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select attribute_value, ref_group_value from triage.bias_metrics "
-                "where model_id = :m and metric = 'selection_rate' "
-                "and attribute_name = 'race'"
-            ),
+            "select attribute_value, ref_group_value from triage.bias_metrics "
+            "where model_id = %(m)s and metric = 'selection_rate' "
+            "and attribute_name = 'race'",
             {"m": model_id},
-        ).all()
+        ).fetchall()
     for row in rows:
-        assert row.ref_group_value == "B"
+        assert row["ref_group_value"] == "B"
 
 
 # ------------------------------------------------------------------ idempotency
@@ -438,11 +397,11 @@ def test_evaluate_model_is_idempotent(greenfield_engine):
     evaluate_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, metric_config=cfg)
     evaluate_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, metric_config=cfg)
 
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         count = conn.execute(
-            text("select count(*) from triage.evaluations where model_id = :m"),
+            "select count(*) as n from triage.evaluations where model_id = %(m)s",
             {"m": model_id},
-        ).scalar_one()
+        ).fetchone()["n"]
     # 2 metrics (precision@5_abs, auc_roc) -> 2 rows even after two runs.
     assert count == 2
 
@@ -453,20 +412,16 @@ def test_empty_labeled_set_is_safe(greenfield_engine):
     engine = greenfield_engine
     model_id = _seed_model(engine)
     # predictions only, no labels at this timespan
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
-                "values ('labels-art-1', 'labels-logical-1', 'labels', '{}'::jsonb)"
-            )
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
+            "values ('labels-art-1', 'labels-logical-1', 'labels', '{}'::jsonb)"
         )
         for eid, score in zip(ENTITY_IDS, SCORES):
             conn.execute(
-                text(
-                    "insert into triage.predictions "
-                    "(model_id, entity_id, as_of_date, split_kind, score) "
-                    "values (:m, :e, :d, 'test', :s)"
-                ),
+                "insert into triage.predictions "
+                "(model_id, entity_id, as_of_date, split_kind, score) "
+                "values (%(m)s, %(e)s, %(d)s, 'test', %(s)s)",
                 {"m": model_id, "e": eid, "d": AS_OF_DATE, "s": score},
             )
 
@@ -485,39 +440,34 @@ def test_empty_labeled_set_is_safe(greenfield_engine):
 # ------------------------------------------------------------------- migration
 
 
-def test_0002_downgrade_then_reupgrade(postgresql):
+def test_0002_downgrade_then_reupgrade(db_url, db_pool):
     """0002 downgrade drops the functions + type cleanly, and re-upgrade
     rebuilds them (no leftover objects blocking the re-create)."""
-    connection_url = (
-        f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:"
-        f"{postgresql.info.port}/{postgresql.info.dbname}"
-    )
-    engine = create_engine(connection_url)
-    try:
-        upgrade_db(db_engine=engine, revision="head")
+    upgrade_db(dburl=db_url, revision="head")
 
-        def fn_count(conn):
-            return conn.execute(
-                text(
-                    "select count(*) from pg_proc p "
-                    "join pg_namespace n on n.oid = p.pronamespace "
-                    "where n.nspname = 'triage'"
-                )
-            ).scalar_one()
+    def fn_count(conn):
+        return conn.execute(
+            "select count(*) as n from pg_proc p "
+            "join pg_namespace n on n.oid = p.pronamespace "
+            "where n.nspname = 'triage'"
+        ).fetchone()["n"]
 
-        with engine.begin() as conn:
-            assert fn_count(conn) > 0  # functions exist after head
+    with db_pool.connection() as conn:
+        assert fn_count(conn) > 0  # functions exist after head
 
-        # downgrade 0002 -> 0001 removes the functions + composite type
-        downgrade_db(db_engine=engine, revision="0001_initial_triage_schema")
-        with engine.begin() as conn:
-            assert fn_count(conn) == 0
-            # the base schema from 0001 survives
-            assert conn.execute(text("select to_regclass('triage.evaluations')")).scalar_one() is not None
+    # downgrade 0002 -> 0001 removes the functions + composite type
+    downgrade_db(dburl=db_url, revision="0001_initial_triage_schema")
+    with db_pool.connection() as conn:
+        assert fn_count(conn) == 0
+        # the base schema from 0001 survives
+        assert (
+            conn.execute("select to_regclass('triage.evaluations') as r").fetchone()[
+                "r"
+            ]
+            is not None
+        )
 
-        # re-upgrade rebuilds them
-        upgrade_db(db_engine=engine, revision="head")
-        with engine.begin() as conn:
-            assert fn_count(conn) > 0
-    finally:
-        engine.dispose()
+    # re-upgrade rebuilds them
+    upgrade_db(dburl=db_url, revision="head")
+    with db_pool.connection() as conn:
+        assert fn_count(conn) > 0

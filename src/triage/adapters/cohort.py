@@ -31,8 +31,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.artifacts import (
     begin_artifact,
@@ -71,7 +70,7 @@ def _validate_template(cohort_query_template: str) -> None:
 
 
 def build_cohort(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     cohort_query_template: str,
     as_of_dates: Sequence[date],
@@ -132,15 +131,17 @@ def build_cohort(
     )
     artifact_id = derivation.id
     try:
-        with db_engine.begin() as conn:
+        with db_engine.connection() as conn:
             for as_of_date in as_of_dates:
                 rendered = cohort_query_template.format(as_of_date=f"'{as_of_date}'")
+                # The rendered user SQL is embedded directly; psycopg3 reads ``%`` as the
+                # parameter marker, so any literal ``%`` in the user's query (e.g. LIKE
+                # patterns) must be doubled to ``%%`` — our own binds stay ``%(name)s``.
                 conn.execute(
-                    text(
-                        "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
-                        + f" select :cohort_hash, sub.entity_id, :as_of_date from ({rendered}) sub"
-                        + " on conflict do nothing"
-                    ),
+                    "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
+                    + " select %(cohort_hash)s, sub.entity_id, %(as_of_date)s"
+                    + f" from ({rendered.replace('%', '%%')}) sub"
+                    + " on conflict do nothing",
                     {"cohort_hash": artifact_id, "as_of_date": as_of_date},
                 )
         mark_built(db_engine, artifact_id, output_ref=COHORT_OUTPUT_REF)
@@ -149,5 +150,7 @@ def build_cohort(
         raise
 
     record_use(db_engine, run_id, [artifact_id])
-    logger.info(f"Built cohort {artifact_id[:12]}… over {len(as_of_dates)} as_of_date(s)")
+    logger.info(
+        f"Built cohort {artifact_id[:12]}… over {len(as_of_dates)} as_of_date(s)"
+    )
     return artifact_id

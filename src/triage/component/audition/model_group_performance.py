@@ -5,10 +5,9 @@ logger = get_logger(__name__)
 import os
 
 import numpy as np
-import pandas as pd
 
 from .plotting import category_colordict, category_styledict, plot_cats
-from .utils import str_in_sql
+from .utils import read_sql_pool, str_in_sql
 
 
 class ModelGroupPerformancePlotter:
@@ -54,9 +53,7 @@ class ModelGroupPerformancePlotter:
             # set stable colors/styles by model type
             categories = np.unique(df["model_type"])
             if not self.colordict:
-                self.colordict = category_colordict(
-                    self.cmap_name, categories, self.highlight_grp
-                )
+                self.colordict = category_colordict(self.cmap_name, categories, self.highlight_grp)
             if not self.styledict:
                 self.styledict = category_styledict(self.colordict, self.highlight_grp)
 
@@ -82,8 +79,7 @@ class ModelGroupPerformancePlotter:
         on the given metric over time
         """
 
-        df = pd.read_sql(
-            """
+        query = """
             select distinct on(model_group_id, metric, parameter, train_end_time, raw_value, model_type) * from (
                 select
                     model_group_id,
@@ -109,14 +105,14 @@ class ModelGroupPerformancePlotter:
             and train_end_time in ({train_end_times})
             order by model_group_id asc, train_end_time asc
             """.format(
-                metric=metric,
-                parameter=parameter,
-                dist_table=self.distance_from_best_table.distance_table,
-                model_group_ids=str_in_sql(model_group_ids),
-                train_end_times=str_in_sql(train_end_times),
-            ),
-            self.distance_from_best_table.db_engine,
+            metric=metric,
+            parameter=parameter,
+            dist_table=self.distance_from_best_table.distance_table,
+            model_group_ids=str_in_sql(model_group_ids),
+            train_end_times=str_in_sql(train_end_times),
         )
+
+        df = read_sql_pool(self.distance_from_best_table.db_engine, query)
 
         return df
 
@@ -145,22 +141,16 @@ class ModelGroupPerformancePlotter:
         # as np.datetime64 objects, and converting from them to datetimes is ugly.
         # to get around this, we use the train_end_times given to the plot call as ticks
         # But to be defensive, we verify that these two versions of the list are the same
-        for given_time, matrix_time in zip(
-            train_end_times, sorted(df_metric["train_end_time"].unique())
-        ):
+        for given_time, matrix_time in zip(train_end_times, sorted(df_metric["train_end_time"].unique())):
             given_time_as_numpy = np.datetime64(given_time)
             if given_time_as_numpy != matrix_time:
                 raise ValueError(
                     "Train times given to the plotter do not match up with those "
                     "extracted from the database: "
-                    "{} (given time) does not equal {} (matrix time)".format(
-                        given_time_as_numpy, matrix_time
-                    )
+                    "{} (given time) does not equal {} (matrix time)".format(given_time_as_numpy, matrix_time)
                 )
         if directory:
-            path_to_save = os.path.join(
-                directory, f"metric_over_time_{metric}{parameter}.png"
-            )
+            path_to_save = os.path.join(directory, f"metric_over_time_{metric}{parameter}.png")
         else:
             path_to_save = None
 

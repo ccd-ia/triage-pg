@@ -3,27 +3,12 @@
 Seeds tiny, split-stable synthetic source data, then drives the WHOLE pipeline through one
 :func:`triage.adapters.run.run_experiment` call — experiment/run rows, source pinning,
 timechop splits, one cohort + one labels over the union of split dates, per-split train+test
-matrices, and a grid × split of models scored + evaluated. Asserts:
-
-* the lineage rows — ``triage.experiments`` + ``triage.runs`` (run ``completed``) +
-  ``triage.run_source_pins`` for the declared sources;
-* the full artifact DAG via ``triage.artifacts`` + ``artifact_inputs`` — cohort (root) →
-  labels; feature_group → cohort; matrix → {feature_group, cohort, labels}; test_matrix →
-  train_matrix; model → train_matrix; every node ``status='built'``;
-* ``triage.matrices`` (train + test per split, parquet, files on disk), ``triage.models`` +
-  ``triage.model_groups``, append-only ``triage.predictions`` for the test split, and
-  ``triage.evaluations`` with sane values;
-* CACHE REUSE — a second identical ``run_experiment`` (same config + same pinned sources) is
-  mostly cache hits: no duplicate cohort/labels/matrix/model artifact rows, counts unchanged.
-
-The pinning step (register + bump the declared sources) is what makes the second run cacheable
-— an unpinned source is volatile and would rebuild every run (ADR-0014).
+matrices, and a grid × split of models scored + evaluated.
 """
 
 import os
 
 import pytest
-from sqlalchemy import text
 
 from triage.adapters.run import experiment_hash_for, run_experiment
 
@@ -139,38 +124,28 @@ def _experiment_config() -> dict:
 
 
 def _seed_source(engine) -> None:
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "create table customers (customer_id bigint primary key, signup_date date, age int)"
-            )
+            "create table customers (customer_id bigint primary key, signup_date date, age int)"
         )
         conn.execute(
-            text(
-                "insert into customers (customer_id, signup_date, age)"
-                " select g, date '2010-01-01', 30 + g from unnest(:ids) as g"
-            ),
+            "insert into customers (customer_id, signup_date, age)"
+            " select g, date '2010-01-01', 30 + g from unnest(%(ids)s) as g",
             {"ids": _CUSTOMERS},
         )
         conn.execute(
-            text(
-                "create table orders"
-                " (order_id bigint primary key, customer_id bigint,"
-                "  order_date date, amount double precision)"
-            )
+            "create table orders"
+            " (order_id bigint primary key, customer_id bigint,"
+            "  order_date date, amount double precision)"
         )
         for order_id, customer_id, order_date, amount in _ORDERS:
             conn.execute(
-                text(
-                    "insert into orders (order_id, customer_id, order_date, amount)"
-                    " values (:oid, :cid, cast(:od as date), :amt)"
-                ),
+                "insert into orders (order_id, customer_id, order_date, amount)"
+                " values (%(oid)s, %(cid)s, cast(%(od)s as date), %(amt)s)",
                 {"oid": order_id, "cid": customer_id, "od": order_date, "amt": amount},
             )
         conn.execute(
-            text(
-                "create table label_src (entity_id bigint, knowledge_date date, outcome double precision)"
-            )
+            "create table label_src (entity_id bigint, knowledge_date date, outcome double precision)"
         )
         # One label per customer per label window (each window starts at an as_of_date).
         for as_of in _AS_OF_MONTHS:
@@ -178,16 +153,14 @@ def _seed_source(engine) -> None:
             kd = f"{year}-{month}-15"  # mid-window: inside [as_of, as_of + 6 months)
             for customer_id, outcome in _LABELS.items():
                 conn.execute(
-                    text(
-                        "insert into label_src (entity_id, knowledge_date, outcome)"
-                        " values (:eid, cast(:kd as date), :out)"
-                    ),
+                    "insert into label_src (entity_id, knowledge_date, outcome)"
+                    " values (%(eid)s, cast(%(kd)s as date), %(out)s)",
                     {"eid": customer_id, "kd": kd, "out": outcome},
                 )
 
 
-def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
-    engine = db_engine_greenfield
+def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
+    engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
     config = _experiment_config()
@@ -196,27 +169,15 @@ def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
 
     # ---- lineage: experiment + run rows, run completed
     assert result.experiment_hash == experiment_hash_for(config)
-    with engine.connect() as conn:
-        exp = (
-            conn.execute(
-                text(
-                    "select problem_type from triage.experiments where experiment_hash = :h"
-                ),
-                {"h": result.experiment_hash},
-            )
-            .mappings()
-            .one()
-        )
-        run = (
-            conn.execute(
-                text(
-                    "select status, profile, random_seed, finished_at from triage.runs where run_id = :r"
-                ),
-                {"r": result.run_id},
-            )
-            .mappings()
-            .one()
-        )
+    with engine.connection() as conn:
+        exp = conn.execute(
+            "select problem_type from triage.experiments where experiment_hash = %(h)s",
+            {"h": result.experiment_hash},
+        ).fetchone()
+        run = conn.execute(
+            "select status, profile, random_seed, finished_at from triage.runs where run_id = %(r)s",
+            {"r": result.run_id},
+        ).fetchone()
     assert exp["problem_type"] == PROBLEM_TYPE
     assert run["status"] == "completed"
     assert run["profile"] == "local"
@@ -224,15 +185,13 @@ def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
     assert run["finished_at"] is not None
 
     # ---- run_source_pins: one per declared source, each pinned to v1
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         pins = {
             r["source_name"]: r["version_label"]
             for r in conn.execute(
-                text(
-                    "select source_name, version_label from triage.run_source_pins where run_id = :r"
-                ),
+                "select source_name, version_label from triage.run_source_pins where run_id = %(r)s",
                 {"r": result.run_id},
-            ).mappings()
+            ).fetchall()
         }
     assert pins == {"customers": "v1", "orders": "v1", "label_src": "v1"}
     # the frozen pins returned in the result match what was recorded
@@ -246,27 +205,23 @@ def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
         assert os.path.exists(split.train_matrix.storage_uri)
         assert os.path.exists(split.test_matrix.storage_uri)
 
-    # ---- the artifact DAG: cohort (root) -> labels; feature_group -> cohort;
-    # matrix -> {feature_group, cohort, labels}; test_matrix -> train_matrix; model -> train_matrix
+    # ---- the artifact DAG
     def parents_of(artifact_id):
-        with engine.connect() as conn:
-            return set(
-                conn.execute(
-                    text(
-                        "select parent_id from triage.artifact_inputs where artifact_id = :a"
-                    ),
+        with engine.connection() as conn:
+            return {
+                r["parent_id"]
+                for r in conn.execute(
+                    "select parent_id from triage.artifact_inputs where artifact_id = %(a)s",
                     {"a": artifact_id},
-                )
-                .scalars()
-                .all()
-            )
+                ).fetchall()
+            }
 
     def status_of(artifact_id):
-        with engine.connect() as conn:
+        with engine.connection() as conn:
             return conn.execute(
-                text("select status from triage.artifacts where artifact_id = :a"),
+                "select status from triage.artifacts where artifact_id = %(a)s",
                 {"a": artifact_id},
-            ).scalar_one()
+            ).fetchone()["status"]
 
     # cohort is a DAG root (no parents); labels' single parent is the cohort
     assert parents_of(result.cohort_artifact_id) == set()
@@ -296,34 +251,30 @@ def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
             assert status_of(model_artifact_id) == "built"
 
     # all artifacts built (no failed/building nodes)
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         not_built = conn.execute(
-            text("select count(*) from triage.artifacts where status <> 'built'")
-        ).scalar_one()
+            "select count(*) as n from triage.artifacts where status <> 'built'"
+        ).fetchone()["n"]
     assert not_built == 0
 
     # ---- triage.matrices: 2 per split (train + test), parquet, files on disk
-    with engine.connect() as conn:
-        mx_rows = (
-            conn.execute(
-                text(
-                    "select matrix_kind, storage_format, storage_uri, num_entities from triage.matrices"
-                )
-            )
-            .mappings()
-            .all()
-        )
+    with engine.connection() as conn:
+        mx_rows = conn.execute(
+            "select matrix_kind, storage_format, storage_uri, num_entities from triage.matrices"
+        ).fetchall()
     assert len(mx_rows) == 6  # 3 splits × (train + test)
     assert all(r["storage_format"] == "parquet" for r in mx_rows)
     assert all(os.path.exists(r["storage_uri"]) for r in mx_rows)
     assert all(r["num_entities"] > 0 for r in mx_rows)
 
     # ---- models + model_groups: one model per split (same family) -> one shared group
-    with engine.connect() as conn:
-        n_models = conn.execute(text("select count(*) from triage.models")).scalar_one()
+    with engine.connection() as conn:
+        n_models = conn.execute("select count(*) as n from triage.models").fetchone()[
+            "n"
+        ]
         n_groups = conn.execute(
-            text("select count(*) from triage.model_groups")
-        ).scalar_one()
+            "select count(*) as n from triage.model_groups"
+        ).fetchone()["n"]
     assert n_models == 3  # one DecisionTree per split
     assert (
         n_groups == 1
@@ -331,43 +282,33 @@ def test_run_experiment_end_to_end(db_engine_greenfield, tmp_path):
     assert result.num_models == 3
 
     # ---- predictions: append-only test-split rows referencing the test matrix_uuid
-    with engine.connect() as conn:
-        pred_rows = (
-            conn.execute(text("select split_kind from triage.predictions"))
-            .mappings()
-            .all()
-        )
+    with engine.connection() as conn:
+        pred_rows = conn.execute("select split_kind from triage.predictions").fetchall()
     # 6 entities per test matrix × 3 splits
     assert len(pred_rows) == 18
     assert result.num_predictions == 18
     assert all(r["split_kind"] == "test" for r in pred_rows)
 
     # ---- evaluations: rows with sane values (perfect separation -> AUC == 1.0)
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         n_evals = conn.execute(
-            text("select count(*) from triage.evaluations")
-        ).scalar_one()
-        auc_values = (
-            conn.execute(
-                text("select value from triage.evaluations where metric = 'auc_roc'")
-            )
-            .scalars()
-            .all()
-        )
+            "select count(*) as n from triage.evaluations"
+        ).fetchone()["n"]
+        auc_values = [
+            r["value"]
+            for r in conn.execute(
+                "select value from triage.evaluations where metric = 'auc_roc'"
+            ).fetchall()
+        ]
     assert n_evals > 0
     assert result.num_evaluations == n_evals
     assert auc_values  # at least one AUC computed
     assert all(v == pytest.approx(1.0) for v in auc_values)
 
 
-def test_run_experiment_cache_reuse_on_rerun(db_engine_greenfield, tmp_path):
-    """A second identical run reuses every artifact: no new artifact/matrix/model rows.
-
-    Source pinning (register + bump in run_experiment) makes the derivations cacheable; the
-    second run therefore cache-hits the cohort, labels, feature groups, matrices, and models
-    instead of rebuilding them — the derivation cache works ACROSS runs (ADR-0014).
-    """
-    engine = db_engine_greenfield
+def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
+    """A second identical run reuses every artifact: no new artifact/matrix/model rows."""
+    engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
     config = _experiment_config()
@@ -375,20 +316,20 @@ def test_run_experiment_cache_reuse_on_rerun(db_engine_greenfield, tmp_path):
     first = run_experiment(engine, config, storage_dir=storage, random_seed=42)
 
     def counts():
-        with engine.connect() as conn:
+        with engine.connection() as conn:
             return {
                 "artifacts": conn.execute(
-                    text("select count(*) from triage.artifacts")
-                ).scalar_one(),
+                    "select count(*) as n from triage.artifacts"
+                ).fetchone()["n"],
                 "matrices": conn.execute(
-                    text("select count(*) from triage.matrices")
-                ).scalar_one(),
+                    "select count(*) as n from triage.matrices"
+                ).fetchone()["n"],
                 "models": conn.execute(
-                    text("select count(*) from triage.models")
-                ).scalar_one(),
+                    "select count(*) as n from triage.models"
+                ).fetchone()["n"],
                 "model_groups": conn.execute(
-                    text("select count(*) from triage.model_groups")
-                ).scalar_one(),
+                    "select count(*) as n from triage.model_groups"
+                ).fetchone()["n"],
             }
 
     after_first = counts()
@@ -416,16 +357,16 @@ def test_run_experiment_cache_reuse_on_rerun(db_engine_greenfield, tmp_path):
         assert s2.test_matrix.cache_hit is True
 
     # the second run still recorded its own source pins + used the same artifacts
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         n_run_pins = conn.execute(
-            text("select count(*) from triage.run_source_pins where run_id = :r"),
+            "select count(*) as n from triage.run_source_pins where run_id = %(r)s",
             {"r": second.run_id},
-        ).scalar_one()
+        ).fetchone()["n"]
         # both runs are GC roots for the shared artifacts (run_artifacts usage edges)
         n_usage = conn.execute(
-            text("select count(*) from triage.run_artifacts where run_id = :r"),
+            "select count(*) as n from triage.run_artifacts where run_id = %(r)s",
             {"r": second.run_id},
-        ).scalar_one()
+        ).fetchone()["n"]
     assert n_run_pins == 3
     assert (
         n_usage > 0

@@ -1,7 +1,6 @@
 """Tests for the artifact DAG store (ADR-0013, ADR-0015) on the greenfield schema."""
 
 import pytest
-from sqlalchemy import text
 
 from triage.artifacts import (
     begin_artifact,
@@ -17,15 +16,15 @@ from triage.derivation import as_uuid, derive
 
 
 @pytest.fixture
-def triage_db(db_engine):
+def triage_db(db_url, db_pool):
     """Apply the greenfield baseline migration."""
-    upgrade_db(db_engine=db_engine)
-    return db_engine
+    upgrade_db(dburl=db_url)
+    return db_pool
 
 
-def build(engine, derivation, kind, config, parents=(), **kwargs):
-    begin_artifact(engine, derivation, kind, config, parents=parents, **kwargs)
-    mark_built(engine, derivation.id)
+def build(pool, derivation, kind, config, parents=(), **kwargs):
+    begin_artifact(pool, derivation, kind, config, parents=parents, **kwargs)
+    mark_built(pool, derivation.id)
 
 
 def test_begin_then_built_then_cache_hit(triage_db):
@@ -128,11 +127,11 @@ def test_edge_insertion_is_idempotent(triage_db):
     # volatile-style re-run records the same edge again without erroring
     begin_artifact(triage_db, child, "matrix", {"m": 1}, parents=[parent.id])
 
-    with triage_db.connect() as conn:
+    with triage_db.connection() as conn:
         count = conn.execute(
-            text("select count(*) from triage.artifact_inputs where artifact_id = :id"),
+            "select count(*) as n from triage.artifact_inputs where artifact_id = %(id)s",
             {"id": child.id},
-        ).scalar_one()
+        ).fetchone()["n"]
     assert count == 1
 
 

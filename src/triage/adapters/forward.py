@@ -32,8 +32,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
@@ -83,7 +82,7 @@ class ForwardResult:
 
 
 def open_run(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     *,
     purpose: str,
     prediction_date: date,
@@ -99,13 +98,11 @@ def open_run(
     the run conservatively live for GC (ADR-0017) — its rebuilt artifacts are not collected out
     from under an in-use model.
     """
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         run_id = conn.execute(
-            text(
-                "insert into triage.runs (profile, status, random_seed, purpose,"
-                + " prediction_date, experiment_hash) values (:profile, 'started', :seed,"
-                + " :purpose, :pred, :exp) returning run_id"
-            ),
+            "insert into triage.runs (profile, status, random_seed, purpose,"
+            + " prediction_date, experiment_hash) values (%(profile)s, 'started', %(seed)s,"
+            + " %(purpose)s, %(pred)s, %(exp)s) returning run_id",
             {
                 "profile": profile,
                 "seed": random_seed,
@@ -113,27 +110,28 @@ def open_run(
                 "pred": prediction_date,
                 "exp": experiment_hash,
             },
-        ).scalar_one()
+        ).fetchone()["run_id"]
     return str(run_id)
 
 
 def close_run(
-    db_engine: Engine, run_id: str, status: str, error: str | None = None
+    db_engine: ConnectionPool,
+    run_id: str,
+    status: str,
+    error: str | None = None,
 ) -> None:
     """Set a run's terminal status ('completed' | 'failed') + finish time."""
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         conn.execute(
-            text(
-                "update triage.runs set status = cast(:status as triage.run_status),"
-                + " finished_at = now(), error = coalesce(:error, error)"
-                + " where run_id = :run_id"
-            ),
+            "update triage.runs set status = cast(%(status)s as triage.run_status),"
+            + " finished_at = now(), error = coalesce(%(error)s, error)"
+            + " where run_id = %(run_id)s",
             {"status": status, "error": error, "run_id": run_id},
         )
 
 
 def predict_forward(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     as_of_date: date,
     *,

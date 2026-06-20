@@ -51,7 +51,7 @@ class Auditioner:
             and its format is detailed in that method's docstring
 
         Args:
-            db_engine (sqlalchemy.engine): A database engine with access to a
+            db_engine (psycopg_pool.ConnectionPool): A connection pool with access to a
                 results schema of a completed modeling run
             model_group_ids (list): A large list of model groups to audition. No effort should
                 be needed to pick 'good' model groups, but they should all be groups that could
@@ -101,9 +101,7 @@ class Auditioner:
             distance_table=distance_table,
             agg_type=agg_type,
         )
-        self.best_distance_plotter = BestDistancePlotter(
-            self.distance_from_best_table, self.directory
-        )
+        self.best_distance_plotter = BestDistancePlotter(self.distance_from_best_table, self.directory)
 
         if baseline_model_group_ids:
             self.baseline_model_groups = model_groups_filter(
@@ -133,12 +131,8 @@ class Auditioner:
         )
 
         self.selection_rule_picker = SelectionRulePicker(self.distance_from_best_table)
-        self.selection_rule_plotter = SelectionRulePlotter(
-            self.selection_rule_picker, self.directory
-        )
-        self.selection_rule_performance_plotter = SelectionRulePerformancePlotter(
-            self.selection_rule_picker, directory
-        )
+        self.selection_rule_plotter = SelectionRulePlotter(self.selection_rule_picker, self.directory)
+        self.selection_rule_performance_plotter = SelectionRulePerformancePlotter(self.selection_rule_picker, directory)
 
         # note we populate the distance from best table using both the
         # baseline and candidate model groups
@@ -151,10 +145,7 @@ class Auditioner:
 
     @property
     def metrics(self):
-        return [
-            {"metric": f["metric"], "parameter": f["parameter"]}
-            for f in self.metric_filters
-        ]
+        return [{"metric": f["metric"], "parameter": f["parameter"]} for f in self.metric_filters]
 
     @property
     def thresholded_model_group_ids(self) -> list:
@@ -179,12 +170,7 @@ class Auditioner:
         """
         result = dict()
         for k in self.results_for_rule.keys():
-            result[k] = (
-                self.results_for_rule[k]
-                .groupby("selection_rule")["regret"]
-                .mean()
-                .to_dict()
-            )
+            result[k] = self.results_for_rule[k].groupby("selection_rule")["regret"].mean().to_dict()
         return result
 
     @property
@@ -203,14 +189,12 @@ class Auditioner:
         thresholded_ids = self.thresholded_model_group_ids
         for selection_rule in self.selection_rules:
             logger.debug("Calculating selection rule picks for %s", selection_rule)
-            model_group_ids[selection_rule.descriptive_name] = (
-                self.selection_rule_picker.model_group_from_rule(
-                    bound_selection_rule=selection_rule,
-                    model_group_ids=thresholded_ids,
-                    # evaluate the selection rules for the most recent
-                    # time period and use those as candidate model groups
-                    train_end_time=self.train_end_times[-1],
-                )
+            model_group_ids[selection_rule.descriptive_name] = self.selection_rule_picker.model_group_from_rule(
+                bound_selection_rule=selection_rule,
+                model_group_ids=thresholded_ids,
+                # evaluate the selection rules for the most recent
+                # time period and use those as candidate model groups
+                train_end_time=self.train_end_times[-1],
             )
             logger.debug(
                 "For rule %s, model group %s was picked",
@@ -235,10 +219,7 @@ class Auditioner:
         logger.debug("Showing best distance plots for all metrics")
         thresholded_model_group_ids = self.thresholded_model_group_ids
         if len(thresholded_model_group_ids) == 0:
-            logger.warning(
-                "Zero model group ids found that passed configured thresholds. "
-                "Nothing to plot"
-            )
+            logger.warning("Zero model group ids found that passed configured thresholds. Nothing to plot")
             return
         self.best_distance_plotter.plot_all_best_dist(
             self.metrics,
@@ -331,9 +312,7 @@ class Auditioner:
             )
             self.selection_rule_plotter.plot_all_selection_rules(**common_kwargs)
 
-            df = self.selection_rule_performance_plotter.generate_plot_data(
-                **common_kwargs
-            )
+            df = self.selection_rule_performance_plotter.generate_plot_data(**common_kwargs)
             self.selection_rule_performance_plotter.regret_plot_from_dataframe(
                 metric=metric_definition["metric"],
                 parameter=metric_definition["parameter"],
@@ -413,9 +392,7 @@ class AuditionRunner:
     def run(self):
         pre_aud = PreAudition(self.db_engine)
         model_group_ids = pre_aud.get_model_groups(self.config["model_groups"]["query"])
-        query_end_times = self.config["time_stamps"]["query"].format(
-            ", ".join(map(str, model_group_ids))
-        )
+        query_end_times = self.config["time_stamps"]["query"].format(", ".join(map(str, model_group_ids)))
         logger.spam(f"query to get end times: {query_end_times}")
         end_times = pre_aud.get_train_end_times(query=query_end_times)
         logger.spam(f"end times: {end_times}")

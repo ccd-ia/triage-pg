@@ -2,7 +2,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-from sqlalchemy import text
 
 from triage.component.audition.distance_from_best import (
     BestDistancePlotter,
@@ -17,14 +16,14 @@ from .utils import (
 )
 
 
-def test_DistanceFromBestTable(db_engine_greenfield):
-    db_engine = db_engine_greenfield
+def test_DistanceFromBestTable(db_pool_greenfield):
+    db_engine = db_pool_greenfield
 
     # Three model groups across three train end times each. In the greenfield
     # schema evaluations carry only an as_of_date (no start/end window), so there
     # is nothing to de-dup — we seed exactly one test-split evaluation per
     # (model, metric) at the model's train_end_time, with the metric's value.
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         model_groups = {
             "stable": insert_model_group(conn, "myStableClassifier"),
             "bad": insert_model_group(conn, "myBadClassifier"),
@@ -90,9 +89,7 @@ def test_DistanceFromBestTable(db_engine_greenfield):
         {"metric": "recall@", "parameter": "100_abs"},
     ]
     model_group_ids = list(model_groups.values())
-    distance_table.create_and_populate(
-        model_group_ids, ["2014-01-01", "2015-01-01", "2016-01-01"], metrics
-    )
+    distance_table.create_and_populate(model_group_ids, ["2014-01-01", "2015-01-01", "2016-01-01"], metrics)
 
     # get an ordered list of the model groups for a particular metric/time
     query = """
@@ -102,32 +99,40 @@ def test_DistanceFromBestTable(db_engine_greenfield):
             dist_from_best_case,
             dist_from_best_case_next_time
         from dist_table
-        where metric = :metric
-        and parameter = :threshold
-        and train_end_time = :train_end_time
+        where metric = %(metric)s
+        and parameter = %(threshold)s
+        and train_end_time = %(train_end_time)s
         order by dist_from_best_case
         """
 
     # greenfield evaluations.value is double precision (the old ORM
     # stochastic_value was numeric/Decimal), so compare the float columns under
-    # tolerance while keeping the model_group_id / ordering exact.
+    # tolerance while keeping the model_group_id / ordering exact. The pool uses
+    # dict_row, so flatten each row to a tuple in column-select order first.
+    def as_tuple(row):
+        return (
+            row["model_group_id"],
+            row["raw_value"],
+            row["dist_from_best_case"],
+            row["dist_from_best_case_next_time"],
+        )
+
     def assert_rows(actual, expected):
         assert len(actual) == len(expected)
-        for got, want in zip(actual, expected):
+        for got_row, want in zip(actual, expected):
+            got = as_tuple(got_row)
             assert got[0] == want[0]
             assert got[1:] == pytest.approx(want[1:])
 
-    with db_engine.connect() as conn:
-        prec_3y_ago = list(
-            conn.execute(
-                text(query),
-                {
-                    "metric": "precision@",
-                    "threshold": "100_abs",
-                    "train_end_time": "2014-01-01",
-                },
-            )
-        )
+    with db_engine.connection() as conn:
+        prec_3y_ago = conn.execute(
+            query,
+            {
+                "metric": "precision@",
+                "threshold": "100_abs",
+                "train_end_time": "2014-01-01",
+            },
+        ).fetchall()
         assert_rows(
             prec_3y_ago,
             [
@@ -137,16 +142,14 @@ def test_DistanceFromBestTable(db_engine_greenfield):
             ],
         )
 
-        recall_2y_ago = list(
-            conn.execute(
-                text(query),
-                {
-                    "metric": "recall@",
-                    "threshold": "100_abs",
-                    "train_end_time": "2015-01-01",
-                },
-            )
-        )
+        recall_2y_ago = conn.execute(
+            query,
+            {
+                "metric": "recall@",
+                "threshold": "100_abs",
+                "train_end_time": "2015-01-01",
+            },
+        ).fetchall()
         assert_rows(
             recall_2y_ago,
             [
@@ -165,8 +168,8 @@ def test_DistanceFromBestTable(db_engine_greenfield):
         assert bounds[("recall@", "100_abs")] == pytest.approx((0.34, 0.8))
 
 
-def test_BestDistancePlotter(db_engine_greenfield):
-    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
+def test_BestDistancePlotter(db_pool_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
     plotter = BestDistancePlotter(distance_table)
     df_dist = plotter.generate_plot_data(
         metric="precision@",
@@ -185,18 +188,15 @@ def test_BestDistancePlotter(db_engine_greenfield):
 
     # the stable model group should be within 0.11 1/2 of the time
     # if we included 2016 in the train_end_times, this would be 1/3!
-    for value in df_dist[
-        (df_dist["distance"] == 0.11)
-        & (df_dist["model_group_id"] == model_groups["stable"])
-    ]["pct_of_time"].values:
+    for value in df_dist[(df_dist["distance"] == 0.11) & (df_dist["model_group_id"] == model_groups["stable"])][
+        "pct_of_time"
+    ].values:
         assert np.isclose(value, 0.5)
 
 
-def test_BestDistancePlotter_plot(db_engine_greenfield):
+def test_BestDistancePlotter_plot(db_pool_greenfield):
     with patch("triage.component.audition.distance_from_best.plot_cats") as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(
-            db_engine_greenfield
-        )
+        distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
         plotter = BestDistancePlotter(distance_table)
         plotter.plot_all_best_dist(
             [{"metric": "precision@", "parameter": "100_abs"}],

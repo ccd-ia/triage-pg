@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.derivation import Derivation, canonical_json
 from triage.logging import get_logger
@@ -33,21 +32,17 @@ from triage.logging import get_logger
 logger = get_logger(__name__)
 
 
-def get_artifact(engine: Engine, artifact_id: str) -> dict[str, Any] | None:
-    with engine.connect() as conn:
-        row = (
-            conn.execute(
-                text("select * from triage.artifacts where artifact_id = :id"),
-                {"id": artifact_id},
-            )
-            .mappings()
-            .first()
-        )
+def get_artifact(pool: ConnectionPool, artifact_id: str) -> dict[str, Any] | None:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select * from triage.artifacts where artifact_id = %(id)s",
+            {"id": artifact_id},
+        ).fetchone()
     return dict(row) if row else None
 
 
 def cache_hit(
-    engine: Engine, derivation: Derivation, policy: str = "exact"
+    pool: ConnectionPool, derivation: Derivation, policy: str = "exact"
 ) -> dict[str, Any] | None:
     """Return the built artifact row for a derivation, or None to build.
 
@@ -72,27 +67,23 @@ def cache_hit(
             + " — skipping cache lookup, rebuilding"
         )
         return None
-    artifact = get_artifact(engine, derivation.id)
+    artifact = get_artifact(pool, derivation.id)
     if artifact is not None and artifact["status"] == "built":
         return artifact
     if policy == "logical":
-        with engine.connect() as conn:
-            row = (
-                conn.execute(
-                    text("""
-                        select * from triage.artifacts
-                        where logical_id = :logical_id
-                          and artifact_id <> :id
-                          and status = 'built'
-                          and cacheable
-                        order by built_at desc
-                        limit 1
-                        """),
-                    {"logical_id": derivation.logical_id, "id": derivation.id},
-                )
-                .mappings()
-                .first()
-            )
+        with pool.connection() as conn:
+            row = conn.execute(
+                """
+                    select * from triage.artifacts
+                    where logical_id = %(logical_id)s
+                      and artifact_id <> %(id)s
+                      and status = 'built'
+                      and cacheable
+                    order by built_at desc
+                    limit 1
+                    """,
+                {"logical_id": derivation.logical_id, "id": derivation.id},
+            ).fetchone()
         if row is not None:
             logger.warning(
                 f"ENGINE-DRIFT REUSE: derivation {derivation.id[:12]}… missed,"
@@ -106,7 +97,7 @@ def cache_hit(
 
 
 def begin_artifact(
-    engine: Engine,
+    pool: ConnectionPool,
     derivation: Derivation,
     kind: str,
     config: Mapping[str, Any],
@@ -121,56 +112,54 @@ def begin_artifact(
     resets it to 'building'. Parent artifacts must already exist — builds run
     bottom-up.
     """
-    with engine.begin() as conn:
-        row = (
-            conn.execute(
-                text("""
-                    insert into triage.artifacts
-                        (artifact_id, logical_id, kind, cacheable, config,
-                         source_pins, engine_versions, built_by_run, status)
-                    values (:id, :logical_id, :kind, :cacheable,
-                            cast(:config as jsonb), cast(:pins as jsonb),
-                            cast(:versions as jsonb), :run_id, 'building')
-                    on conflict (artifact_id) do update
-                        set status = 'building',
-                            built_at = null,
-                            built_by_run = excluded.built_by_run
-                    returning *
-                    """),
-                {
-                    "id": derivation.id,
-                    "logical_id": derivation.logical_id,
-                    "kind": kind,
-                    "cacheable": derivation.cacheable,
-                    "config": canonical_json(config),
-                    "pins": canonical_json(dict(source_pins or {})),
-                    "versions": canonical_json(dict(engine_versions or {})),
-                    "run_id": run_id,
-                },
-            )
-            .mappings()
-            .one()
-        )
+    with pool.connection() as conn:
+        row = conn.execute(
+            """
+                insert into triage.artifacts
+                    (artifact_id, logical_id, kind, cacheable, config,
+                     source_pins, engine_versions, built_by_run, status)
+                values (%(id)s, %(logical_id)s, %(kind)s, %(cacheable)s,
+                        cast(%(config)s as jsonb), cast(%(pins)s as jsonb),
+                        cast(%(versions)s as jsonb), %(run_id)s, 'building')
+                on conflict (artifact_id) do update
+                    set status = 'building',
+                        built_at = null,
+                        built_by_run = excluded.built_by_run
+                returning *
+                """,
+            {
+                "id": derivation.id,
+                "logical_id": derivation.logical_id,
+                "kind": kind,
+                "cacheable": derivation.cacheable,
+                "config": canonical_json(config),
+                "pins": canonical_json(dict(source_pins or {})),
+                "versions": canonical_json(dict(engine_versions or {})),
+                "run_id": run_id,
+            },
+        ).fetchone()
         for parent_id in parents:
             conn.execute(
-                text("""
+                """
                     insert into triage.artifact_inputs (artifact_id, parent_id)
-                    values (:id, :parent) on conflict do nothing
-                    """),
+                    values (%(id)s, %(parent)s) on conflict do nothing
+                    """,
                 {"id": derivation.id, "parent": parent_id},
             )
     return dict(row)
 
 
-def mark_built(engine: Engine, artifact_id: str, output_ref: str | None = None) -> None:
-    with engine.begin() as conn:
+def mark_built(
+    pool: ConnectionPool, artifact_id: str, output_ref: str | None = None
+) -> None:
+    with pool.connection() as conn:
         updated = conn.execute(
-            text("""
+            """
                 update triage.artifacts
                 set status = 'built', built_at = now(),
-                    output_ref = coalesce(:output_ref, output_ref)
-                where artifact_id = :id
-                """),
+                    output_ref = coalesce(%(output_ref)s, output_ref)
+                where artifact_id = %(id)s
+                """,
             {"id": artifact_id, "output_ref": output_ref},
         ).rowcount
     if updated != 1:
@@ -180,12 +169,10 @@ def mark_built(engine: Engine, artifact_id: str, output_ref: str | None = None) 
         )
 
 
-def mark_failed(engine: Engine, artifact_id: str) -> None:
-    with engine.begin() as conn:
+def mark_failed(pool: ConnectionPool, artifact_id: str) -> None:
+    with pool.connection() as conn:
         updated = conn.execute(
-            text(
-                "update triage.artifacts set status = 'failed' where artifact_id = :id"
-            ),
+            "update triage.artifacts set status = 'failed' where artifact_id = %(id)s",
             {"id": artifact_id},
         ).rowcount
     if updated != 1:
@@ -194,37 +181,37 @@ def mark_failed(engine: Engine, artifact_id: str) -> None:
         )
 
 
-def record_use(engine: Engine, run_id: str, artifact_ids: Sequence[str]) -> None:
+def record_use(pool: ConnectionPool, run_id: str, artifact_ids: Sequence[str]) -> None:
     """Record that a run used these artifacts — built OR cache-hit (ADR-0017).
 
     These usage edges, not ``built_by_run``, are the GC root evidence: a run
     depends on every artifact it consumed, including ones built by an earlier,
     possibly later-archived run.
     """
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         for artifact_id in artifact_ids:
             conn.execute(
-                text("""
+                """
                     insert into triage.run_artifacts (run_id, artifact_id)
-                    values (:run_id, :artifact_id) on conflict do nothing
-                    """),
+                    values (%(run_id)s, %(artifact_id)s) on conflict do nothing
+                    """,
                 {"run_id": run_id, "artifact_id": artifact_id},
             )
 
 
-def archive_experiment(engine: Engine, experiment_hash: str) -> None:
+def archive_experiment(pool: ConnectionPool, experiment_hash: str) -> None:
     """Soft-archive an experiment — removes it from the GC root set.
 
     Idempotent: re-archiving keeps the original timestamp. Reversible until a
     sweep actually collects (set archived_at back to null to restore).
     """
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         updated = conn.execute(
-            text("""
+            """
                 update triage.experiments
                 set archived_at = coalesce(archived_at, now())
-                where experiment_hash = :hash
-                """),
+                where experiment_hash = %(hash)s
+                """,
             {"hash": experiment_hash},
         ).rowcount
     if updated != 1:
@@ -258,35 +245,31 @@ live as (
 )
 select a.*
 from triage.artifacts a
-where a.status = any(:statuses)
+where a.status = any(%(statuses)s)
   and coalesce(a.built_at, a.created_at)
-        <= now() - make_interval(days => :min_age_days)
+        <= now() - make_interval(days => %(min_age_days)s)
   and not exists (select 1 from live where live.artifact_id = a.artifact_id)
 order by a.kind, a.artifact_id
 """
 
 
 def _dead_artifacts(
-    engine: Engine, statuses: Sequence[str], min_age_days: int
+    pool: ConnectionPool, statuses: Sequence[str], min_age_days: int
 ) -> list[dict[str, Any]]:
-    with engine.connect() as conn:
-        rows = (
-            conn.execute(
-                text(_DEAD_SQL),
-                {"statuses": list(statuses), "min_age_days": min_age_days},
-            )
-            .mappings()
-            .all()
-        )
+    with pool.connection() as conn:
+        rows = conn.execute(
+            _DEAD_SQL,
+            {"statuses": list(statuses), "min_age_days": min_age_days},
+        ).fetchall()
     return [dict(row) for row in rows]
 
 
-def gc_candidates(engine: Engine, min_age_days: int = 0) -> list[dict[str, Any]]:
+def gc_candidates(pool: ConnectionPool, min_age_days: int = 0) -> list[dict[str, Any]]:
     """Built artifacts that are dead: unreachable from any GC root."""
-    return _dead_artifacts(engine, statuses=["built"], min_age_days=min_age_days)
+    return _dead_artifacts(pool, statuses=["built"], min_age_days=min_age_days)
 
 
-def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]:
+def collect(pool: ConnectionPool, artifact_ids: Sequence[str]) -> list[dict[str, Any]]:
     """Output GC: delete in-PG outputs and mark rows 'collected' (ADR-0017).
 
     Rows, lineage, and pins stay — provenance is never collected, and a
@@ -299,19 +282,13 @@ def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]
     safe: a leftover file is overwritten on rebuild, never served stale.
     """
     needs_external_deletion: list[dict[str, Any]] = []
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         for artifact_id in artifact_ids:
-            row = (
-                conn.execute(
-                    text(
-                        "select kind, status, output_ref from triage.artifacts"
-                        + " where artifact_id = :id"
-                    ),
-                    {"id": artifact_id},
-                )
-                .mappings()
-                .first()
-            )
+            row = conn.execute(
+                "select kind, status, output_ref from triage.artifacts"
+                + " where artifact_id = %(id)s",
+                {"id": artifact_id},
+            ).fetchone()
             if row is None:
                 raise ValueError(
                     f"Cannot collect artifact {artifact_id!r}: no such artifact"
@@ -323,12 +300,12 @@ def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]
                 )
             if row["kind"] == "cohort":
                 conn.execute(
-                    text("delete from triage.cohorts where cohort_hash = :id"),
+                    "delete from triage.cohorts where cohort_hash = %(id)s",
                     {"id": artifact_id},
                 )
             elif row["kind"] == "labels":
                 conn.execute(
-                    text("delete from triage.labels where label_hash = :id"),
+                    "delete from triage.labels where label_hash = %(id)s",
                     {"id": artifact_id},
                 )
             else:
@@ -340,10 +317,8 @@ def collect(engine: Engine, artifact_ids: Sequence[str]) -> list[dict[str, Any]]
                     }
                 )
             conn.execute(
-                text(
-                    "update triage.artifacts set status = 'collected'"
-                    + " where artifact_id = :id"
-                ),
+                "update triage.artifacts set status = 'collected'"
+                + " where artifact_id = %(id)s",
                 {"id": artifact_id},
             )
     logger.info(
@@ -412,7 +387,7 @@ def delete_outputs(external: Sequence[Mapping[str, Any]]) -> dict[str, list[str]
     return {"deleted": deleted, "absent": absent}
 
 
-def purge(engine: Engine, min_age_days: int = 0) -> list[str]:
+def purge(pool: ConnectionPool, min_age_days: int = 0) -> list[str]:
     """Deep GC: delete the rows of dead collected/failed artifacts (ADR-0017).
 
     Recomputes deadness itself (defense in depth) — only artifacts that are
@@ -425,28 +400,27 @@ def purge(engine: Engine, min_age_days: int = 0) -> list[str]:
     append-only history.
     """
     dead = _dead_artifacts(
-        engine, statuses=["collected", "failed"], min_age_days=min_age_days
+        pool, statuses=["collected", "failed"], min_age_days=min_age_days
     )
     remaining = {row["artifact_id"] for row in dead}
     purged: list[str] = []
     while remaining:
-        with engine.begin() as conn:
-            deleted = (
-                conn.execute(
-                    text("""
+        with pool.connection() as conn:
+            deleted = [
+                r["artifact_id"]
+                for r in conn.execute(
+                    """
                         delete from triage.artifacts a
-                        where a.artifact_id = any(:ids)
+                        where a.artifact_id = any(%(ids)s)
                           and not exists (
                               select 1 from triage.artifact_inputs i
                               where i.parent_id = a.artifact_id
                           )
                         returning a.artifact_id
-                        """),
+                        """,
                     {"ids": list(remaining)},
-                )
-                .scalars()
-                .all()
-            )
+                ).fetchall()
+            ]
         if not deleted:
             break  # the rest still have surviving children — retained for now
         purged.extend(deleted)
@@ -466,7 +440,7 @@ _CLOSURE_SQL = """
 with recursive walk as (
     select a.artifact_id, a.kind, a.status, a.cacheable, 0 as depth
     from triage.artifacts a
-    where a.artifact_id = :id
+    where a.artifact_id = %(id)s
     union all
     select n.artifact_id, n.kind, n.status, n.cacheable, walk.depth + 1
     from walk
@@ -480,17 +454,17 @@ order by depth, artifact_id
 """
 
 
-def closure(engine: Engine, artifact_id: str) -> list[dict[str, Any]]:
+def closure(pool: ConnectionPool, artifact_id: str) -> list[dict[str, Any]]:
     """The artifact plus its full upstream input closure (provenance)."""
     sql = _CLOSURE_SQL.format(near="artifact_id", far="parent_id")
-    with engine.connect() as conn:
-        rows = conn.execute(text(sql), {"id": artifact_id}).mappings().all()
+    with pool.connection() as conn:
+        rows = conn.execute(sql, {"id": artifact_id}).fetchall()
     return [dict(row) for row in rows]
 
 
-def dependents(engine: Engine, artifact_id: str) -> list[dict[str, Any]]:
+def dependents(pool: ConnectionPool, artifact_id: str) -> list[dict[str, Any]]:
     """The artifact plus its full downstream cone (what a change invalidates)."""
     sql = _CLOSURE_SQL.format(near="parent_id", far="artifact_id")
-    with engine.connect() as conn:
-        rows = conn.execute(text(sql), {"id": artifact_id}).mappings().all()
+    with pool.connection() as conn:
+        rows = conn.execute(sql, {"id": artifact_id}).fetchall()
     return [dict(row) for row in rows]

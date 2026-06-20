@@ -19,8 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import get_artifact
@@ -65,26 +64,22 @@ class ModelLineage:
     source_pins: dict[str, str | None]
 
 
-def matrix_result_from_uuid(db_engine: Engine, matrix_uuid: Any) -> MatrixResult:
+def matrix_result_from_uuid(
+    db_engine: ConnectionPool, matrix_uuid: Any
+) -> MatrixResult:
     """Rebuild a :class:`MatrixResult` from its ``triage.matrices`` row (by ``matrix_uuid``).
 
     ``feature_group_artifact_id`` is left empty — the forward/retrain path does not re-derive
     the feature group from a reconstructed matrix; it passes the recovered featurizer config to
     :func:`triage.adapters.matrix.build_matrix`, which derives a fresh feature-group node.
     """
-    with db_engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    "select artifact_id, storage_uri, num_entities, num_features,"
-                    + " feature_names, metadata from triage.matrices"
-                    + " where matrix_uuid = :u"
-                ),
-                {"u": matrix_uuid},
-            )
-            .mappings()
-            .first()
-        )
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select artifact_id, storage_uri, num_entities, num_features,"
+            + " feature_names, metadata from triage.matrices"
+            + " where matrix_uuid = %(u)s",
+            {"u": matrix_uuid},
+        ).fetchone()
     if row is None:
         raise ValueError(
             f"no triage.matrices row for matrix_uuid {matrix_uuid!r}"
@@ -102,47 +97,43 @@ def matrix_result_from_uuid(db_engine: Engine, matrix_uuid: Any) -> MatrixResult
     )
 
 
-def parents_of(db_engine: Engine, artifact_id: str) -> dict[str, str]:
+def parents_of(db_engine: ConnectionPool, artifact_id: str) -> dict[str, str]:
     """The DAG parents of an artifact, as ``{kind: parent_artifact_id}``.
 
     A train matrix's parents are its feature_group, cohort, and labels nodes. Returns the
     last parent per kind (a matrix has exactly one parent of each kind that matters here).
     """
-    with db_engine.connect() as conn:
+    with db_engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select a.artifact_id, a.kind from triage.artifact_inputs i"
-                + " join triage.artifacts a on a.artifact_id = i.parent_id"
-                + " where i.artifact_id = :child"
-            ),
+            "select a.artifact_id, a.kind from triage.artifact_inputs i"
+            + " join triage.artifacts a on a.artifact_id = i.parent_id"
+            + " where i.artifact_id = %(child)s",
             {"child": artifact_id},
-        ).all()
-    return {str(kind): str(pid) for pid, kind in rows}
+        ).fetchall()
+    return {str(row["kind"]): str(row["artifact_id"]) for row in rows}
 
 
-def latest_model_in_group(db_engine: Engine, model_group_id: int) -> int:
+def latest_model_in_group(db_engine: ConnectionPool, model_group_id: int) -> int:
     """The most recently trained model in a group — the spec source for a retrain.
 
     Ordered by ``train_end_time`` (the data cut), then ``created_at`` / ``model_id`` to break
     ties deterministically. Raises if the group has no models.
     """
-    with db_engine.connect() as conn:
-        model_id = conn.execute(
-            text(
-                "select model_id from triage.models where model_group_id = :gid"
-                + " order by train_end_time desc nulls last, created_at desc, model_id desc"
-                + " limit 1"
-            ),
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select model_id from triage.models where model_group_id = %(gid)s"
+            + " order by train_end_time desc nulls last, created_at desc, model_id desc"
+            + " limit 1",
             {"gid": model_group_id},
-        ).scalar_one_or_none()
-    if model_id is None:
+        ).fetchone()
+    if row is None:
         raise ValueError(
             f"model group {model_group_id} has no models — nothing to retrain from"
         )
-    return int(model_id)
+    return int(row["model_id"])
 
 
-def _run_links(db_engine: Engine, run_id: Any) -> tuple[str | None, str | None]:
+def _run_links(db_engine: ConnectionPool, run_id: Any) -> tuple[str | None, str | None]:
     """The ``(experiment_hash, problem_type)`` of the experiment a run belongs to.
 
     ``triage.models.run_id`` is nullable (FK on delete set null) and a run may have a NULL
@@ -151,28 +142,22 @@ def _run_links(db_engine: Engine, run_id: Any) -> tuple[str | None, str | None]:
     """
     if run_id is None:
         return None, None
-    with db_engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    "select r.experiment_hash, e.problem_type::text as problem_type"
-                    + " from triage.runs r"
-                    + " left join triage.experiments e"
-                    + "   on e.experiment_hash = r.experiment_hash"
-                    + " where r.run_id = :rid"
-                ),
-                {"rid": run_id},
-            )
-            .mappings()
-            .first()
-        )
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select r.experiment_hash, e.problem_type::text as problem_type"
+            + " from triage.runs r"
+            + " left join triage.experiments e"
+            + "   on e.experiment_hash = r.experiment_hash"
+            + " where r.run_id = %(rid)s",
+            {"rid": run_id},
+        ).fetchone()
     if row is None:
         return None, None
     return row["experiment_hash"], row["problem_type"]
 
 
 def reconstruct_model_lineage(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     *,
     problem_type_override: str | None = None,
@@ -190,19 +175,13 @@ def reconstruct_model_lineage(
         ValueError: the model, its artifact, its train matrix, or its cohort/labels parents
             are missing, or the problem_type cannot be resolved and no override was given.
     """
-    with db_engine.connect() as conn:
-        model_row = (
-            conn.execute(
-                text(
-                    "select model_id, model_hash, model_group_id, run_id,"
-                    + " train_matrix_uuid, artifact_uri, random_seed"
-                    + " from triage.models where model_id = :mid"
-                ),
-                {"mid": model_id},
-            )
-            .mappings()
-            .first()
-        )
+    with db_engine.connection() as conn:
+        model_row = conn.execute(
+            "select model_id, model_hash, model_group_id, run_id,"
+            + " train_matrix_uuid, artifact_uri, random_seed"
+            + " from triage.models where model_id = %(mid)s",
+            {"mid": model_id},
+        ).fetchone()
     if model_row is None:
         raise ValueError(f"no triage.models row for model_id {model_id}")
     if model_row["train_matrix_uuid"] is None:

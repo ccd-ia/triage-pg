@@ -1,9 +1,7 @@
 import uuid
 from datetime import datetime
 
-import pandas as pd
 import pytest
-from sqlalchemy import text
 
 from triage.component.audition.pre_audition import PreAudition
 
@@ -20,24 +18,19 @@ def _insert_experiment_and_run(conn):
     """
     experiment_hash = uuid.uuid4().hex
     conn.execute(
-        text(
-            "insert into triage.experiments (experiment_hash, config, problem_type)"
-            " values (:h, '{}'::jsonb, 'classification')"
-        ),
+        "insert into triage.experiments (experiment_hash, config, problem_type)"
+        " values (%(h)s, '{}'::jsonb, 'classification')",
         {"h": experiment_hash},
     )
     run_id = conn.execute(
-        text(
-            "insert into triage.runs (experiment_hash, profile)"
-            " values (:h, 'local') returning run_id"
-        ),
+        "insert into triage.runs (experiment_hash, profile) values (%(h)s, 'local') returning run_id",
         {"h": experiment_hash},
-    ).scalar_one()
+    ).fetchone()["run_id"]
     return experiment_hash, run_id
 
 
-def test_PreAudition(db_engine_greenfield):
-    db_engine = db_engine_greenfield
+def test_PreAudition(db_pool_greenfield):
+    db_engine = db_pool_greenfield
 
     num_model_groups = 10
     model_types = ["classifier type {}".format(i) for i in range(0, num_model_groups)]
@@ -61,7 +54,7 @@ def test_PreAudition(db_engine_greenfield):
 
     model_group_ids = []
     experiment_hashes = []
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         for model_type in model_types:
             mgid = insert_model_group(conn, model_type)
             model_group_ids.append(mgid)
@@ -72,9 +65,7 @@ def test_PreAudition(db_engine_greenfield):
                 tet = train_end_time.strftime("%Y-%m-%d")
                 model_id = insert_model(conn, mgid, tet, run_id=run_id)
                 for metric, parameter in metrics:
-                    insert_evaluation(
-                        conn, model_id, metric, parameter, 0.5, as_of_date=tet
-                    )
+                    insert_evaluation(conn, model_id, metric, parameter, 0.5, as_of_date=tet)
 
     pre_aud = PreAudition(db_engine)
 
@@ -84,19 +75,12 @@ def test_PreAudition(db_engine_greenfield):
         pre_aud.get_model_groups_from_label("label_1")
 
     # Expect exactly one model group for a given experiment_hash
-    experiment_hash = list(
-        pd.read_sql(
-            """SELECT r.experiment_hash
+    with db_engine.connection() as conn:
+        experiment_hash = conn.execute("""SELECT r.experiment_hash
             FROM triage.models m
             JOIN triage.runs r ON m.run_id = r.run_id
-            limit 1""",
-            con=db_engine,
-        )["experiment_hash"]
-    )[0]
-    assert (
-        len(pre_aud.get_model_groups_from_experiment(experiment_hash)["model_groups"])
-        == 1
-    )
+            limit 1""").fetchone()["experiment_hash"]
+    assert len(pre_aud.get_model_groups_from_experiment(experiment_hash)["model_groups"]) == 1
 
     # Expect the number of model groups for customs SQL
     query = f"""

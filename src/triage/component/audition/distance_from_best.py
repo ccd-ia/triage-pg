@@ -6,11 +6,10 @@ import os
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
 
 from .metric_directionality import sql_rank_order, value_agg_funcs
 from .plotting import category_colordict, category_styledict, plot_bounds, plot_cats
-from .utils import str_in_sql
+from .utils import read_sql_pool, str_in_sql
 
 
 class DistanceFromBestTable:
@@ -19,7 +18,7 @@ class DistanceFromBestTable:
         best model for that train end time for a variety of chosen metrics
 
         Args:
-            db_engine (sqlalchemy.engine)
+            db_engine (psycopg_pool.ConnectionPool)
             models_table (string) The name of a models table in the database, pre-populated
             distance_table (string) The desired name of the distance table to be
                 produced by this class
@@ -33,13 +32,13 @@ class DistanceFromBestTable:
 
     def _delete(self):
         """Delete the distance-from-best table if it exists"""
-        with self.db_engine.begin() as conn:
-            conn.execute(text(f"drop table if exists {self.distance_table}"))
+        with self.db_engine.connection() as conn:
+            conn.execute(f"drop table if exists {self.distance_table}")
 
     def _create(self):
         """Create the distance-from-best table"""
-        with self.db_engine.begin() as conn:
-            conn.execute(text(f"""
+        with self.db_engine.connection() as conn:
+            conn.execute(f"""
                      create table {self.distance_table} (
                      model_group_id int,
                      train_end_time timestamp,
@@ -51,7 +50,7 @@ class DistanceFromBestTable:
                      raw_value_next_time float,
                      dist_from_best_case_next_time float
                     )
-                    """))
+                    """)
 
     def _populate(self, model_group_ids, train_end_times, metrics):
         """Populate the distance table with the given model groups, times, and metrics
@@ -67,11 +66,10 @@ class DistanceFromBestTable:
                 for all given model group ids, train end times, and metric/param combos
         """
         logger.debug("Populating data to distance table")
-        with self.db_engine.begin() as conn:
+        with self.db_engine.connection() as conn:
             for metric in metrics:
                 conn.execute(
-                    text(
-                        """
+                    """
                         insert into {new_table}
                         WITH metric_values AS (
                             SELECT
@@ -134,17 +132,14 @@ class DistanceFromBestTable:
                         from current_best_vals
                         order by train_end_time
                         """.format(
-                            model_group_ids=str_in_sql(model_group_ids),
-                            train_end_times=str_in_sql(train_end_times),
-                            models_table=self.models_table,
-                            metric=metric["metric"],
-                            parameter=metric["parameter"],
-                            metric_value_order=sql_rank_order(metric["metric"]),
-                            new_table=self.distance_table,
-                            metric_agg_fcn=value_agg_funcs(metric["metric"])[
-                                self.agg_type
-                            ],
-                        )
+                        model_group_ids=str_in_sql(model_group_ids),
+                        train_end_times=str_in_sql(train_end_times),
+                        models_table=self.models_table,
+                        metric=metric["metric"],
+                        parameter=metric["parameter"],
+                        metric_value_order=sql_rank_order(metric["metric"]),
+                        new_table=self.distance_table,
+                        metric_agg_fcn=value_agg_funcs(metric["metric"])[self.agg_type],
                     )
                 )
 
@@ -154,28 +149,24 @@ class DistanceFromBestTable:
                 SELECT
                     metric,
                     parameter,
-                    min(raw_value),
-                    max(raw_value)
+                    min(raw_value) as minimum,
+                    max(raw_value) as maximum
                 FROM {self.distance_table} dist
                 GROUP BY metric, parameter
             """
 
-        with self.db_engine.connect() as conn:
+        with self.db_engine.connection() as conn:
             results = dict(
-                ((metric, parameter), (minimum, maximum))
-                for metric, parameter, minimum, maximum in conn.execute(text(query))
+                (
+                    (row["metric"], row["parameter"]),
+                    (row["minimum"], row["maximum"]),
+                )
+                for row in conn.execute(query).fetchall()
             )
-
-        # return dict(
-        #     ((metric, parameter), (minimum, maximum))
-        #     for metric, parameter, minimum, maximum in self.db_engine.execute(query)
-        # )
 
         return results
 
-    def create_and_populate(
-        self, model_group_ids, train_end_times, metrics, delete=True
-    ):
+    def create_and_populate(self, model_group_ids, train_end_times, metrics, delete=True):
         """Creates and populates the distance table with the
             given model groups, times, and metrics
 
@@ -205,12 +196,8 @@ class DistanceFromBestTable:
         Returns: (pandas.DataFrame) The data from the table corresponding
             to those model group ids
         """
-        return pd.read_sql(
-            "select * from {} where model_group_id in ({})".format(
-                self.distance_table, str_in_sql(model_group_ids)
-            ),
-            self.db_engine,
-        )
+        query = "select * from {} where model_group_id in ({})".format(self.distance_table, str_in_sql(model_group_ids))
+        return read_sql_pool(self.db_engine, query)
 
     def dataframe_as_of(self, model_group_ids, train_end_time):
         """Return model group id/train end time subset of table as dataframe
@@ -249,9 +236,7 @@ class BestDistancePlotter:
         self.cmap_name = "tab10"
 
     def plot_bounds(self, metric, parameter):
-        observed_min, observed_max = self.distance_from_best_table.observed_bounds[
-            (metric, parameter)
-        ]
+        observed_min, observed_max = self.distance_from_best_table.observed_bounds[(metric, parameter)]
         return plot_bounds(observed_min, observed_max)
 
     def plot_tick_dist(self, plot_min, plot_max):
@@ -272,10 +257,7 @@ class BestDistancePlotter:
             each was within various thresholds of the best model at that time
         """
         model_group_union_sql = " union all ".join(
-            [
-                "(select {} as model_group_id)".format(model_group_id)
-                for model_group_id in model_group_ids
-            ]
+            ["(select {} as model_group_id)".format(model_group_id) for model_group_id in model_group_ids]
         )
         plot_min, plot_max = self.plot_bounds(metric, parameter)
         plot_tick_dist = self.plot_tick_dist(plot_min, plot_max)
@@ -316,9 +298,7 @@ class BestDistancePlotter:
             GROUP BY 1,2,3
         """.format(**sel_params)
 
-        return pd.read_sql(sel, self.distance_from_best_table.db_engine).sort_values(
-            ["model_group_id", "distance"]
-        )
+        return read_sql_pool(self.distance_from_best_table.db_engine, sel).sort_values(["model_group_id", "distance"])
 
     def plot_all_best_dist(self, metric_filters, model_group_ids, train_end_times):
         """For each metric, plot the percentage of time that a model group is
@@ -394,14 +374,10 @@ def plot_best_dist(metric, parameter, df_best_dist, directory=None, **plt_format
     """
 
     cat_col = "model_type"
-    plt_title = "Fraction of models X pp worse than best {} {}".format(
-        metric, parameter
-    )
+    plt_title = "Fraction of models X pp worse than best {} {}".format(metric, parameter)
 
     if directory:
-        path_to_save = os.path.join(
-            directory, f"distance_from_best_{metric}{parameter}.png"
-        )
+        path_to_save = os.path.join(directory, f"distance_from_best_{metric}{parameter}.png")
     else:
         path_to_save = None
 

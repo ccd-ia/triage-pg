@@ -2,9 +2,9 @@ import pandas as pd
 
 from triage.logging import get_logger
 
-logger = get_logger(__name__)
+from .utils import read_sql_pool
 
-from sqlalchemy import text
+logger = get_logger(__name__)
 
 
 class PreAudition:
@@ -12,7 +12,7 @@ class PreAudition:
         """Prepare the model_groups and train_end_times for Auditioner to use
 
         Args:
-            db_engine: (sqlalchemy.engine)
+            db_engine: (psycopg_pool.ConnectionPool)
             query: (string): cuztomized SQL query to pull model groups
             baseline_model_types: (list): optional list of model types to use to identify baseline models
         """
@@ -21,9 +21,7 @@ class PreAudition:
         self.baseline_model_groups = None
 
         if baseline_model_types:
-            baseline_types_list = ", ".join(
-                ["'%s'" % mt for mt in baseline_model_types]
-            )
+            baseline_types_list = ", ".join(["'%s'" % mt for mt in baseline_model_types])
             self.baseline_where = "AND model_type IN (%s)" % baseline_types_list
             self.nonbaseline_where = "AND model_type NOT IN (%s)" % baseline_types_list
         else:
@@ -66,24 +64,22 @@ class PreAudition:
             SELECT DISTINCT(model_group_id)
             FROM triage.models m
             JOIN triage.runs r ON m.run_id = r.run_id
-            WHERE r.experiment_hash = :experiment_hash
+            WHERE r.experiment_hash = %(experiment_hash)s
             {baseline_clause}
             """
 
-        with self.db_engine.connect() as conn:
-            model_groups = pd.read_sql(
-                text(query.format(baseline_clause=self.nonbaseline_where)),
-                con=conn,
-                params={"experiment_hash": experiment_hash},
-            )
+        model_groups = read_sql_pool(
+            self.db_engine,
+            query.format(baseline_clause=self.nonbaseline_where),
+            params={"experiment_hash": experiment_hash},
+        )
         self.model_groups = list(model_groups["model_group_id"])
 
-        with self.db_engine.connect() as conn:
-            baseline_model_groups = pd.read_sql(
-                text(query.format(baseline_clause=self.baseline_where)),
-                con=conn,
-                params={"experiment_hash": experiment_hash},
-            )
+        baseline_model_groups = read_sql_pool(
+            self.db_engine,
+            query.format(baseline_clause=self.baseline_where),
+            params={"experiment_hash": experiment_hash},
+        )
         self.baseline_model_groups = list(baseline_model_groups["model_group_id"])
 
         return {
@@ -98,7 +94,7 @@ class PreAudition:
         Args:
             query: (string) SQL query for model groups
         """
-        model_groups = pd.read_sql(query, con=self.db_engine)
+        model_groups = read_sql_pool(self.db_engine, query)
         self.model_group = list(model_groups["model_group_id"])
         return self.model_group
 
@@ -109,32 +105,27 @@ class PreAudition:
             after: (string) YYYY-MM-DD time format
             query: (string) SQL query for train_end_times
         """
-        logger.debug(
-            f"model groups: {self.model_groups}, baseline model groups: {self.baseline_model_groups}"
-        )
+        logger.debug(f"model groups: {self.model_groups}, baseline model groups: {self.baseline_model_groups}")
         if query is None:
-            model_groups_stmt = ", ".join(
-                map(str, self.model_groups + self.baseline_model_groups)
-            )
+            model_groups_stmt = ", ".join(map(str, self.model_groups + self.baseline_model_groups))
 
             query = f"""
             SELECT DISTINCT train_end_time
             FROM triage.models
             WHERE model_group_id IN ({model_groups_stmt})
-                AND train_end_time >= :after
+                AND train_end_time >= %(after)s
             ORDER BY train_end_time
             ;
             """
         logger.spam(f"pre audition get train end times with query: {query}")
+        # A caller-supplied query embeds its own filter and carries no %(after)s
+        # placeholder, so only pass the bind when we built the default query above.
+        params = {"after": after} if after is not None else None
         # greenfield triage.models.train_end_time is a DATE, so pandas reads it
         # as datetime.date; the inherited schema used a TIMESTAMP (-> Timestamp).
         # Normalize to pandas Timestamps so the downstream pandas comparisons
         # against the distance table's datetime64 train_end_time column (in
         # regrets / model_group_performance / thresholding) keep working.
-        train_end_time_col = pd.to_datetime(
-            pd.read_sql(text(query), con=self.db_engine, params={"after": after})[
-                "train_end_time"
-            ]
-        )
+        train_end_time_col = pd.to_datetime(read_sql_pool(self.db_engine, query, params=params)["train_end_time"])
         end_times = sorted(train_end_time_col.tolist())
         return end_times

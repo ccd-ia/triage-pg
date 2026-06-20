@@ -27,8 +27,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.artifacts import (
     begin_artifact,
@@ -81,13 +80,14 @@ def _label_projection(problem_type: str) -> tuple[str, str]:
     if problem_type in _OUTCOME_TYPES:
         return (
             "label_hash, entity_id, as_of_date, label_timespan, outcome",
-            ":label_hash, sub.entity_id, :as_of_date," + " cast(:label_timespan as interval), sub.outcome",
+            "%(label_hash)s, sub.entity_id, %(as_of_date)s,"
+            + " cast(%(label_timespan)s as interval), sub.outcome",
         )
     if problem_type == _SURVIVAL_TYPE:
         return (
             "label_hash, entity_id, as_of_date, label_timespan, duration, event_observed",
-            ":label_hash, sub.entity_id, :as_of_date,"
-            + " cast(:label_timespan as interval), sub.duration, sub.event_observed",
+            "%(label_hash)s, sub.entity_id, %(as_of_date)s,"
+            + " cast(%(label_timespan)s as interval), sub.duration, sub.event_observed",
         )
     raise ValueError(
         f"unknown problem_type {problem_type!r}; expected one of"
@@ -96,7 +96,7 @@ def _label_projection(problem_type: str) -> tuple[str, str]:
 
 
 def build_labels(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     cohort_artifact_id: str,
     label_query_template: str,
@@ -180,19 +180,21 @@ def build_labels(
     )
     artifact_id = derivation.id
     try:
-        with db_engine.begin() as conn:
+        with db_engine.connection() as conn:
             for as_of_date in as_of_dates:
                 for label_timespan in label_timespans:
                     rendered = label_query_template.format(
                         as_of_date=f"'{as_of_date}'",
                         label_timespan=f"interval '{label_timespan}'",
                     )
+                    # The rendered user SQL is embedded directly; psycopg3 reads ``%`` as
+                    # the parameter marker, so literal ``%`` in the user's query (LIKE
+                    # patterns etc.) is doubled to ``%%``. The %(name)s binds in
+                    # select_columns stay as-is.
                     conn.execute(
-                        text(
-                            f"insert into triage.labels ({target_columns})"
-                            + f" select {select_columns} from ({rendered}) sub"
-                            + " on conflict do nothing"
-                        ),
+                        f"insert into triage.labels ({target_columns})"
+                        + f" select {select_columns} from ({rendered.replace('%', '%%')}) sub"
+                        + " on conflict do nothing",
                         {
                             "label_hash": artifact_id,
                             "as_of_date": as_of_date,

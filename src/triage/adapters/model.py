@@ -53,8 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import (
@@ -169,7 +168,9 @@ def _model_group_hash(
     return hashlib.sha256(canonical_json(envelope).encode("ascii")).hexdigest()
 
 
-def _reconstruct_derivation(engine: Engine, artifact_id: str, what: str) -> Derivation:
+def _reconstruct_derivation(
+    engine: ConnectionPool, artifact_id: str, what: str
+) -> Derivation:
     """Re-read an upstream artifact and rebuild its Derivation so it can chain.
 
     Mirrors :func:`triage.adapters.matrix._reconstruct_derivation`.
@@ -188,7 +189,7 @@ def _reconstruct_derivation(engine: Engine, artifact_id: str, what: str) -> Deri
 
 
 def build_model(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     train_matrix_result: MatrixResult,
     class_path: str,
@@ -446,7 +447,7 @@ def _load_estimator(artifact_uri: str):
 
 
 def _select_or_insert_model_group(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     group_hash: str,
     class_path: str,
     hyperparameters: Mapping[str, Any],
@@ -457,45 +458,39 @@ def _select_or_insert_model_group(
     A second model of the same family (same estimator + hyperparameters + features) reuses the
     existing row — that's how a model group spans temporal splits.
     """
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         existing = conn.execute(
-            text(
-                "select model_group_id from triage.model_groups"
-                + " where model_group_hash = :h"
-            ),
+            "select model_group_id from triage.model_groups"
+            + " where model_group_hash = %(h)s",
             {"h": group_hash},
-        ).scalar_one_or_none()
+        ).fetchone()
         if existing is not None:
-            return existing
-        model_group_id = conn.execute(
-            text(
-                "insert into triage.model_groups"
-                + " (model_group_hash, model_type, hyperparameters, feature_list)"
-                + " values (:h, :model_type, cast(:hp as jsonb), :feature_list)"
-                + " on conflict (model_group_hash) do nothing"
-                + " returning model_group_id"
-            ),
+            return existing["model_group_id"]
+        inserted = conn.execute(
+            "insert into triage.model_groups"
+            + " (model_group_hash, model_type, hyperparameters, feature_list)"
+            + " values (%(h)s, %(model_type)s, cast(%(hp)s as jsonb), %(feature_list)s)"
+            + " on conflict (model_group_hash) do nothing"
+            + " returning model_group_id",
             {
                 "h": group_hash,
                 "model_type": class_path,
                 "hp": json.dumps(hyperparameters),
                 "feature_list": list(feature_list),
             },
-        ).scalar_one_or_none()
-        if model_group_id is None:
+        ).fetchone()
+        if inserted is None:
             # A concurrent insert won the race; re-read the now-present row.
-            model_group_id = conn.execute(
-                text(
-                    "select model_group_id from triage.model_groups"
-                    + " where model_group_hash = :h"
-                ),
+            inserted = conn.execute(
+                "select model_group_id from triage.model_groups"
+                + " where model_group_hash = %(h)s",
                 {"h": group_hash},
-            ).scalar_one()
-    return model_group_id
+            ).fetchone()
+    return inserted["model_group_id"]
 
 
 def _insert_model_row(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_artifact_id: str,
     model_group_id: int,
     run_id: str,
@@ -511,19 +506,17 @@ def _insert_model_row(
     ``model_hash`` is the model artifact_id (FK → artifacts); ``train_matrix_uuid`` is
     ``as_uuid(train_matrix_artifact_id)`` (FK → matrices, ADR-0015).
     """
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         model_id = conn.execute(
-            text(
-                "insert into triage.models"
-                + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
-                + "  train_end_time, training_label_timespan, artifact_uri,"
-                + "  artifact_format, model_size_bytes, random_seed)"
-                + " values (:model_group_id, :model_hash, :run_id, :train_matrix_uuid,"
-                + "  cast(:train_end_time as date),"
-                + "  cast(:training_label_timespan as interval), :artifact_uri,"
-                + "  'joblib', :model_size_bytes, :random_seed)"
-                + " returning model_id"
-            ),
+            "insert into triage.models"
+            + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
+            + "  train_end_time, training_label_timespan, artifact_uri,"
+            + "  artifact_format, model_size_bytes, random_seed)"
+            + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
+            + "  cast(%(train_end_time)s as date),"
+            + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
+            + "  'joblib', %(model_size_bytes)s, %(random_seed)s)"
+            + " returning model_id",
             {
                 "model_group_id": model_group_id,
                 "model_hash": model_artifact_id,
@@ -535,7 +528,7 @@ def _insert_model_row(
                 "model_size_bytes": model_size_bytes,
                 "random_seed": random_seed,
             },
-        ).scalar_one()
+        ).fetchone()["model_id"]
     return model_id
 
 
@@ -565,7 +558,7 @@ def _feature_importance_values(estimator, n_features: int):
 
 
 def _persist_feature_importances(
-    db_engine: Engine, model_id: int, estimator, feature_columns: Sequence[str]
+    db_engine: ConnectionPool, model_id: int, estimator, feature_columns: Sequence[str]
 ) -> None:
     """INSERT ``triage.feature_importances`` rows with absolute + percentile ranks (ADR-0011).
 
@@ -598,35 +591,29 @@ def _persist_feature_importances(
                 "rank_pct": float(rank_pct),
             }
         )
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "insert into triage.feature_importances"
-                + " (model_id, feature, feature_importance, rank_abs, rank_pct)"
-                + " values (:model_id, :feature, :feature_importance, :rank_abs, :rank_pct)"
-                + " on conflict (model_id, feature) do update set"
-                + "  feature_importance = excluded.feature_importance,"
-                + "  rank_abs = excluded.rank_abs,"
-                + "  rank_pct = excluded.rank_pct"
-            ),
+    with db_engine.connection() as conn, conn.cursor() as cur:
+        cur.executemany(
+            "insert into triage.feature_importances"
+            + " (model_id, feature, feature_importance, rank_abs, rank_pct)"
+            + " values (%(model_id)s, %(feature)s, %(feature_importance)s, %(rank_abs)s, %(rank_pct)s)"
+            + " on conflict (model_id, feature) do update set"
+            + "  feature_importance = excluded.feature_importance,"
+            + "  rank_abs = excluded.rank_abs,"
+            + "  rank_pct = excluded.rank_pct",
             rows,
         )
     logger.debug(f"Persisted {len(rows)} feature importance(s) for model_id={model_id}")
 
 
-def _existing_model_row(db_engine: Engine, model_artifact_id: str) -> dict[str, Any]:
-    with db_engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    "select model_id, model_group_id, artifact_uri"
-                    + " from triage.models where model_hash = :h"
-                ),
-                {"h": model_artifact_id},
-            )
-            .mappings()
-            .first()
-        )
+def _existing_model_row(
+    db_engine: ConnectionPool, model_artifact_id: str
+) -> dict[str, Any]:
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select model_id, model_group_id, artifact_uri"
+            + " from triage.models where model_hash = %(h)s",
+            {"h": model_artifact_id},
+        ).fetchone()
     if row is None:
         raise ValueError(
             f"model artifact {model_artifact_id!r} has no triage.models row —"
@@ -663,7 +650,7 @@ def _score_column(estimator, x):
 
 
 def score_and_evaluate(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     estimator,
     test_matrix_result: MatrixResult,

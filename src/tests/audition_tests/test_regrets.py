@@ -12,8 +12,8 @@ from triage.component.audition.selection_rules import (
 from .utils import create_sample_distance_table
 
 
-def test_selection_rule_picker(db_engine_greenfield):
-    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
+def test_selection_rule_picker(db_pool_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
 
     def pick_spiky(df, train_end_time):
         return [model_groups["spiky"]]
@@ -21,9 +21,7 @@ def test_selection_rule_picker(db_engine_greenfield):
     selection_rule_picker = SelectionRulePicker(distance_from_best_table=distance_table)
 
     results = selection_rule_picker.results_for_rule(
-        bound_selection_rule=BoundSelectionRule(
-            descriptive_name="spiky", function=pick_spiky, args={}
-        ),
+        bound_selection_rule=BoundSelectionRule(descriptive_name="spiky", function=pick_spiky, args={}),
         model_group_ids=list(model_groups.values()),
         train_end_times=["2014-01-01", "2015-01-01", "2016-01-01"],
         regret_metric="precision@",
@@ -37,8 +35,8 @@ def test_selection_rule_picker(db_engine_greenfield):
     assert [result["raw_value"] for result in results] == [0.45, 0.84, 0.45]
 
 
-def test_selection_rule_picker_with_args(db_engine_greenfield):
-    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
+def test_selection_rule_picker_with_args(db_pool_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
 
     def pick_highest_avg(df, train_end_time, metric, parameter):
         assert len(df["train_end_time"].unique()) == 2
@@ -65,11 +63,9 @@ def test_selection_rule_picker_with_args(db_engine_greenfield):
     assert regrets == [0.3]
 
 
-def test_SelectionPlotter_create_plot_dataframe(db_engine_greenfield):
-    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
-    plotter = SelectionRulePlotter(
-        selection_rule_picker=SelectionRulePicker(distance_table)
-    )
+def test_SelectionPlotter_create_plot_dataframe(db_pool_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
+    plotter = SelectionRulePlotter(selection_rule_picker=SelectionRulePicker(distance_table))
     plot_df = plotter.create_plot_dataframe(
         bound_selection_rules=[
             BoundSelectionRule(
@@ -96,19 +92,16 @@ def test_SelectionPlotter_create_plot_dataframe(db_engine_greenfield):
         assert np.isclose(value, 1.0)
 
     # best avg precision rule should be within 0.14 1/3 of the time
-    for value in plot_df[
-        (plot_df["regret"] == 0.14)
-        & (plot_df["selection_rule"] == "best_avg_precision")
-    ]["pct_of_time"].values:
+    for value in plot_df[(plot_df["regret"] == 0.14) & (plot_df["selection_rule"] == "best_avg_precision")][
+        "pct_of_time"
+    ].values:
         assert np.isclose(value, 1.0 / 3)
 
 
-def test_SelectionPlotter_plot(db_engine_greenfield):
+def test_SelectionPlotter_plot(db_pool_greenfield):
     with patch("triage.component.audition.regrets.plot_cats") as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
-        plotter = SelectionRulePlotter(
-            selection_rule_picker=SelectionRulePicker(distance_table)
-        )
+        distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
+        plotter = SelectionRulePlotter(selection_rule_picker=SelectionRulePicker(distance_table))
         plotter.plot_all_selection_rules(
             bound_selection_rules=[
                 BoundSelectionRule(

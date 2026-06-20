@@ -49,8 +49,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
@@ -167,7 +166,7 @@ def _union_as_of_dates(splits: Sequence[Mapping[str, Any]]) -> list[date]:
 
 
 def _pin_sources(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     declared_sources: Sequence[Mapping[str, Any]],
     source_pins: Mapping[str, str | None] | None,
@@ -210,7 +209,7 @@ def _pin_sources(
 
 
 def _version_exists(
-    db_engine: Engine, source_name: str, version_label: str | None
+    db_engine: ConnectionPool, source_name: str, version_label: str | None
 ) -> bool:
     """Whether ``(source_name, version_label)`` is already pinned (for idempotent bumps).
 
@@ -219,21 +218,19 @@ def _version_exists(
     """
     if version_label is None:
         return False
-    with db_engine.connect() as conn:
+    with db_engine.connection() as conn:
         return (
             conn.execute(
-                text(
-                    "select 1 from triage.source_versions"
-                    + " where source_name = :name and version_label = :label"
-                ),
+                "select 1 from triage.source_versions"
+                + " where source_name = %(name)s and version_label = %(label)s",
                 {"name": source_name, "label": version_label},
-            ).first()
+            ).fetchone()
             is not None
         )
 
 
 def _create_experiment_and_run(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     experiment_config: Mapping[str, Any],
     problem_type: str,
     profile: str,
@@ -246,13 +243,11 @@ def _create_experiment_and_run(
     comes from the DB ``gen_random_uuid()`` default).
     """
     exp_hash = experiment_hash_for(experiment_config)
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.experiments (experiment_hash, config, problem_type)"
-                + " values (:h, cast(:config as jsonb), cast(:pt as triage.problem_type))"
-                + " on conflict (experiment_hash) do nothing"
-            ),
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            + " values (%(h)s, cast(%(config)s as jsonb), cast(%(pt)s as triage.problem_type))"
+            + " on conflict (experiment_hash) do nothing",
             {
                 "h": exp_hash,
                 "config": canonical_json(experiment_config),
@@ -260,12 +255,10 @@ def _create_experiment_and_run(
             },
         )
         run_id = conn.execute(
-            text(
-                "insert into triage.runs (experiment_hash, profile, status, random_seed)"
-                + " values (:h, :profile, 'started', :seed) returning run_id"
-            ),
+            "insert into triage.runs (experiment_hash, profile, status, random_seed)"
+            + " values (%(h)s, %(profile)s, 'started', %(seed)s) returning run_id",
             {"h": exp_hash, "profile": profile, "seed": random_seed},
-        ).scalar_one()
+        ).fetchone()["run_id"]
     logger.info(
         f"Experiment {exp_hash[:12]}… ({problem_type}); started run {str(run_id)[:8]}…"
     )
@@ -273,22 +266,20 @@ def _create_experiment_and_run(
 
 
 def _mark_run(
-    db_engine: Engine, run_id: str, status: str, error: str | None = None
+    db_engine: ConnectionPool, run_id: str, status: str, error: str | None = None
 ) -> None:
     """Set a run's terminal status (``completed`` | ``failed``) + finish time."""
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         conn.execute(
-            text(
-                "update triage.runs set status = cast(:status as triage.run_status),"
-                + " finished_at = now(), error = coalesce(:error, error)"
-                + " where run_id = :run_id"
-            ),
+            "update triage.runs set status = cast(%(status)s as triage.run_status),"
+            + " finished_at = now(), error = coalesce(%(error)s, error)"
+            + " where run_id = %(run_id)s",
             {"status": status, "error": error, "run_id": run_id},
         )
 
 
 def _build_split(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     split: Mapping[str, Any],
     *,
@@ -398,7 +389,7 @@ def _grid_specs(grid_config: Mapping[str, Any]) -> list[tuple[str, dict[str, Any
 
 
 def run_experiment(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     experiment_config: Mapping[str, Any],
     *,
     storage_dir: str,

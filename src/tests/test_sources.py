@@ -2,7 +2,6 @@
 
 import pytest
 from loguru import logger as loguru_logger
-from sqlalchemy import text
 
 from triage.component.results_schema import upgrade_db
 from triage.sources import (
@@ -19,19 +18,17 @@ from triage.sources import (
 
 
 @pytest.fixture
-def triage_db(db_engine):
+def triage_db(db_url, db_pool):
     """Apply the greenfield baseline migration and seed a raw source table."""
-    upgrade_db(db_engine=db_engine)
-    with db_engine.begin() as conn:
-        conn.execute(text("create schema raw"))
-        conn.execute(
-            text("create table raw.events (event_id int, knowledge_date date)")
-        )
-        conn.execute(text("""
+    upgrade_db(dburl=db_url)
+    with db_pool.connection() as conn:
+        conn.execute("create schema raw")
+        conn.execute("create table raw.events (event_id int, knowledge_date date)")
+        conn.execute("""
                 insert into raw.events values
                     (1, '2026-01-15'), (2, '2026-02-20'), (3, '2026-03-25')
-                """))
-    return db_engine
+                """)
+    return db_pool
 
 
 @pytest.fixture
@@ -45,9 +42,9 @@ def warning_messages():
     loguru_logger.remove(sink_id)
 
 
-def register_events(engine):
+def register_events(pool):
     register_source(
-        engine,
+        pool,
         "events",
         "raw.events",
         knowledge_date_column="knowledge_date",
@@ -137,8 +134,8 @@ def test_drift_detected_when_data_moves_without_bump(triage_db, warning_messages
     bump_source(triage_db, "events", "v1")
     assert check_drift(triage_db, "events") is False
 
-    with triage_db.begin() as conn:
-        conn.execute(text("insert into raw.events values (4, '2026-04-30')"))
+    with triage_db.connection() as conn:
+        conn.execute("insert into raw.events values (4, '2026-04-30')")
     assert check_drift(triage_db, "events") is True
     assert any("drifted" in message for message in warning_messages)
 
@@ -151,28 +148,24 @@ def test_drift_is_noop_without_pin(triage_db):
 def test_record_run_pins_persists_the_frozen_set(triage_db):
     register_events(triage_db)
     bump_source(triage_db, "events", "v1")
-    with triage_db.begin() as conn:
+    with triage_db.connection() as conn:
         run_id = conn.execute(
-            text("insert into triage.runs (profile) values ('local') returning run_id")
-        ).scalar_one()
+            "insert into triage.runs (profile) values ('local') returning run_id"
+        ).fetchone()["run_id"]
 
     pins = resolve_pins(triage_db, ["events", "ghost"])
     record_run_pins(triage_db, str(run_id), pins)
 
-    with triage_db.connect() as conn:
-        rows = (
-            conn.execute(
-                text("""
-                    select source_name, version_label, fingerprint
-                    from triage.run_source_pins
-                    where run_id = :run_id
-                    order by source_name
-                    """),
-                {"run_id": run_id},
-            )
-            .mappings()
-            .all()
-        )
+    with triage_db.connection() as conn:
+        rows = conn.execute(
+            """
+                select source_name, version_label, fingerprint
+                from triage.run_source_pins
+                where run_id = %(run_id)s
+                order by source_name
+                """,
+            {"run_id": run_id},
+        ).fetchall()
     assert [row["source_name"] for row in rows] == ["events", "ghost"]
     assert rows[0]["version_label"] == "v1"
     assert rows[0]["fingerprint"]["row_count"] == 3

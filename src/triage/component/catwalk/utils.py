@@ -5,7 +5,7 @@ import random
 
 import numpy as np
 import pandas as pd
-import sqlalchemy
+import psycopg
 from retrying import retry
 
 from triage.logging import get_logger
@@ -32,7 +32,7 @@ def get_subset_table_name(subset_config):
 
 
 def retry_if_db_error(exception):
-    return isinstance(exception, sqlalchemy.exc.OperationalError)
+    return isinstance(exception, psycopg.OperationalError)
 
 
 DEFAULT_RETRY_KWARGS = {

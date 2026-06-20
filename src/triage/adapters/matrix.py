@@ -65,8 +65,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.temporal import TemporalConfig
@@ -131,7 +130,9 @@ class MatrixResult:
     cache_hit: bool
 
 
-def _reconstruct_derivation(engine: Engine, artifact_id: str, what: str) -> Derivation:
+def _reconstruct_derivation(
+    engine: ConnectionPool, artifact_id: str, what: str
+) -> Derivation:
     """Re-read an upstream artifact and rebuild just enough of its Derivation to chain.
 
     Parents enter a child's hash by their ``id`` (strict) and ``logical_id`` (fallback);
@@ -172,7 +173,9 @@ def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
 
 
 def _run_featurizer(
-    db_engine: Engine, featurizer_config: Mapping[str, Any], as_of_dates: Sequence[date]
+    db_engine: ConnectionPool,
+    featurizer_config: Mapping[str, Any],
+    as_of_dates: Sequence[date],
 ):
     """Run featurizer over the split's as_of_dates; return (pyarrow.Table, target_id_col).
 
@@ -195,19 +198,16 @@ def _run_featurizer(
         target_id_col = featurizer.target.id.name
 
         # featurizer reads ``as_of_dates`` (and the source tables) by bare name on this
-        # connection; a raw psycopg connection from the SQLAlchemy engine carries the same
-        # search_path as the rest of the build.
-        raw = db_engine.raw_connection()
-        try:
-            psycopg_conn = raw.driver_connection
-            with psycopg_conn.cursor() as cur:
+        # connection (ADR-0019: a pooled psycopg3 connection passed straight through — no
+        # raw_connection unwrap). The as_of_dates table is created + committed before
+        # to_arrow so featurizer's own queries see it on the same connection.
+        with db_engine.connection() as conn:
+            with conn.cursor() as cur:
                 _materialize_as_of_dates_psycopg(cur, as_of_dates)
-            psycopg_conn.commit()
-            table = featurizer.to_arrow(connection=psycopg_conn, impute=True)
+            conn.commit()
+            table = featurizer.to_arrow(connection=conn, impute=True)
             if not hasattr(table, "column_names"):  # an OrderedDict of column groups
                 table = _merge_arrow_groups(table, target_id_col)
-        finally:
-            raw.close()
     finally:
         Path(config_path).unlink(missing_ok=True)
     return table, target_id_col
@@ -334,7 +334,7 @@ def _check_error_rules(
 
 
 def build_matrix(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     run_id: str,
     featurizer_config: Mapping[str, Any],
     cohort_artifact_id: str,
@@ -554,7 +554,7 @@ def _canonical_featurizer(featurizer_config: Mapping[str, Any]) -> dict[str, Any
 
 
 def _assemble(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     featurizer_config: Mapping[str, Any],
     cohort_artifact_id: str,
     labels_artifact_id: str,
@@ -617,7 +617,7 @@ def _assemble(
 
 
 def _resolve_fit_stats(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     design,
     feature_columns: Sequence[str],
     imputation_policy: ImputationPolicy,
@@ -655,25 +655,28 @@ def _resolve_fit_stats(
     return fitted
 
 
-def _load_cohort(db_engine: Engine, cohort_artifact_id: str):
+def _load_cohort(db_engine: ConnectionPool, cohort_artifact_id: str):
     """The cohort selection mask as a Polars frame: (entity_id, as_of_date)."""
     import polars as pl
 
-    with db_engine.connect() as conn:
+    with db_engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select entity_id, as_of_date from triage.cohorts"
-                + " where cohort_hash = :h"
-            ),
+            "select entity_id, as_of_date from triage.cohorts"
+            + " where cohort_hash = %(h)s",
             {"h": cohort_artifact_id},
-        ).all()
+        ).fetchall()
     return pl.DataFrame(
-        {"entity_id": [r[0] for r in rows], _AS_OF_COL: [r[1] for r in rows]},
+        {
+            "entity_id": [r["entity_id"] for r in rows],
+            _AS_OF_COL: [r["as_of_date"] for r in rows],
+        },
         schema={"entity_id": pl.Int64, _AS_OF_COL: pl.Date},
     )
 
 
-def _load_labels(db_engine: Engine, labels_artifact_id: str, label_timespan: str):
+def _load_labels(
+    db_engine: ConnectionPool, labels_artifact_id: str, label_timespan: str
+):
     """The labels target as a Polars frame, filtered to this split's label_timespan.
 
     Carries all of ``outcome``/``duration``/``event_observed`` — the unused columns are NULL
@@ -681,22 +684,20 @@ def _load_labels(db_engine: Engine, labels_artifact_id: str, label_timespan: str
     """
     import polars as pl
 
-    with db_engine.connect() as conn:
+    with db_engine.connection() as conn:
         rows = conn.execute(
-            text(
-                "select entity_id, as_of_date, outcome, duration, event_observed"
-                + " from triage.labels"
-                + " where label_hash = :h and label_timespan = cast(:ts as interval)"
-            ),
+            "select entity_id, as_of_date, outcome, duration, event_observed"
+            + " from triage.labels"
+            + " where label_hash = %(h)s and label_timespan = cast(%(ts)s as interval)",
             {"h": labels_artifact_id, "ts": label_timespan},
-        ).all()
+        ).fetchall()
     return pl.DataFrame(
         {
-            "entity_id": [r[0] for r in rows],
-            _AS_OF_COL: [r[1] for r in rows],
-            "outcome": [r[2] for r in rows],
-            "duration": [r[3] for r in rows],
-            "event_observed": [r[4] for r in rows],
+            "entity_id": [r["entity_id"] for r in rows],
+            _AS_OF_COL: [r["as_of_date"] for r in rows],
+            "outcome": [r["outcome"] for r in rows],
+            "duration": [r["duration"] for r in rows],
+            "event_observed": [r["event_observed"] for r in rows],
         },
         schema={
             "entity_id": pl.Int64,
@@ -708,19 +709,15 @@ def _load_labels(db_engine: Engine, labels_artifact_id: str, label_timespan: str
     )
 
 
-def _existing_matrix_row(db_engine: Engine, matrix_artifact_id: str) -> dict[str, Any]:
-    with db_engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    "select storage_uri, num_entities, num_features, feature_names,"
-                    + " metadata from triage.matrices where matrix_uuid = :u"
-                ),
-                {"u": as_uuid(matrix_artifact_id)},
-            )
-            .mappings()
-            .first()
-        )
+def _existing_matrix_row(
+    db_engine: ConnectionPool, matrix_artifact_id: str
+) -> dict[str, Any]:
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select storage_uri, num_entities, num_features, feature_names,"
+            + " metadata from triage.matrices where matrix_uuid = %(u)s",
+            {"u": as_uuid(matrix_artifact_id)},
+        ).fetchone()
     if row is None:
         raise ValueError(
             f"matrix artifact {matrix_artifact_id!r} has no triage.matrices row —"
@@ -730,7 +727,7 @@ def _existing_matrix_row(db_engine: Engine, matrix_artifact_id: str) -> dict[str
 
 
 def _insert_matrix_row(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     matrix_artifact_id: str,
     matrix_kind: str,
     result: MatrixResult,
@@ -739,24 +736,22 @@ def _insert_matrix_row(
     run_id: str,
 ) -> None:
     metadata = {_FIT_STATS_KEY: result.fit_based_stats}
-    with db_engine.begin() as conn:
+    with db_engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.matrices"
-                + " (matrix_uuid, artifact_id, matrix_kind, storage_uri, storage_format,"
-                + "  num_entities, num_features, feature_names, label_timespan, lookback,"
-                + "  metadata, built_by_run)"
-                + " values (:uuid, :artifact_id, cast(:kind as triage.split_kind),"
-                + "  :storage_uri, 'parquet', :num_entities, :num_features, :feature_names,"
-                + "  cast(:label_timespan as interval), cast(:lookback as interval),"
-                + "  cast(:metadata as jsonb), :run_id)"
-                + " on conflict (matrix_uuid) do update set"
-                + "  storage_uri = excluded.storage_uri,"
-                + "  num_entities = excluded.num_entities,"
-                + "  num_features = excluded.num_features,"
-                + "  feature_names = excluded.feature_names,"
-                + "  metadata = excluded.metadata"
-            ),
+            "insert into triage.matrices"
+            + " (matrix_uuid, artifact_id, matrix_kind, storage_uri, storage_format,"
+            + "  num_entities, num_features, feature_names, label_timespan, lookback,"
+            + "  metadata, built_by_run)"
+            + " values (%(uuid)s, %(artifact_id)s, cast(%(kind)s as triage.split_kind),"
+            + "  %(storage_uri)s, 'parquet', %(num_entities)s, %(num_features)s, %(feature_names)s,"
+            + "  cast(%(label_timespan)s as interval), cast(%(lookback)s as interval),"
+            + "  cast(%(metadata)s as jsonb), %(run_id)s)"
+            + " on conflict (matrix_uuid) do update set"
+            + "  storage_uri = excluded.storage_uri,"
+            + "  num_entities = excluded.num_entities,"
+            + "  num_features = excluded.num_features,"
+            + "  feature_names = excluded.feature_names,"
+            + "  metadata = excluded.metadata",
             {
                 "uuid": as_uuid(matrix_artifact_id),
                 "artifact_id": matrix_artifact_id,

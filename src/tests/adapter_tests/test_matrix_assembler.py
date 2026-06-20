@@ -18,7 +18,6 @@ from datetime import date
 
 import polars as pl
 import pytest
-from sqlalchemy import text
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
@@ -101,19 +100,15 @@ def _featurizer_config() -> dict:
 
 
 def _seed_lineage(engine) -> str:
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.experiments (experiment_hash, config, problem_type)"
-                " values ('exp-matrix', '{}'::jsonb, 'classification')"
-            )
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            " values ('exp-matrix', '{}'::jsonb, 'classification')"
         )
         run_id = conn.execute(
-            text(
-                "insert into triage.runs (experiment_hash, profile)"
-                " values ('exp-matrix', 'local') returning run_id"
-            )
-        ).scalar_one()
+            "insert into triage.runs (experiment_hash, profile)"
+            " values ('exp-matrix', 'local') returning run_id"
+        ).fetchone()["run_id"]
     return str(run_id)
 
 
@@ -137,51 +132,39 @@ def _seed_source(engine) -> None:
     from the train statistic. The leakage assertion checks entity 2/3's filled value equals
     the TRAIN mean (100.0), not any test-derived number.
     """
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "create table customers"
-                " (customer_id bigint primary key, signup_date date, age int)"
-            )
+            "create table customers"
+            " (customer_id bigint primary key, signup_date date, age int)"
         )
         conn.execute(
-            text(
-                "insert into customers (customer_id, signup_date, age) values"
-                " (1, date '2010-01-01', 30),"
-                " (2, date '2010-01-01', 40),"
-                " (3, date '2010-01-01', 50)"
-            )
+            "insert into customers (customer_id, signup_date, age) values"
+            " (1, date '2010-01-01', 30),"
+            " (2, date '2010-01-01', 40),"
+            " (3, date '2010-01-01', 50)"
         )
         conn.execute(
-            text(
-                "create table orders"
-                " (order_id bigint primary key, customer_id bigint,"
-                "  order_date date, amount double precision)"
-            )
+            "create table orders"
+            " (order_id bigint primary key, customer_id bigint,"
+            "  order_date date, amount double precision)"
         )
         conn.execute(
-            text(
-                "insert into orders (order_id, customer_id, order_date, amount) values"
-                " (10, 1, date '2013-12-01', 100.0),"  # before train + test
-                " (11, 1, date '2014-06-01', 300.0),"  # before test only
-                " (30, 3, date '2014-07-01', 1000.0)"  # ON the test as_of (boundary)
-            )
+            "insert into orders (order_id, customer_id, order_date, amount) values"
+            " (10, 1, date '2013-12-01', 100.0),"  # before train + test
+            " (11, 1, date '2014-06-01', 300.0),"  # before test only
+            " (30, 3, date '2014-07-01', 1000.0)"  # ON the test as_of (boundary)
         )
         # Labels: entity 1, 2, 3 each get an outcome in both windows.
         conn.execute(
-            text(
-                "create table label_src"
-                " (entity_id bigint, knowledge_date date, outcome double precision)"
-            )
+            "create table label_src"
+            " (entity_id bigint, knowledge_date date, outcome double precision)"
         )
         conn.execute(
-            text(
-                "insert into label_src (entity_id, knowledge_date, outcome) values"
-                " (1, date '2014-02-01', 1.0), (2, date '2014-03-01', 0.0),"
-                " (3, date '2014-04-01', 1.0),"
-                " (1, date '2014-08-01', 0.0), (2, date '2014-09-01', 1.0),"
-                " (3, date '2014-10-01', 0.0)"
-            )
+            "insert into label_src (entity_id, knowledge_date, outcome) values"
+            " (1, date '2014-02-01', 1.0), (2, date '2014-03-01', 0.0),"
+            " (3, date '2014-04-01', 1.0),"
+            " (1, date '2014-08-01', 0.0), (2, date '2014-09-01', 1.0),"
+            " (3, date '2014-10-01', 0.0)"
         )
 
 
@@ -229,8 +212,8 @@ def _read_parquet_value(storage_uri, feature, entity_id) -> float | None:
     return row.get_column(feature)[0]
 
 
-def test_train_then_test_matrix_full_lifecycle(db_engine_greenfield, tmp_path):
-    engine = db_engine_greenfield
+def test_train_then_test_matrix_full_lifecycle(db_pool_greenfield, tmp_path):
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     temporal = _temporal_config()
@@ -266,49 +249,37 @@ def test_train_then_test_matrix_full_lifecycle(db_engine_greenfield, tmp_path):
     import os
 
     assert os.path.exists(train.storage_uri)
-    with engine.connect() as conn:
-        mrow = (
-            conn.execute(
-                text(
-                    "select matrix_uuid, artifact_id, matrix_kind, storage_uri,"
-                    " num_entities, num_features, metadata"
-                    " from triage.matrices where artifact_id = :a"
-                ),
-                {"a": train.matrix_artifact_id},
-            )
-            .mappings()
-            .one()
-        )
+    with engine.connection() as conn:
+        mrow = conn.execute(
+            "select matrix_uuid, artifact_id, matrix_kind, storage_uri,"
+            " num_entities, num_features, metadata"
+            " from triage.matrices where artifact_id = %(a)s",
+            {"a": train.matrix_artifact_id},
+        ).fetchone()
     assert str(mrow["matrix_uuid"]) == str(as_uuid(train.matrix_artifact_id))
     assert mrow["matrix_kind"] == "train"
     assert mrow["num_entities"] == 3  # all three cohort entities on the one as_of_date
 
     # artifact DAG: matrix -> [feature_group, cohort, labels]
-    with engine.connect() as conn:
-        parents = set(
-            conn.execute(
-                text(
-                    "select parent_id from triage.artifact_inputs where artifact_id = :a"
-                ),
+    with engine.connection() as conn:
+        parents = {
+            r["parent_id"]
+            for r in conn.execute(
+                "select parent_id from triage.artifact_inputs where artifact_id = %(a)s",
                 {"a": train.matrix_artifact_id},
-            )
-            .scalars()
-            .all()
-        )
+            ).fetchall()
+        }
     assert parents == {train.feature_group_artifact_id, cohort, labels}
 
     # feature_group -> cohort edge
-    with engine.connect() as conn:
-        fg_parents = (
-            conn.execute(
-                text(
-                    "select parent_id from triage.artifact_inputs where artifact_id = :a"
-                ),
+    with engine.connection() as conn:
+        fg_parents = [
+            r["parent_id"]
+            for r in conn.execute(
+                "select parent_id from triage.artifact_inputs where artifact_id = %(a)s",
                 {"a": train.feature_group_artifact_id},
-            )
-            .scalars()
-            .all()
-        )
+            ).fetchall()
+        ]
     assert fg_parents == [cohort]
 
     # fit-based stat persisted in TRAIN metadata: the mean over the TRAIN split only.
@@ -338,17 +309,14 @@ def test_train_then_test_matrix_full_lifecycle(db_engine_greenfield, tmp_path):
     )
 
     # test_matrix -> train_matrix edge (the leakage-boundary dependency)
-    with engine.connect() as conn:
-        test_parents = set(
-            conn.execute(
-                text(
-                    "select parent_id from triage.artifact_inputs where artifact_id = :a"
-                ),
+    with engine.connection() as conn:
+        test_parents = {
+            r["parent_id"]
+            for r in conn.execute(
+                "select parent_id from triage.artifact_inputs where artifact_id = %(a)s",
                 {"a": test.matrix_artifact_id},
-            )
-            .scalars()
-            .all()
-        )
+            ).fetchall()
+        }
     assert train.matrix_artifact_id in test_parents
     assert {cohort, labels, test.feature_group_artifact_id} <= test_parents
 
@@ -362,11 +330,11 @@ def test_train_then_test_matrix_full_lifecycle(db_engine_greenfield, tmp_path):
     assert test_fill_entity2 != pytest.approx(200.0)  # the leak would be ~200
 
     # The reused stats are exactly the train stats (no recompute on test).
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         test_meta = conn.execute(
-            text("select metadata from triage.matrices where artifact_id = :a"),
+            "select metadata from triage.matrices where artifact_id = %(a)s",
             {"a": test.matrix_artifact_id},
-        ).scalar_one()
+        ).fetchone()["metadata"]
     assert test_meta["fit_based_stats"][feature]["value"] == pytest.approx(100.0)
 
     # ---- as_of_boundary EXCLUSIVE -------------------------------------------------------
@@ -389,8 +357,8 @@ def test_train_then_test_matrix_full_lifecycle(db_engine_greenfield, tmp_path):
     )  # {100, 300} both before 2014-07-01
 
 
-def test_matrix_cache_hit_on_rerun(db_engine_greenfield, tmp_path):
-    engine = db_engine_greenfield
+def test_matrix_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     temporal = _temporal_config()
@@ -417,19 +385,19 @@ def test_matrix_cache_hit_on_rerun(db_engine_greenfield, tmp_path):
     assert second.matrix_artifact_id == first.matrix_artifact_id
 
     # No duplicate matrix artifact / matrices row
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         n_matrices = conn.execute(
-            text("select count(*) from triage.matrices")
-        ).scalar_one()
+            "select count(*) as n from triage.matrices"
+        ).fetchone()["n"]
         n_artifacts = conn.execute(
-            text("select count(*) from triage.artifacts where kind = 'matrix'")
-        ).scalar_one()
+            "select count(*) as n from triage.artifacts where kind = 'matrix'"
+        ).fetchone()["n"]
     assert n_matrices == 1
     assert n_artifacts == 1
 
 
-def test_test_matrix_requires_train_parent(db_engine_greenfield, tmp_path):
-    engine = db_engine_greenfield
+def test_test_matrix_requires_train_parent(db_pool_greenfield, tmp_path):
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     cohort_te, labels_te = _build_cohort_and_labels(engine, run_id, [TEST_AS_OF])

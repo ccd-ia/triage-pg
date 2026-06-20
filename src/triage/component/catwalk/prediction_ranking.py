@@ -45,8 +45,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.logging import get_logger
 
@@ -57,7 +56,7 @@ VALID_SPLIT_KINDS = frozenset({"train", "test", "validation", "production"})
 
 
 def record_predictions(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     split_kind: str,
     scores: Iterable[Mapping[str, Any]],
@@ -107,27 +106,31 @@ def record_predictions(
         for s in scores
     ]
     if not rows:
-        logger.debug(f"record_predictions called for model {model_id} with no scores; nothing inserted")
+        logger.debug(
+            f"record_predictions called for model {model_id} with no scores; nothing inserted"
+        )
         return 0
 
     # No scored_at in the column list -> the table default (now()) fills it, so
     # re-scoring always lands a distinct, later row (append-only, ADR-0006).
-    insert = text(
+    insert = (
         "insert into triage.predictions "
         "(model_id, entity_id, as_of_date, split_kind, score, matrix_uuid) "
-        "values (:model_id, :entity_id, :as_of_date, "
-        "cast(:split_kind as triage.split_kind), :score, "
-        "cast(:matrix_uuid as uuid))"
+        "values (%(model_id)s, %(entity_id)s, %(as_of_date)s, "
+        "cast(%(split_kind)s as triage.split_kind), %(score)s, "
+        "cast(%(matrix_uuid)s as uuid))"
     )
-    with db_engine.begin() as conn:
-        conn.execute(insert, rows)
+    with db_engine.connection() as conn, conn.cursor() as cur:
+        cur.executemany(insert, rows)
 
-    logger.debug(f"Appended {len(rows)} prediction rows for model {model_id} ({split_kind})")
+    logger.debug(
+        f"Appended {len(rows)} prediction rows for model {model_id} ({split_kind})"
+    )
     return len(rows)
 
 
 def fetch_ranks(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     as_of_date: date | str,
 ) -> list[dict[str, Any]]:
@@ -147,20 +150,22 @@ def fetch_ranks(
         ``split_kind``, ``score``, ``scored_at``, ``rank_abs`` (1-based,
         ``row_number``) and ``rank_pct`` (``percent_rank``).
     """
-    query = text(
+    query = (
         "select entity_id, as_of_date, split_kind, score, scored_at, "
         "rank_abs, rank_pct "
         "from triage.prediction_ranks "
-        "where model_id = :model_id and as_of_date = :as_of_date "
+        "where model_id = %(model_id)s and as_of_date = %(as_of_date)s "
         "order by rank_abs"
     )
-    with db_engine.connect() as conn:
-        result = conn.execute(query, {"model_id": int(model_id), "as_of_date": as_of_date})
-        return [dict(row._mapping) for row in result]
+    with db_engine.connection() as conn:
+        result = conn.execute(
+            query, {"model_id": int(model_id), "as_of_date": as_of_date}
+        )
+        return result.fetchall()
 
 
 def rank_predictions(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_id: int,
     split_kind: str,
     scores: Sequence[Mapping[str, Any]],

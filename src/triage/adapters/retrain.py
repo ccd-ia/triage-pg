@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.forward import (
@@ -64,7 +64,7 @@ class RetrainResult:
 
 
 def retrain(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_group_id: int,
     prediction_date: date,
     *,
@@ -188,7 +188,7 @@ def retrain(
 
 
 def retrain_and_predict(
-    db_engine: Engine,
+    db_engine: ConnectionPool,
     model_group_id: int,
     prediction_date: date,
     *,

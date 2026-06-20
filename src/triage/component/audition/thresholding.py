@@ -5,17 +5,12 @@ logger = get_logger(__name__)
 from datetime import datetime
 
 import pandas as pd
-from sqlalchemy import text
 
 from .metric_directionality import is_better_operator
 
 
 def _past_threshold(df, metric_filter):
-    return df[
-        is_better_operator(metric_filter["metric"])(
-            df["raw_value"], metric_filter["threshold_value"]
-        )
-    ]
+    return df[is_better_operator(metric_filter["metric"])(df["raw_value"], metric_filter["threshold_value"])]
 
 
 def _close_to_best_case(df, metric_filter):
@@ -23,15 +18,10 @@ def _close_to_best_case(df, metric_filter):
 
 
 def _of_metric(df, metric_filter):
-    return df[
-        (df["metric"] == metric_filter["metric"])
-        & (df["parameter"] == metric_filter["parameter"])
-    ]
+    return df[(df["metric"] == metric_filter["metric"]) & (df["parameter"] == metric_filter["parameter"])]
 
 
-def model_groups_filter(
-    train_end_times, initial_model_group_ids, models_table, db_engine
-):
+def model_groups_filter(train_end_times, initial_model_group_ids, models_table, db_engine):
     """Filter the models which related train end times don't contain the user-input
     train_end_times
 
@@ -47,8 +37,8 @@ def model_groups_filter(
         initial_model_group_ids (list) The initial list of model group ids to
                                        narrow down
         models_table (string) The name of the results schema
-        db_engine (sqlalchemy.engine) A database engine with access to results
-                                      schema of a completed modeling run
+        db_engine (psycopg_pool.ConnectionPool) A connection pool with access to
+                                      the results schema of a completed modeling run
     """
 
     if isinstance(train_end_times, str) or not hasattr(train_end_times, "__iter__"):
@@ -59,11 +49,7 @@ def model_groups_filter(
 
     end_times_sql = "ARRAY[{}]".format(
         ", ".join(
-            "'{}'".format(
-                end_time.strftime("%Y-%m-%d")
-                if isinstance(end_time, datetime)
-                else end_time
-            )
+            "'{}'".format(end_time.strftime("%Y-%m-%d") if isinstance(end_time, datetime) else end_time)
             for end_time in train_end_times
         )
     )
@@ -76,15 +62,13 @@ def model_groups_filter(
                 model_group_id,
                 array_agg(distinct train_end_time::date::text) as train_end_time_list
             FROM triage.{models_table}
-            WHERE model_group_id in ({','.join([str(m) for m in initial_model_group_ids])})
+            WHERE model_group_id in ({",".join([str(m) for m in initial_model_group_ids])})
             GROUP BY model_group_id
         ) as t
         WHERE train_end_time_list @> {end_times_sql}
         """
-    with db_engine.connect() as conn:
-        model_group_ids = {
-            row.model_group_id for row in conn.execute(text(query))
-        }  # change in sqlalchemy 2
+    with db_engine.connection() as conn:
+        model_group_ids = {row["model_group_id"] for row in conn.execute(query).fetchall()}
 
     if not model_group_ids:
         raise ValueError(
@@ -92,9 +76,7 @@ def model_groups_filter(
         )
 
     dropped_model_groups = len(initial_model_group_ids) - len(model_group_ids)
-    logger.debug(
-        f"Dropped {dropped_model_groups} model groups which don't match the train end times"
-    )
+    logger.debug(f"Dropped {dropped_model_groups} model groups which don't match the train end times")
     logger.debug(f"Found {len(model_group_ids)} total model groups past the checker")
 
     return model_group_ids
@@ -139,11 +121,7 @@ class ModelGroupThresholder:
         """
         passing = set(self._initial_model_group_ids)
         for metric_filter in self._metric_filters:
-            passing &= set(
-                filter_func(_of_metric(df, metric_filter), metric_filter)[
-                    "model_group_id"
-                ]
-            )
+            passing &= set(filter_func(_of_metric(df, metric_filter), metric_filter)["model_group_id"])
         return passing
 
     def model_groups_past_threshold(self, df):
@@ -199,9 +177,7 @@ class ModelGroupThresholder:
             past_threshold_model_groups &= past_threshold
 
         total_model_groups = close_to_best_model_groups & past_threshold_model_groups
-        logger.debug(
-            "Found {len(total_model_groups)} total model groups past threshold"
-        )
+        logger.debug("Found {len(total_model_groups)} total model groups past threshold")
         return total_model_groups
 
     def update_filters(self, new_metric_filters):

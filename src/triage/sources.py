@@ -18,8 +18,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from psycopg_pool import ConnectionPool
 
 from triage.logging import get_logger
 
@@ -51,7 +50,7 @@ def _quote_column(column: str) -> str:
 
 
 def register_source(
-    engine: Engine,
+    pool: ConnectionPool,
     source_name: str,
     relation: str,
     knowledge_date_column: str | None = None,
@@ -61,17 +60,17 @@ def register_source(
     _ = _quote_relation(relation)  # validate early, before anything is stored
     if knowledge_date_column is not None:
         _ = _quote_column(knowledge_date_column)
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         conn.execute(
-            text("""
+            """
                 insert into triage.sources
                     (source_name, relation, knowledge_date_column, description)
-                values (:name, :relation, :kdc, :description)
+                values (%(name)s, %(relation)s, %(kdc)s, %(description)s)
                 on conflict (source_name) do update
                     set relation = excluded.relation,
                         knowledge_date_column = excluded.knowledge_date_column,
                         description = excluded.description
-                """),
+                """,
             {
                 "name": source_name,
                 "relation": relation,
@@ -82,35 +81,31 @@ def register_source(
     logger.info(f"Registered source {source_name!r} -> {relation}")
 
 
-def get_source(engine: Engine, source_name: str) -> dict[str, Any] | None:
-    with engine.connect() as conn:
-        row = (
-            conn.execute(
-                text("select * from triage.sources where source_name = :name"),
-                {"name": source_name},
-            )
-            .mappings()
-            .first()
-        )
+def get_source(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select * from triage.sources where source_name = %(name)s",
+            {"name": source_name},
+        ).fetchone()
     return dict(row) if row else None
 
 
-def list_sources(engine: Engine) -> list[dict[str, Any]]:
+def list_sources(pool: ConnectionPool) -> list[dict[str, Any]]:
     """All sources with their current pin (null version_label = unpinned)."""
-    with engine.connect() as conn:
-        rows = conn.execute(text("""
+    with pool.connection() as conn:
+        rows = conn.execute("""
                 select s.source_name, s.relation, s.knowledge_date_column,
                        s.description, p.version_label, p.registered_at
                 from triage.sources s
                 left join triage.current_source_pins p using (source_name)
                 order by s.source_name
-                """)).mappings().all()
+                """).fetchall()
     return [dict(row) for row in rows]
 
 
-def capture_fingerprint(engine: Engine, source_name: str) -> dict[str, Any]:
+def capture_fingerprint(pool: ConnectionPool, source_name: str) -> dict[str, Any]:
     """Cheap advisory fingerprint: row count + max knowledge date (if declared)."""
-    source = get_source(engine, source_name)
+    source = get_source(pool, source_name)
     if source is None:
         raise ValueError(
             f"Source {source_name!r} is not registered; register it with"
@@ -119,16 +114,10 @@ def capture_fingerprint(engine: Engine, source_name: str) -> dict[str, Any]:
     relation = _quote_relation(source["relation"])
     kdc = source["knowledge_date_column"]
     max_expr = f"max({_quote_column(kdc)})::text" if kdc else "null"
-    with engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    f"select count(*) as row_count, {max_expr} as max_knowledge_date from {relation}"
-                )
-            )
-            .mappings()
-            .one()
-        )
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"select count(*) as row_count, {max_expr} as max_knowledge_date from {relation}"
+        ).fetchone()
     return {
         "row_count": row["row_count"],
         "max_knowledge_date": row["max_knowledge_date"],
@@ -136,7 +125,7 @@ def capture_fingerprint(engine: Engine, source_name: str) -> dict[str, Any]:
 
 
 def bump_source(
-    engine: Engine, source_name: str, version_label: str | None = None
+    pool: ConnectionPool, source_name: str, version_label: str | None = None
 ) -> str:
     """Record a new version pin for a source, fingerprinting it now.
 
@@ -144,18 +133,18 @@ def bump_source(
     given). Intended callers: the ETL/loader on load completion, or
     ``triage source bump`` for manual loads.
     """
-    fingerprint = capture_fingerprint(engine, source_name)  # also validates existence
+    fingerprint = capture_fingerprint(pool, source_name)  # also validates existence
     if version_label is None:
         version_label = datetime.datetime.now(datetime.timezone.utc).strftime(
             "v%Y%m%d-%H%M%S"
         )
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         conn.execute(
-            text("""
+            """
                 insert into triage.source_versions
                     (source_name, version_label, fingerprint)
-                values (:name, :label, cast(:fingerprint as jsonb))
-                """),
+                values (%(name)s, %(label)s, cast(%(fingerprint)s as jsonb))
+                """,
             {
                 "name": source_name,
                 "label": version_label,
@@ -168,22 +157,18 @@ def bump_source(
     return version_label
 
 
-def current_pin(engine: Engine, source_name: str) -> dict[str, Any] | None:
-    with engine.connect() as conn:
-        row = (
-            conn.execute(
-                text(
-                    "select * from triage.current_source_pins where source_name = :name"
-                ),
-                {"name": source_name},
-            )
-            .mappings()
-            .first()
-        )
+def current_pin(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select * from triage.current_source_pins where source_name = %(name)s",
+            {"name": source_name},
+        ).fetchone()
     return dict(row) if row else None
 
 
-def resolve_pins(engine: Engine, declared: Iterable[str]) -> dict[str, str | None]:
+def resolve_pins(
+    pool: ConnectionPool, declared: Iterable[str]
+) -> dict[str, str | None]:
     """Freeze the current pin of every declared source (plan time, ADR-0014).
 
     Unregistered or unpinned sources resolve to ``None`` — volatile, meaning
@@ -193,7 +178,7 @@ def resolve_pins(engine: Engine, declared: Iterable[str]) -> dict[str, str | Non
     """
     pins: dict[str, str | None] = {}
     for name in declared:
-        source = get_source(engine, name)
+        source = get_source(pool, name)
         if source is None:
             logger.warning(
                 f"Declared source {name!r} is NOT registered — treating it as"
@@ -202,7 +187,7 @@ def resolve_pins(engine: Engine, declared: Iterable[str]) -> dict[str, str | Non
             )
             pins[name] = None
             continue
-        pin = current_pin(engine, name)
+        pin = current_pin(pool, name)
         if pin is None:
             logger.warning(
                 f"Source {name!r} has no version pin — treating it as volatile"
@@ -215,17 +200,17 @@ def resolve_pins(engine: Engine, declared: Iterable[str]) -> dict[str, str | Non
     return pins
 
 
-def check_drift(engine: Engine, source_name: str) -> bool:
+def check_drift(pool: ConnectionPool, source_name: str) -> bool:
     """Advisory drift check: did the data move while the pin stayed put?
 
     Compares the current fingerprint against the one stored with the source's
     current pin. Returns True (and warns loudly) on drift; False when there is
     nothing to compare (no pin or no stored fingerprint) or no drift.
     """
-    pin = current_pin(engine, source_name)
+    pin = current_pin(pool, source_name)
     if pin is None or pin["fingerprint"] is None:
         return False
-    now = capture_fingerprint(engine, source_name)
+    now = capture_fingerprint(pool, source_name)
     pinned = pin["fingerprint"]
     if now != pinned:
         logger.warning(
@@ -238,25 +223,27 @@ def check_drift(engine: Engine, source_name: str) -> bool:
     return False
 
 
-def record_run_pins(engine: Engine, run_id: str, pins: dict[str, str | None]) -> None:
+def record_run_pins(
+    pool: ConnectionPool, run_id: str, pins: dict[str, str | None]
+) -> None:
     """Persist the pins frozen for a run (the ``guix describe`` analog).
 
     Captures a build-time fingerprint per registered source so later drift
     analysis can compare against what the run actually saw.
     """
-    with engine.begin() as conn:
+    with pool.connection() as conn:
         for name, version_label in pins.items():
             fingerprint = (
-                capture_fingerprint(engine, name)
-                if get_source(engine, name) is not None
+                capture_fingerprint(pool, name)
+                if get_source(pool, name) is not None
                 else None
             )
             conn.execute(
-                text("""
+                """
                     insert into triage.run_source_pins
                         (run_id, source_name, version_label, fingerprint)
-                    values (:run_id, :name, :label, cast(:fingerprint as jsonb))
-                    """),
+                    values (%(run_id)s, %(name)s, %(label)s, cast(%(fingerprint)s as jsonb))
+                    """,
                 {
                     "run_id": run_id,
                     "name": name,

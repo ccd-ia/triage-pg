@@ -20,7 +20,6 @@ scores + evaluates it with :func:`triage.adapters.score_and_evaluate`. Asserts:
 from datetime import date
 
 import pytest
-from sqlalchemy import text
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
@@ -35,7 +34,9 @@ TEST_AS_OF = date(2014, 7, 1)
 LABEL_TIMESPAN = "6 months"
 CLASS_PATH = "sklearn.tree.DecisionTreeClassifier"
 
-COHORT_QUERY = "select customer_id as entity_id from customers where {as_of_date} is not null"
+COHORT_QUERY = (
+    "select customer_id as entity_id from customers where {as_of_date} is not null"
+)
 # Outcome read straight from a labels source in the [as_of, as_of+span) window.
 LABEL_QUERY = (
     "select entity_id, outcome from label_src"
@@ -96,16 +97,14 @@ def _featurizer_config() -> dict:
 
 
 def _seed_lineage(engine) -> str:
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into triage.experiments (experiment_hash, config, problem_type)"
-                " values ('exp-model', '{}'::jsonb, 'classification')"
-            )
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            " values ('exp-model', '{}'::jsonb, 'classification')"
         )
         run_id = conn.execute(
-            text("insert into triage.runs (experiment_hash, profile) values ('exp-model', 'local') returning run_id")
-        ).scalar_one()
+            "insert into triage.runs (experiment_hash, profile) values ('exp-model', 'local') returning run_id"
+        ).fetchone()["run_id"]
     return str(run_id)
 
 
@@ -133,39 +132,35 @@ _LABELS = {1: 1.0, 2: 1.0, 3: 1.0, 4: 0.0, 5: 0.0, 6: 0.0}
 
 
 def _seed_source(engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text("create table customers (customer_id bigint primary key, signup_date date, age int)"))
+    with engine.connection() as conn:
         conn.execute(
-            text(
-                "insert into customers (customer_id, signup_date, age)"
-                " select g, date '2010-01-01', 30 + g from unnest(:ids) as g"
-            ),
+            "create table customers (customer_id bigint primary key, signup_date date, age int)"
+        )
+        conn.execute(
+            "insert into customers (customer_id, signup_date, age)"
+            " select g, date '2010-01-01', 30 + g from unnest(%(ids)s) as g",
             {"ids": _CUSTOMERS},
         )
         conn.execute(
-            text(
-                "create table orders"
-                " (order_id bigint primary key, customer_id bigint,"
-                "  order_date date, amount double precision)"
-            )
+            "create table orders"
+            " (order_id bigint primary key, customer_id bigint,"
+            "  order_date date, amount double precision)"
         )
         for order_id, customer_id, order_date, amount in _ORDERS:
             conn.execute(
-                text(
-                    "insert into orders (order_id, customer_id, order_date, amount)"
-                    " values (:oid, :cid, cast(:od as date), :amt)"
-                ),
+                "insert into orders (order_id, customer_id, order_date, amount)"
+                " values (%(oid)s, %(cid)s, cast(%(od)s as date), %(amt)s)",
                 {"oid": order_id, "cid": customer_id, "od": order_date, "amt": amount},
             )
-        conn.execute(text("create table label_src (entity_id bigint, knowledge_date date, outcome double precision)"))
+        conn.execute(
+            "create table label_src (entity_id bigint, knowledge_date date, outcome double precision)"
+        )
         # One label per customer in each of the two label windows.
         for as_of in (TRAIN_AS_OF, TEST_AS_OF):
             for customer_id, outcome in _LABELS.items():
                 conn.execute(
-                    text(
-                        "insert into label_src (entity_id, knowledge_date, outcome)"
-                        " values (:eid, cast(:kd as date), :out)"
-                    ),
+                    "insert into label_src (entity_id, knowledge_date, outcome)"
+                    " values (%(eid)s, cast(%(kd)s as date), %(out)s)",
                     {
                         "eid": customer_id,
                         # knowledge_date inside [as_of, as_of + 6 months)
@@ -178,15 +173,13 @@ def _seed_source(engine) -> None:
 def _seed_protected_groups(engine) -> None:
     """A binary protected attribute so the optional bias group-by has something to read."""
     groups = {1: "A", 2: "A", 3: "B", 4: "B", 5: "A", 6: "B"}
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         for as_of in (TRAIN_AS_OF, TEST_AS_OF):
             for entity_id, value in groups.items():
                 conn.execute(
-                    text(
-                        "insert into triage.protected_groups"
-                        " (entity_id, as_of_date, attribute_name, attribute_value)"
-                        " values (:eid, :aod, 'grp', :val)"
-                    ),
+                    "insert into triage.protected_groups"
+                    " (entity_id, as_of_date, attribute_name, attribute_value)"
+                    " values (%(eid)s, %(aod)s, 'grp', %(val)s)",
                     {"eid": entity_id, "aod": as_of, "val": value},
                 )
 
@@ -219,7 +212,9 @@ _PINS = {"customers": "v1", "orders": "v1", "label_src": "v1"}
 
 def _build_matrices(engine, run_id, cohort, labels, storage):
     temporal = _temporal_config()
-    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}, "mean": {"type": "mean"}})
+    policy = ImputationPolicy.model_validate(
+        {"all": {"type": "zero"}, "mean": {"type": "mean"}}
+    )
     train = build_matrix(
         engine,
         run_id,
@@ -253,10 +248,10 @@ def _build_matrices(engine, run_id, cohort, labels, storage):
     return train, test
 
 
-def test_model_build_predict_evaluate_full_lifecycle(db_engine_greenfield, tmp_path):
+def test_model_build_predict_evaluate_full_lifecycle(db_pool_greenfield, tmp_path):
     import os
 
-    engine = db_engine_greenfield
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     _seed_protected_groups(engine)
@@ -280,41 +275,30 @@ def test_model_build_predict_evaluate_full_lifecycle(db_engine_greenfield, tmp_p
     assert model.cache_hit is False
 
     # artifact DAG: a built model node whose single parent is the train matrix
-    with engine.connect() as conn:
-        art = (
-            conn.execute(
-                text("select kind, status from triage.artifacts where artifact_id = :a"),
+    with engine.connection() as conn:
+        art = conn.execute(
+            "select kind, status from triage.artifacts where artifact_id = %(a)s",
+            {"a": model.model_artifact_id},
+        ).fetchone()
+        parents = [
+            r["parent_id"]
+            for r in conn.execute(
+                "select parent_id from triage.artifact_inputs where artifact_id = %(a)s",
                 {"a": model.model_artifact_id},
-            )
-            .mappings()
-            .one()
-        )
-        parents = (
-            conn.execute(
-                text("select parent_id from triage.artifact_inputs where artifact_id = :a"),
-                {"a": model.model_artifact_id},
-            )
-            .scalars()
-            .all()
-        )
+            ).fetchall()
+        ]
     assert art["kind"] == "model"
     assert art["status"] == "built"
     assert parents == [train.matrix_artifact_id]
 
     # triage.models row: model_hash == artifact_id, train_matrix_uuid set, file on disk
-    with engine.connect() as conn:
-        mrow = (
-            conn.execute(
-                text(
-                    "select model_id, model_group_id, model_hash, train_matrix_uuid,"
-                    " artifact_uri, artifact_format, model_size_bytes, random_seed,"
-                    " training_label_timespan from triage.models where model_id = :m"
-                ),
-                {"m": model.model_id},
-            )
-            .mappings()
-            .one()
-        )
+    with engine.connection() as conn:
+        mrow = conn.execute(
+            "select model_id, model_group_id, model_hash, train_matrix_uuid,"
+            " artifact_uri, artifact_format, model_size_bytes, random_seed,"
+            " training_label_timespan from triage.models where model_id = %(m)s",
+            {"m": model.model_id},
+        ).fetchone()
     assert mrow["model_hash"] == model.model_artifact_id
     assert str(mrow["train_matrix_uuid"]) == str(as_uuid(train.matrix_artifact_id))
     assert mrow["artifact_format"] == "joblib"
@@ -323,39 +307,27 @@ def test_model_build_predict_evaluate_full_lifecycle(db_engine_greenfield, tmp_p
     assert os.path.exists(model.artifact_uri)
 
     # model_groups row keyed by hash
-    with engine.connect() as conn:
-        grow = (
-            conn.execute(
-                text(
-                    "select model_group_hash, model_type, feature_list"
-                    " from triage.model_groups where model_group_id = :g"
-                ),
-                {"g": model.model_group_id},
-            )
-            .mappings()
-            .one()
-        )
+    with engine.connection() as conn:
+        grow = conn.execute(
+            "select model_group_hash, model_type, feature_list"
+            " from triage.model_groups where model_group_id = %(g)s",
+            {"g": model.model_group_id},
+        ).fetchone()
     assert grow["model_group_hash"] == model.model_group_hash
     assert grow["model_type"] == CLASS_PATH
     assert set(grow["feature_list"]) == set(train.feature_names)
 
     # feature_importances populated (DecisionTree exposes feature_importances_)
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         n_imp = conn.execute(
-            text("select count(*) from triage.feature_importances where model_id = :m"),
+            "select count(*) as n from triage.feature_importances where model_id = %(m)s",
             {"m": model.model_id},
-        ).scalar_one()
-        top = (
-            conn.execute(
-                text(
-                    "select feature, rank_abs, rank_pct from triage.feature_importances"
-                    " where model_id = :m order by rank_abs limit 1"
-                ),
-                {"m": model.model_id},
-            )
-            .mappings()
-            .one()
-        )
+        ).fetchone()["n"]
+        top = conn.execute(
+            "select feature, rank_abs, rank_pct from triage.feature_importances"
+            " where model_id = %(m)s order by rank_abs limit 1",
+            {"m": model.model_id},
+        ).fetchone()
     assert n_imp == len(train.feature_names)
     assert top["rank_abs"] == 1
 
@@ -382,30 +354,27 @@ def test_model_build_predict_evaluate_full_lifecycle(db_engine_greenfield, tmp_p
     assert result.num_bias_metrics > 0
 
     # predictions reference model_id + the test matrix_uuid
-    with engine.connect() as conn:
-        pred_rows = (
-            conn.execute(
-                text("select entity_id, split_kind, matrix_uuid from triage.predictions where model_id = :m"),
-                {"m": model.model_id},
-            )
-            .mappings()
-            .all()
-        )
+    with engine.connection() as conn:
+        pred_rows = conn.execute(
+            "select entity_id, split_kind, matrix_uuid from triage.predictions where model_id = %(m)s",
+            {"m": model.model_id},
+        ).fetchall()
     assert len(pred_rows) == 6
     assert all(r["split_kind"] == "test" for r in pred_rows)
-    assert all(str(r["matrix_uuid"]) == str(as_uuid(test.matrix_artifact_id)) for r in pred_rows)
+    assert all(
+        str(r["matrix_uuid"]) == str(as_uuid(test.matrix_artifact_id))
+        for r in pred_rows
+    )
 
     # evaluations: perfect separation -> precision@/recall@/AUC == 1.0
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         evals = {
             (r["metric"], r["parameter"]): r["value"]
             for r in conn.execute(
-                text(
-                    "select metric, parameter, value, num_labeled, num_positive"
-                    " from triage.evaluations where model_id = :m"
-                ),
+                "select metric, parameter, value, num_labeled, num_positive"
+                " from triage.evaluations where model_id = %(m)s",
                 {"m": model.model_id},
-            ).mappings()
+            ).fetchall()
         }
     assert evals[("auc_roc", "")] == pytest.approx(1.0)
     # precision@50_pct: top 3 of 6 are exactly the 3 positives -> 1.0
@@ -414,9 +383,9 @@ def test_model_build_predict_evaluate_full_lifecycle(db_engine_greenfield, tmp_p
     assert evals[("recall@", "50_pct")] == pytest.approx(1.0)
 
 
-def test_predictions_are_append_only(db_engine_greenfield, tmp_path):
+def test_predictions_are_append_only(db_pool_greenfield, tmp_path):
     """Re-scoring the same model+matrix APPENDS rows (ADR-0006), never overwrites."""
-    engine = db_engine_greenfield
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     storage = str(tmp_path / "store")
@@ -433,37 +402,41 @@ def test_predictions_are_append_only(db_engine_greenfield, tmp_path):
         source_pins=_PINS,
     )
 
-    first = score_and_evaluate(engine, model.model_id, model.estimator, test, TEST_AS_OF, LABEL_TIMESPAN)
-    second = score_and_evaluate(engine, model.model_id, model.estimator, test, TEST_AS_OF, LABEL_TIMESPAN)
+    first = score_and_evaluate(
+        engine, model.model_id, model.estimator, test, TEST_AS_OF, LABEL_TIMESPAN
+    )
+    second = score_and_evaluate(
+        engine, model.model_id, model.estimator, test, TEST_AS_OF, LABEL_TIMESPAN
+    )
     assert first.num_predictions == 6
     assert second.num_predictions == 6
 
-    with engine.connect() as conn:
+    with engine.connection() as conn:
         total = conn.execute(
-            text("select count(*) from triage.predictions where model_id = :m"),
+            "select count(*) as n from triage.predictions where model_id = %(m)s",
             {"m": model.model_id},
-        ).scalar_one()
+        ).fetchone()["n"]
         # latest_predictions collapses the two scoring runs back to one row per entity
         latest = conn.execute(
-            text("select count(*) from triage.latest_predictions where model_id = :m"),
+            "select count(*) as n from triage.latest_predictions where model_id = %(m)s",
             {"m": model.model_id},
-        ).scalar_one()
+        ).fetchone()["n"]
         distinct_scored_at = conn.execute(
-            text("select count(distinct scored_at) from triage.predictions where model_id = :m"),
+            "select count(distinct scored_at) as n from triage.predictions where model_id = %(m)s",
             {"m": model.model_id},
-        ).scalar_one()
+        ).fetchone()["n"]
     assert total == 12  # 6 entities × 2 scoring runs — appended, not overwritten
     assert latest == 6
     assert distinct_scored_at == 2  # each run got its own scored_at default
 
 
-def test_model_group_reused_across_models(db_engine_greenfield, tmp_path):
+def test_model_group_reused_across_models(db_pool_greenfield, tmp_path):
     """A second model of the same family (estimator + hyperparams + features) reuses the group.
 
     Two models differing only in ``random_seed`` (not part of group identity) must mint
     distinct model rows + artifacts but share one ``model_group_id``.
     """
-    engine = db_engine_greenfield
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     storage = str(tmp_path / "store")
@@ -495,14 +468,16 @@ def test_model_group_reused_across_models(db_engine_greenfield, tmp_path):
     assert m1.model_group_id == m2.model_group_id
     assert m1.model_group_hash == m2.model_group_hash
 
-    with engine.connect() as conn:
-        n_groups = conn.execute(text("select count(*) from triage.model_groups")).scalar_one()
+    with engine.connection() as conn:
+        n_groups = conn.execute(
+            "select count(*) as n from triage.model_groups"
+        ).fetchone()["n"]
     assert n_groups == 1
 
 
-def test_build_model_cache_hit_on_rerun(db_engine_greenfield, tmp_path):
+def test_build_model_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
     """A second identical build_model is a cache hit: same artifact, no duplicate model row."""
-    engine = db_engine_greenfield
+    engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
     _seed_source(engine)
     storage = str(tmp_path / "store")
@@ -536,10 +511,12 @@ def test_build_model_cache_hit_on_rerun(db_engine_greenfield, tmp_path):
     assert second.model_id == first.model_id
     assert second.model_artifact_id == first.model_artifact_id
 
-    with engine.connect() as conn:
-        n_models = conn.execute(text("select count(*) from triage.models")).scalar_one()
+    with engine.connection() as conn:
+        n_models = conn.execute("select count(*) as n from triage.models").fetchone()[
+            "n"
+        ]
         n_model_artifacts = conn.execute(
-            text("select count(*) from triage.artifacts where kind = 'model'")
-        ).scalar_one()
+            "select count(*) as n from triage.artifacts where kind = 'model'"
+        ).fetchone()["n"]
     assert n_models == 1
     assert n_model_artifacts == 1

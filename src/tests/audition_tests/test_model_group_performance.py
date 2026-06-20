@@ -9,8 +9,8 @@ from triage.component.audition.model_group_performance import (
 from .utils import create_sample_distance_table
 
 
-def test_ModelGroupPerformancePlotter_generate_plot_data(db_engine_greenfield):
-    distance_table, model_groups = create_sample_distance_table(db_engine_greenfield)
+def test_ModelGroupPerformancePlotter_generate_plot_data(db_pool_greenfield):
+    distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
     plotter = ModelGroupPerformancePlotter(distance_table)
     df = plotter.generate_plot_data(
         metric="precision@",
@@ -27,13 +27,9 @@ def test_ModelGroupPerformancePlotter_generate_plot_data(db_engine_greenfield):
         assert np.isclose(value, 0.5)
 
 
-def test_ModelGroupPerformancePlotter_plot_all(db_engine_greenfield):
-    with patch(
-        "triage.component.audition.model_group_performance.plot_cats"
-    ) as plot_patch:
-        distance_table, model_groups = create_sample_distance_table(
-            db_engine_greenfield
-        )
+def test_ModelGroupPerformancePlotter_plot_all(db_pool_greenfield):
+    with patch("triage.component.audition.model_group_performance.plot_cats") as plot_patch:
+        distance_table, model_groups = create_sample_distance_table(db_pool_greenfield)
         plotter = ModelGroupPerformancePlotter(distance_table)
         plotter.plot_all(
             [{"metric": "precision@", "parameter": "100_abs"}],

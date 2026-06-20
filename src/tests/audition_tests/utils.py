@@ -5,7 +5,9 @@ The audition tests used to seed via the inherited ORM factories
 ``triage_metadata.*`` / ``test_results.*``. Audition now reads the greenfield
 ``triage.*`` schema, so these helpers INSERT directly into
 ``triage.model_groups`` / ``triage.models`` / ``triage.evaluations`` against the
-``db_engine_greenfield`` fixture (alembic-upgraded to head).
+``db_pool_greenfield`` fixture (a psycopg3 ``ConnectionPool``, alembic-upgraded to
+head). Each helper takes a psycopg3 connection (``%(name)s`` paramstyle,
+``dict_row`` rows) borrowed via ``with pool.connection() as conn:``.
 
 FK ordering (``triage.evaluations.model_id`` -> ``triage.models.model_id`` ->
 ``triage.model_groups.model_group_id``):
@@ -23,8 +25,6 @@ reads ``split_kind = 'test'`` rows by their ``value`` column.
 
 import uuid
 
-from sqlalchemy import text
-
 from triage.component.audition.distance_from_best import DistanceFromBestTable
 
 
@@ -39,15 +39,13 @@ def insert_model_group(conn, model_type, *, model_group_id=None, config=None):
     group_hash = uuid.uuid4().hex
     if model_group_id is not None:
         row = conn.execute(
-            text(
-                "insert into triage.model_groups"
-                " (model_group_id, model_group_hash, model_type, hyperparameters,"
-                "  feature_list, config)"
-                " overriding system value"
-                " values (:mgid, :h, :mt, '{}'::jsonb, '{}'::text[],"
-                "  cast(:cfg as jsonb))"
-                " returning model_group_id"
-            ),
+            "insert into triage.model_groups"
+            " (model_group_id, model_group_hash, model_type, hyperparameters,"
+            "  feature_list, config)"
+            " overriding system value"
+            " values (%(mgid)s, %(h)s, %(mt)s, '{}'::jsonb, '{}'::text[],"
+            "  cast(%(cfg)s as jsonb))"
+            " returning model_group_id",
             {
                 "mgid": model_group_id,
                 "h": group_hash,
@@ -57,15 +55,13 @@ def insert_model_group(conn, model_type, *, model_group_id=None, config=None):
         )
     else:
         row = conn.execute(
-            text(
-                "insert into triage.model_groups"
-                " (model_group_hash, model_type, hyperparameters, feature_list, config)"
-                " values (:h, :mt, '{}'::jsonb, '{}'::text[], cast(:cfg as jsonb))"
-                " returning model_group_id"
-            ),
+            "insert into triage.model_groups"
+            " (model_group_hash, model_type, hyperparameters, feature_list, config)"
+            " values (%(h)s, %(mt)s, '{}'::jsonb, '{}'::text[], cast(%(cfg)s as jsonb))"
+            " returning model_group_id",
             {"h": group_hash, "mt": model_type, "cfg": config},
         )
-    return row.scalar_one()
+    return row.fetchone()["model_group_id"]
 
 
 def insert_model(conn, model_group_id, train_end_time, *, run_id=None):
@@ -78,20 +74,16 @@ def insert_model(conn, model_group_id, train_end_time, *, run_id=None):
     """
     artifact_id = uuid.uuid4().hex
     conn.execute(
-        text(
-            "insert into triage.artifacts"
-            " (artifact_id, logical_id, kind, config, status)"
-            " values (:aid, :aid, 'model', '{}'::jsonb, 'built')"
-        ),
+        "insert into triage.artifacts"
+        " (artifact_id, logical_id, kind, config, status)"
+        " values (%(aid)s, %(aid)s, 'model', '{}'::jsonb, 'built')",
         {"aid": artifact_id},
     )
     row = conn.execute(
-        text(
-            "insert into triage.models"
-            " (model_group_id, model_hash, run_id, train_end_time)"
-            " values (:mgid, :h, :run_id, cast(:tet as date))"
-            " returning model_id"
-        ),
+        "insert into triage.models"
+        " (model_group_id, model_hash, run_id, train_end_time)"
+        " values (%(mgid)s, %(h)s, %(run_id)s, cast(%(tet)s as date))"
+        " returning model_id",
         {
             "mgid": model_group_id,
             "h": artifact_id,
@@ -99,7 +91,7 @@ def insert_model(conn, model_group_id, train_end_time, *, run_id=None):
             "tet": str(train_end_time),
         },
     )
-    return row.scalar_one()
+    return row.fetchone()["model_id"]
 
 
 def insert_evaluation(
@@ -115,12 +107,10 @@ def insert_evaluation(
 ):
     """INSERT one ``triage.evaluations`` row (audition reads ``split_kind='test'``)."""
     conn.execute(
-        text(
-            "insert into triage.evaluations"
-            " (model_id, split_kind, as_of_date, subset_hash, metric, parameter, value)"
-            " values (:mid, cast(:sk as triage.split_kind), cast(:aod as date),"
-            "  :sh, :metric, :parameter, :value)"
-        ),
+        "insert into triage.evaluations"
+        " (model_id, split_kind, as_of_date, subset_hash, metric, parameter, value)"
+        " values (%(mid)s, cast(%(sk)s as triage.split_kind), cast(%(aod)s as date),"
+        "  %(sh)s, %(metric)s, %(parameter)s, %(value)s)",
         {
             "mid": model_id,
             "sk": split_kind,
@@ -141,7 +131,7 @@ def create_sample_distance_table(engine):
     fixture rows the ORM version used). Returns (distance_table, model_groups)
     where ``model_groups`` maps name -> model_group_id.
     """
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         model_groups = {
             "stable": insert_model_group(conn, "myStableClassifier"),
             "spiky": insert_model_group(conn, "mySpikeClassifier"),
@@ -306,14 +296,13 @@ def create_sample_distance_table(engine):
         ),
     ]
 
-    with engine.begin() as conn:
+    with engine.connection() as conn:
         for dist_row in distance_rows:
             conn.execute(
-                text(
-                    "insert into dist_table values (:model_group_id, "
-                    ":train_end_time, :metric, :parameter, :raw_value, :best_case, "
-                    ":dist_from_best, :raw_value_next, :dist_from_best_case_next_time)"
-                ),
+                "insert into dist_table values (%(model_group_id)s, "
+                "%(train_end_time)s, %(metric)s, %(parameter)s, %(raw_value)s, "
+                "%(best_case)s, %(dist_from_best)s, %(raw_value_next)s, "
+                "%(dist_from_best_case_next_time)s)",
                 {
                     "model_group_id": dist_row[0],
                     "train_end_time": dist_row[1],

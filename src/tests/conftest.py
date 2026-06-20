@@ -3,7 +3,6 @@ import tempfile
 import pytest
 from pytest_postgresql import factories
 
-from triage import create_engine
 from triage.component.catwalk.storage import ProjectStorage
 
 # Create postgresql process fixture (session-scoped, starts PostgreSQL once)
@@ -11,37 +10,6 @@ postgresql_proc = factories.postgresql_proc(port=None)
 
 # Create postgresql client fixture (function-scoped, creates fresh db per test)
 postgresql = factories.postgresql("postgresql_proc")
-
-
-@pytest.fixture(name="db_engine", scope="function")
-def fixture_db_engine(postgresql):
-    """pytest fixture provider to set up and teardown a "test" database
-    and provide the test function a connection engine with which to
-    query that database.
-
-    """
-    # Build connection URL from pytest-postgresql fixture
-    connection_url = f"postgresql+psycopg://{postgresql.info.user}@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
-    engine = create_engine(connection_url)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="function")
-def db_engine_greenfield(db_engine):
-    """Fresh pytest-postgresql DB with the greenfield ``triage`` schema applied.
-
-    Runs the per-project alembic migrations (results_schema/alembic.ini, 0001 ->
-    head) against the throwaway ``db_engine`` database, creating the greenfield
-    ``triage.*`` schema (artifacts/runs/cohorts/labels/... + the 0002 metric
-    functions). This is the schema the greenfield builders (cohort, labels,
-    matrix, model) write to — distinct from ``db_engine_with_results_schema``,
-    which builds the *inherited* ORM schema via ``Base.metadata.create_all``.
-    """
-    from triage.component.results_schema import upgrade_db
-
-    upgrade_db(db_engine=db_engine, revision="head")
-    yield db_engine
 
 
 @pytest.fixture(name="db_url", scope="function")
@@ -97,35 +65,6 @@ def project_storage(project_path):
     Yields (catwalk.storage.ProjectStorage)
     """
     yield ProjectStorage(project_path)
-
-
-@pytest.fixture(scope="module")
-def shared_db_engine(postgresql_proc):
-    """pytest fixture provider to set up and teardown a "test" database
-    and provide a test module a connection engine with which to
-    query that database.
-
-    Uses pytest-postgresql's DatabaseJanitor for module-scoped database management.
-    """
-    import uuid
-
-    from pytest_postgresql.janitor import DatabaseJanitor
-
-    # Create a unique database name for this module
-    db_name = f"test_module_{uuid.uuid4().hex[:8]}"
-
-    with DatabaseJanitor(
-        user=postgresql_proc.user,
-        host=postgresql_proc.host,
-        port=postgresql_proc.port,
-        dbname=db_name,
-        version=postgresql_proc.version,
-        password=postgresql_proc.password or "",
-    ):
-        connection_url = f"postgresql+psycopg://{postgresql_proc.user}@{postgresql_proc.host}:{postgresql_proc.port}/{db_name}"
-        engine = create_engine(connection_url)
-        yield engine
-        engine.dispose()
 
 
 @pytest.fixture(scope="module")
