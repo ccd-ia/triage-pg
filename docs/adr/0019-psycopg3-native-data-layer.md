@@ -1,8 +1,10 @@
 # 0019. psycopg3-native data layer in application code; SQLAlchemy kept only for alembic
 
-- Status: Accepted — implementation deferred to a dedicated session (the code is still
-  on SQLAlchemy Core as of this writing; this ADR records the decision and the plan).
-- Date: 2026-06-19
+- Status: Accepted — **Implemented** 2026-06-20 (WS7, branch `feat/psycopg3-native`,
+  commits C1 `96ba3717` / C2 `519889d6` / C3 `358b0898`). Application code is psycopg3-native
+  on a `ConnectionPool`; SQLAlchemy remains only behind alembic. Full suite green
+  (267 passed, 11 skipped); `grep sqlalchemy src/triage` hits only the alembic zones.
+- Date: 2026-06-19 (decision); 2026-06-20 (implemented)
 - Deciders: Adolfo De Unánue
 
 ## Context
