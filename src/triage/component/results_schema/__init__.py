@@ -6,10 +6,13 @@ logger = get_logger(__name__)
 
 from alembic import command, script
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
-from triage import create_engine
-from triage.database_reflection import table_exists
+# NOTE (ADR-0019): this module is the alembic / migration layer — the ONE place application
+# code may keep SQLAlchemy. It deliberately builds its own SQLAlchemy engine and does its own
+# table-existence check inline, rather than importing the psycopg3 application layer
+# (``triage.util.db`` / ``triage.database_reflection``), so the migration layer and the app's
+# psycopg3 connection pool stay fully decoupled.
 
 __all__ = (
     "upgrade_db",
@@ -70,16 +73,21 @@ def upgrade_if_clean(dburl):
     alembic_cfg = alembic_config(dburl)
     engine = create_engine(dburl)
     script_ = script.ScriptDirectory.from_config(alembic_cfg)
-    if not table_exists("results_schema_versions", engine):
-        logger.info(
-            "No results_schema_versions table exists, which means that this installation is fresh. Upgrading db."
-        )
-        upgrade_db(dburl=dburl)
-        return
-    with engine.begin() as conn:
-        current_revision = conn.execute(
-            text("select version_num from results_schema_versions limit 1")
-        ).scalar_one()
+    try:
+        with engine.connect() as conn:
+            versions_table = conn.execute(
+                text("select to_regclass('results_schema_versions')")
+            ).scalar_one()
+        if versions_table is None:
+            logger.info(
+                "No results_schema_versions table exists, which means that this installation is fresh. Upgrading db."
+            )
+            upgrade_db(dburl=dburl)
+            return
+        with engine.begin() as conn:
+            current_revision = conn.execute(
+                text("select version_num from results_schema_versions limit 1")
+            ).scalar_one()
         logger.debug(
             "Database's triage_metadata schema version is %s", current_revision
         )
@@ -108,6 +116,8 @@ def upgrade_if_clean(dburl):
                 "The database changes may take a long time on a heavily populated database. "
                 "Otherwise, you can also downgrade your Triage version to match your database."
             )
+    finally:
+        engine.dispose()
 
 
 def alembic_config(dburl):

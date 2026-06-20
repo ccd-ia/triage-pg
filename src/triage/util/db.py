@@ -11,7 +11,9 @@ logger = get_logger(__name__)
 
 from datetime import date
 
+from psycopg.rows import dict_row
 from psycopg.types.range import DateRange, TimestamptzRange
+from psycopg_pool import ConnectionPool
 from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 
@@ -64,3 +66,47 @@ class SerializableDbEngine(wrapt.ObjectProxy):
 
 
 create_engine = functools.partial(SerializableDbEngine, json_serializer=json_dumps)
+
+
+def libpq_conninfo(dburl) -> str:
+    """Strip SQLAlchemy's ``+psycopg`` driver tag so a URL is a libpq conninfo string.
+
+    ``cli.resolve_db_url`` and the test fixtures build ``postgresql+psycopg://…`` URLs (the
+    form SQLAlchemy/alembic want); psycopg3/libpq wants the bare ``postgresql://…`` form.
+    Accepts a string only — pass the password-bearing string from
+    ``url.render_as_string(hide_password=False)``, never a bare ``str(URL)`` (which masks
+    the password).
+    """
+    if not isinstance(dburl, str):
+        raise TypeError(
+            "connection_pool expects a database URL string (password-bearing); got "
+            f"{type(dburl).__name__}. Stringify SQLAlchemy URLs with "
+            "render_as_string(hide_password=False) first."
+        )
+    for prefix in ("postgresql+psycopg://", "postgresql+psycopg2://"):
+        if dburl.startswith(prefix):
+            return "postgresql://" + dburl[len(prefix) :]
+    return dburl
+
+
+def connection_pool(
+    dburl, *, min_size: int = 1, max_size: int = 10, **kwargs
+) -> ConnectionPool:
+    """Open a psycopg3 ``ConnectionPool`` for the project database (ADR-0019).
+
+    The single application-side connection factory. Every greenfield adapter takes the
+    returned pool and runs raw SQL through ``with pool.connection() as conn`` — which commits
+    on clean block exit and rolls back on exception (covering both the old ``engine.connect()``
+    read path and the ``engine.begin()`` write-transaction path). Rows come back as dicts
+    (``row_factory=dict_row``) so call sites use mapping access. SQLAlchemy is no longer
+    involved in application data access; it survives only behind alembic.
+    """
+    pool = ConnectionPool(
+        libpq_conninfo(dburl),
+        min_size=min_size,
+        max_size=max_size,
+        kwargs={"row_factory": dict_row},
+        open=True,
+        **kwargs,
+    )
+    return pool
