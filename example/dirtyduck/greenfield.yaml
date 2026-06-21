@@ -55,15 +55,18 @@ feature_config:
     - alias: facilities
       id: entity_id
       table: ontology.entities
-      # start_time is when the facility became known; use it as the knowledge date.
-      # NOTE: semantic.entities is not a time-series table (no temporal_ix needed for
-      # the target entity itself; featurizer only requires temporal_ix on child event
-      # entities for the as-of join).
-      # NOTE: facility_type and zip_code omitted intentionally — featurizer returns
-      # categorical direct-variables as raw strings, and the matrix adapter has no
-      # categorical encoding step before sklearn. Gap: adapter needs OrdinalEncoder/
-      # OneHotEncoder for string columns before model fitting (recorded in e2e report).
-      variables: {}
+      # ontology.entities is not a time-series table (no temporal_ix needed for the target
+      # entity itself; featurizer only requires temporal_ix on child event entities).
+      # facility_type / zip_code are direct target-entity categoricals — featurizer passes
+      # them through as raw strings; the matrix adapter now train-fit ordinal-encodes them
+      # (adapter-spec §4). NOTE: ordinal is a stop-gap for these — they're genuine (high-card)
+      # categoricals; the cleaner treatment is featurizer fixed-vocabulary one-hot reading the
+      # PG ENUM / declared vocab (the parallel featurizer work), once that release lands.
+      variables:
+        facility_type:
+          type: categorical
+        zip_code:
+          type: categorical
 
     - alias: inspections
       id: ~
