@@ -57,16 +57,51 @@ feature_config:
       table: ontology.entities
       # ontology.entities is not a time-series table (no temporal_ix needed for the target
       # entity itself; featurizer only requires temporal_ix on child event entities).
-      # facility_type / zip_code are direct target-entity categoricals — featurizer passes
-      # them through as raw strings; the matrix adapter now train-fit ordinal-encodes them
-      # (adapter-spec §4). NOTE: ordinal is a stop-gap for these — they're genuine (high-card)
-      # categoricals; the cleaner treatment is featurizer fixed-vocabulary one-hot reading the
-      # PG ENUM / declared vocab (the parallel featurizer work), once that release lands.
+      # Direct target-entity categoricals via featurizer v0.4.0 fixed-vocabulary one-hot
+      # (adapter-spec §4 declarative path): featurizer emits deterministic 0/1 columns named
+      # "facilities.<col>=<value>" — already numeric, so the matrix adapter's ordinal encoder
+      # no longer fires on them. role:identifier excludes the restaurant name explicitly
+      # (explicit > silent omission, since featurizer is exhaustive). Vocabularies are the
+      # top values (facility_type top-15 ≈ 96% of entities; the long tail → all-zero "other").
       variables:
+        facility:
+          type: text
+          role: identifier
         facility_type:
           type: categorical
+          role: categorical
+          vocabulary:
+            - "restaurant"
+            - "grocery store"
+            - "school"
+            - "unknown"
+            - "children's services facility"
+            - "bakery"
+            - "daycare (2 - 6 years)"
+            - "daycare above and under 2 years"
+            - "liquor"
+            - "long term care"
+            - "catering"
+            - "mobile food preparer"
+            - "mobile food dispenser"
+            - "daycare combo 1586"
+            - "hospital"
         zip_code:
           type: categorical
+          role: categorical
+          vocabulary:
+            - "60647"
+            - "60657"
+            - "60614"
+            - "60611"
+            - "60608"
+            - "60618"
+            - "60622"
+            - "60607"
+            - "60639"
+            - "60625"
+            - "60623"
+            - "60640"
 
     - alias: inspections
       id: ~
