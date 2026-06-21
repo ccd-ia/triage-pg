@@ -1,0 +1,122 @@
+# DirtyDuck Greenfield End-to-End Run
+# Ported from old-schema configs (dirty-duckling.yaml, inspections_baseline.yaml)
+# to the greenfield experiment_config shape (adapter-spec + run.py docstring).
+#
+# Problem: which facilities are likely to fail a food inspection in the next 6 months?
+# Data: semantic.entities (active facilities), semantic.events (inspections, 2014-2017)
+
+problem_type: classification
+
+temporal_config:
+  feature_start_time: '2014-01-01'
+  feature_end_time: '2017-07-01'
+  label_start_time: '2015-01-01'
+  label_end_time: '2017-07-01'
+  # Retrain every 6 months — gives us 5 splits
+  model_update_frequency: '6month'
+  # One training row per entity every 6 months
+  training_as_of_date_frequencies: '6month'
+  training_label_timespans: ['6month']
+  # Test: 1 date at the split boundary (0day duration = point-in-time test)
+  test_as_of_date_frequencies: '6month'
+  test_durations: '0day'
+  test_label_timespans: ['6month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: active_facilities
+  query: |
+    select e.entity_id
+    from semantic.entities as e
+    where daterange(start_time, end_time, '[]') @> {as_of_date}::date
+
+label_config:
+  name: failed_inspections
+  query: |
+    select
+      entity_id,
+      bool_or(result = 'fail')::integer as outcome
+    from semantic.events
+    where {as_of_date}::date <= date
+      and date < {as_of_date}::date + {label_timespan}
+    group by entity_id
+
+# featurizer ER-graph: facilities are the target entity, inspections are child events.
+# Aggregation windows are ISO-8601 (featurizer format, not timechop format).
+feature_config:
+  target: facilities
+  max_depth: 2
+  intervals:
+    - P1M
+    - P3M
+    - P6M
+
+  entities:
+    - alias: facilities
+      id: entity_id
+      table: semantic.entities
+      # start_time is when the facility became known; use it as the knowledge date.
+      # NOTE: semantic.entities is not a time-series table (no temporal_ix needed for
+      # the target entity itself; featurizer only requires temporal_ix on child event
+      # entities for the as-of join).
+      # NOTE: facility_type and zip_code omitted intentionally — featurizer returns
+      # categorical direct-variables as raw strings, and the matrix adapter has no
+      # categorical encoding step before sklearn. Gap: adapter needs OrdinalEncoder/
+      # OneHotEncoder for string columns before model fitting (recorded in e2e report).
+      variables: {}
+
+    - alias: inspections
+      id: ~
+      table: semantic.events
+      # 'date' is when the inspection happened = when it became known (knowledge date).
+      temporal_ix: date
+      variables:
+        result:
+          type: categorical
+        risk:
+          type: categorical
+        type:
+          type: categorical
+
+  relationships:
+    - parent:
+        entity: facilities
+        key: entity_id
+      child:
+        entity: inspections
+        key: entity_id
+      temporal:
+        mode: as_of
+
+# Tiny grid for a fast first run: 1 DecisionTree depth + 1 RandomForest
+grid_config:
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [3, 5]
+    min_samples_split: [50]
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [10]
+    max_depth: [3]
+    min_samples_split: [50]
+
+# Declare the data sources so the derivation DAG can pin them.
+# version_label is static so repeated runs are idempotent (no re-bump on re-run).
+sources:
+  - name: semantic_entities
+    relation: semantic.entities
+    knowledge_date_column: start_time
+    version_label: 'dirtyduck-v1'
+    description: Active food-service facilities (DirtyDuck tutorial)
+
+  - name: semantic_events
+    relation: semantic.events
+    knowledge_date_column: date
+    version_label: 'dirtyduck-v1'
+    description: Food inspection events with result and violations (DirtyDuck tutorial)
+
+# Imputation: count-like features get zero-fill (default), categoricals get zero.
+# The zero strategy is fit-free (safe on train and test equally).
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

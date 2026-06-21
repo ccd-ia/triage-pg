@@ -42,3 +42,8 @@ TODO.org
 
 # Claude Code hook logs (runtime output, session-local)
 logs/
+
+# DirtyDuck local run artifacts + dev config (never committed)
+dirtyduck-output/
+dirtyduck-database.yaml
+dirtyduck/docker-compose.override.yml
