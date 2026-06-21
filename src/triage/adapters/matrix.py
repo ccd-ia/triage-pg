@@ -30,15 +30,22 @@ also permit Arrow/Polars "if you keep the leakage boundary intact." We assemble 
 2. Wide configs shard into ``query_groups`` (multiple SQLs that re-join on the keys);
    ``Featurizer.to_arrow`` already re-joins those into one Table, so consuming Arrow avoids
    re-implementing the group merge in SQL.
-3. ``to_arrow(impute=True)`` already performs featurizer's *fit-free* pass — count-like → 0,
-   measures left NULL, ``<feature>__missing`` 0/1 flags — exactly the ADR-0009 fit-free
-   semantics; re-spelling them in raw SQL would duplicate featurizer's count-like
-   classification (against ADR-0008). We take featurizer's fit-free output verbatim and add
-   only the *fit-based* fills, which are the actual leakage boundary.
+3. ``to_arrow(impute=True)`` performs featurizer's *fit-free* pass for the aggregations it
+   classifies as count-like (→ 0), leaves measures NULL, and emits ``<feature>__missing``
+   0/1 flags. featurizer's count-like classification is **narrower** than the triage
+   imputation policy, though — e.g. recency/tenure *time-since* primitives are left NULL — so
+   the adapter applies the policy's *own* fit-free fills (:func:`_apply_fit_free`:
+   zero/constant per :class:`ImputationPolicy`) on top, for every feature whose rule is
+   fit-free. It does **not** re-spell featurizer's count-like classification in SQL (that
+   would duplicate it, against ADR-0008); it only fills the residual the policy declares. The
+   adapter then adds the *fit-based* fills (the leakage boundary), and a fail-fast guard
+   (:func:`_check_no_nulls_remain`) asserts no NULL survives — so a NaN can never silently
+   reach the model (ADR-0009 "imputation required"; trees tolerate NaN and would mask it).
 
 The leakage boundary is preserved identically in Arrow: the fit-based statistic is computed
 over the *train Table's rows only*, persisted, and on the test side read back and applied with
-``COALESCE``/``fill_null`` — never recomputed from test rows, never per ``as_of_date``.
+``fill_null`` — never recomputed from test rows, never per ``as_of_date``. Fit-free fills need
+no statistic, so they are applied identically on train and test (leakage-safe).
 
 Lifecycle (mirrors :mod:`triage.adapters.cohort` / :mod:`~.labels`)
 -------------------------------------------------------------------
@@ -340,6 +347,51 @@ def _apply_fit_based(
     return frame.with_columns(exprs) if exprs else frame
 
 
+def _apply_fit_free(
+    frame,
+    feature_columns: Sequence[str],
+    policy: ImputationPolicy,
+):
+    """Fill every *fit-free* feature's NULLs per the policy (zero/constant). Polars in/out.
+
+    featurizer's ``impute=True`` only zero-fills the aggregations it classifies as count-like;
+    measures and recency/tenure *time-since* primitives are left NULL. This pass closes that
+    gap for every feature whose resolved rule is fit-free, so the triage ``ImputationPolicy``
+    (not featurizer's narrower heuristic) is authoritative for fit-free fills. Fit-free fills
+    need no fitted statistic, so they are leakage-safe and applied identically on train and
+    test (ADR-0009, adapter-spec §3). Fit-based and ``error`` features are left untouched here
+    (handled by :func:`_apply_fit_based` / caught by :func:`_check_no_nulls_remain`).
+    """
+    import polars as pl
+
+    numeric = (
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Float32, pl.Float64,
+    )  # fmt: skip
+    exprs = []
+    for feature in feature_columns:
+        rule = policy.resolve(_metric_of(feature))
+        if rule.kind != "fit_free":
+            continue
+        if rule.type in ("zero", "zero_noflag"):
+            fill: Any = 0
+        elif rule.type == "constant":
+            fill = rule.value
+        else:
+            # null_category (categoricals) is already handled by _apply_cat_encoding's
+            # fill_null(0); nothing to fill here for a non-categorical column.
+            continue
+        if frame.schema[feature] not in numeric:
+            # A zero/constant fill is only meaningful for a numeric feature. A non-numeric
+            # column here (e.g. a target temporal_ix date that leaked into the feature set)
+            # is left for _check_no_nulls_remain to flag if it actually carries NULLs, rather
+            # than crashing fill_null on an incompatible dtype.
+            continue
+        exprs.append(pl.col(feature).fill_null(fill).alias(feature))
+    return frame.with_columns(exprs) if exprs else frame
+
+
 def _categorical_features(frame, feature_columns: Sequence[str]) -> list[str]:
     """Feature columns whose dtype is string/categorical — these need encoding before sklearn.
 
@@ -426,19 +478,29 @@ def _resolve_cat_encodings(
     return encodings
 
 
-def _check_error_rules(
+def _check_no_nulls_remain(
     frame, feature_columns: Sequence[str], policy: ImputationPolicy
 ) -> None:
-    """Fail loudly if an ``error``-policy feature still has a NULL (adapter-spec §3.2)."""
-    offenders = []
-    for feature in feature_columns:
-        rule = policy.resolve(_metric_of(feature))
-        if rule.type == "error" and frame.get_column(feature).null_count() > 0:
-            offenders.append(feature)
+    """Fail loudly if ANY feature still has a NULL after imputation (ADR-0009, adapter-spec §3.2).
+
+    Every feature must be fully imputed before it reaches a model — a surviving NULL becomes a
+    NaN in the Parquet that some estimators (GradientBoosting, LogisticRegression) reject while
+    tree ensembles silently tolerate, *masking* the gap. We refuse to ship either. A NULL here
+    means one of: an ``error``-ruled feature whose data is genuinely missing; a fit-based
+    feature whose statistic was un-computable (all-null on the train split); or a fit-free gap
+    (which :func:`_apply_fit_free` should have closed). The message names each offender + rule.
+    """
+    offenders = [
+        f"{feature} (rule {policy.resolve(_metric_of(feature)).type!r})"
+        for feature in feature_columns
+        if frame.get_column(feature).null_count() > 0
+    ]
     if offenders:
         raise ValueError(
-            "imputation policy 'error' but NULLs remain in feature(s) "
-            + f"{offenders!r} — every value must be imputable (adapter-spec §3.2)"
+            "imputation incomplete — NULLs remain in feature(s) after the fit-free + "
+            f"fit-based passes: {offenders!r}. Every feature must be imputable (ADR-0009 "
+            "'imputation required'); a fit-based statistic may be un-computable (feature "
+            "all-null on the train split) or an 'error' rule's data is missing."
         )
 
 
@@ -726,7 +788,10 @@ def _assemble(
         train_matrix_artifact_id=train_matrix_artifact_id,
     )
     design = _apply_fit_based(design, feature_columns, fitted)
-    _check_error_rules(design, feature_columns, imputation_policy)
+    # Apply the policy's fit-free fills (zero/constant) on top of featurizer's narrower
+    # count-like zero-fill — closes the recency/tenure NULL gap (ADR-0009). Leakage-safe.
+    design = _apply_fit_free(design, feature_columns, imputation_policy)
+    _check_no_nulls_remain(design, feature_columns, imputation_policy)
 
     storage_uri = storage.join(storage_root, f"{as_uuid(matrix_artifact_id)}.parquet")
     write_parquet(storage, storage_uri, design)

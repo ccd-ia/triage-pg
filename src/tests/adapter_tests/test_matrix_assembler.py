@@ -493,3 +493,132 @@ def test_fit_cat_encoding_high_cardinality_still_encodes(caplog):
     # the guard warns but still encodes (ordinal stays one column — no width blow-up)
     assert len(enc) == n
     assert min(enc.values()) == 1  # 0 stays reserved for unknown
+
+
+# ---------------------------------------------------------------------------
+# Fit-free imputation + the no-NULL guard (ADR-0009, adapter-spec §3).
+# Regression for the gap where featurizer's count-like-only zero-fill left
+# recency/tenure (and any measure under an `all: zero` policy) as NULL → NaN
+# silently reached the model (trees tolerated it; GradientBoosting/LogReg crashed).
+# ---------------------------------------------------------------------------
+
+
+def test_apply_fit_free_zero_fills_fitfree_and_leaves_fit_based_untouched():
+    from triage.adapters.matrix import _apply_fit_free
+
+    # `days_since(...)` stands in for the recency/tenure primitives featurizer leaves NULL.
+    frame = pl.DataFrame(
+        {
+            "count(orders.id)": [1, None, 3],  # fit-free (all→zero)
+            "days_since(orders.dt)": [
+                None,
+                5.0,
+                None,
+            ],  # the bug-class column → all→zero
+            "MEAN(orders.amount)": [
+                1.0,
+                None,
+                3.0,
+            ],  # fit-based → must NOT be touched here
+        }
+    )
+    policy = ImputationPolicy.model_validate(
+        {"all": {"type": "zero"}, "mean": {"type": "mean"}}
+    )
+    out = _apply_fit_free(frame, list(frame.columns), policy)
+    assert out.get_column("count(orders.id)").to_list() == [1, 0, 3]
+    assert out.get_column("days_since(orders.dt)").to_list() == [0.0, 5.0, 0.0]
+    # fit-based stays NULL here (filled later by _apply_fit_based, not the fit-free pass)
+    assert out.get_column("MEAN(orders.amount)").null_count() == 1
+
+
+def test_apply_fit_free_constant_uses_declared_value():
+    from triage.adapters.matrix import _apply_fit_free
+
+    policy = ImputationPolicy.model_validate({"all": {"type": "constant", "value": -1}})
+    frame = pl.DataFrame({"days_since(x)": [None, 2.0]})
+    out = _apply_fit_free(frame, ["days_since(x)"], policy)
+    assert out.get_column("days_since(x)").to_list() == [-1.0, 2.0]
+
+
+def test_check_no_nulls_remain_passes_when_clean():
+    from triage.adapters.matrix import _check_no_nulls_remain
+
+    frame = pl.DataFrame({"count(x)": [1, 2], "MEAN(x)": [1.0, 2.0]})
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})
+    _check_no_nulls_remain(frame, ["count(x)", "MEAN(x)"], policy)  # no raise
+
+
+def test_check_no_nulls_remain_raises_naming_offender_and_rule():
+    from triage.adapters.matrix import _check_no_nulls_remain
+
+    frame = pl.DataFrame(
+        {"MEAN(x)": [1.0, None]}
+    )  # fit-based stat un-computable → NULL left
+    policy = ImputationPolicy.model_validate(
+        {"all": {"type": "zero"}, "mean": {"type": "mean"}}
+    )
+    with pytest.raises(ValueError, match=r"MEAN\(x\).*mean"):
+        _check_no_nulls_remain(frame, ["MEAN(x)"], policy)
+
+
+def test_fit_free_zero_fills_measures_so_nan_intolerant_model_trains(
+    db_pool_greenfield, tmp_path
+):
+    """End-to-end regression: with a fit-free `all: zero` policy and NO fit-based mean rule,
+    featurizer leaves MEAN(amount) NULL for the order-less entity. The adapter's fit-free pass
+    must zero-fill it, so (a) no NaN reaches the Parquet and (b) a GradientBoostingClassifier
+    — which REJECTS NaN, unlike the tree ensembles that masked the bug — trains end-to-end.
+    Mirrors the recency/tenure-NaN crash deepgrid surfaced on real data.
+    """
+    import math
+
+    from sklearn.ensemble import GradientBoostingClassifier
+
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})  # all fit-free
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF])
+
+    train = build_matrix(
+        engine,
+        run_id,
+        featurizer_config=_featurizer_config(),
+        cohort_artifact_id=cohort,
+        labels_artifact_id=labels,
+        temporal_config=_temporal_config(),
+        imputation_policy=policy,
+        matrix_kind="train",
+        as_of_dates=[TRAIN_AS_OF],
+        label_timespan=LABEL_TIMESPAN,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "matrices"),
+        source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
+    )
+
+    # entity 2 has no orders → MEAN(amount) would be NULL without the fit-free fill.
+    mean_feat = _mean_amount_feature(train.feature_names)
+    assert _read_parquet_value(train.storage_uri, mean_feat, 2) == pytest.approx(0.0)
+
+    # No NULL and no NaN in ANY feature column (what the old code silently violated).
+    frame = pl.read_parquet(train.storage_uri)
+    for feature in train.feature_names:
+        col = frame.get_column(feature)
+        assert col.null_count() == 0, f"{feature} still has NULLs"
+        if frame.schema[feature] in (pl.Float32, pl.Float64):
+            assert not any(
+                v is not None and math.isnan(v) for v in col.to_list()
+            ), f"{feature} has NaN"
+
+    # GradientBoosting rejects NaN, so a successful fit proves the matrix is clean. Select the
+    # numeric features (the model-ready columns) — the fixture's target temporal_ix leaks as a
+    # Date column, an orthogonal issue; the imputation fix is what this asserts.
+    numeric = (pl.Float32, pl.Float64, pl.Int8, pl.Int16, pl.Int32, pl.Int64)
+    numeric_feats = [f for f in train.feature_names if frame.schema[f] in numeric]
+    labeled = frame.filter(pl.col("outcome").is_not_null())
+    features = labeled.select(numeric_feats).to_numpy()
+    target = labeled.get_column("outcome").to_numpy()
+    GradientBoostingClassifier(n_estimators=3, max_depth=2, random_state=0).fit(
+        features, target
+    )
