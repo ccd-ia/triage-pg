@@ -18,25 +18,44 @@ trends, bias, predictions) for a completed run.
 - **Detail, top — live pipeline DAG** (the ④ panel): nodes `cohort → labels → matrices →
   models → evaluate`, each with a status dot (done / current / todo) and a count
   (`matrices 3/5`). This is the live-progress view.
-- **Detail, bottom — result cards** (the ③ panel, populated once a run completes):
-  leaderboard, precision/AUC-over-time, bias group-bys, top predictions. Each card is an
-  independent read of one view.
+- **Detail, top — artifact derivation graph** (the *Guix-style* DAG, ADR-0013–0017): a
+  visualization of the run's artifact closure — nodes = `triage.artifacts` used by the run,
+  edges = `triage.artifact_inputs(parent_id → artifact_id)` — colored by `status`
+  (built / building / collected). This is the "tracking" graph: it shows *what was derived
+  from what* (cohort/labels → feature_group → matrices → models), including cache hits, and
+  doubles as the reproducibility/provenance view. See §3.5.
+- **Detail, bottom — result cards** (the ③ panel, populated once a run completes): the full
+  card set in §2. Each card is an independent read of one view.
+- **Drill-down** (scope: single run, but navigable into its models): a result row drills
+  `run → model_group (triage.model_groups) → model (triage.models)`; a selected model opens
+  a **model-detail** view — its feature importances, top individual predictions, and
+  per-split evaluations. The unit of view stays one run/experiment (all its temporal splits
+  + grid); cross-*experiment* comparison is deferred.
 
 ## 2. Panel → view contract (ADR-0012 audit)
 
-| Panel | Source | Exists? |
-|-------|--------|---------|
-| Run list + status | `triage.runs` | ✓ table |
-| Pipeline DAG (per-node status) | `triage.artifacts` filtered by `built_by_run = :run_id`, grouped by `kind` + `status` | ✓ (query, see §3) |
-| Leaderboard | `triage.leaderboard` (matview) | ✓ |
-| Metric-over-time | `triage.evaluations` | ✓ table |
-| Bias / fairness | `triage.bias_metrics` | ✓ table |
-| Top predictions | `triage.prediction_ranks` / `latest_predictions` | ✓ view |
-| Source pins / drift (optional) | `triage.current_source_pins` | ✓ view |
+| Panel | Zone | Source | Exists? |
+|-------|------|--------|---------|
+| Run list + status | rail | `triage.runs` | ✓ table |
+| Pipeline DAG (per-node status) | ④ | `triage.artifacts` filtered by `built_by_run = :run_id`, grouped by `kind` + `status` | ✓ (query, §3) |
+| Artifact derivation graph (Guix DAG) | ④ | `triage.artifacts` (nodes) + `triage.artifact_inputs` (edges), scoped to the run closure | ✓ (query, §3.5) |
+| Leaderboard | ③ | `triage.leaderboard` (matview) | ✓ |
+| Metric-over-time | ③ | `triage.evaluations` | ✓ table |
+| Bias / fairness | ③ | `triage.bias_metrics` | ✓ table |
+| Top predictions | ③ | `triage.prediction_ranks` / `latest_predictions` | ✓ view |
+| Model selection / audition | ③ | audition modules (`distance_from_best`, `regrets`, `model_group_performance`) over `triage.evaluations` | ✓ (Python/SQL; may want a view) |
+| Source pins / drift | ③ | `triage.current_source_pins` | ✓ view |
+| **Model-group → model drill-down** | drill | `triage.model_groups` → `triage.models` | ✓ tables |
+| **Model detail: feature importances** | drill | `triage.feature_importances` (by `model_id`) | ✓ table |
+| **Model detail: individual predictions** | drill | `triage.prediction_ranks` / `triage.individual_importances` (by `model_id`) | ✓ |
+| **Model detail: per-split evaluations** | drill | `triage.evaluations` (by `model_id`) | ✓ table |
 
-**Gap:** none for results. The DAG panel needs only the two telemetry additions in §3 —
-no new *results* view. A `triage.run_progress` view (§3) is a thin convenience wrapper, not
-new business logic.
+**Gap:** none for results — every panel maps to an existing view/table (ADR-0012 holds).
+New read-only convenience views (`triage.run_progress` §3, optionally a
+`triage.audition` view to keep audition logic out of the UI) are thin wrappers, not new
+business logic. The audition curves (regret / distance-from-best) should resolve to a SQL
+view so the dashboard stays logic-free — if the audition math only exists in Python today,
+porting it to a view is a small core task this spec flags.
 
 ## 3. Live progress — `LISTEN/NOTIFY → SSE` push + REST poll for state
 
