@@ -1,6 +1,7 @@
-drop table if exists cleaned.violations cascade;
+-- Clean layer (DB-audit #2: `cleaned` -> `clean`); severity typed as the clean.severity_t enum (#3).
+drop table if exists clean.violations cascade;
 
-create table cleaned.violations as (
+create table clean.violations as (
   select
     inspection::integer,
     license_num::integer,
@@ -14,7 +15,7 @@ create table cleaned.violations as (
      when btrim(tuple[1])::int between 15 and 29  then 'serious'
      else 'minor'
      end
-    ) as severity from
+    )::clean.severity_t as severity from
                       (
                         select
                           inspection,

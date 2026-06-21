@@ -27,8 +27,8 @@ cohort_config:
   name: active_facilities
   query: |
     select e.entity_id
-    from semantic.entities as e
-    where daterange(start_time, end_time, '[]') @> {as_of_date}::date
+    from ontology.entities as e
+    where e.activity_period @> {as_of_date}::date
 
 label_config:
   name: failed_inspections
@@ -36,7 +36,7 @@ label_config:
     select
       entity_id,
       bool_or(result = 'fail')::integer as outcome
-    from semantic.events
+    from ontology.events
     where {as_of_date}::date <= date
       and date < {as_of_date}::date + {label_timespan}
     group by entity_id
@@ -54,7 +54,7 @@ feature_config:
   entities:
     - alias: facilities
       id: entity_id
-      table: semantic.entities
+      table: ontology.entities
       # start_time is when the facility became known; use it as the knowledge date.
       # NOTE: semantic.entities is not a time-series table (no temporal_ix needed for
       # the target entity itself; featurizer only requires temporal_ix on child event
@@ -67,7 +67,7 @@ feature_config:
 
     - alias: inspections
       id: ~
-      table: semantic.events
+      table: ontology.events
       # 'date' is when the inspection happened = when it became known (knowledge date).
       temporal_ix: date
       variables:
@@ -101,14 +101,14 @@ grid_config:
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).
 sources:
-  - name: semantic_entities
-    relation: semantic.entities
+  - name: ontology_entities
+    relation: ontology.entities
     knowledge_date_column: start_time
     version_label: 'dirtyduck-v1'
     description: Active food-service facilities (DirtyDuck tutorial)
 
-  - name: semantic_events
-    relation: semantic.events
+  - name: ontology_events
+    relation: ontology.events
     knowledge_date_column: date
     version_label: 'dirtyduck-v1'
     description: Food inspection events with result and violations (DirtyDuck tutorial)

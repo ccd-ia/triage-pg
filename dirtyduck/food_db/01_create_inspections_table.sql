@@ -5,7 +5,7 @@ create table if not exists raw.inspections (
        inspection text not null,
        DBA_Name text,
        AKA_Name text,
-       license_Num decimal,
+       license_Num text,        -- raw = as-ingested string; an identifier, not a quantity (DB-audit #7). cleaned casts to integer.
        facility_type text,
        risk text,
        address text,
