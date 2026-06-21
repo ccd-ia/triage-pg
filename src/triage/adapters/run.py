@@ -266,6 +266,24 @@ def _create_experiment_and_run(
     return exp_hash, str(run_id)
 
 
+def _refresh_leaderboard(db_engine: ConnectionPool) -> None:
+    """Refresh the ``triage.leaderboard`` materialized view so reads see this run (ADR-0007).
+
+    The matview is never auto-populated otherwise (querying it errors "has not been populated"),
+    so we refresh it once a run lands its evaluations. Best-effort: a refresh failure must not
+    undo an already-completed run, but it is logged with context — never silently swallowed
+    (CLAUDE.md error policy). Plain (non-CONCURRENT) refresh: the matview has no unique index.
+    """
+    try:
+        with db_engine.connection() as conn:
+            conn.execute("refresh materialized view triage.leaderboard")
+        logger.info("Refreshed triage.leaderboard")
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - leaderboard is a read convenience, never fatal
+        logger.warning(f"Could not refresh triage.leaderboard (non-fatal): {exc}")
+
+
 def _mark_run(
     db_engine: ConnectionPool, run_id: str, status: str, error: str | None = None
 ) -> None:
@@ -586,6 +604,7 @@ def run_experiment(
         logger.error(f"Run {run_id[:8]}… failed: {exc}")
         raise
 
+    _refresh_leaderboard(db_engine)
     logger.info(
         f"Run {run_id[:8]}… completed: {len(all_model_ids)} model(s),"
         + f" {total_predictions} prediction(s), {total_evaluations} evaluation(s)"

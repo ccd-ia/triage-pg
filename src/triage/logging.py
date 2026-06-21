@@ -117,6 +117,24 @@ class InterceptHandler(logging.Handler):
         ).log(level, record.getMessage())
 
 
+def _formatter(record: dict[str, Any]) -> str:
+    """Format string with a default ``module`` so third-party loguru records don't KeyError.
+
+    Our format references ``{extra[module]}``, which our own loggers bind. featurizer (and any
+    other library that shares loguru's singleton) emits records *without* that field → a
+    ``KeyError: 'module'`` in the handler on every line. Defaulting it here keeps their messages
+    legible and silences the noise (DirtyDuck e2e finding 2026-06-21). A format function must
+    return the template and include the trailing newline itself.
+    """
+    record["extra"].setdefault("module", "-")
+    return (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level:<7}</level> | "
+        "<cyan>{extra[module]}</cyan> | "
+        "<level>{message}</level>\n"
+    )
+
+
 def configure_logging(default_level: str = "INFO") -> None:
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
     _logger.remove()
@@ -125,12 +143,7 @@ def configure_logging(default_level: str = "INFO") -> None:
         level=default_level,
         backtrace=False,
         diagnose=False,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level:<7}</level> | "
-            "<cyan>{extra[module]}</cyan> | "
-            "<level>{message}</level>"
-        ),
+        format=_formatter,
     )
 
     ic.configureOutput(

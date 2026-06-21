@@ -123,7 +123,9 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
     logger.debug(f".env file exists: {env_path.exists()}")
 
     if env_path.exists():
-        dotenv_loaded = load_dotenv(dotenv_path=env_path, override=True)
+        # override=False: an explicit inline PG*/DATABASE_URL on the command must win over
+        # .env (override=True silently clobbered it — DirtyDuck e2e finding 2026-06-21).
+        dotenv_loaded = load_dotenv(dotenv_path=env_path, override=False)
         logger.debug(f"dotenv loaded from {env_path}: {dotenv_loaded}")
     else:
         logger.debug("No .env file found, skipping")
