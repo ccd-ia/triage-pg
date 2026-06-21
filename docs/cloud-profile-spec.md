@@ -9,9 +9,26 @@ analogous to `docs/adapter-spec.md` for the featurizer seam.
 
 | # | Adapter | Local | Cloud | Status |
 |---|---------|-------|-------|--------|
-| 1 | auth | static password URL | RDS IAM, per-connect token | **specified (this doc)** |
-| 2 | storage | local FS (`Path`) | S3 via fsspec/pyarrow | **specified (this doc)** |
-| 3 | execution | in-process `run_experiment` | one AWS Batch job/experiment | **specified (this doc)** |
+| 1 | auth | static password URL | RDS IAM, per-connect token | **implemented** (`triage/profiles/auth.py`) |
+| 2 | storage | local FS (`Path`) | S3 via s3fs/pyarrow | **implemented** (`triage/profiles/storage.py`) |
+| 3 | execution | in-process `run_experiment` | one AWS Batch job/experiment | **implemented** (`triage/profiles/execution.py`) |
+
+> **Implementation note (2026-06-21).** Built per this spec. The `Profile` value object +
+> `load_profile` live in `triage/profiles/__init__.py`; the three `Protocol`s in
+> `triage/profiles/protocols.py`. Two deviations from the spec letter, both deliberate:
+> (a) **Parquet/joblib IO over S3 routes through `s3fs` (file-handle) rather than
+> `pyarrow.fs.S3FileSystem`** — pyarrow's native C++ S3 SDK is *not* intercepted by `moto`
+> (it bypasses botocore), so the spec's mocked-AWS testing contract (§6) is only satisfiable
+> via the botocore-backed `s3fs` path; this also keeps one IO code path for both schemes.
+> `StorageAdapter.filesystem()` still returns the pyarrow fs for callers that want native access.
+> (b) **The score/forward read paths keep their existing signatures** (no `storage` param added):
+> `_design_X` / `_load_estimator` derive the adapter from the artifact URI scheme via
+> `storage_for_root`, matching how GC dispatches by `output_ref`. The one core signature change is
+> exactly as specified — `run_experiment`'s `storage_dir: str` → `storage` + `storage_root`,
+> threaded through `_build_split` → `build_matrix` / `build_model`. Tests:
+> `src/tests/test_profiles.py` (12, mocked-AWS); `moto` was bumped 3.1.7 → 5.x for `mock_aws`.
+> Old `catwalk/storage.py` was **not** retired — `cli.py`'s `Store.factory` (config/YAML loading)
+> and several `catwalk_tests` still import it; retiring it is out of scope for this seam.
 
 **Scope (decided 2026-06-20):** spec **and** build both profiles now, with a testing
 contract of mocked AWS (`moto`/`localstack`) + a stubbed token provider — no live-AWS

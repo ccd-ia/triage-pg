@@ -8,7 +8,7 @@ import boto3
 import pandas as pd
 import pytest
 import yaml
-from moto import mock_s3
+from moto import mock_aws
 from numpy.testing import assert_almost_equal
 from pandas.testing import assert_frame_equal
 
@@ -31,7 +31,7 @@ class SomeClass:
 @pytest.mark.skip(
     reason="moto 3.x + botocore returns aws-chunked encoding with checksums instead of raw bytes"
 )
-@mock_s3
+@mock_aws
 def test_S3Store():
     client = boto3.client("s3")
     client.create_bucket(
@@ -52,7 +52,7 @@ def test_S3Store():
 @pytest.mark.skip(
     reason="moto 3.x + botocore chunked encoding issue; test hangs or fails"
 )
-@mock_s3
+@mock_aws
 def test_S3Store_large():
     client = boto3.client("s3")
     client.create_bucket(
@@ -307,7 +307,7 @@ def test_as_of_dates(project_storage):
 @pytest.mark.skip(
     reason="moto 3.x + polars/s3fs compatibility issue with chunked encoding"
 )
-@mock_s3
+@mock_aws
 def test_s3_save():
     client = boto3.client("s3")
     client.create_bucket(

@@ -27,6 +27,7 @@ from triage.adapters.labels import build_labels
 from triage.adapters.matrix import build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.temporal import TemporalConfig
+from triage.profiles.storage import LocalStorage
 from triage.derivation import as_uuid
 
 TRAIN_AS_OF = date(2014, 1, 1)
@@ -226,7 +227,7 @@ def _build_matrices(engine, run_id, cohort, labels, storage):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         lookback="6 months",
         source_pins=_PINS,
     )
@@ -241,7 +242,7 @@ def _build_matrices(engine, run_id, cohort, labels, storage):
         matrix_kind="test",
         as_of_dates=[TEST_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         train_matrix_artifact_id=train.matrix_artifact_id,
         source_pins=_PINS,
     )
@@ -267,7 +268,7 @@ def test_model_build_predict_evaluate_full_lifecycle(db_pool_greenfield, tmp_pat
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
         random_seed=42,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         train_end_time=TRAIN_AS_OF,
         training_label_timespan=LABEL_TIMESPAN,
         source_pins=_PINS,
@@ -398,7 +399,7 @@ def test_predictions_are_append_only(db_pool_greenfield, tmp_path):
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
         random_seed=7,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins=_PINS,
     )
 
@@ -450,7 +451,7 @@ def test_model_group_reused_across_models(db_pool_greenfield, tmp_path):
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
         random_seed=1,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins=_PINS,
     )
     m2 = build_model(
@@ -460,7 +461,7 @@ def test_model_group_reused_across_models(db_pool_greenfield, tmp_path):
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
         random_seed=2,  # different seed -> different model, same group
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins=_PINS,
     )
     assert m1.model_id != m2.model_id
@@ -493,7 +494,7 @@ def test_build_model_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins=_PINS,
     )
     kwargs = dict(
@@ -501,7 +502,7 @@ def test_build_model_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
         random_seed=99,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins=_PINS,
     )
     first = build_model(engine, run_id, **kwargs)

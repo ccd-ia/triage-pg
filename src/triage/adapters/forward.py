@@ -44,6 +44,7 @@ from triage.adapters.temporal import TemporalConfig
 from triage.component.catwalk.prediction_ranking import record_predictions
 from triage.derivation import as_uuid
 from triage.logging import get_logger
+from triage.profiles.storage import storage_for_root
 
 logger = get_logger(__name__)
 
@@ -213,7 +214,8 @@ def predict_forward(
             matrix_kind="production",
             as_of_dates=[as_of_date],
             label_timespan=label_timespan,
-            storage_dir=storage_dir,
+            storage=storage_for_root(storage_dir),
+            storage_root=storage_dir,
             train_matrix_artifact_id=lineage.train_matrix_artifact_id,
             source_pins=pins,
             policy=cache_policy,
