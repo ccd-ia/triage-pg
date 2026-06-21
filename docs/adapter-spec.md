@@ -368,3 +368,70 @@ the `aggregates_imputation` shape): `.resolve(metric)` (explicit rule, else `all
 - ~~**ADR-0009 amendment** (§3.1) — record that fit-free fills run in adapter SQL on the
   SQL→Parquet path.~~ **Done (2026-06-20):** recorded as the "Refinement" section in
   `docs/adr/0009-imputation-split-fit-free-vs-fit-based.md`.
+
+---
+
+## 4. Categorical handling (ADR-0009 extension)
+
+### 4.1 The split, by vocabulary source
+
+Encoding a categorical needs a **vocabulary** (category → code, or category → one-hot
+columns). *Where the vocabulary comes from* decides where the encoding lives — exactly the
+ADR-0008/0009 boundary:
+
+- **Declared / fixed vocabulary** (listed in config, or read from a PostgreSQL `ENUM` on the
+  column) → nothing is learned → **fit-free** → safe in **featurizer** (it stays split-blind).
+- **Learned vocabulary** (derived from the data) → a **fit-based transform** → must be fit on
+  the **train split only**, in the **triage-pg adapter** — because featurizer is split-blind
+  (ADR-0008) and would otherwise embed the test-period vocabulary (leakage).
+
+Two categorical cases, only one of which is a problem:
+
+| Case | Example | Handling |
+|------|---------|----------|
+| Child-event categorical | `result`/`risk`/`type` on `inspections` | featurizer **aggregates** to numeric (count/nunique/per-value) — already works |
+| Direct target-entity categorical | `facility_type`, `zip_code` on `facilities` | passes through as a raw string → **must be encoded** (this section) |
+
+### 4.2 Adapter train-fit encoding (the automatic, leakage-safe path)
+
+Mirrors the fit-based-imputation machinery (§3.4–3.7) verbatim:
+
+- `_fit_cat_encoding(train_frame, feature)` — categories present in the **train** rows only,
+  `drop_nulls().unique().sort()` → a deterministic `{category: code}` map with **code `0`
+  reserved for "unknown"** (unseen-at-test, and NULL).
+- `_apply_cat_encoding(frame, encodings)` — **ordinal** (`replace_strict(map, default=0)`,
+  schema-stable) by default; **one-hot** (explode to `<feature>=<cat>` 0/1 columns) when the
+  rule asks. Applied identically to train and test.
+- Persisted under `triage.matrices.metadata` key **`cat_encodings`** (alongside
+  `fit_based_stats`); the **test matrix reads the train matrix's map** via the existing
+  train→test parent edge and **never refits** — the leakage boundary is the same DAG edge.
+- Enters the matrix node's derivation hash via the policy's `canonical()` (re-encode →
+  rebuild, like imputation).
+- **Max-cardinality guard**: refuse/skip one-hot above N distinct (log loudly) so a
+  high-cardinality column or a mislabeled identifier can't explode the matrix width.
+
+### 4.3 featurizer fixed-vocabulary encoding + roles (the declarative path)
+
+featurizer (split-blind, ADR-0008) does **only fit-free** categorical work:
+
+- A per-direct-variable **`role`**: `identifier` (excluded from features, logged — the
+  *explicit* alternative to silently omitting, which matters because featurizer is automatic
+  and exhaustive), `categorical` (encoded), `numeric` (passthrough).
+- **Fixed-vocabulary one-hot**: vocabulary either declared in config or **read from the
+  column's PostgreSQL `ENUM`** labels (deterministic, sorted) — fit-free, no leakage.
+- featurizer **never** learns a vocabulary from data (that's the adapter's train-fit job).
+
+### 4.4 Domain typing (DB side)
+
+Stable low-cardinality categoricals are **PostgreSQL `ENUM`** (enforces canonical form +
+gives featurizer a free fixed vocabulary). **Per-column escape hatch**: a domain that churns
+(frequent new values) uses a **lookup/dimension table** (FK) instead — `ENUM` can't drop
+values and `ALTER TYPE ... ADD VALUE` is non-transactional. `citext` is unnecessary once the
+enum enforces casing. Decision: **ENUM default, lookup-table the documented per-column
+fallback.**
+
+### 4.5 Open items
+- One-hot column naming convention must round-trip through `_feature_columns` (keys +
+  `__missing` stripped) — `<feature>=<cat>` columns are just more feature columns.
+- Text features from `violations.description`/`comment` (trigram/NLP) — future; keeps
+  `pg_trgm`/`fuzzystrmatch` in play (do not drop yet).
