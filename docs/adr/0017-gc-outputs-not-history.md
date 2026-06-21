@@ -40,5 +40,18 @@ child's provenance), while domain rows (`matrices`, `models`, `cohorts`,
 - Builders must call `record_use()` for cache hits, not only builds — usage,
   not authorship, is what keeps artifacts alive.
 - A dead parent with a surviving child is retained by purge until the child
-  goes (bottom-up deletion); file-output deletion is returned to the caller
-  until the storage adapter lands.
+  goes (bottom-up deletion).
+
+## Status update (2026-06-20)
+
+The storage-adapter seam this ADR deferred has landed. `collect()`
+(`triage/artifacts.py`) deletes in-PG cohort/label slices, marks rows
+`'collected'`, and returns file-backed outputs as `{artifact_id, kind,
+output_ref}`; `delete_outputs()` / `_delete_output_file()` then remove the
+files — local FS via `Path.unlink`, `s3://` via `s3fs` — fail-fast on real I/O
+errors and tolerant of already-absent files. Both are wired into `triage gc
+--delete` (`cli.py`) and covered by `src/tests/test_gc.py`. A feature_group
+consumed inline as Arrow carries the sentinel `output_ref="featurizer:feature_group"`
+(no file, no slice) and is collected without an external-deletion attempt; a
+future `to_tables` materialization would carry a real table ref needing a
+`DROP TABLE` handler.

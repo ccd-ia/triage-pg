@@ -70,6 +70,7 @@ from psycopg_pool import ConnectionPool
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import (
+    FEATURE_GROUP_OUTPUT_REF,
     begin_artifact,
     cache_hit,
     get_artifact,

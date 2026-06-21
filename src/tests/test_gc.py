@@ -4,6 +4,7 @@ import pytest
 from psycopg import IntegrityError
 
 from triage.artifacts import (
+    FEATURE_GROUP_OUTPUT_REF,
     archive_experiment,
     begin_artifact,
     cache_hit,
@@ -190,6 +191,23 @@ def test_collect_returns_file_backed_outputs_for_the_storage_layer(triage_db):
             "output_ref": "file:///tmp/m.parquet",
         }
     ]
+
+
+def test_collect_skips_virtual_feature_group_outputs(triage_db):
+    # A feature_group consumed inline as Arrow (matrix.py) has no in-PG slice and
+    # no file — its columns land in the matrix Parquet. Its sentinel output_ref must
+    # not be routed for storage-layer deletion (no spurious "already absent" log);
+    # it is only flipped to 'collected'.
+    fg = derive("feature_group", {"f": 1}, source_pins=PINS)
+    begin_artifact(triage_db, fg, "feature_group", {"f": 1}, source_pins=PINS)
+    mark_built(triage_db, fg.id, output_ref=FEATURE_GROUP_OUTPUT_REF)
+
+    external = collect(triage_db, [fg.id])
+    assert external == []  # virtual: nothing for the storage layer to delete
+
+    artifact = get_artifact(triage_db, fg.id)
+    assert artifact is not None  # provenance survives collection
+    assert artifact["status"] == "collected"
 
 
 def test_delete_outputs_removes_files_through_the_storage_layer(triage_db, tmp_path):

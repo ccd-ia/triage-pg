@@ -1,7 +1,7 @@
 # triage-pg — Artifact Derivation DAG (Design)
 
-- Status: **Design complete** — source-data pinning (§3), node granularity (§4), engine versions (§5), and GC/retention (§6) all resolved; only builder wiring (§7) remains, and it belongs to the adapter pass
-- Date: 2026-06-11 (GC resolved 2026-06-12)
+- Status: **Implemented** — source-data pinning (§3), node granularity (§4), engine versions (§5), and GC/retention (§6) all resolved; builder wiring (§7) landed with the adapter pass (greenfield `adapters/{cohort,labels,matrix,model}.py`) and file-output deletion through `artifacts.delete_outputs()`
+- Date: 2026-06-11 (GC resolved 2026-06-12; builder wiring + storage-layer deletion landed 2026-06-20)
 - Implements: ADR-0013 (derivation-hash identity), ADR-0014 (source-data pinning), ADR-0015 (node granularity), ADR-0016 (engine versions), ADR-0017 (GC roots & retention)
 - Related: ADR-0006 (append-only predictions), schema-design.md §4.7–4.8 (sources + artifacts DDL)
 
@@ -323,10 +323,20 @@ artifacts is the wrong default, and file deletion is not pg_cron-able anyway.
 - *Scheduled auto-GC* — silent deletion of rebuildable-but-expensive
   artifacts; storage-layer deletion can't run in-database anyway.
 
-## 7. OPEN — Builder wiring (adapter pass)
+## 7. Builder wiring (landed with the adapter pass)
 
-Which code paths compute and record derivations — `derive()` →
+The code paths that compute and record derivations — `derive()` →
 `cache_hit()` → `begin_artifact()`/`mark_built()` + `record_use()` per build —
-lands with the adapter implementation (the CONTEXT.md Adapter responsibility
-"derivations (cache keys)"), together with file-output deletion through the
-storage adapter.
+landed with the greenfield adapter implementation (the CONTEXT.md Adapter
+responsibility "derivations (cache keys)"): `adapters/cohort.py`,
+`adapters/labels.py`, `adapters/matrix.py` (which derives both the
+`feature_group` and `matrix` nodes), and `adapters/model.py`. Cross-run cache
+reuse is asserted end-to-end by the `run_experiment` test.
+
+File-output deletion through the storage adapter also landed: `collect()`
+(`triage/artifacts.py`) returns file-backed outputs, and `delete_outputs()` /
+`_delete_output_file()` remove them — local FS via `Path.unlink`, `s3://` via
+`s3fs` — wired into `triage gc --delete` and covered by `src/tests/test_gc.py`
+(see ADR-0017's 2026-06-20 status update). A feature_group consumed inline as
+Arrow carries the sentinel `output_ref="featurizer:feature_group"` and is
+collected without an external-deletion attempt.

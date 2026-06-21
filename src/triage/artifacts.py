@@ -31,6 +31,13 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
+# A feature_group consumed inline as Arrow (the current featurizer→matrix seam,
+# ADR-0008) has no materialized output of its own — its columns land in the
+# matrix Parquet. We still record the artifact for provenance/identity, marking
+# it built with this sentinel ``output_ref`` so GC knows there is nothing to
+# delete (no in-PG slice, no file). The writer lives in ``adapters/matrix.py``.
+FEATURE_GROUP_OUTPUT_REF = "featurizer:feature_group"
+
 
 def get_artifact(pool: ConnectionPool, artifact_id: str) -> dict[str, Any] | None:
     with pool.connection() as conn:
@@ -280,6 +287,12 @@ def collect(pool: ConnectionPool, artifact_ids: Sequence[str]) -> list[dict[str,
     ``{artifact_id, kind, output_ref}`` for the caller to delete through the
     storage layer — their rows are still marked 'collected' first, which is
     safe: a leftover file is overwritten on rebuild, never served stale.
+
+    A feature_group consumed inline as Arrow (``FEATURE_GROUP_OUTPUT_REF``) has
+    neither an in-PG slice nor a file — its columns live in the matrix Parquet —
+    so it is just marked 'collected', never routed for external deletion. A
+    future ``to_tables`` materialization would carry a real table ref (not the
+    sentinel) and would instead need a ``DROP TABLE`` handler here.
     """
     needs_external_deletion: list[dict[str, Any]] = []
     with pool.connection() as conn:
@@ -308,6 +321,8 @@ def collect(pool: ConnectionPool, artifact_ids: Sequence[str]) -> list[dict[str,
                     "delete from triage.labels where label_hash = %(id)s",
                     {"id": artifact_id},
                 )
+            elif row["output_ref"] == FEATURE_GROUP_OUTPUT_REF:
+                pass  # virtual: consumed inline as Arrow, nothing to delete
             else:
                 needs_external_deletion.append(
                     {
