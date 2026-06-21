@@ -22,7 +22,6 @@ from rich.table import Table
 
 from triage.adapters.forward import predict_forward
 from triage.adapters.retrain import retrain_and_predict
-from triage.adapters.run import run_experiment
 from triage.artifacts import (
     archive_experiment,
     collect,
@@ -41,6 +40,7 @@ from triage.component.results_schema import (
 )
 from triage.component.timechop import Timechop
 from triage.logging import configure_logging, get_logger
+from triage.profiles import load_profile
 from triage.sources import (
     bump_source,
     check_drift,
@@ -311,12 +311,14 @@ def run_command(
     config: str = typer.Argument(
         ...,
         help="Greenfield experiment config YAML (problem_type, temporal_config,"
-        " cohort_config, label_config, feature_config, grid_config, sources).",
+        " cohort_config, label_config, feature_config, grid_config, sources)."
+        " Under --profile cloud this may be an s3:// URI the container reads.",
     ),
     project_path: pathlib.Path = typer.Option(
         pathlib.Path.cwd(),
         "--project-path",
-        help="Directory or URI to store Parquet matrices + joblib models.",
+        help="Local directory to store Parquet matrices + joblib models (local profile)."
+        " Cloud derives s3://$TRIAGE_S3_BUCKET from the environment.",
     ),
     random_seed: int = typer.Option(
         0,
@@ -324,7 +326,7 @@ def run_command(
         help="Deterministic seed stored on the run + passed to models.",
     ),
     profile: str = typer.Option(
-        "local", "--profile", help="Run profile: 'local' or 'cloud'."
+        "local", "--profile", help="Run profile: 'local' or 'cloud' (ADR-0003)."
     ),
     cache_policy: str = typer.Option(
         "exact", "--cache-policy", help="Artifact cache policy: 'exact' or 'logical'."
@@ -332,19 +334,41 @@ def run_command(
 ) -> None:
     """Run a greenfield experiment end-to-end (cohort→labels→matrix→model→eval, ADR-0012).
 
-    The single CLI entry point onto ``triage.adapters.run.run_experiment`` — the headless
-    core that drives the whole artifact-DAG pipeline from one config.
+    Builds the :class:`~triage.profiles.Profile` from ``--profile`` + the environment, opens the
+    pool via ``profile.auth``, and wraps the headless core via ``profile.execution`` — in-process
+    locally, or one AWS Batch job submitted (returning the ``job_id`` immediately) in cloud.
     """
-    engine = get_pool(ctx)
-    config_data = load_experiment_config(config)
-    result = run_experiment(
-        engine,
-        config_data,
-        storage_dir=str(project_path),
-        random_seed=random_seed,
-        profile=profile,
-        cache_policy=cache_policy,
+    state = get_state(ctx)
+    profile_obj = load_profile(
+        profile,
+        dburl=state.db_url,
+        storage_root=str(project_path) if profile == "local" else None,
     )
+    config_data = load_experiment_config(config)
+
+    pool = profile_obj.auth.open_pool()
+    try:
+        handle = profile_obj.execution.run(
+            pool,
+            config_data,
+            storage=profile_obj.storage,
+            storage_root=profile_obj.storage_root,
+            random_seed=random_seed,
+            profile=profile,
+            cache_policy=cache_policy,
+        )
+    finally:
+        pool.close()
+
+    if handle.batch_job_id is not None:
+        console.print(
+            f"[green]Submitted AWS Batch job[/green] [cyan]{handle.batch_job_id}[/cyan]"
+            f" (config staged to {handle.config_uri}). The run completes asynchronously"
+            " inside the job; poll Batch for its status."
+        )
+        return
+
+    result = handle.run_result
     console.print(
         f"[green]Run {str(result.run_id)[:8]}… completed:[/green]"
         f" {result.num_models} model(s), {result.num_predictions} prediction(s),"
@@ -352,7 +376,7 @@ def run_command(
     )
     console.print(
         f"[cyan]Experiment:[/cyan] {result.experiment_hash[:12]}…"
-        f"  [cyan]storage:[/cyan] {project_path}"
+        f"  [cyan]storage:[/cyan] {profile_obj.storage_root}"
     )
 
 
@@ -752,7 +776,8 @@ def gc_command(
             f"[green]Collected {len(candidates)} artifact(s); in-PG slices deleted.[/green]"
         )
         if external:
-            result = delete_outputs(external)
+            # storage=None → delete_outputs dispatches per-ref by scheme (local FS / s3://).
+            result = delete_outputs(None, external)
             console.print(
                 f"[green]Deleted {len(result['deleted'])} file-backed output(s)"
                 f" via the storage layer.[/green]"

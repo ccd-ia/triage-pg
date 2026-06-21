@@ -227,7 +227,7 @@ def test_delete_outputs_removes_files_through_the_storage_layer(triage_db, tmp_p
     mark_built(triage_db, model.id, output_ref=str(model_file))
 
     external = collect(triage_db, [matrix.id, model.id])
-    result = delete_outputs(external)
+    result = delete_outputs(None, external)
 
     assert not matrix_file.exists()
     assert not model_file.exists()
@@ -242,7 +242,7 @@ def test_delete_outputs_tolerates_already_absent_files(triage_db, tmp_path):
     )
     mark_built(triage_db, matrix.id, output_ref=str(gone))
 
-    result = delete_outputs(collect(triage_db, [matrix.id]))
+    result = delete_outputs(None, collect(triage_db, [matrix.id]))
 
     assert result["deleted"] == []
     assert result["absent"] == [str(gone)]

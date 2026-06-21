@@ -60,6 +60,7 @@ from triage.adapters.temporal import TemporalConfig
 from triage.component.timechop import Timechop
 from triage.derivation import canonical_json
 from triage.logging import get_logger
+from triage.profiles.protocols import StorageAdapter
 from triage.sources import (
     bump_source,
     record_run_pins,
@@ -288,7 +289,8 @@ def _build_split(
     labels_artifact_id: str,
     temporal_config: TemporalConfig,
     imputation_policy: ImputationPolicy,
-    storage_dir: str,
+    storage: StorageAdapter,
+    storage_root: str,
     source_pins: Mapping[str, str | None],
 ) -> tuple[MatrixResult, MatrixResult, list[date], list[date], str, str]:
     """Build a split's train + test matrices; return both + their dates + label timespans.
@@ -327,7 +329,8 @@ def _build_split(
         matrix_kind="train",
         as_of_dates=train_dates,
         label_timespan=train_timespan,
-        storage_dir=storage_dir,
+        storage=storage,
+        storage_root=storage_root,
         lookback=lookback,
         source_pins=source_pins,
     )
@@ -342,7 +345,8 @@ def _build_split(
         matrix_kind="test",
         as_of_dates=test_dates,
         label_timespan=test_timespan,
-        storage_dir=storage_dir,
+        storage=storage,
+        storage_root=storage_root,
         train_matrix_artifact_id=train_matrix.matrix_artifact_id,
         source_pins=source_pins,
     )
@@ -392,7 +396,8 @@ def run_experiment(
     db_engine: ConnectionPool,
     experiment_config: Mapping[str, Any],
     *,
-    storage_dir: str,
+    storage: StorageAdapter,
+    storage_root: str,
     source_pins: Mapping[str, str | None] | None = None,
     profile: str = "local",
     random_seed: int = 0,
@@ -421,7 +426,10 @@ def run_experiment(
               ``[{name, relation, knowledge_date_column?, version_label?, description?}]``.
             * ``imputation_config`` (optional) — :class:`ImputationPolicy` mapping; defaults
               to ``{"all": {"type": "zero"}}`` (fit-free).
-        storage_dir: directory the Parquet matrices + joblib models are written under.
+        storage: the :class:`~triage.profiles.protocols.StorageAdapter` the Parquet matrices +
+            joblib models are written/read through (local FS or S3, by ``storage_root`` scheme).
+        storage_root: the artifact root URI (``./matrices`` locally, ``s3://…/<scope>`` cloud);
+            matrices/models land at ``<storage_root>/<uuid>.parquet|.joblib``.
         source_pins: pre-frozen pins to use verbatim (skips register/bump). When ``None``
             (the default) the declared ``sources`` are registered + bumped + resolved here.
         profile: ``'local'`` | ``'cloud'`` (``triage.runs.profile``).
@@ -515,7 +523,8 @@ def run_experiment(
                 labels_artifact_id=labels_artifact_id,
                 temporal_config=temporal_config,
                 imputation_policy=imputation_policy,
-                storage_dir=storage_dir,
+                storage=storage,
+                storage_root=storage_root,
                 source_pins=frozen_pins,
             )
 
@@ -534,7 +543,8 @@ def run_experiment(
                     class_path=class_path,
                     hyperparameters=hyperparameters,
                     random_seed=random_seed,
-                    storage_dir=storage_dir,
+                    storage=storage,
+                    storage_root=storage_root,
                     train_end_time=train_end_time,
                     training_label_timespan=train_timespan,
                     source_pins=frozen_pins,

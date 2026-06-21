@@ -43,6 +43,7 @@ from triage.adapters.matrix import build_matrix
 from triage.adapters.model import build_model
 from triage.adapters.temporal import TemporalConfig
 from triage.logging import get_logger
+from triage.profiles.storage import storage_for_root
 from triage.util.conf import convert_str_to_relativedelta
 
 logger = get_logger(__name__)
@@ -149,7 +150,8 @@ def retrain(
             matrix_kind="train",
             as_of_dates=[train_as_of],
             label_timespan=label_timespan,
-            storage_dir=storage_dir,
+            storage=storage_for_root(storage_dir),
+            storage_root=storage_dir,
             source_pins=pins,
             policy=cache_policy,
         )
@@ -160,7 +162,8 @@ def retrain(
             class_path=lineage.class_path,
             hyperparameters=lineage.hyperparameters,
             random_seed=seed,
-            storage_dir=storage_dir,
+            storage=storage_for_root(storage_dir),
+            storage_root=storage_dir,
             train_end_time=train_as_of,
             training_label_timespan=label_timespan,
             source_pins=pins,

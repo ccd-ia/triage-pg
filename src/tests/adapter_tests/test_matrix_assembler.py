@@ -24,6 +24,7 @@ from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import build_matrix
 from triage.adapters.temporal import TemporalConfig
+from triage.profiles.storage import LocalStorage
 from triage.derivation import as_uuid
 
 # One train as_of_date, one test as_of_date — distinct so train-only fitting is observable.
@@ -240,7 +241,7 @@ def test_train_then_test_matrix_full_lifecycle(db_pool_greenfield, tmp_path):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         lookback="6 months",
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
@@ -303,7 +304,7 @@ def test_train_then_test_matrix_full_lifecycle(db_pool_greenfield, tmp_path):
         matrix_kind="test",
         as_of_dates=[TEST_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         train_matrix_artifact_id=train.matrix_artifact_id,
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
@@ -375,7 +376,7 @@ def test_matrix_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage_dir=storage,
+        storage=LocalStorage(), storage_root=storage,
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
     first = build_matrix(engine, run_id, **kwargs)
@@ -415,7 +416,7 @@ def test_test_matrix_requires_train_parent(db_pool_greenfield, tmp_path):
             matrix_kind="test",
             as_of_dates=[TEST_AS_OF],
             label_timespan=LABEL_TIMESPAN,
-            storage_dir=str(tmp_path / "matrices"),
+            storage=LocalStorage(), storage_root=str(tmp_path / "matrices"),
             train_matrix_artifact_id=None,  # the error
             source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
         )

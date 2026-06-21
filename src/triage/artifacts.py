@@ -20,9 +20,7 @@ artifact — provenance still matters — but :func:`cache_hit` never returns th
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from psycopg_pool import ConnectionPool
 
@@ -343,41 +341,22 @@ def collect(pool: ConnectionPool, artifact_ids: Sequence[str]) -> list[dict[str,
     return needs_external_deletion
 
 
-def _delete_output_file(output_ref: str) -> bool:
-    """Delete one file-backed artifact output, returning whether a file was removed.
-
-    Matches the greenfield write path: matrices/models are plain filesystem paths
-    (``adapters/matrix.py`` Parquet, ``adapters/model.py`` joblib), with ``s3://`` URIs
-    supported for future remote storage. A bare path or ``file://`` URI is a local file;
-    anything else dispatches by scheme. Returns ``False`` when the file is already absent
-    (collect already marked the row 'collected'; a leftover would only be overwritten on
-    rebuild). Real I/O errors propagate (fail fast, CLAUDE.md error policy).
-    """
-    parsed = urlparse(output_ref)
-    if parsed.scheme == "s3":
-        import s3fs
-
-        fs = s3fs.S3FileSystem()
-        if not fs.exists(output_ref):
-            return False
-        fs.rm(output_ref)
-        return True
-    # local filesystem: a bare path (scheme '') or a file:// URI
-    path = Path(parsed.path) if parsed.scheme == "file" else Path(output_ref)
-    if not path.exists():
-        return False
-    path.unlink()
-    return True
-
-
-def delete_outputs(external: Sequence[Mapping[str, Any]]) -> dict[str, list[str]]:
-    """Delete the file-backed outputs returned by :func:`collect` (ADR-0017).
+def delete_outputs(
+    storage, external: Sequence[Mapping[str, Any]]
+) -> dict[str, list[str]]:
+    """Delete the file-backed outputs returned by :func:`collect` through the storage seam (ADR-0017).
 
     ``external`` is collect's ``[{artifact_id, kind, output_ref}, ...]``. This is the
-    storage-layer deletion step that derivation-dag.md §7 deferred "until the storage
-    adapter lands". A missing file is logged and skipped, never an error; a row without an
-    ``output_ref`` is logged and skipped. Returns ``{'deleted': [...], 'absent': [...]}``.
+    storage-layer deletion step that derivation-dag.md §7 deferred "until the storage adapter
+    lands"; it now routes each ``output_ref`` through the storage adapter (local FS or S3 — see
+    :class:`triage.profiles.storage`). ``storage`` may be a concrete adapter (used for every ref)
+    or ``None``, in which case the adapter is resolved per-ref from the ``output_ref`` scheme —
+    GC outputs are heterogeneous (a project can hold both local and ``s3://`` refs), so per-ref
+    dispatch is the safe default. A missing file is logged and skipped, never an error; a row
+    without an ``output_ref`` is logged and skipped. Returns ``{'deleted': [...], 'absent': [...]}``.
     """
+    from triage.profiles.storage import storage_for_root
+
     deleted: list[str] = []
     absent: list[str] = []
     for item in external:
@@ -388,7 +367,8 @@ def delete_outputs(external: Sequence[Mapping[str, Any]]) -> dict[str, list[str]
                 + " no output_ref; nothing to delete"
             )
             continue
-        if _delete_output_file(ref):
+        adapter = storage if storage is not None else storage_for_root(ref)
+        if adapter.delete(ref):
             deleted.append(ref)
         else:
             absent.append(ref)

@@ -11,6 +11,7 @@ import os
 import pytest
 
 from triage.adapters.run import experiment_hash_for, run_experiment
+from triage.profiles.storage import LocalStorage
 
 PROBLEM_TYPE = "classification"
 LABEL_TIMESPAN = "6 months"
@@ -165,7 +166,7 @@ def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "store")
     config = _experiment_config()
 
-    result = run_experiment(engine, config, storage_dir=storage, random_seed=42)
+    result = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
 
     # ---- lineage: experiment + run rows, run completed
     assert result.experiment_hash == experiment_hash_for(config)
@@ -313,7 +314,7 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "store")
     config = _experiment_config()
 
-    first = run_experiment(engine, config, storage_dir=storage, random_seed=42)
+    first = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
 
     def counts():
         with engine.connection() as conn:
@@ -334,7 +335,7 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
 
     after_first = counts()
 
-    second = run_experiment(engine, config, storage_dir=storage, random_seed=42)
+    second = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
     after_second = counts()
 
     # same experiment hash (same config) — a re-run reuses the experiment row

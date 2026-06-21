@@ -14,6 +14,7 @@ from tests.adapter_tests.test_run_orchestration import (
 )
 from triage.adapters.forward import predict_forward
 from triage.adapters.run import run_experiment
+from triage.profiles.storage import LocalStorage
 
 # A date later than every training/label window — its label window has no realized outcomes,
 # so this exercises forward scoring on an UNLABELED production matrix (G1).
@@ -32,7 +33,7 @@ def test_predict_forward_appends_production_predictions(db_pool_greenfield, tmp_
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage_dir=storage, random_seed=42)
+    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
     model = _latest_model(engine)
 
     result = predict_forward(
@@ -90,7 +91,7 @@ def test_predict_forward_is_append_only_across_calls(db_pool_greenfield, tmp_pat
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage_dir=storage, random_seed=42)
+    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
     model = _latest_model(engine)
 
     predict_forward(engine, model["model_id"], FORWARD_DATE, storage_dir=storage)

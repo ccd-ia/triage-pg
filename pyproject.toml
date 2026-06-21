@@ -68,7 +68,7 @@ dev = [
   "factory_boy==3.2.1",
   "hypothesis==6.46.1",
   "jupyter-console>=6.6.3",
-  "moto==3.1.7",
+  "moto[batch,s3]>=5.0.0",
   "parsedatetime==2.6",
   "pytest>=8.2",
   "pytest-cov==3.0.0",

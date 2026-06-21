@@ -80,6 +80,8 @@ from triage.artifacts import (
 )
 from triage.derivation import Derivation, as_uuid, derive, engine_versions_for
 from triage.logging import get_logger
+from triage.profiles.protocols import StorageAdapter
+from triage.profiles.storage import write_parquet
 
 logger = get_logger(__name__)
 
@@ -345,7 +347,8 @@ def build_matrix(
     matrix_kind: str,
     as_of_dates: Sequence[date],
     label_timespan: str,
-    storage_dir: str,
+    storage: StorageAdapter,
+    storage_root: str,
     lookback: str | None = None,
     train_matrix_artifact_id: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
@@ -373,7 +376,10 @@ def build_matrix(
         as_of_dates: the split's ``as_of_times`` (from timechop via ``temporal_config``).
         label_timespan: the split's label horizon (e.g. ``'6 months'``); joins labels and is
             written to ``matrices.label_timespan``.
-        storage_dir: directory the Parquet matrix is written under (FS/S3 path root).
+        storage: the :class:`~triage.profiles.protocols.StorageAdapter` the Parquet matrix is
+            written/read through (local FS or S3).
+        storage_root: the artifact root URI; the matrix lands at
+            ``<storage_root>/<uuid>.parquet``.
         lookback: optional ``max_training_history`` for train matrices (``matrices.lookback``).
         train_matrix_artifact_id: ``None`` for a train matrix; the train matrix's artifact_id
             for a test matrix — the leakage-boundary parent that carries the fitted stats.
@@ -504,7 +510,8 @@ def build_matrix(
             label_timespan=label_timespan,
             train_matrix_artifact_id=train_matrix_artifact_id,
             matrix_artifact_id=matrix_derivation.id,
-            storage_dir=storage_dir,
+            storage=storage,
+            storage_root=storage_root,
         )
         if not fg_built:
             mark_built(
@@ -565,7 +572,8 @@ def _assemble(
     label_timespan: str,
     train_matrix_artifact_id: str | None,
     matrix_artifact_id: str,
-    storage_dir: str,
+    storage: StorageAdapter,
+    storage_root: str,
 ) -> MatrixResult:
     """The assembly itself: features ⋈ cohort ⋈ labels, impute, write Parquet."""
     import polars as pl
@@ -601,9 +609,8 @@ def _assemble(
     design = _apply_fit_based(design, feature_columns, fitted)
     _check_error_rules(design, feature_columns, imputation_policy)
 
-    storage_uri = str(Path(storage_dir) / f"{as_uuid(matrix_artifact_id)}.parquet")
-    Path(storage_dir).mkdir(parents=True, exist_ok=True)
-    design.write_parquet(storage_uri)
+    storage_uri = storage.join(storage_root, f"{as_uuid(matrix_artifact_id)}.parquet")
+    write_parquet(storage, storage_uri, design)
 
     return MatrixResult(
         matrix_artifact_id=matrix_artifact_id,

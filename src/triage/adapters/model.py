@@ -50,7 +50,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -72,6 +71,8 @@ from triage.component.catwalk.in_pg_evaluation import (
 from triage.component.catwalk.prediction_ranking import record_predictions
 from triage.derivation import Derivation, as_uuid, derive, engine_versions_for
 from triage.logging import get_logger
+from triage.profiles.protocols import StorageAdapter
+from triage.profiles.storage import read_parquet
 
 logger = get_logger(__name__)
 
@@ -196,7 +197,8 @@ def build_model(
     hyperparameters: Mapping[str, Any],
     *,
     random_seed: int,
-    storage_dir: str,
+    storage: StorageAdapter,
+    storage_root: str,
     train_end_time: Any | None = None,
     training_label_timespan: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
@@ -221,7 +223,9 @@ def build_model(
         hyperparameters: estimator constructor kwargs (excluding the seed).
         random_seed: deterministic seed; passed to the estimator as ``random_state`` when it
             accepts one, and stored on ``triage.models.random_seed``. Part of model identity.
-        storage_dir: directory the joblib model artifact is written under.
+        storage: the :class:`~triage.profiles.protocols.StorageAdapter` the joblib model is
+            written/read through (local FS or S3); also reads the train matrix Parquet.
+        storage_root: the artifact root URI; the model lands at ``<storage_root>/<uuid>.joblib``.
         train_end_time: optional ``triage.models.train_end_time`` (the split's train cut).
         training_label_timespan: optional label horizon the model trained against
             (``triage.models.training_label_timespan``).
@@ -272,7 +276,7 @@ def build_model(
             model_group_hash=group_hash,
             artifact_uri=existing["artifact_uri"],
             feature_names=feature_list,
-            estimator=_load_estimator(existing["artifact_uri"]),
+            estimator=_load_estimator(existing["artifact_uri"], storage),
             cache_hit=True,
         )
 
@@ -289,10 +293,11 @@ def build_model(
 
     try:
         estimator, x_columns = _fit_estimator(
-            train_matrix_result, class_path, hyperparameters, random_seed
+            train_matrix_result, class_path, hyperparameters, random_seed, storage
         )
-        artifact_uri = _serialize_estimator(estimator, storage_dir, model_derivation.id)
-        model_size_bytes = Path(artifact_uri).stat().st_size
+        artifact_uri, model_size_bytes = _serialize_estimator(
+            estimator, storage, storage_root, model_derivation.id
+        )
 
         model_group_id = _select_or_insert_model_group(
             db_engine,
@@ -336,17 +341,24 @@ def build_model(
     )
 
 
-def _design_X(matrix_result: MatrixResult):
+def _design_X(matrix_result: MatrixResult, storage: StorageAdapter | None = None):
     """Load a matrix Parquet and return (X numpy array, feature columns, frame).
 
     The design matrix X is exactly the ``feature_names`` columns (which already exclude the
     keys, the ``__missing`` flags, and the label triple — F2's ``_feature_columns``). We pull
     them in a stable, recorded order so train and score see identical column geometry, and
     hand the estimator a numpy array (the Phase E seam: Polars/numpy, not pandas).
-    """
-    import polars as pl
 
-    frame = pl.read_parquet(matrix_result.storage_uri)
+    ``storage`` reads the Parquet through the profile's adapter; when omitted (the score /
+    forward paths, whose signatures the cloud seam deliberately leaves untouched) the adapter is
+    derived from the ``storage_uri`` scheme — local FS for a bare path, S3 for ``s3://…``.
+    """
+    from triage.profiles.storage import storage_for_root
+
+    adapter = (
+        storage if storage is not None else storage_for_root(matrix_result.storage_uri)
+    )
+    frame = read_parquet(adapter, matrix_result.storage_uri)
     feature_columns = list(matrix_result.feature_names)
     missing = [c for c in feature_columns if c not in frame.columns]
     if missing:
@@ -363,6 +375,7 @@ def _fit_estimator(
     class_path: str,
     hyperparameters: Mapping[str, Any],
     random_seed: int,
+    storage: StorageAdapter | None = None,
 ):
     """Instantiate and fit the estimator on the train matrix; return (estimator, x_columns).
 
@@ -375,7 +388,7 @@ def _fit_estimator(
     estimator_cls = _import_estimator(class_path)
     estimator = _instantiate(estimator_cls, hyperparameters, random_seed)
 
-    x, feature_columns, frame = _design_X(train_matrix_result)
+    x, feature_columns, frame = _design_X(train_matrix_result, storage)
     if "outcome" not in frame.columns:
         raise ValueError(
             f"train matrix {train_matrix_result.storage_uri} has no 'outcome' column —"
@@ -426,24 +439,42 @@ def _instantiate(estimator_cls, hyperparameters: Mapping[str, Any], random_seed:
     return estimator_cls(**kwargs)
 
 
-def _serialize_estimator(estimator, storage_dir: str, model_artifact_id: str) -> str:
-    """joblib.dump the fitted estimator under ``storage_dir``; return its uri.
+def _serialize_estimator(
+    estimator, storage: StorageAdapter, storage_root: str, model_artifact_id: str
+) -> tuple[str, int]:
+    """joblib.dump the fitted estimator through ``storage``; return ``(uri, size_bytes)``.
 
-    Named by ``as_uuid(model_artifact_id)`` to mirror the matrix naming convention
-    (ADR-0015) and keep one file per identity.
+    Named by ``as_uuid(model_artifact_id)`` to mirror the matrix naming convention (ADR-0015),
+    one file per identity. The estimator is serialized to an in-memory buffer (so the byte size
+    is known without a stat round-trip — important for S3, where the just-written object's size
+    is otherwise a second request) and written through ``storage.open_output`` — local FS or S3.
+    """
+    import io
+
+    import joblib
+
+    artifact_uri = storage.join(storage_root, f"{as_uuid(model_artifact_id)}.joblib")
+    buffer = io.BytesIO()
+    joblib.dump(estimator, buffer)
+    payload = buffer.getvalue()
+    with storage.open_output(artifact_uri) as handle:
+        handle.write(payload)
+    return artifact_uri, len(payload)
+
+
+def _load_estimator(artifact_uri: str, storage: StorageAdapter | None = None):
+    """joblib.load the estimator from ``artifact_uri`` through ``storage``.
+
+    ``storage`` defaults to the adapter implied by the URI scheme (so the score / forward paths,
+    whose signatures the cloud seam leaves untouched, still read S3 or local correctly).
     """
     import joblib
 
-    Path(storage_dir).mkdir(parents=True, exist_ok=True)
-    artifact_uri = str(Path(storage_dir) / f"{as_uuid(model_artifact_id)}.joblib")
-    joblib.dump(estimator, artifact_uri)
-    return artifact_uri
+    from triage.profiles.storage import storage_for_root
 
-
-def _load_estimator(artifact_uri: str):
-    import joblib
-
-    return joblib.load(artifact_uri)
+    adapter = storage if storage is not None else storage_for_root(artifact_uri)
+    with adapter.open_input(artifact_uri) as handle:
+        return joblib.load(handle)
 
 
 def _select_or_insert_model_group(
