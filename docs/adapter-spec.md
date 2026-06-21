@@ -365,5 +365,6 @@ the `aggregates_imputation` shape): `.resolve(metric)` (explicit rule, else `all
 - **featurizer `measure_strategy` hazard** (§3.3) — guard against its use (lint/contract).
 - **Fit-based SQL** — the `MODE() WITHIN GROUP` / `PERCENTILE_CONT`-over-train rendering and
   the `matrices.metadata` stat layout are adapter-build details, not fixed here.
-- **ADR-0009 amendment** (§3.1) — record that fit-free fills run in adapter SQL on the
-  SQL→Parquet path.
+- ~~**ADR-0009 amendment** (§3.1) — record that fit-free fills run in adapter SQL on the
+  SQL→Parquet path.~~ **Done (2026-06-20):** recorded as the "Refinement" section in
+  `docs/adr/0009-imputation-split-fit-free-vs-fit-based.md`.
