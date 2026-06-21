@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -118,6 +118,18 @@ _AS_OF_COL = "as_of_date"
 # {"fit_based_stats": {"<feature>": {"stat": "mean", "value": 12.3}, ...}}.
 _FIT_STATS_KEY = "fit_based_stats"
 
+# Train-fitted categorical code maps, stored alongside the fit stats (adapter-spec §4):
+# {"cat_encodings": {"<feature>": {"<category>": <code int>, ...}, ...}}. Code 0 is reserved
+# for unknown (unseen-at-test / NULL). This is the *learned-vocabulary* path — a fit-based
+# transform fitted on the train split only and reused for test (ADR-0009 extension).
+_CAT_ENC_KEY = "cat_encodings"
+
+# Above this many distinct *train* categories an ordinal-encoded column is almost certainly an
+# identifier (or a leakage/overfit risk). We still ordinal-encode it (one column, no width
+# blow-up) but warn loudly so it gets a featurizer ``role: identifier``. One-hot is never
+# auto-applied by the adapter (that is the declared/fixed-vocabulary path, in featurizer).
+_MAX_CAT_CARDINALITY = 100
+
 
 @dataclass(frozen=True)
 class MatrixResult:
@@ -131,6 +143,9 @@ class MatrixResult:
     feature_names: list[str]
     fit_based_stats: dict[str, dict[str, Any]]
     cache_hit: bool
+    # train-fitted categorical code maps (adapter-spec §4); default-empty so existing
+    # constructors are unaffected. {feature: {category: code}}, code 0 = unknown.
+    cat_encodings: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def _reconstruct_derivation(
@@ -224,9 +239,14 @@ def _materialize_as_of_dates_psycopg(cur, as_of_dates: Sequence[date]) -> None:
     expects a table ``as_of_dates`` resolvable on the connection's search_path. The adapter
     owns this table; we drop+recreate it for the split's dates so one matrix build sees
     exactly its own as_of_dates and nothing leaks between builds on a shared db.
+
+    It is a **TEMP** table (``pg_temp``, first on the search_path so featurizer resolves it):
+    session-scoped, auto-dropped, invisible to other connections — never pollutes ``public``
+    and cannot collide/race with a concurrent build on another connection (DB-audit #1).
+    featurizer reads it on this *same* connection, so visibility is guaranteed.
     """
     cur.execute("drop table if exists as_of_dates")
-    cur.execute("create table as_of_dates (as_of_date date primary key)")
+    cur.execute("create temp table as_of_dates (as_of_date date primary key)")
     for as_of_date in as_of_dates:
         cur.execute(
             "insert into as_of_dates (as_of_date) values (%s) on conflict do nothing",
@@ -318,6 +338,92 @@ def _apply_fit_based(
             continue
         exprs.append(pl.col(feature).fill_null(stat["value"]).alias(feature))
     return frame.with_columns(exprs) if exprs else frame
+
+
+def _categorical_features(frame, feature_columns: Sequence[str]) -> list[str]:
+    """Feature columns whose dtype is string/categorical — these need encoding before sklearn.
+
+    featurizer aggregates child-event categoricals to numbers already; what reaches here as a
+    string is a *direct* target-entity categorical (e.g. ``facility_type``) that would crash
+    ``estimator.fit`` on the raw value (adapter-spec §4).
+    """
+    import polars as pl
+
+    string_types = (pl.Utf8, pl.String, pl.Categorical)
+    return [f for f in feature_columns if frame.schema.get(f) in string_types]
+
+
+def _fit_cat_encoding(train_frame, feature: str) -> dict[str, int]:
+    """Train-only ``{category: code}`` map for one categorical feature (adapter-spec §4).
+
+    Categories present in the *train* rows only, ``drop_nulls().unique().sort()`` →
+    deterministic codes starting at 1 (**code 0 is reserved** for unknown: unseen-at-test and
+    NULL). This is the "fit" — computed on train, persisted, reused for test, never refit.
+    """
+    cats = train_frame.get_column(feature).drop_nulls().unique().sort().to_list()
+    if len(cats) > _MAX_CAT_CARDINALITY:
+        logger.warning(
+            f"categorical feature {feature!r} has {len(cats)} distinct train values"
+            + f" (> {_MAX_CAT_CARDINALITY}) — likely an identifier; ordinal-encoding it"
+            + " anyway, but consider marking it role:identifier in the featurizer config"
+        )
+    return {str(cat): code for code, cat in enumerate(cats, start=1)}
+
+
+def _apply_cat_encoding(frame, encodings: Mapping[str, Mapping[str, int]]):
+    """Replace each encoded string column with its ordinal code (unseen/NULL → 0). Polars in/out.
+
+    ``encodings`` is the persisted ``{feature: {category: code}}`` map — for the train matrix
+    just fitted over these rows, for the test matrix read from the train matrix's metadata.
+    Either way the *map* is the single source of truth: a test-only category maps to 0, never
+    refit (the same ADR-0009 leakage boundary the fit-based stats use).
+    """
+    import polars as pl
+
+    exprs = []
+    for feature, mapping in encodings.items():
+        if feature not in frame.columns:
+            continue
+        exprs.append(
+            pl.col(feature)
+            .cast(pl.Utf8)
+            .replace_strict(dict(mapping), default=0, return_dtype=pl.Int32)
+            .fill_null(0)
+            .alias(feature)
+        )
+    return frame.with_columns(exprs) if exprs else frame
+
+
+def _resolve_cat_encodings(
+    db_engine: ConnectionPool,
+    design,
+    feature_columns: Sequence[str],
+    train_matrix_artifact_id: str | None,
+) -> dict[str, dict[str, int]]:
+    """The categorical code maps for this matrix — the leakage boundary, mirroring fit stats.
+
+    * **Train matrix**: fit a code map per categorical (string) feature over *these* rows.
+    * **Test matrix**: read the train matrix's persisted maps from ``triage.matrices.metadata``
+      and reuse them — never refit (refitting on test categories is the ADR-0009 leak).
+    """
+    if train_matrix_artifact_id is not None:
+        train_meta = _existing_matrix_row(db_engine, train_matrix_artifact_id)
+        encodings = (train_meta["metadata"] or {}).get(_CAT_ENC_KEY, {})
+        if encodings:
+            logger.info(
+                f"Test matrix reusing {len(encodings)} train-fitted categorical encoding(s)"
+                + " (no refit on test — ADR-0009 leakage boundary)"
+            )
+        return dict(encodings)
+
+    cat_features = _categorical_features(design, feature_columns)
+    encodings = {f: _fit_cat_encoding(design, f) for f in cat_features}
+    if encodings:
+        logger.info(
+            f"Train matrix fitted {len(encodings)} categorical encoding(s):"
+            + f" {sorted(encodings)}"
+        )
+    return encodings
 
 
 def _check_error_rules(
@@ -465,6 +571,7 @@ def build_matrix(
             num_features=existing["num_features"],
             feature_names=list(existing["feature_names"] or []),
             fit_based_stats=(existing["metadata"] or {}).get(_FIT_STATS_KEY, {}),
+            cat_encodings=(existing["metadata"] or {}).get(_CAT_ENC_KEY, {}),
             cache_hit=True,
         )
 
@@ -546,6 +653,7 @@ def build_matrix(
         num_features=result.num_features,
         feature_names=result.feature_names,
         fit_based_stats=result.fit_based_stats,
+        cat_encodings=result.cat_encodings,
         cache_hit=False,
     )
 
@@ -598,6 +706,17 @@ def _assemble(
 
     feature_columns = _feature_columns(features.columns, "entity_id")
 
+    # Categorical encoding FIRST — turn direct-categorical *strings* into ordinal codes
+    # (train-fit, reused for test) so the matrix Parquet is fully numeric for sklearn
+    # (adapter-spec §4). Column names are unchanged (ordinal), so feature_columns still holds.
+    cat_encodings = _resolve_cat_encodings(
+        db_engine=db_engine,
+        design=design,
+        feature_columns=feature_columns,
+        train_matrix_artifact_id=train_matrix_artifact_id,
+    )
+    design = _apply_cat_encoding(design, cat_encodings)
+
     fitted = _resolve_fit_stats(
         db_engine=db_engine,
         design=design,
@@ -620,6 +739,7 @@ def _assemble(
         num_features=len(feature_columns),
         feature_names=feature_columns,
         fit_based_stats=fitted,
+        cat_encodings=cat_encodings,
         cache_hit=False,
     )
 
@@ -743,7 +863,10 @@ def _insert_matrix_row(
     lookback: str | None,
     run_id: str,
 ) -> None:
-    metadata = {_FIT_STATS_KEY: result.fit_based_stats}
+    metadata = {
+        _FIT_STATS_KEY: result.fit_based_stats,
+        _CAT_ENC_KEY: result.cat_encodings,
+    }
     with db_engine.connection() as conn:
         conn.execute(
             "insert into triage.matrices"

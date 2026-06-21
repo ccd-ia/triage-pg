@@ -24,8 +24,8 @@ from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import build_matrix
 from triage.adapters.temporal import TemporalConfig
-from triage.profiles.storage import LocalStorage
 from triage.derivation import as_uuid
+from triage.profiles.storage import LocalStorage
 
 # One train as_of_date, one test as_of_date — distinct so train-only fitting is observable.
 TRAIN_AS_OF = date(2014, 1, 1)
@@ -241,7 +241,8 @@ def test_train_then_test_matrix_full_lifecycle(db_pool_greenfield, tmp_path):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage=LocalStorage(), storage_root=storage,
+        storage=LocalStorage(),
+        storage_root=storage,
         lookback="6 months",
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
@@ -304,7 +305,8 @@ def test_train_then_test_matrix_full_lifecycle(db_pool_greenfield, tmp_path):
         matrix_kind="test",
         as_of_dates=[TEST_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage=LocalStorage(), storage_root=storage,
+        storage=LocalStorage(),
+        storage_root=storage,
         train_matrix_artifact_id=train.matrix_artifact_id,
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
@@ -376,7 +378,8 @@ def test_matrix_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
         matrix_kind="train",
         as_of_dates=[TRAIN_AS_OF],
         label_timespan=LABEL_TIMESPAN,
-        storage=LocalStorage(), storage_root=storage,
+        storage=LocalStorage(),
+        storage_root=storage,
         source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
     )
     first = build_matrix(engine, run_id, **kwargs)
@@ -416,7 +419,77 @@ def test_test_matrix_requires_train_parent(db_pool_greenfield, tmp_path):
             matrix_kind="test",
             as_of_dates=[TEST_AS_OF],
             label_timespan=LABEL_TIMESPAN,
-            storage=LocalStorage(), storage_root=str(tmp_path / "matrices"),
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "matrices"),
             train_matrix_artifact_id=None,  # the error
             source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Categorical encoding (adapter-spec §4) — pure-function unit tests.
+# Train-fit, deterministic, code 0 reserved for unknown; the test matrix reuses
+# the train map verbatim (a test-only category → 0, never refit — the ADR-0009 edge).
+# ---------------------------------------------------------------------------
+
+
+def test_categorical_features_detects_only_string_columns():
+    from triage.adapters.matrix import _categorical_features
+
+    frame = pl.DataFrame(
+        {
+            "count(x)": [1, 2],
+            "facility_type": ["restaurant", "grocery"],
+            "lat": [1.0, 2.0],
+        }
+    )
+    assert _categorical_features(frame, ["count(x)", "facility_type", "lat"]) == [
+        "facility_type"
+    ]
+
+
+def test_fit_cat_encoding_is_train_only_sorted_zero_reserved():
+    from triage.adapters.matrix import _fit_cat_encoding
+
+    frame = pl.DataFrame(
+        {"facility_type": ["grocery", "restaurant", "grocery", None, "bakery"]}
+    )
+    # sorted categories, codes start at 1 (0 reserved), NULL dropped from the vocabulary.
+    assert _fit_cat_encoding(frame, "facility_type") == {
+        "bakery": 1,
+        "grocery": 2,
+        "restaurant": 3,
+    }
+
+
+def test_apply_cat_encoding_maps_unknown_and_null_to_zero():
+    from triage.adapters.matrix import _apply_cat_encoding
+
+    # the train-fitted map (e.g. read back from the train matrix's metadata for the test split)
+    encodings = {"facility_type": {"bakery": 1, "grocery": 2, "restaurant": 3}}
+    # a TEST frame: a seen category, a train-unseen category, and a NULL
+    frame = pl.DataFrame({"facility_type": ["grocery", "school", None]})
+    out = _apply_cat_encoding(frame, encodings)
+    assert out.get_column("facility_type").to_list() == [2, 0, 0]
+    assert (
+        out.schema["facility_type"] == pl.Int32
+    )  # numeric now → safe for to_numpy()/sklearn
+
+
+def test_apply_cat_encoding_noop_when_no_encodings():
+    from triage.adapters.matrix import _apply_cat_encoding
+
+    frame = pl.DataFrame({"count(x)": [1, 2, 3]})
+    out = _apply_cat_encoding(frame, {})
+    assert out.get_column("count(x)").to_list() == [1, 2, 3]
+
+
+def test_fit_cat_encoding_high_cardinality_still_encodes(caplog):
+    from triage.adapters.matrix import _MAX_CAT_CARDINALITY, _fit_cat_encoding
+
+    n = _MAX_CAT_CARDINALITY + 5
+    frame = pl.DataFrame({"id_like": [f"v{i}" for i in range(n)]})
+    enc = _fit_cat_encoding(frame, "id_like")
+    # the guard warns but still encodes (ordinal stays one column — no width blow-up)
+    assert len(enc) == n
+    assert min(enc.values()) == 1  # 0 stays reserved for unknown
