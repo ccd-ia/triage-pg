@@ -27,6 +27,11 @@ services:
       context: ..
       dockerfile: Dockerfile
       target: base
+      # featurizer is a private git+ssh dependency (ADR-0008/0016); the image's
+      # `uv sync` clones it over SSH. Forward the host SSH agent into the build.
+      # The host must have the featurizer deploy key loaded (`ssh-add -l`).
+      ssh:
+        - default
     image: dsapp/triage:dev
     # bind-mounts host paths (../example/dirtyduck, ../dirtyduck-output) — run as the
     # host user so files written inside (run outputs) aren't root-owned (Docker hard rule).
