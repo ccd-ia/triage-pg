@@ -13,7 +13,9 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      # host port is overridable to avoid local collisions (e.g. another PG on 5434);
+      # set DIRTYDUCK_PG_PORT in your env / .envrc. Default keeps the historic 5434.
+      - "${DIRTYDUCK_PG_PORT:-5434}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U food_user -d food"]
       interval: 5s
@@ -26,6 +28,10 @@ services:
       dockerfile: Dockerfile
       target: base
     image: dsapp/triage:dev
+    # bind-mounts host paths (../example/dirtyduck, ../dirtyduck-output) — run as the
+    # host user so files written inside (run outputs) aren't root-owned (Docker hard rule).
+    # export UID/GID in your env / .envrc before `docker compose up`.
+    user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       food_db:
         condition: service_healthy
