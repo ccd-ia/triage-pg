@@ -166,7 +166,9 @@ def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "store")
     config = _experiment_config()
 
-    result = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
+    result = run_experiment(
+        engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
+    )
 
     # ---- lineage: experiment + run rows, run completed
     assert result.experiment_hash == experiment_hash_for(config)
@@ -205,6 +207,27 @@ def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
         assert split.test_matrix.matrix_artifact_id
         assert os.path.exists(split.train_matrix.storage_uri)
         assert os.path.exists(split.test_matrix.storage_uri)
+
+    # ---- runs.plan telemetry populated (ADR-0021) + surfaced by triage.run_summary
+    with engine.connection() as conn:
+        plan = conn.execute(
+            "select plan from triage.runs where run_id = %(r)s", {"r": result.run_id}
+        ).fetchone()["plan"]
+    assert plan is not None
+    assert plan["n_splits"] == len(result.splits)
+    assert plan["n_matrices"] == 2 * len(result.splits)
+    assert plan["n_models"] == result.num_models
+    assert plan["n_features"] == result.splits[0].train_matrix.num_features
+    assert plan["estimator_types"]  # non-empty list of class paths
+    assert "featurizer" in plan["engine_versions"]
+    with engine.connection() as conn:
+        summary = conn.execute(
+            "select status, problem_type, plan from triage.run_summary"
+            " where run_id = %(r)s",
+            {"r": result.run_id},
+        ).fetchone()
+    assert summary["status"] == "completed"
+    assert summary["plan"]["n_models"] == result.num_models
 
     # ---- the artifact DAG
     def parents_of(artifact_id):
@@ -314,7 +337,9 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "store")
     config = _experiment_config()
 
-    first = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
+    first = run_experiment(
+        engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
+    )
 
     def counts():
         with engine.connection() as conn:
@@ -335,7 +360,9 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
 
     after_first = counts()
 
-    second = run_experiment(engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42)
+    second = run_experiment(
+        engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
+    )
     after_second = counts()
 
     # same experiment hash (same config) — a re-run reuses the experiment row

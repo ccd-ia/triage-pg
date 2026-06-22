@@ -44,6 +44,7 @@ the source pins, and the sequencing — not the artifact bookkeeping the builder
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -58,7 +59,7 @@ from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.temporal import TemporalConfig
 from triage.component.timechop import Timechop
-from triage.derivation import canonical_json
+from triage.derivation import canonical_json, engine_versions_for
 from triage.logging import get_logger
 from triage.profiles.protocols import StorageAdapter
 from triage.sources import (
@@ -297,6 +298,24 @@ def _mark_run(
         )
 
 
+def _record_run_plan(
+    db_engine: ConnectionPool, run_id: str, plan: Mapping[str, Any]
+) -> None:
+    """Persist the run's planned shape on ``triage.runs.plan`` (ADR-0021 telemetry).
+
+    The read-dashboard's pipeline-DAG denominators (``matrices N/M``, ``models N/M``) and the
+    experiment-summary panel read this (``triage.run_summary`` exposes it). Written once after
+    timechop + grid so the dashboard has the denominators *while the run is still building*,
+    then updated once with ``n_features`` after the first matrix lands. A trivial UPDATE of a
+    valid jsonb on an existing run — not wrapped: a failure here is a real error, not swallowed.
+    """
+    with db_engine.connection() as conn:
+        conn.execute(
+            "update triage.runs set plan = %(plan)s::jsonb where run_id = %(run_id)s",
+            {"plan": json.dumps(plan), "run_id": run_id},
+        )
+
+
 def _build_split(
     db_engine: ConnectionPool,
     run_id: str,
@@ -519,6 +538,25 @@ def run_experiment(
         )
 
         grid = _grid_specs(grid_config)
+
+        # Record the planned shape now (after timechop + grid) so the read-dashboard's
+        # pipeline-DAG denominators (matrices/models N/M) + experiment-summary are available
+        # WHILE the run builds (ADR-0021, read-dashboard-spec §3.1). One train + one test
+        # matrix per split; one model per (grid spec, split); grid specs are the model_groups.
+        # n_features is unknown until the first matrix lands — filled in the split loop below.
+        plan: dict[str, Any] = {
+            "n_splits": len(splits),
+            "n_matrices": 2 * len(splits),
+            "n_model_groups": len(grid),
+            "n_models": len(grid) * len(splits),
+            "estimator_types": sorted({class_path for class_path, _ in grid}),
+            "temporal": temporal_config.canonical(),
+            "engine_versions": engine_versions_for("feature_group"),
+            "n_feature_groups": 1,
+            "n_features": None,
+        }
+        _record_run_plan(db_engine, run_id, plan)
+
         split_results: list[SplitResult] = []
         all_model_ids: list[int] = []
         total_predictions = 0
@@ -545,6 +583,11 @@ def run_experiment(
                 storage_root=storage_root,
                 source_pins=frozen_pins,
             )
+
+            # Fill the feature count once the first matrix is built (it's unknown at plan time).
+            if plan["n_features"] is None and train_matrix.num_features is not None:
+                plan["n_features"] = train_matrix.num_features
+                _record_run_plan(db_engine, run_id, plan)
 
             split_model_ids: list[int] = []
             split_model_artifact_ids: list[str] = []
