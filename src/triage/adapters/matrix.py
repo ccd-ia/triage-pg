@@ -282,6 +282,50 @@ def _feature_columns(column_names: Sequence[str], target_id_col: str) -> list[st
     ]
 
 
+def _numeric_dtypes():
+    """The Polars numeric dtype tuple (sklearn consumes a numeric design matrix).
+
+    Lazy import so polars stays an assembly-time dependency. Shared by the fit-free fill and the
+    non-numeric leak guard so the two never drift.
+    """
+    import polars as pl
+
+    return (
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Float32, pl.Float64,
+    )  # fmt: skip
+
+
+def _numeric_feature_columns(frame, feature_columns: Sequence[str]) -> list[str]:
+    """Drop any feature column that is not numeric *after* categorical encoding (leak guard).
+
+    featurizer passes the target entity's ``temporal_ix`` through as a Date-typed **feature**
+    column; :func:`_feature_columns` filters only the keys + ``__missing`` flags, so a raw Date
+    (or any other non-numeric leak) would survive into ``feature_names`` and crash
+    ``estimator.fit`` — :func:`triage.adapters.model._design_X` does
+    ``frame.select(feature_names).to_numpy()`` with no dtype filter. By the time this runs
+    :func:`_apply_cat_encoding` has turned every *legitimate* direct categorical into an ordinal
+    ``Int32``, so anything still non-numeric is a leak. We drop it and log loudly (a Date column
+    is almost always the target entity's ``temporal_ix`` reaching the feature set — give it a
+    featurizer ``role: identifier`` to drop it at the source).
+    """
+    numeric = _numeric_dtypes()
+    kept, dropped = [], []
+    for feature in feature_columns:
+        (kept if frame.schema.get(feature) in numeric else dropped).append(feature)
+    if dropped:
+        logger.warning(
+            "dropping %d non-numeric feature column(s) from the matrix — %s. sklearn needs a"
+            " numeric design matrix; a Date column here is typically the target entity's"
+            " temporal_ix leaking into the feature set (mark it role:identifier in the"
+            " featurizer config to drop it at the source).",
+            len(dropped),
+            [(f, str(frame.schema.get(f))) for f in dropped],
+        )
+    return kept
+
+
 def _metric_of(feature_name: str) -> str:
     """Map a featurizer feature name to its imputation *metric* key.
 
@@ -790,6 +834,18 @@ def _assemble(
         train_matrix_artifact_id=train_matrix_artifact_id,
     )
     design = _apply_cat_encoding(design, cat_encodings)
+
+    # Drop any feature column still non-numeric after categorical encoding — the target entity's
+    # temporal_ix leaks through featurizer as a Date-typed *feature*, and sklearn needs a numeric
+    # design matrix (model._design_X does frame.select(feature_names).to_numpy(), no dtype
+    # filter). Post cat-encoding every legitimate feature is numeric, so a residual non-numeric
+    # column is a leak: drop it from BOTH the feature set and the written Parquet. Keys/labels
+    # are never in feature_columns, so they are untouched.
+    numeric_feature_columns = _numeric_feature_columns(design, feature_columns)
+    leaked = [c for c in feature_columns if c not in numeric_feature_columns]
+    if leaked:
+        design = design.drop(leaked)
+    feature_columns = numeric_feature_columns
 
     fitted = _resolve_fit_stats(
         db_engine=db_engine,

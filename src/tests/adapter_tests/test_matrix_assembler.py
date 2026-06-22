@@ -611,14 +611,80 @@ def test_fit_free_zero_fills_measures_so_nan_intolerant_model_trains(
                 v is not None and math.isnan(v) for v in col.to_list()
             ), f"{feature} has NaN"
 
-    # GradientBoosting rejects NaN, so a successful fit proves the matrix is clean. Select the
-    # numeric features (the model-ready columns) — the fixture's target temporal_ix leaks as a
-    # Date column, an orthogonal issue; the imputation fix is what this asserts.
-    numeric = (pl.Float32, pl.Float64, pl.Int8, pl.Int16, pl.Int32, pl.Int64)
-    numeric_feats = [f for f in train.feature_names if frame.schema[f] in numeric]
+    # GradientBoosting rejects NaN, so a successful fit proves the matrix is clean. feature_names
+    # is now fully numeric (the target temporal_ix leak is dropped by _numeric_feature_columns —
+    # see test_target_temporal_ix_dropped_from_feature_set), so we fit on it directly.
     labeled = frame.filter(pl.col("outcome").is_not_null())
-    features = labeled.select(numeric_feats).to_numpy()
+    features = labeled.select(train.feature_names).to_numpy()
     target = labeled.get_column("outcome").to_numpy()
     GradientBoostingClassifier(n_estimators=3, max_depth=2, random_state=0).fit(
         features, target
     )
+
+
+# ---------------------------------------------------------------------------
+# Non-numeric leak guard (the target entity's temporal_ix reaches the feature set).
+# featurizer passes the target's temporal_ix through as a Date-typed feature column;
+# _feature_columns only strips keys + __missing flags, so without the guard it would
+# survive into feature_names and crash model._design_X's frame.select(...).to_numpy().
+# ---------------------------------------------------------------------------
+
+
+def test_numeric_feature_columns_drops_non_numeric_and_keeps_numeric():
+    from triage.adapters.matrix import _numeric_feature_columns
+
+    frame = pl.DataFrame(
+        {
+            "count(orders.id)": [1, 2],  # Int64 — kept
+            "MEAN(orders.amount)": [1.0, 2.0],  # Float64 — kept
+            "facility_type": [7, 8],  # ordinal-encoded Int32 — kept
+            "signup_date": [date(2010, 1, 1), date(2011, 1, 1)],  # Date leak — dropped
+        }
+    )
+    cols = ["count(orders.id)", "MEAN(orders.amount)", "facility_type", "signup_date"]
+    kept = _numeric_feature_columns(frame, cols)
+    assert kept == ["count(orders.id)", "MEAN(orders.amount)", "facility_type"]
+    assert "signup_date" not in kept
+
+
+def test_target_temporal_ix_dropped_from_feature_set(db_pool_greenfield, tmp_path):
+    """End-to-end: the fixture's target ``customers`` carries ``temporal_ix: signup_date``, which
+    featurizer emits as a Date feature column. The assembler must drop it so (a) ``feature_names``
+    is fully numeric and (b) the written Parquet's declared feature set carries no Date column —
+    the matrix is model-ready for any estimator, not just the NaN-tolerant trees.
+    """
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF])
+
+    train = build_matrix(
+        engine,
+        run_id,
+        featurizer_config=_featurizer_config(),
+        cohort_artifact_id=cohort,
+        labels_artifact_id=labels,
+        temporal_config=_temporal_config(),
+        imputation_policy=policy,
+        matrix_kind="train",
+        as_of_dates=[TRAIN_AS_OF],
+        label_timespan=LABEL_TIMESPAN,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "matrices"),
+        source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
+    )
+
+    # signup_date (the target temporal_ix) must not survive into the declared feature set,
+    # and num_features must match the (numeric) feature_names exactly.
+    assert "signup_date" not in train.feature_names
+    assert train.num_features == len(train.feature_names)
+
+    frame = pl.read_parquet(train.storage_uri)
+    numeric = (pl.Float32, pl.Float64, pl.Int8, pl.Int16, pl.Int32, pl.Int64)
+    for feature in train.feature_names:
+        assert (
+            frame.schema[feature] in numeric
+        ), f"{feature} is {frame.schema[feature]} — feature set must be fully numeric"
+    # the leaked Date column is dropped from the Parquet entirely (not merely excluded)
+    assert "signup_date" not in frame.columns
