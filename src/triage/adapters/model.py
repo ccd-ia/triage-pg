@@ -319,9 +319,15 @@ def build_model(
             random_seed=random_seed,
         )
         _persist_feature_importances(db_engine, model_id, estimator, x_columns)
-        mark_built(db_engine, model_derivation.id, output_ref=artifact_uri)
+        mark_built(
+            db_engine,
+            model_derivation.id,
+            output_ref=artifact_uri,
+            kind=MODEL_KIND,
+            run_id=run_id,
+        )
     except Exception:
-        mark_failed(db_engine, model_derivation.id)
+        mark_failed(db_engine, model_derivation.id, kind=MODEL_KIND, run_id=run_id)
         raise
 
     record_use(db_engine, run_id, [model_derivation.id])
