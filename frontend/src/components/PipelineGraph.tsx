@@ -8,6 +8,7 @@ import { useMemo } from 'react'
 import { ReactFlow, Background, Position, type Edge, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { ProgressResponse, StageProgress } from '../api/types'
+import { deriveStages } from '../api/transforms'
 
 const STAGE_X = 170
 const NODE_Y = 60
@@ -23,7 +24,8 @@ function nodeLabel(st: StageProgress): string {
 
 export function PipelineGraph({ data }: { data: ProgressResponse }) {
   const { nodes, edges } = useMemo(() => {
-    const ns: Node[] = data.stages.map((st, i) => ({
+    const stages = deriveStages(data)
+    const ns: Node[] = stages.map((st, i) => ({
       id: st.kind,
       position: { x: i * STAGE_X, y: NODE_Y },
       data: { label: nodeLabel(st) },
@@ -34,9 +36,9 @@ export function PipelineGraph({ data }: { data: ProgressResponse }) {
       targetPosition: Position.Left,
       style: { whiteSpace: 'pre-line' as const },
     }))
-    const es: Edge[] = data.stages.slice(1).map((st, i) => ({
-      id: `${data.stages[i].kind}->${st.kind}`,
-      source: data.stages[i].kind,
+    const es: Edge[] = stages.slice(1).map((st, i) => ({
+      id: `${stages[i].kind}->${st.kind}`,
+      source: stages[i].kind,
       target: st.kind,
       animated: st.status === 'current',
       style: { stroke: 'var(--line)' },

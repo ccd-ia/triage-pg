@@ -1,11 +1,12 @@
 /*
- * Typed API client for the read dashboard (docs/read-dashboard-spec.md §5).
+ * Typed API client for the read dashboard (src/triage/dashboard/routes.py §5).
  *
- * Every method is a thin typed GET against base `/api`. The backend is not yet
- * running, so when VITE_USE_FIXTURE is enabled (the dev default, see .env.development)
- * each method resolves the dev fixture instead of fetching. At integration time,
- * unset the flag (or set it to "0") and the same methods hit the real endpoints
- * via the Vite proxy / FastAPI static mount.
+ * Every method is a thin typed GET against base `/api`, returning the REAL
+ * response shapes from routes.py (the source of truth). When VITE_USE_FIXTURE
+ * is enabled (the dev default, see .env.development) each method resolves the
+ * dev fixture instead of fetching. At integration time, unset the flag (or set
+ * it to "0") and the same methods hit the real endpoints via the Vite proxy /
+ * FastAPI static mount.
  */
 import type {
   AuditionResponse,
@@ -24,6 +25,9 @@ import type {
 import * as fixture from '../fixtures'
 
 const BASE = '/api'
+
+/** Default audition/selected-model rule (matches routes.py defaults). */
+export const DEFAULT_RULE = 'best_average_value'
 
 // Default to fixture mode in dev unless explicitly disabled. import.meta.env
 // values are strings; treat anything but "0"/"false" as enabled when the var
@@ -72,11 +76,17 @@ export const api = {
     return get<DerivationResponse>(`/runs/${runId}/derivation`)
   },
 
-  audition(runId: string, metric?: string, strategy?: string): Promise<AuditionResponse> {
+  audition(
+    runId: string,
+    metric?: string,
+    parameter?: string,
+    rule?: string,
+  ): Promise<AuditionResponse> {
     if (USE_FIXTURE) return fake(fixture.audition)
     const q = new URLSearchParams()
     if (metric) q.set('metric', metric)
-    if (strategy) q.set('strategy', strategy)
+    if (parameter !== undefined) q.set('parameter', parameter)
+    if (rule) q.set('rule', rule)
     const qs = q.toString()
     return get<AuditionResponse>(`/runs/${runId}/audition${qs ? `?${qs}` : ''}`)
   },
@@ -98,9 +108,11 @@ export const api = {
     return get<EvaluationsResponse>(`/runs/${runId}/evaluations${q}`)
   },
 
-  predictions(runId: string, modelId: number, k = 10): Promise<PredictionsResponse> {
+  predictions(runId: string, modelId: number, k?: number): Promise<PredictionsResponse> {
     if (USE_FIXTURE) return fake(fixture.predictionsFor(modelId))
-    return get<PredictionsResponse>(`/runs/${runId}/predictions?model_id=${modelId}&k=${k}`)
+    const q = new URLSearchParams({ model_id: String(modelId) })
+    if (k !== undefined) q.set('k', String(k))
+    return get<PredictionsResponse>(`/runs/${runId}/predictions?${q.toString()}`)
   },
 
   sourcePins(runId: string): Promise<SourcePinsResponse> {
@@ -108,10 +120,19 @@ export const api = {
     return get<SourcePinsResponse>(`/runs/${runId}/source-pins`)
   },
 
-  selectedModel(runId: string, metric?: string): Promise<SelectedModelResponse> {
+  selectedModel(
+    runId: string,
+    metric?: string,
+    parameter?: string,
+    rule?: string,
+  ): Promise<SelectedModelResponse> {
     if (USE_FIXTURE) return fake(fixture.selectedModel)
-    const q = metric ? `?metric=${encodeURIComponent(metric)}` : ''
-    return get<SelectedModelResponse>(`/runs/${runId}/selected-model${q}`)
+    const q = new URLSearchParams()
+    if (metric) q.set('metric', metric)
+    if (parameter !== undefined) q.set('parameter', parameter)
+    if (rule) q.set('rule', rule)
+    const qs = q.toString()
+    return get<SelectedModelResponse>(`/runs/${runId}/selected-model${qs ? `?${qs}` : ''}`)
   },
 
   modelDetail(modelId: number): Promise<ModelDetailResponse> {

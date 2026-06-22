@@ -5,10 +5,22 @@
  *    /selected-model; manual = a clicked Leaderboard row)
  *  - one EventSource per run; deltas re-fetch the affected panels
  *    (pipeline always; audition/bias/metric on kind ∈ {model, evaluation}).
+ *
+ * Reconciled to routes.py: /selected-model returns bigint ids and no labels (so
+ * labels are resolved here from the leaderboard reshape), the active source-model
+ * field is `audition_model` / `leaderboard_model`, audition + selected-model take
+ * a `rule` (default best_average_value), and the run-state (pending/provisional/
+ * final) is derived client-side from run status + audition provisionality.
  */
 import { useCallback, useMemo, useState } from 'react'
-import { api } from '../api/client'
-import type { ProgressDelta, SelectionSource } from '../api/types'
+import { api, DEFAULT_RULE } from '../api/client'
+import type {
+  ProgressDelta,
+  SelectionSource,
+  SelectionState,
+} from '../api/types'
+import { isEmpty } from '../api/types'
+import { rankLeaderboard, type LeaderboardEntry } from '../api/transforms'
 import { useAsync } from '../hooks/useAsync'
 import { useRunStream } from '../hooks/useRunStream'
 import { SummaryStrip } from '../components/SummaryStrip'
@@ -34,11 +46,14 @@ export function RunDetail({ runId }: { runId: string }) {
   const summary = useAsync(() => api.summary(runId), [runId])
   const progress = useAsync(() => api.progress(runId), [runId])
   const derivation = useAsync(() => api.derivation(runId), [runId])
-  const audition = useAsync(() => api.audition(runId), [runId])
+  const audition = useAsync(() => api.audition(runId, undefined, undefined, DEFAULT_RULE), [runId])
   const leaderboard = useAsync(() => api.leaderboard(runId), [runId])
   const evaluations = useAsync(() => api.evaluations(runId), [runId])
   const sourcePins = useAsync(() => api.sourcePins(runId), [runId])
-  const selectedModel = useAsync(() => api.selectedModel(runId), [runId])
+  const selectedModel = useAsync(
+    () => api.selectedModel(runId, undefined, undefined, DEFAULT_RULE),
+    [runId],
+  )
 
   /* ---- selection state machine ---- */
   // Only the user's *choices* are stored: the source segment, and the concrete
@@ -55,13 +70,14 @@ export function RunDetail({ runId }: { runId: string }) {
     setSelection({ source: 'manual', manualModelId: modelId })
   }, [])
 
-  const sm = selectedModel.data
+  // selected-model may be the empty envelope (no evaluated models yet).
+  const sm = selectedModel.data && !isEmpty(selectedModel.data) ? selectedModel.data : undefined
   const activeModelId =
     selection.source === 'manual'
       ? selection.manualModelId
       : selection.source === 'leaderboard'
         ? (sm?.leaderboard_model ?? undefined)
-        : (sm?.audition_model_id ?? undefined)
+        : (sm?.audition_model ?? undefined)
 
   /* ---- model-scoped reads (depend on the selected model) ---- */
   const bias = useAsync(
@@ -77,18 +93,39 @@ export function RunDetail({ runId }: { runId: string }) {
     [activeModelId],
   )
 
-  /* ---- active model label (for the bar + model-scoped cards) ---- */
-  const activeLabel = useMemo(() => {
-    const fromDetail = modelDetail.data?.label
-    if (fromDetail) return fromDetail
-    const lbRow = leaderboard.data?.rows.find((r) => r.model_id === activeModelId)
-    if (lbRow) return lbRow.label
-    if (sm && selection.source === 'leaderboard') return sm.leaderboard_label ?? '—'
-    if (sm) return sm.audition_label ?? '—'
-    return '—'
-  }, [modelDetail.data, leaderboard.data, activeModelId, sm, selection.source])
+  /* ---- leaderboard reshape (rows → ranked entries) used for labels ---- */
+  const lbEntries: LeaderboardEntry[] = useMemo(
+    () => (leaderboard.data ? rankLeaderboard(leaderboard.data) : []),
+    [leaderboard.data],
+  )
+  const lbById = useMemo(() => {
+    const m = new Map<number, LeaderboardEntry>()
+    for (const e of lbEntries) m.set(e.model_id, e)
+    return m
+  }, [lbEntries])
 
-  const live = summary.data?.summary.status === 'building'
+  /* ---- model labels (the API gives only ids; resolve from the leaderboard) ---- */
+  const labelFor = useCallback(
+    (modelId: number | null | undefined): string | null => {
+      if (modelId == null) return null
+      return lbById.get(modelId)?.label ?? `model ${modelId}`
+    },
+    [lbById],
+  )
+  const auditionLabel = labelFor(sm?.audition_model)
+  const leaderboardLabel = labelFor(sm?.leaderboard_model)
+  const activeLabel = labelFor(activeModelId) ?? '—'
+
+  /* ---- run-state (pending → provisional → final), derived client-side ---- */
+  const runStatus = summary.data?.summary.status
+  const auditionProvisional = audition.data && !isEmpty(audition.data) ? audition.data.provisional : true
+  const state: SelectionState = useMemo(() => {
+    if (!activeModelId) return 'pending'
+    if (runStatus === 'completed') return 'final'
+    return auditionProvisional ? 'provisional' : 'final'
+  }, [activeModelId, runStatus, auditionProvisional])
+
+  const live = runStatus === 'building' || runStatus === 'started'
 
   /* ---- SSE: re-fetch affected panels on each delta (spec §4/§6) ----
    * Plain function (re-created each render); useRunStream reads the latest via a
@@ -120,6 +157,8 @@ export function RunDetail({ runId }: { runId: string }) {
     )
   }
 
+  const auditionPickGroup = sm?.audition_group ?? null
+
   return (
     <main className="detail">
       {summary.data ? (
@@ -141,7 +180,10 @@ export function RunDetail({ runId }: { runId: string }) {
         selected={selectedModel.data}
         source={selection.source}
         activeLabel={activeLabel}
-        manualAvailable={!!leaderboard.data?.rows.length}
+        auditionLabel={auditionLabel}
+        leaderboardLabel={leaderboardLabel}
+        state={state}
+        manualAvailable={lbEntries.length > 0}
         onSourceChange={onSourceChange}
       />
 
@@ -152,6 +194,7 @@ export function RunDetail({ runId }: { runId: string }) {
             data={leaderboard.data}
             onPick={onManualPick}
             selectedModelId={activeModelId}
+            auditionPickGroup={auditionPickGroup}
           />
         ) : null}
         {evaluations.data ? <MetricOverTimeCard data={evaluations.data} /> : null}
@@ -161,7 +204,7 @@ export function RunDetail({ runId }: { runId: string }) {
         {sourcePins.data ? <SourcePinsCard data={sourcePins.data} /> : null}
       </div>
 
-      {modelDetail.data ? <ModelDetail data={modelDetail.data} /> : null}
+      {modelDetail.data ? <ModelDetail data={modelDetail.data} label={activeLabel} /> : null}
     </main>
   )
 }

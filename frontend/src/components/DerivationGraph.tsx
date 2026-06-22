@@ -16,7 +16,7 @@ const LAYER_X = 200
 const ROW_Y = 56
 
 function nodeClass(n: DerivationNode): string {
-  if (n.cache_hit || n.status === 'cachehit') return 'cachehit'
+  if (n.cache_hit) return 'cachehit'
   switch (n.status) {
     case 'built':
       return 'built'
@@ -27,6 +27,16 @@ function nodeClass(n: DerivationNode): string {
     default:
       return 'todo'
   }
+}
+
+/**
+ * A node label derived from the raw artifact (routes.py returns no label field):
+ * the kind, a short artifact id, plus a marker for cache-hit / status.
+ */
+function nodeLabel(n: DerivationNode): string {
+  const shortId = n.artifact_id.length > 10 ? n.artifact_id.slice(0, 10) : n.artifact_id
+  const marker = n.cache_hit ? ' ⟲ cache' : n.status === 'building' ? ' ◐' : ''
+  return `${n.kind}\n${shortId}${marker}`
 }
 
 /** Longest-path layering: a node's layer = 1 + max(parent layers). */
@@ -70,12 +80,13 @@ export function DerivationGraph({ data }: { data: DerivationResponse }) {
       return {
         id: n.artifact_id,
         position: { x: layer * LAYER_X, y: row * ROW_Y },
-        data: { label: n.label },
+        data: { label: nodeLabel(n) },
         className: `flownode ${nodeClass(n)}`,
         draggable: false,
         connectable: false,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
+        style: { whiteSpace: 'pre-line' as const },
       }
     })
 

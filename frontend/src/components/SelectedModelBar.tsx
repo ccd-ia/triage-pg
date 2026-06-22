@@ -5,11 +5,14 @@
  * ≠ the audition pick. Default = audition pick; run-state fallback
  * pending → provisional → final.
  *
- * `audition`/`leaderboard` segments set the source from /selected-model;
- * `manual` is client state set by clicking a Leaderboard row (handled by the
- * parent). The bar is presentational over the lifted selection state.
+ * Reconciled to routes.py: GET /selected-model returns {metric, parameter,
+ * rule, audition_group, audition_model, leaderboard_group, leaderboard_model,
+ * diverges} OR the empty envelope — bigint ids, NO human labels and NO `state`.
+ * The provenance label (audition|leaderboard|manual) is SPA client state; the
+ * run-state and the human model labels are resolved by the parent and passed in.
  */
 import type { SelectedModelResponse, SelectionSource, SelectionState } from '../api/types'
+import { isEmpty } from '../api/types'
 
 const STATE_NOTE: Record<SelectionState, string> = {
   pending: 'pending — no evaluated models yet',
@@ -22,6 +25,11 @@ interface Props {
   source: SelectionSource
   /** Human label of the currently active model (resolves manual too). */
   activeLabel: string
+  /** Labels for the audition / leaderboard picks (resolved by the parent). */
+  auditionLabel: string | null
+  leaderboardLabel: string | null
+  /** Client-derived run-state for the strip note. */
+  state: SelectionState
   /** True once at least one model has been evaluated (manual is selectable). */
   manualAvailable: boolean
   onSourceChange: (source: SelectionSource) => void
@@ -31,11 +39,14 @@ export function SelectedModelBar({
   selected,
   source,
   activeLabel,
+  auditionLabel,
+  leaderboardLabel,
+  state,
   manualAvailable,
   onSourceChange,
 }: Props) {
-  const diverges = selected?.diverges ?? false
-  const state: SelectionState = selected?.state ?? 'pending'
+  const data = selected && !isEmpty(selected) ? selected : undefined
+  const diverges = data?.diverges ?? false
 
   return (
     <>
@@ -46,14 +57,14 @@ export function SelectedModelBar({
           from:
           <Seg
             on={source === 'audition'}
-            disabled={!selected?.audition_model_id}
+            disabled={!data?.audition_model}
             onClick={() => onSourceChange('audition')}
           >
             audition
           </Seg>
           <Seg
             on={source === 'leaderboard'}
-            disabled={!selected?.leaderboard_model}
+            disabled={!data?.leaderboard_model}
             onClick={() => onSourceChange('leaderboard')}
           >
             leaderboard
@@ -62,11 +73,10 @@ export function SelectedModelBar({
             manual
           </Seg>
         </span>
-        {diverges && selected ? (
+        {diverges && data ? (
           <span className="diverge">
-            ⚠ leaderboard #1 ({selected.leaderboard_label}
-            {selected.leaderboard_metric ? ` by ${selected.leaderboard_metric}` : ''}) ≠ audition
-            pick ({selected.audition_label}) — click to compare
+            ⚠ leaderboard #1 ({leaderboardLabel ?? `model ${data.leaderboard_model}`}) ≠ audition
+            pick ({auditionLabel ?? `model ${data.audition_model}`}) — click to compare
           </span>
         ) : null}
       </div>

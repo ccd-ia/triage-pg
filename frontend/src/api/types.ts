@@ -1,12 +1,18 @@
 /*
  * Typed API contract for the read dashboard.
  *
- * These types mirror the FIXED JSON contract in docs/read-dashboard-spec.md §5
- * (the HTTP endpoints) over the §3 SQL views/functions. The backend is not yet
- * running; the dev fixture (src/fixtures) produces values of exactly these
- * shapes so the SPA renders standalone. Where a §5 endpoint's JSON shape was
- * not pinned down to the field level by the spec, the chosen shape is noted with
- * an `AMBIGUOUS` comment so it can be reconciled at integration.
+ * These types mirror the ACTUAL FastAPI responses in
+ * src/triage/dashboard/routes.py (the §5 endpoints over the §3 SQL
+ * views/functions of migration 0004). routes.py is the source of truth: the SPA
+ * was first sketched against docs/read-dashboard-spec.md §5, then reconciled to
+ * the shapes the API actually ships. Where the API returns a raw view row (bare
+ * arrays, long-format metrics), the SPA reshapes client-side — those derived
+ * shapes are marked `derived (client-side)`.
+ *
+ * Empty-state contract (routes.py `_empty`, spec §3.7): a panel whose source is
+ * empty returns 200 with `{empty: true, reason, hint}` instead of an empty list,
+ * so the SPA renders the state. Panels that can be empty are typed as
+ * `<Rows> | EmptyState`.
  */
 
 export type ProblemType = 'classification' | 'regression-as-ranking' | 'pure-regression'
@@ -19,74 +25,110 @@ export type StageKind = 'cohort' | 'labels' | 'matrices' | 'models' | 'evaluate'
 /** Selector provenance for the model driving the model-scoped panels (§3.5). */
 export type SelectionSource = 'audition' | 'leaderboard' | 'manual'
 
-/** Run-state of the selected-model bar (§3.5). */
+/** Run-state of the selected-model bar (§3.5), derived client-side from run status. */
 export type SelectionState = 'pending' | 'provisional' | 'final'
+
+/** Empty-state envelope shared by panels whose source may be empty (routes.py `_empty`, §3.7). */
+export interface EmptyState {
+  empty: true
+  reason: string
+  hint: string
+}
+
+/** Narrowing helper for the empty-state envelope. */
+export function isEmpty(x: unknown): x is EmptyState {
+  return typeof x === 'object' && x !== null && (x as { empty?: unknown }).empty === true
+}
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/runs — rail list (triage.runs)                                    */
 /* -------------------------------------------------------------------------- */
 
+/** A row of triage.runs as returned by GET /runs (newest first). */
 export interface RunListItem {
   run_id: string
+  experiment_hash: string | null
+  profile: string | null
+  purpose: string | null
   status: RunStatus
   started_at: string // ISO-8601
-  /** Short human label for the run (e.g. "deep-grid", "one-hot cats"). */
-  label: string
-  /** Headline metric once done, e.g. "auc 0.574"; null while building/failed. */
-  headline_metric: string | null
-  /** Sub-line for in-flight runs, e.g. "matrices 3/8 · eval 3/8"; optional. */
-  progress_line?: string | null
+  finished_at: string | null
+  triage_version: string | null
+  git_hash: string | null
+  batch_job_id: string | null
 }
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/runs/{id}/summary — run_summary + per-split profiles (§3.1/§3.2)   */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * runs.plan denominators + temporal config (jsonb). Shape is open — routes.py
+ * passes runs.plan through verbatim. The SPA reads `n_splits` (planned splits)
+ * and the temporal window/frequency strings when present.
+ */
 export interface TemporalPlan {
-  n_splits: number
-  /** e.g. "6mo"; window/frequency human strings from runs.plan->temporal. */
-  label_timespan?: string
-  history?: string
+  n_splits?: number | null
+  label_timespan?: string | null
+  history?: string | null
+  [key: string]: unknown
 }
 
-export interface SourcePinSummary {
-  source: string
-  pin: string
+/**
+ * runs.experiment_config (jsonb) — the resolved experiment config. cohort/label
+ * NAMES live here (NOT top-level on run_summary); the SPA reads
+ * `cohort_name` / `label_name` from it. Open shape.
+ */
+export interface ExperimentConfig {
+  cohort_name?: string | null
+  label_name?: string | null
+  [key: string]: unknown
 }
 
+/**
+ * triage.run_summary — `select *`, so the column set follows migration 0004's
+ * view. Typed permissively (everything optional/nullable) since routes.py does
+ * not project a fixed list; the fields below are the ones the SPA reads.
+ */
 export interface RunSummary {
   run_id: string
   status: RunStatus
-  profile: string
+  profile?: string | null
+  purpose?: string | null
   started_at: string
-  finished_at: string | null
-  duration: string | null // PG interval rendered as text
-  problem_type: ProblemType
-  experiment_hash: string
-  cohort_name: string | null
-  label_name: string | null
-  temporal: TemporalPlan | null
-  n_features: number | null
-  n_feature_groups: number | null
-  n_model_groups: number | null
-  n_models: number | null
-  estimator_types: string[] | null
-  random_seed: number | null
-  triage_version: string | null
-  git_hash: string | null
-  batch_job_id: string | null
+  finished_at?: string | null
+  duration?: string | null // PG interval rendered as text, when the view exposes it
+  problem_type?: ProblemType | null
+  experiment_hash?: string | null
+  /** Resolved config; cohort_name / label_name live in here (jsonb). */
+  experiment_config?: ExperimentConfig | null
+  /** runs.plan denominators + temporal config (jsonb). */
+  plan?: TemporalPlan | null
+  n_features?: number | null
+  n_feature_groups?: number | null
+  n_model_groups?: number | null
+  n_models?: number | null
+  estimator_types?: string[] | null
+  random_seed?: number | null
+  triage_version?: string | null
+  git_hash?: string | null
+  batch_job_id?: string | null
   /** runs.plan->engine_versions, incl. featurizer (e.g. {"featurizer":"v0.4.1"}). */
-  engine_versions: Record<string, string> | null
+  engine_versions?: Record<string, string> | null
+  // The view may expose more columns; the SPA only reads the ones above.
+  [key: string]: unknown
 }
 
 /** triage.cohort_profile — entities per as_of_date (§3.2). */
 export interface CohortProfilePoint {
+  run_id: string
   as_of_date: string
   n_entities: number
 }
 
 /** triage.label_base_rate — positive rate per as_of_date (§3.2). */
 export interface BaseRatePoint {
+  run_id: string
   as_of_date: string
   label_timespan: string
   base_rate: number | null
@@ -94,33 +136,46 @@ export interface BaseRatePoint {
 }
 
 /**
- * AMBIGUOUS (§5): GET /summary maps to "run_summary + cohort_profile +
- * label_base_rate". The composite envelope (this shape) is chosen so the strip
- * + summary card get one fetch. Reconcile field nesting at integration.
+ * GET /summary — composite of run_summary + cohort_profile + label_base_rate
+ * (routes.py `run_summary`). NOTE the key is `label_base_rate` (not `base_rate`).
  */
 export interface SummaryResponse {
   summary: RunSummary
   cohort_profile: CohortProfilePoint[]
-  base_rate: BaseRatePoint[]
+  label_base_rate: BaseRatePoint[]
 }
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/runs/{id}/progress — run_progress (§3.3)                          */
 /* -------------------------------------------------------------------------- */
 
+/** triage.run_progress — one row per (kind, status) with a count. */
+export interface RunProgressRow {
+  run_id: string
+  kind: string
+  status: string
+  n: number
+}
+
+/**
+ * GET /progress — raw per-(kind,status) counts + the runs.plan denominators
+ * (routes.py `run_progress`). The SPA folds these into per-stage done/current/
+ * todo + N/M client-side (see deriveStages).
+ */
+export interface ProgressResponse {
+  progress: RunProgressRow[]
+  plan: TemporalPlan | null
+}
+
+/** Derived (client-side): one entry per pipeline stage for PipelineGraph. */
 export interface StageProgress {
   kind: StageKind
   status: 'done' | 'current' | 'todo'
   /** Built count and planned denominator (N/M from runs.plan). */
   n: number
   m: number
-  /** Optional headline detail, e.g. "2,140 rows", "23.8% pos". */
+  /** Optional headline detail. */
   detail?: string | null
-}
-
-export interface ProgressResponse {
-  run_id: string
-  stages: StageProgress[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -130,10 +185,10 @@ export interface ProgressResponse {
 export interface DerivationNode {
   artifact_id: string
   kind: string // cohort | labels | feature_group | matrix | model | source | ...
-  status: ArtifactStatus | 'cachehit' | 'todo'
-  label: string
+  status: ArtifactStatus | 'collected' | string
+  built_by_run: string | null
   /** True when used by this run but built by a different run (cache hit, §3.6). */
-  cache_hit?: boolean
+  cache_hit: boolean
 }
 
 export interface DerivationEdge {
@@ -147,195 +202,211 @@ export interface DerivationResponse {
 }
 
 /* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/audition — ranking + curves + pick (§3.4)               */
+/* GET /api/runs/{id}/audition?metric=&parameter=&rule= — ranking+curves+pick */
 /* -------------------------------------------------------------------------- */
 
+/** triage.audition ranking row (one per model_group). */
 export interface AuditionRankRow {
+  run_id: string
+  metric: string
+  parameter: string
   model_group_id: number
-  label: string // human model_group label, e.g. "RF·d3"
+  n_splits_evaluated: number
+  avg_value: number | null
+  stddev_value: number | null
   avg_distance_from_best: number
   max_regret: number
-  n_splits_evaluated: number
-  is_pick: boolean
 }
 
-/** A single model_group's distance-from-best curve across evaluated splits. */
-export interface AuditionCurve {
+/** triage.audition_distances — a model_group's per-split distance row. */
+export interface AuditionCurveRow {
+  run_id: string
   model_group_id: number
-  label: string
-  points: { as_of_date: string; distance_from_best: number }[]
-}
-
-/** Empty-state envelope shared by panels whose source may be empty (§3.7). */
-export interface EmptyState {
-  empty: true
-  reason: string
-  hint: string
+  metric: string
+  parameter: string
+  as_of_date: string
+  raw_value: number | null
+  best_value: number | null
+  dist_from_best_case: number | null
 }
 
 export interface AuditionData {
   empty?: false
-  run_id: string
   metric: string
-  strategy: string
-  provisional: boolean
-  k: number // evaluated splits
-  n: number // planned splits
+  parameter: string
+  rule: string
   ranking: AuditionRankRow[]
-  curves: AuditionCurve[]
+  curves: AuditionCurveRow[]
+  /** model_group_id of the rule's pick (audition_pick), or null. */
+  pick: number | null
+  k: number // evaluated splits
+  n: number | null // planned splits (runs.plan->n_splits), may be null
+  provisional: boolean
 }
 
 export type AuditionResponse = AuditionData | EmptyState
 
 /* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/bias — bias_metrics | empty (§3.7)                      */
+/* GET /api/runs/{id}/bias?model_id= — bias_metrics (long format) | empty     */
 /* -------------------------------------------------------------------------- */
 
-export interface BiasRow {
-  group_attribute: string // e.g. "facility_type"
-  group_value: string // e.g. "restaurant"
-  tpr: number
-  fpr: number
-  ppv: number
-  n: number
-  /** Optional flagged disparity vs reference group, e.g. 0.12. */
-  disparity?: number | null
-}
-
-export interface BiasData {
-  empty?: false
+/** triage.bias_metrics — long format: one row per (model, attribute, value, metric). */
+export interface BiasMetricRow {
   model_id: number
-  rows: BiasRow[]
+  split_kind: string
+  as_of_date: string
+  parameter: string
+  attribute_name: string
+  attribute_value: string
+  metric: string
+  value: number | null
+  ref_group_value: string | null
+  disparity: number | null
 }
 
-export type BiasResponse = BiasData | EmptyState
+/** GET /bias returns a bare array of long-format rows, OR the empty envelope. */
+export type BiasResponse = BiasMetricRow[] | EmptyState
 
 /* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/leaderboard — triage.leaderboard                        */
+/* GET /api/runs/{id}/leaderboard — triage.leaderboard (bare row array)       */
 /* -------------------------------------------------------------------------- */
 
+/** triage.leaderboard — one row per (model, metric, parameter, as_of_date). */
 export interface LeaderboardRow {
-  model_id: number
-  model_group_id: number
-  label: string // human model label, e.g. "RF·d3·n10"
-  /** Metric -> value; UI reads p@10%, p@100, auc, ap when present. */
-  metrics: Record<string, number>
-  /** True for the audition pick; "← #1 by X" rendered from rank_metric. */
-  is_audition_pick?: boolean
-  /** When this row is leaderboard #1 by a metric, the metric name. */
-  rank_metric?: string | null
-}
-
-export interface LeaderboardResponse {
   run_id: string
-  rows: LeaderboardRow[]
-}
-
-/* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/evaluations?metric= — metric-over-time                  */
-/* -------------------------------------------------------------------------- */
-
-export interface MetricSeriesPoint {
+  model_group_id: number
+  model_type: string | null
+  split_kind: string
+  metric: string
+  parameter: string
   as_of_date: string
   value: number | null
-}
-
-export interface MetricSeries {
-  metric: string
-  points: MetricSeriesPoint[]
-}
-
-/**
- * AMBIGUOUS (§5): GET /evaluations?metric= returns "metric-over-time". The
- * card overlays two series (e.g. p@10% + auc), so the response carries a list
- * of series. If the backend keys by a single metric per call, the SPA will
- * fan out one call per series. Reconcile at integration.
- */
-export interface EvaluationsResponse {
-  run_id: string
-  series: MetricSeries[]
-}
-
-/* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/predictions?model_id=&k= — top-k prediction_ranks       */
-/* -------------------------------------------------------------------------- */
-
-export interface PredictionRow {
-  rank: number
-  entity_id: string
-  /** Optional display attribute, e.g. facility_type. */
-  attribute?: string | null
-  score: number
-}
-
-export interface PredictionsData {
-  empty?: false
+  value_expected: number | null
+  value_std: number | null
   model_id: number
-  rows: PredictionRow[]
+  train_end_time: string | null
 }
 
-export type PredictionsResponse = PredictionsData | EmptyState
+/** GET /leaderboard returns a bare array (may be empty until the matview is REFRESHed). */
+export type LeaderboardResponse = LeaderboardRow[]
 
 /* -------------------------------------------------------------------------- */
-/* GET /api/runs/{id}/source-pins — current_source_pins                       */
+/* GET /api/runs/{id}/evaluations?metric= — raw test-split evaluations        */
 /* -------------------------------------------------------------------------- */
 
-export interface SourcePinRow {
-  source: string
-  pin: string
-  rows: number | null
-  drift: string // "stable" | "pinned" | ...
-}
-
-export interface SourcePinsResponse {
+/** triage.evaluations (test split, run-scoped) — one row per model/metric/split. */
+export interface EvaluationRow {
   run_id: string
-  pins: SourcePinRow[]
+  model_id: number
+  model_group_id: number
+  split_kind: string
+  as_of_date: string
+  metric: string
+  parameter: string
+  value: number | null
+  num_labeled: number | null
+  num_positive: number | null
+}
+
+/** GET /evaluations returns a bare array; the SPA builds overlay series client-side. */
+export type EvaluationsResponse = EvaluationRow[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/runs/{id}/predictions?model_id=&k= — prediction_ranks | empty     */
+/* -------------------------------------------------------------------------- */
+
+/** triage.prediction_ranks — one scored entity. */
+export interface PredictionRankRow {
+  model_id: number
+  entity_id: string | number
+  as_of_date: string
+  split_kind: string
+  score: number
+  scored_at: string
+  rank_abs: number
+  rank_pct: number | null
+}
+
+/** GET /predictions returns a bare array of ranked rows, OR the empty envelope. */
+export type PredictionsResponse = PredictionRankRow[] | EmptyState
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/runs/{id}/source-pins — run pins + registry head (drift)          */
+/* -------------------------------------------------------------------------- */
+
+/** triage.run_source_pins — a pin frozen at this run's plan time. */
+export interface RunSourcePin {
+  run_id: string
+  source_name: string
+  version_label: string | null
+  fingerprint: string | null
+}
+
+/** triage.current_source_pins — the registry's current head per source. */
+export interface CurrentSourcePin {
+  source_name: string
+  version_label: string | null
+  registered_at: string | null
+  fingerprint: string | null
+}
+
+/** GET /source-pins — the run's frozen pins + the registry's current head. */
+export interface SourcePinsResponse {
+  run_pins: RunSourcePin[]
+  current: CurrentSourcePin[]
 }
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/runs/{id}/selected-model — selected_model (§3.5)                  */
 /* -------------------------------------------------------------------------- */
 
-export interface SelectedModelResponse {
-  run_id: string
+export interface SelectedModelData {
+  empty?: false
   metric: string
-  state: SelectionState
-  /** Audition pick's model_group + its concrete latest-split model_id. */
+  parameter: string
+  rule: string
+  /** Audition pick's model_group + its concrete model (bigint ids; no labels). */
   audition_group: number | null
-  audition_model_id: number | null
-  audition_label: string | null
+  audition_model: number | null
   /** Leaderboard #1 model + its group. */
-  leaderboard_model: number | null
   leaderboard_group: number | null
-  leaderboard_label: string | null
-  /** Metric leaderboard #1 ranks by, for the divergence message. */
-  leaderboard_metric: string | null
+  leaderboard_model: number | null
   diverges: boolean
 }
+
+export type SelectedModelResponse = SelectedModelData | EmptyState
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/models/{model_id} — feature_importances + per-split evals          */
 /* -------------------------------------------------------------------------- */
 
+/** triage.feature_importances — one feature's importance for a model. */
 export interface FeatureImportanceRow {
+  model_id: number
   feature: string
-  importance: number
+  feature_importance: number
+  rank_abs: number | null
+  rank_pct: number | null
 }
 
-export interface SplitEvalRow {
+/** triage.evaluations row for a single model (long format, all splits). */
+export interface ModelEvaluationRow {
+  model_id: number
+  split_kind: string
   as_of_date: string
-  /** Metric -> value; UI reads p@10% + auc + "n test". null while building. */
-  metrics: Record<string, number | null>
-  n_test: number | null
-  building?: boolean
+  metric: string
+  parameter: string
+  value: number | null
+  value_expected: number | null
+  value_std: number | null
+  num_labeled: number | null
+  num_positive: number | null
 }
 
 export interface ModelDetailResponse {
   model_id: number
-  model_group_id: number
-  label: string
   feature_importances: FeatureImportanceRow[]
-  per_split: SplitEvalRow[]
+  evaluations: ModelEvaluationRow[]
 }
 
 /* -------------------------------------------------------------------------- */
