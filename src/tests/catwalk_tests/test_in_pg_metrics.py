@@ -10,6 +10,7 @@ protected_groups, calls the functions, and asserts the resulting
 sklearn-computed) reference values.
 """
 
+import json
 import math
 
 import pytest
@@ -435,6 +436,101 @@ def test_empty_labeled_set_is_safe(greenfield_engine):
     p = _eval_row(engine, model_id, "precision@", "5_abs")
     assert p["num_labeled"] == 0
     assert p["value"] is None
+
+
+# ----------------------------------------------- live telemetry (read-dashboard §4)
+
+
+def _link_model_to_run(pool, model_id):
+    """Create a run row and point the model's ``run_id`` at it; returns run_id (str).
+
+    ``_seed_model`` leaves ``models.run_id`` null (no run); the evaluation NOTIFY is
+    only emitted when a run owns the model, so wire one up for the emit-path test."""
+    with pool.connection() as conn:
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status) "
+            "values ('exp1', 'local', 'started') returning run_id"
+        ).fetchone()["run_id"]
+        conn.execute(
+            "update triage.models set run_id = %(r)s where model_id = %(m)s",
+            {"r": run_id, "m": model_id},
+        )
+    return str(run_id)
+
+
+def test_evaluate_in_db_emits_evaluation_completed(greenfield_engine):
+    """evaluate_in_db emits evaluation/completed on the run_progress channel for a
+    model owned by a run, on the same COMMIT as the evaluation rows."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+    run_id = _link_model_to_run(engine, model_id)
+
+    listener = engine.getconn()
+    listener.execute("listen run_progress")
+    listener.commit()
+    try:
+        evaluate_in_db(
+            engine,
+            model_id,
+            AS_OF_DATE,
+            LABEL_TIMESPAN,
+            metric_config={"metrics": ["precision@"], "thresholds": ["5_abs"]},
+        )
+        payloads = [
+            json.loads(note.payload)
+            for note in listener.notifies(timeout=5.0, stop_after=1)
+        ]
+    finally:
+        engine.putconn(listener)
+
+    assert payloads == [{"run_id": run_id, "kind": "evaluation", "status": "completed"}]
+
+
+def test_evaluate_in_db_no_run_does_not_emit_or_error(greenfield_engine):
+    """A model with no owning run (run_id null) evaluates fine and emits nothing —
+    the NOTIFY is guarded on a non-null run_id."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)  # leaves models.run_id null
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+
+    listener = engine.getconn()
+    listener.execute("listen run_progress")
+    listener.commit()
+    try:
+        written = evaluate_in_db(
+            engine,
+            model_id,
+            AS_OF_DATE,
+            LABEL_TIMESPAN,
+            metric_config={"metrics": ["precision@"], "thresholds": ["5_abs"]},
+        )
+        payloads = [
+            json.loads(note.payload)
+            for note in listener.notifies(timeout=1.0, stop_after=1)
+        ]
+    finally:
+        engine.putconn(listener)
+
+    assert written == 1  # evaluation still happened
+    assert payloads == []  # but no NOTIFY (no run owns the model)
+
+
+def test_evaluate_in_db_no_listener_is_safe(greenfield_engine):
+    """evaluate_in_db with a run-owned model but NO listener must not error."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+    _link_model_to_run(engine, model_id)
+
+    written = evaluate_in_db(
+        engine,
+        model_id,
+        AS_OF_DATE,
+        LABEL_TIMESPAN,
+        metric_config={"metrics": ["precision@"], "thresholds": ["5_abs"]},
+    )
+    assert written == 1
 
 
 # ------------------------------------------------------------------- migration

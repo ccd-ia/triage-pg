@@ -6,6 +6,7 @@ timechop splits, one cohort + one labels over the union of split dates, per-spli
 matrices, and a grid × split of models scored + evaluated.
 """
 
+import json
 import os
 
 import pytest
@@ -399,3 +400,52 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
     assert (
         n_usage > 0
     )  # the second run recorded usage edges even though everything cache-hit
+
+
+def test_run_experiment_emits_live_progress(db_pool_greenfield, tmp_path):
+    """A full run streams run/started, …/built (cohort, labels, matrix, model),
+    evaluation/completed, and run/completed on the ``run_progress`` channel
+    (read-dashboard-spec §4). A held listener accumulates the NOTIFYs fired on
+    each builder's COMMIT; we drain and assert the expected (kind, status) set."""
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    storage = str(tmp_path / "store")
+    config = _experiment_config()
+
+    listener = engine.getconn()
+    listener.execute("listen run_progress")
+    listener.commit()
+    try:
+        result = run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=storage,
+            random_seed=42,
+        )
+        # Drain generously; the run emits well over a dozen NOTIFYs. Bounded by
+        # timeout so a missing terminal event surfaces as a failure, not a hang.
+        payloads = [
+            json.loads(note.payload)
+            for note in listener.notifies(timeout=10.0, stop_after=200)
+        ]
+    finally:
+        engine.putconn(listener)
+
+    # every payload is the documented contract shape, all for THIS run
+    for p in payloads:
+        assert set(p) == {"run_id", "kind", "status"}
+        assert p["run_id"] == result.run_id
+
+    seen = {(p["kind"], p["status"]) for p in payloads}
+    # run lifecycle: started then completed
+    assert ("run", "started") in seen
+    assert ("run", "completed") in seen
+    # each builder reported 'building' then 'built'
+    for kind in ("cohort", "labels", "feature_group", "matrix", "model"):
+        assert (kind, "building") in seen, kind
+        assert (kind, "built") in seen, kind
+    # evaluation landed
+    assert ("evaluation", "completed") in seen
+    # nothing failed in a clean run
+    assert not any(status == "failed" for _, status in seen)

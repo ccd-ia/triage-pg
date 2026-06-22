@@ -14,6 +14,7 @@ retiring the inherited sklearn ``evaluation.py`` path) is Phase F's adapter pass
 
 import json
 
+from triage.artifacts import _notify_run_progress
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +64,15 @@ def evaluate_in_db(
         metric_config = DEFAULT_CLASSIFICATION_CONFIG
 
     with db_engine.connection() as conn:
+        # The owning run for live telemetry (read-dashboard-spec §4): run_id is not a
+        # parameter here, only model_id, so resolve it from the model row. Nullable
+        # (a model can be seeded without a run), in which case the NOTIFY is skipped.
+        model_row = conn.execute(
+            "select run_id from triage.models where model_id = %(m)s",
+            {"m": model_id},
+        ).fetchone()
+        run_id = model_row["run_id"] if model_row is not None else None
+
         result = conn.execute(
             "select triage.evaluate_model("
             "%(model_id)s, cast(%(split_kind)s as triage.split_kind), "
@@ -78,6 +88,11 @@ def evaluate_in_db(
             },
         )
         written = result.fetchone()["written"]
+        # Emitted after evaluate_model ran, on the same COMMIT, so the dashboard sees
+        # the evaluation only once its rows are durable. No-op if run_id is None.
+        _notify_run_progress(
+            conn, str(run_id) if run_id is not None else None, "evaluation", "completed"
+        )
     logger.debug(
         "in-PG evaluation wrote %s rows for model_id=%s as_of_date=%s",
         written,

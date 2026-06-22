@@ -144,9 +144,15 @@ def build_cohort(
                     + " on conflict do nothing",
                     {"cohort_hash": artifact_id, "as_of_date": as_of_date},
                 )
-        mark_built(db_engine, artifact_id, output_ref=COHORT_OUTPUT_REF)
+        mark_built(
+            db_engine,
+            artifact_id,
+            output_ref=COHORT_OUTPUT_REF,
+            kind=COHORT_KIND,
+            run_id=run_id,
+        )
     except Exception:
-        mark_failed(db_engine, artifact_id)
+        mark_failed(db_engine, artifact_id, kind=COHORT_KIND, run_id=run_id)
         raise
 
     record_use(db_engine, run_id, [artifact_id])

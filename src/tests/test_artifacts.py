@@ -1,5 +1,7 @@
 """Tests for the artifact DAG store (ADR-0013, ADR-0015) on the greenfield schema."""
 
+import json
+
 import pytest
 
 from triage.artifacts import (
@@ -25,6 +27,46 @@ def triage_db(db_url, db_pool):
 def build(pool, derivation, kind, config, parents=(), **kwargs):
     begin_artifact(pool, derivation, kind, config, parents=parents, **kwargs)
     mark_built(pool, derivation.id)
+
+
+def _seed_run(pool):
+    """An experiment + run row so ``built_by_run`` FKs resolve; returns run_id (str)."""
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            " values ('exp-notify', '{}'::jsonb, 'classification')"
+            " on conflict do nothing"
+        )
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status)"
+            " values ('exp-notify', 'local', 'started') returning run_id"
+        ).fetchone()["run_id"]
+    return str(run_id)
+
+
+def listen(pool):
+    """Open a dedicated connection LISTENing on ``run_progress`` (read-dashboard-spec §4).
+
+    The LISTEN must be committed before the producing action so the channel
+    registration is live; the returned connection stays checked out of the pool
+    for the test's lifetime and is drained with :func:`collect_notifies`.
+    """
+    conn = pool.getconn()
+    conn.execute("listen run_progress")
+    conn.commit()
+    return conn
+
+
+def collect_notifies(conn, *, expected, timeout=5.0):
+    """Drain at least ``expected`` ``run_progress`` payloads as parsed dicts.
+
+    Bounded poll (psycopg3 ``notifies(timeout=, stop_after=)``) so a missing
+    NOTIFY fails as a timeout, never an indefinite hang.
+    """
+    return [
+        json.loads(note.payload)
+        for note in conn.notifies(timeout=timeout, stop_after=expected)
+    ]
 
 
 def test_begin_then_built_then_cache_hit(triage_db):
@@ -238,3 +280,104 @@ def test_unknown_cache_policy_fails_fast(triage_db):
     derivation = derive("cohort", {"q": 1}, source_pins={"events": "v1"})
     with pytest.raises(ValueError, match="policy"):
         cache_hit(triage_db, derivation, policy="yolo")
+
+
+# ---- live telemetry: pg_notify('run_progress') (read-dashboard-spec §4) ------
+
+
+def test_begin_artifact_emits_building(triage_db):
+    run_id = _seed_run(triage_db)
+    listener = listen(triage_db)
+    try:
+        derivation = derive("cohort", {"q": "c"}, source_pins={"events": "v1"})
+        begin_artifact(
+            triage_db,
+            derivation,
+            "cohort",
+            {"q": "c"},
+            source_pins={"events": "v1"},
+            run_id=run_id,
+        )
+        payloads = collect_notifies(listener, expected=1)
+    finally:
+        triage_db.putconn(listener)
+
+    assert payloads == [{"run_id": run_id, "kind": "cohort", "status": "building"}]
+
+
+def test_mark_built_emits_built_with_kind_and_run_id(triage_db):
+    run_id = _seed_run(triage_db)
+    listener = listen(triage_db)
+    try:
+        derivation = derive("model", {"c": "DT"}, source_pins={"events": "v1"})
+        begin_artifact(
+            triage_db,
+            derivation,
+            "model",
+            {"c": "DT"},
+            source_pins={"events": "v1"},
+            run_id=run_id,
+        )
+        mark_built(triage_db, derivation.id, kind="model", run_id=run_id)
+        # begin -> 'building', mark_built -> 'built'
+        payloads = collect_notifies(listener, expected=2)
+    finally:
+        triage_db.putconn(listener)
+
+    assert {"run_id": run_id, "kind": "model", "status": "building"} in payloads
+    assert {"run_id": run_id, "kind": "model", "status": "built"} in payloads
+
+
+def test_mark_failed_emits_failed_with_kind_and_run_id(triage_db):
+    run_id = _seed_run(triage_db)
+    derivation = derive("matrix", {"split": "train"}, source_pins={"events": "v1"})
+    begin_artifact(
+        triage_db,
+        derivation,
+        "matrix",
+        {"split": "train"},
+        source_pins={"events": "v1"},
+        run_id=run_id,
+    )
+    listener = listen(triage_db)
+    try:
+        mark_failed(triage_db, derivation.id, kind="matrix", run_id=run_id)
+        payloads = collect_notifies(listener, expected=1)
+    finally:
+        triage_db.putconn(listener)
+
+    assert payloads == [{"run_id": run_id, "kind": "matrix", "status": "failed"}]
+
+
+def test_no_emit_without_run_id_or_kind(triage_db):
+    """begin/mark with no run_id (or mark_built without kind) must not error and
+    must emit nothing — the headless-safe, backward-compatible path."""
+    listener = listen(triage_db)
+    try:
+        derivation = derive("cohort", {"q": "c"}, source_pins={"events": "v1"})
+        # run_id=None on begin -> no NOTIFY
+        begin_artifact(triage_db, derivation, "cohort", {"q": "c"})
+        # mark_built without kind/run_id -> no NOTIFY (backward compatible)
+        mark_built(triage_db, derivation.id)
+        payloads = collect_notifies(listener, expected=1, timeout=1.0)
+    finally:
+        triage_db.putconn(listener)
+
+    assert payloads == []  # timed out with nothing — no error, no emit
+
+
+def test_notify_is_a_no_op_without_listener(triage_db):
+    """A NOTIFY with no listener must not error — the headless core runs unchanged."""
+    run_id = _seed_run(triage_db)
+    derivation = derive("labels", {"q": "l"}, source_pins={"events": "v1"})
+    # nobody is LISTENing; these must complete cleanly
+    begin_artifact(
+        triage_db,
+        derivation,
+        "labels",
+        {"q": "l"},
+        source_pins={"events": "v1"},
+        run_id=run_id,
+    )
+    mark_built(triage_db, derivation.id, kind="labels", run_id=run_id)
+    assert get_artifact(triage_db, derivation.id)["status"] == "built"

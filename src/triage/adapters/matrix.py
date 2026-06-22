@@ -684,7 +684,11 @@ def build_matrix(
         )
         if not fg_built:
             mark_built(
-                db_engine, fg_derivation.id, output_ref="featurizer:feature_group"
+                db_engine,
+                fg_derivation.id,
+                output_ref="featurizer:feature_group",
+                kind=FEATURE_GROUP_KIND,
+                run_id=run_id,
             )
         _insert_matrix_row(
             db_engine,
@@ -695,11 +699,19 @@ def build_matrix(
             lookback=lookback,
             run_id=run_id,
         )
-        mark_built(db_engine, matrix_derivation.id, output_ref=result.storage_uri)
+        mark_built(
+            db_engine,
+            matrix_derivation.id,
+            output_ref=result.storage_uri,
+            kind=MATRIX_KIND,
+            run_id=run_id,
+        )
     except Exception:
-        mark_failed(db_engine, matrix_derivation.id)
+        mark_failed(db_engine, matrix_derivation.id, kind=MATRIX_KIND, run_id=run_id)
         if not fg_built:
-            mark_failed(db_engine, fg_derivation.id)
+            mark_failed(
+                db_engine, fg_derivation.id, kind=FEATURE_GROUP_KIND, run_id=run_id
+            )
         raise
 
     record_use(db_engine, run_id, [fg_derivation.id, matrix_derivation.id])

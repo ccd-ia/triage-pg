@@ -15,19 +15,53 @@ Implements ADR-0013/ADR-0015 (see docs/derivation-dag.md §2, §4). Build flow:
 
 Volatile derivations (unpinned sources, ADR-0014) are recorded like any other
 artifact — provenance still matters — but :func:`cache_hit` never returns them.
+
+Live telemetry (read-dashboard-spec §4)
+---------------------------------------
+Each artifact/run/evaluation status transition emits a Postgres ``NOTIFY`` on
+the ``run_progress`` channel so a dashboard SSE backend can stream live
+progress. The payload is JSON::
+
+    {"run_id": <uuid str>, "kind": <str>, "status": <str>}
+
+with ``kind`` ∈ {cohort, labels, feature_group, matrix, model, evaluation, run}
+and ``status`` ∈ {building, built, failed, completed, started}. The NOTIFY is
+emitted inside the same ``with pool.connection()`` block as the DML it reports,
+so it fires on that same COMMIT (psycopg_pool commits on clean block exit). A
+NOTIFY with no listener is a no-op, so this is headless-safe — the headless core
+(ADR-0012) runs unchanged whether or not a dashboard is listening. Emission is
+skipped when ``run_id`` is None (provenance-only operations carry no run).
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from triage.derivation import Derivation, canonical_json
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _notify_run_progress(
+    conn: Connection, run_id: str | None, kind: str, status: str
+) -> None:
+    """Emit a ``run_progress`` NOTIFY on ``conn`` (read-dashboard-spec §4).
+
+    No-op when ``run_id`` is None (a provenance-only operation has no run to
+    report against). Fires on the COMMIT of the block that owns ``conn``; a
+    NOTIFY with no listener is a no-op, so this is headless-safe.
+    """
+    if run_id is None:
+        return
+    payload = json.dumps({"run_id": run_id, "kind": kind, "status": status})
+    conn.execute("select pg_notify('run_progress', %(p)s)", {"p": payload})
+
 
 # A feature_group consumed inline as Arrow (the current featurizer→matrix seam,
 # ADR-0008) has no materialized output of its own — its columns land in the
@@ -143,6 +177,9 @@ def begin_artifact(
                 "run_id": run_id,
             },
         ).fetchone()
+        # Live telemetry (read-dashboard-spec §4): this artifact has just entered
+        # 'building'. Emitted on the same COMMIT as the INSERT; no-op if run_id is None.
+        _notify_run_progress(conn, run_id, kind, "building")
         for parent_id in parents:
             conn.execute(
                 """
@@ -155,8 +192,16 @@ def begin_artifact(
 
 
 def mark_built(
-    pool: ConnectionPool, artifact_id: str, output_ref: str | None = None
+    pool: ConnectionPool,
+    artifact_id: str,
+    output_ref: str | None = None,
+    kind: str | None = None,
+    run_id: str | None = None,
 ) -> None:
+    """Mark an artifact 'built'. When both ``kind`` and ``run_id`` are supplied,
+    also emit a ``run_progress`` NOTIFY (status='built') on the same COMMIT
+    (read-dashboard-spec §4). Callers that omit them stay no-emit (backward
+    compatible)."""
     with pool.connection() as conn:
         updated = conn.execute(
             """
@@ -167,6 +212,8 @@ def mark_built(
                 """,
             {"id": artifact_id, "output_ref": output_ref},
         ).rowcount
+        if updated == 1 and kind is not None and run_id is not None:
+            _notify_run_progress(conn, run_id, kind, "built")
     if updated != 1:
         raise ValueError(
             f"Cannot mark artifact {artifact_id!r} as built: no such artifact"
@@ -174,12 +221,23 @@ def mark_built(
         )
 
 
-def mark_failed(pool: ConnectionPool, artifact_id: str) -> None:
+def mark_failed(
+    pool: ConnectionPool,
+    artifact_id: str,
+    kind: str | None = None,
+    run_id: str | None = None,
+) -> None:
+    """Mark an artifact 'failed'. When both ``kind`` and ``run_id`` are supplied,
+    also emit a ``run_progress`` NOTIFY (status='failed') on the same COMMIT
+    (read-dashboard-spec §4). Callers that omit them stay no-emit (backward
+    compatible)."""
     with pool.connection() as conn:
         updated = conn.execute(
             "update triage.artifacts set status = 'failed' where artifact_id = %(id)s",
             {"id": artifact_id},
         ).rowcount
+        if updated == 1 and kind is not None and run_id is not None:
+            _notify_run_progress(conn, run_id, kind, "failed")
     if updated != 1:
         raise ValueError(
             f"Cannot mark artifact {artifact_id!r} as failed: no such artifact"

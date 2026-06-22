@@ -201,9 +201,15 @@ def build_labels(
                             "label_timespan": label_timespan,
                         },
                     )
-        mark_built(db_engine, artifact_id, output_ref=LABELS_OUTPUT_REF)
+        mark_built(
+            db_engine,
+            artifact_id,
+            output_ref=LABELS_OUTPUT_REF,
+            kind=LABELS_KIND,
+            run_id=run_id,
+        )
     except Exception:
-        mark_failed(db_engine, artifact_id)
+        mark_failed(db_engine, artifact_id, kind=LABELS_KIND, run_id=run_id)
         raise
 
     record_use(db_engine, run_id, [artifact_id])

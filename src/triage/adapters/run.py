@@ -58,6 +58,7 @@ from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.temporal import TemporalConfig
+from triage.artifacts import _notify_run_progress
 from triage.component.timechop import Timechop
 from triage.derivation import canonical_json, engine_versions_for
 from triage.logging import get_logger
@@ -261,6 +262,9 @@ def _create_experiment_and_run(
             + " values (%(h)s, %(profile)s, 'started', %(seed)s) returning run_id",
             {"h": exp_hash, "profile": profile, "seed": random_seed},
         ).fetchone()["run_id"]
+        # Live telemetry (read-dashboard-spec §4): the run has started. Emitted on
+        # the same COMMIT as the runs INSERT.
+        _notify_run_progress(conn, str(run_id), "run", "started")
     logger.info(
         f"Experiment {exp_hash[:12]}… ({problem_type}); started run {str(run_id)[:8]}…"
     )
@@ -296,6 +300,9 @@ def _mark_run(
             + " where run_id = %(run_id)s",
             {"status": status, "error": error, "run_id": run_id},
         )
+        # Live telemetry (read-dashboard-spec §4): the run reached its terminal
+        # status ('completed' | 'failed'). Emitted on the same COMMIT as the UPDATE.
+        _notify_run_progress(conn, run_id, "run", status)
 
 
 def _record_run_plan(
