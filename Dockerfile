@@ -110,3 +110,44 @@ RUN --mount=type=ssh,uid=1000,gid=1000 \
 #   docker run --rm triage-pg:dev triage --help   -> CLI help (overrides CMD)
 #   docker run --rm -it triage-pg:dev              -> shell
 CMD ["/bin/bash"]
+
+# ---------------------------------------------------------------------------
+# frontend-build — compile the React + Vite SPA (frontend/) to static assets.
+# ---------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS frontend-build
+
+WORKDIR /frontend
+# Lockfile first so `npm ci` layer-caches across source-only edits.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build      # -> /frontend/dist
+
+# ---------------------------------------------------------------------------
+# dashboard — read-only dashboard runtime: base + the `dashboard` extra
+# (fastapi/uvicorn) + the built SPA bundle, served by uvicorn (ADR-0012/0021).
+# Build:  DOCKER_BUILDKIT=1 docker build --ssh default --target dashboard -t triage-pg:dashboard .
+# Run:    docker run --rm -p 8000:8000 -e PGHOST=… -e PGPORT=… -e PGUSER=… \
+#                -e PGPASSWORD=… -e PGDATABASE=… triage-pg:dashboard
+# ---------------------------------------------------------------------------
+FROM base AS dashboard
+
+LABEL triage.stage="dashboard"
+
+USER triage
+WORKDIR /opt/triage
+
+# Add the web deps on top of base's runtime closure (featurizer already installed; the ssh
+# mount only covers a possible git re-resolution). fastapi/uvicorn/httpx are PyPI.
+RUN --mount=type=ssh,uid=1000,gid=1000 \
+    uv sync --frozen --no-dev --no-editable --extra dashboard
+
+# Drop the Vite bundle at a fixed path and point the app at it via TRIAGE_DASHBOARD_STATIC,
+# so static serving does not depend on the (--no-editable) package install layout.
+COPY --from=frontend-build --chown=triage:triage /frontend/dist /opt/triage/dashboard-static
+ENV TRIAGE_DASHBOARD_STATIC=/opt/triage/dashboard-static
+
+EXPOSE 8000
+# Project DB comes from PG*/DATABASE_URL at runtime (never baked into the image).
+# No ENTRYPOINT (base): override the CMD to get a shell/triage CLI if needed.
+CMD ["uvicorn", "triage.dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]

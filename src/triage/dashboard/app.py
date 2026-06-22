@@ -12,6 +12,7 @@ connection, separate from the request pool — see :mod:`triage.dashboard.routes
 
 from __future__ import annotations
 
+import os
 import pathlib
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -27,8 +28,13 @@ from triage.util.db import connection_pool
 
 logger = get_logger(__name__)
 
-# Placeholder static dir; the Vite-built SPA bundle is dropped here at integration (spec §6).
-_STATIC_DIR = pathlib.Path(__file__).parent / "static"
+# Static dir for the built SPA bundle. Defaults to the packaged static/ dir; override with
+# TRIAGE_DASHBOARD_STATIC (the Docker dashboard image + the native preview point it at the
+# Vite build output, spec §6).
+_STATIC_DIR = pathlib.Path(
+    os.environ.get("TRIAGE_DASHBOARD_STATIC")
+    or (pathlib.Path(__file__).parent / "static")
+)
 
 
 def _open_project_pool() -> ConnectionPool:
