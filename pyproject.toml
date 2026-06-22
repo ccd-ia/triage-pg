@@ -80,6 +80,14 @@ dev = [
 test = [
   "triage[dev]",
 ]
+# Read-dashboard JSON API + SSE (read-dashboard-spec §5; ADR-0012/0021). The API is
+# a thin FastAPI app over the in-PG views; SSE uses FastAPI's native StreamingResponse
+# (no extra SSE dep). httpx drives the TestClient in the contract tests.
+dashboard = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "httpx>=0.27",
+]
 docs = [
   "mkdocs==1.6.1",
   "pymdown-extensions==10.8",
