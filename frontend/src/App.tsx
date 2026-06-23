@@ -1,7 +1,17 @@
 /*
- * App shell — header + run rail + routed detail (spec §1, §6 routes).
- * Routes: `/` (rail + most-recent run) and `/runs/:id` (detail). The rail is
- * shared across both; selecting a run navigates to /runs/:id.
+ * App shell (Option 4) — top bar (title + theme toggle) · left GLOBAL nav
+ * (Runs · Experiments · Ontology · Triage-status · Derivation) · routed content.
+ *
+ * Routing model (rework plan):
+ *   /experiments            — experiment index (landing)
+ *   /experiments/:hash      — the experiment detail (analysis is experiment-scoped)
+ *   /runs                   — run rail (monitoring), newest run resolves to its experiment
+ *   /runs/:id               — resolve the run's experiment_hash → redirect to
+ *                             /experiments/:hash?run=:id (run anchors the monitoring panels)
+ *   /ontology · /status · /derivation — project-level views
+ *
+ * The run rail stays primary for monitoring; clicking a run lands on its
+ * experiment with that run anchoring Pipeline/Derivation.
  */
 import {
   BrowserRouter,
@@ -13,112 +23,171 @@ import {
 } from 'react-router-dom'
 import { api } from './api/client'
 import { useAsync } from './hooks/useAsync'
+import { GlobalNav } from './components/GlobalNav'
+import { ThemeToggle } from './components/ThemeToggle'
 import { RunRail } from './components/RunRail'
-import { RunDetail } from './pages/RunDetail'
+import { ExperimentsList } from './pages/ExperimentsList'
+import { ExperimentDetail } from './pages/ExperimentDetail'
+import { OntologyView } from './pages/OntologyView'
+import { TriageStatusView } from './pages/TriageStatusView'
+import { ProjectDerivationView } from './pages/ProjectDerivationView'
 
-function Header() {
+function TopBar() {
   return (
-    <header className="top">
-      <h1>
-        triage-pg — Read Dashboard{' '}
-        <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>
-          · v1
-        </span>
-      </h1>
-      <p>
-        Run-centric master/detail + card-grid hybrid. Read-only over the in-PG views (ADR-0012).
-        The Run monitor is tabbed (Pipeline · Derivation · Audition · Bias) and updates live;
-        model-specific panels follow an explicit selected model.
-      </p>
-      <div className="legend">
-        <span className="chip tech">
-          live: <b>pg_notify → SSE</b> + <b>REST poll</b> · ADR-0021
-        </span>
-        <span className="chip">runs / artifacts</span>
-        <span className="chip">leaderboard</span>
-        <span className="chip">evaluations</span>
-        <span className="chip">bias_metrics</span>
-        <span className="chip">prediction_ranks</span>
-        <span className="chip">current_source_pins</span>
-        {api.useFixture ? <span className="chip">fixture data (no backend)</span> : null}
-      </div>
+    <header className="bar">
+      <span className="brand">
+        triage<span className="dot">·</span>pg
+        {api.useFixture ? (
+          <span className="muted" style={{ fontSize: 11, fontWeight: 400, marginLeft: 10 }}>
+            fixture data
+          </span>
+        ) : null}
+      </span>
+      <ThemeToggle />
     </header>
   )
 }
 
-/** Shell with the shared rail; `selectedId` drives the rail highlight + routing. */
-function Shell({ selectedId, children }: { selectedId?: string; children: React.ReactNode }) {
-  const navigate = useNavigate()
-  const runs = useAsync(() => api.listRuns(), [])
-
+/** Shell: top bar + global nav + content slot. `rail` injects an inner rail. */
+function Shell({ rail, children }: { rail?: React.ReactNode; children: React.ReactNode }) {
   return (
     <>
-      <Header />
-      <div className="app">
-        <RunRail
-          runs={runs.data ?? []}
-          selectedId={selectedId}
-          onSelect={(id) => navigate(`/runs/${id}`)}
-        />
-        {children}
+      <TopBar />
+      <div className="layout">
+        <GlobalNav />
+        <div className={`content${rail ? '' : ' norail'}`}>
+          {rail}
+          {children}
+        </div>
       </div>
-      <Footer />
     </>
   )
 }
 
-function Footer() {
-  return (
-    <div className="foot">
-      <b>v1 surface:</b> run-centric hybrid · live = <code>pg_notify→SSE + REST poll</code> ·
-      Run monitor on tabs (Pipeline · Derivation · Audition · Bias) · model-specific panels
-      follow an explicit selected model — default <b>audition</b>, override to
-      leaderboard/manual, with a divergence flag.
-    </div>
-  )
-}
+/* ----------------------------- runs (monitoring) ------------------------- */
 
-/** `/` — redirect to the most-recent run's detail once the rail loads. */
-function Home() {
+/** /runs — the run rail; selecting a run resolves to its experiment. */
+function RunsRoute() {
+  const navigate = useNavigate()
   const runs = useAsync(() => api.listRuns(), [])
-  if (runs.loading) {
-    return (
-      <Shell>
-        <main className="detail">
-          <div className="banner">Loading runs…</div>
-        </main>
-      </Shell>
-    )
-  }
-  const first = runs.data?.[0]
-  if (first) return <Navigate to={`/runs/${first.run_id}`} replace />
   return (
-    <Shell>
-      <main className="detail">
-        <div className="banner">No runs found.</div>
+    <Shell
+      rail={
+        <RunRail
+          runs={runs.data ?? []}
+          selectedId={undefined}
+          onSelect={(id) => navigate(`/runs/${id}`)}
+        />
+      }
+    >
+      <main className="page">
+        <div className="exphead">
+          <h2>Runs</h2>
+          <p className="desc">Pick a run to open its experiment (analysis aggregates all runs of the experiment).</p>
+        </div>
+        {runs.loading ? <div className="banner">Loading runs…</div> : null}
+        {runs.data && runs.data.length === 0 ? <div className="banner">No runs found.</div> : null}
       </main>
     </Shell>
   )
 }
 
-/** `/runs/:id` — the detail view. */
-function RunRoute() {
+/** /runs/:id — resolve experiment_hash via /summary, then redirect. */
+function RunResolve() {
   const { id } = useParams<{ id: string }>()
-  if (!id) return <Navigate to="/" replace />
+  const summary = useAsync(() => (id ? api.summary(id) : Promise.resolve(undefined)), [id])
+  if (!id) return <Navigate to="/runs" replace />
+  if (summary.loading) {
+    return (
+      <Shell>
+        <main className="page">
+          <div className="banner">Resolving run {id.slice(0, 8)}…</div>
+        </main>
+      </Shell>
+    )
+  }
+  const hash = summary.data?.summary.experiment_hash
+  if (hash) return <Navigate to={`/experiments/${hash}?run=${id}`} replace />
   return (
-    <Shell selectedId={id}>
-      <RunDetail runId={id} />
+    <Shell>
+      <main className="page">
+        <div className="banner err">Run {id.slice(0, 8)} has no experiment_hash.</div>
+      </main>
     </Shell>
   )
 }
+
+/* ---------------------------- experiments -------------------------------- */
+
+/** /experiments — index with the experiment rail. */
+function ExperimentsRoute() {
+  const navigate = useNavigate()
+  const exps = useAsync(() => api.listExperiments(), [])
+  return (
+    <Shell rail={<ExperimentRail selectedHash={undefined} onSelect={(h) => navigate(`/experiments/${h}`)} runs={exps} />}>
+      <ExperimentsList />
+    </Shell>
+  )
+}
+
+/** /experiments/:hash — the experiment detail with the experiment rail. */
+function ExperimentRoute() {
+  const { hash } = useParams<{ hash: string }>()
+  const navigate = useNavigate()
+  const exps = useAsync(() => api.listExperiments(), [])
+  if (!hash) return <Navigate to="/experiments" replace />
+  return (
+    <Shell rail={<ExperimentRail selectedHash={hash} onSelect={(h) => navigate(`/experiments/${h}`)} runs={exps} />}>
+      <ExperimentDetail hash={hash} />
+    </Shell>
+  )
+}
+
+/** A small rail listing experiments (left of the experiment pages). */
+function ExperimentRail({
+  selectedHash,
+  onSelect,
+  runs,
+}: {
+  selectedHash: string | undefined
+  onSelect: (hash: string) => void
+  runs: ReturnType<typeof useAsync<import('./api/types').ExperimentSummary[]>>
+}) {
+  return (
+    <aside className="exprail">
+      <h3 className="k">experiments</h3>
+      {(runs.data ?? []).map((e) => (
+        <button
+          key={e.experiment_hash}
+          type="button"
+          className={`ei${e.experiment_hash === selectedHash ? ' sel' : ''}`}
+          onClick={() => onSelect(e.experiment_hash)}
+        >
+          <span className="nm">{e.name ?? e.experiment_hash.slice(0, 12)}</span>
+          <small>
+            {e.n_runs} run{e.n_runs === 1 ? '' : 's'} · {e.last_status ?? '—'}
+          </small>
+        </button>
+      ))}
+    </aside>
+  )
+}
+
+/* -------------------------------- routes --------------------------------- */
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/runs/:id" element={<RunRoute />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<Navigate to="/experiments" replace />} />
+        <Route path="/experiments" element={<ExperimentsRoute />} />
+        <Route path="/experiments/:hash" element={<ExperimentRoute />} />
+        <Route path="/runs" element={<RunsRoute />} />
+        <Route path="/runs/:id" element={<RunResolve />} />
+        <Route path="/ontology" element={<Shell><OntologyView /></Shell>} />
+        <Route path="/status" element={<Shell><TriageStatusView /></Shell>} />
+        <Route path="/derivation" element={<Shell><ProjectDerivationView /></Shell>} />
+        <Route path="*" element={<Navigate to="/experiments" replace />} />
       </Routes>
     </BrowserRouter>
   )

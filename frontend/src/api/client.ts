@@ -9,17 +9,27 @@
  * FastAPI static mount.
  */
 import type {
-  AuditionResponse,
-  BiasResponse,
   DerivationResponse,
-  EvaluationsResponse,
-  LeaderboardResponse,
-  ModelDetailResponse,
-  PredictionsResponse,
+  ExpAuditionResponse,
+  ExpBiasResponse,
+  ExpEvaluationsResponse,
+  ExpLeaderboardResponse,
+  ExpSelectedModelResponse,
+  ExperimentDetailResponse,
+  ExperimentSummary,
+  MetricsResponse,
+  ModelCardResponse,
+  ModelCurveResponse,
+  ModelGroupDetailResponse,
+  ModelGroupsResponse,
+  ModelHistogramResponse,
+  ModelPredictionsResponse,
+  OntologyResponse,
   ProgressResponse,
+  ProjectDerivationResponse,
   RunListItem,
-  SelectedModelResponse,
   SourcePinsResponse,
+  StatusResponse,
   SummaryResponse,
 } from './types'
 import * as fixture from '../fixtures'
@@ -53,8 +63,20 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
+/** Build a `?metric=&parameter=&rule=` query string (omitting empties). */
+function metricQuery(metric?: string, parameter?: string, rule?: string): string {
+  const q = new URLSearchParams()
+  if (metric) q.set('metric', metric)
+  if (parameter !== undefined && parameter !== '') q.set('parameter', parameter)
+  if (rule) q.set('rule', rule)
+  const qs = q.toString()
+  return qs ? `?${qs}` : ''
+}
+
 export const api = {
   useFixture: USE_FIXTURE,
+
+  /* ---------------------------- run-scoped ------------------------------- */
 
   listRuns(): Promise<RunListItem[]> {
     if (USE_FIXTURE) return fake(fixture.runs)
@@ -62,57 +84,18 @@ export const api = {
   },
 
   summary(runId: string): Promise<SummaryResponse> {
-    if (USE_FIXTURE) return fake(fixture.summary)
+    if (USE_FIXTURE) return fake(fixture.summaryFor(runId))
     return get<SummaryResponse>(`/runs/${runId}/summary`)
   },
 
   progress(runId: string): Promise<ProgressResponse> {
-    if (USE_FIXTURE) return fake(fixture.progress)
+    if (USE_FIXTURE) return fake(fixture.progressFor(runId))
     return get<ProgressResponse>(`/runs/${runId}/progress`)
   },
 
   derivation(runId: string): Promise<DerivationResponse> {
-    if (USE_FIXTURE) return fake(fixture.derivation)
+    if (USE_FIXTURE) return fake(fixture.derivationFor(runId))
     return get<DerivationResponse>(`/runs/${runId}/derivation`)
-  },
-
-  audition(
-    runId: string,
-    metric?: string,
-    parameter?: string,
-    rule?: string,
-  ): Promise<AuditionResponse> {
-    if (USE_FIXTURE) return fake(fixture.audition)
-    const q = new URLSearchParams()
-    if (metric) q.set('metric', metric)
-    if (parameter !== undefined) q.set('parameter', parameter)
-    if (rule) q.set('rule', rule)
-    const qs = q.toString()
-    return get<AuditionResponse>(`/runs/${runId}/audition${qs ? `?${qs}` : ''}`)
-  },
-
-  bias(runId: string, modelId?: number): Promise<BiasResponse> {
-    if (USE_FIXTURE) return fake(modelId ? fixture.biasFor(modelId) : fixture.bias)
-    const q = modelId ? `?model_id=${modelId}` : ''
-    return get<BiasResponse>(`/runs/${runId}/bias${q}`)
-  },
-
-  leaderboard(runId: string): Promise<LeaderboardResponse> {
-    if (USE_FIXTURE) return fake(fixture.leaderboard)
-    return get<LeaderboardResponse>(`/runs/${runId}/leaderboard`)
-  },
-
-  evaluations(runId: string, metric?: string): Promise<EvaluationsResponse> {
-    if (USE_FIXTURE) return fake(fixture.evaluations)
-    const q = metric ? `?metric=${encodeURIComponent(metric)}` : ''
-    return get<EvaluationsResponse>(`/runs/${runId}/evaluations${q}`)
-  },
-
-  predictions(runId: string, modelId: number, k?: number): Promise<PredictionsResponse> {
-    if (USE_FIXTURE) return fake(fixture.predictionsFor(modelId))
-    const q = new URLSearchParams({ model_id: String(modelId) })
-    if (k !== undefined) q.set('k', String(k))
-    return get<PredictionsResponse>(`/runs/${runId}/predictions?${q.toString()}`)
   },
 
   sourcePins(runId: string): Promise<SourcePinsResponse> {
@@ -120,28 +103,115 @@ export const api = {
     return get<SourcePinsResponse>(`/runs/${runId}/source-pins`)
   },
 
-  selectedModel(
-    runId: string,
-    metric?: string,
-    parameter?: string,
-    rule?: string,
-  ): Promise<SelectedModelResponse> {
-    if (USE_FIXTURE) return fake(fixture.selectedModel)
-    const q = new URLSearchParams()
-    if (metric) q.set('metric', metric)
-    if (parameter !== undefined) q.set('parameter', parameter)
-    if (rule) q.set('rule', rule)
-    const qs = q.toString()
-    return get<SelectedModelResponse>(`/runs/${runId}/selected-model${qs ? `?${qs}` : ''}`)
-  },
-
-  modelDetail(modelId: number): Promise<ModelDetailResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelDetail(modelId))
-    return get<ModelDetailResponse>(`/models/${modelId}`)
-  },
-
   /** SSE endpoint URL for run_progress deltas (§4). */
   streamUrl(runId: string): string {
     return `${BASE}/runs/${runId}/stream`
+  },
+
+  /* ------------------------- experiment-scoped --------------------------- */
+
+  listExperiments(): Promise<ExperimentSummary[]> {
+    if (USE_FIXTURE) return fake(fixture.experiments)
+    return get<ExperimentSummary[]>('/experiments')
+  },
+
+  experiment(hash: string): Promise<ExperimentDetailResponse> {
+    if (USE_FIXTURE) return fake(fixture.experimentFor(hash))
+    return get<ExperimentDetailResponse>(`/experiments/${hash}`)
+  },
+
+  expAudition(
+    hash: string,
+    metric?: string,
+    parameter?: string,
+    rule?: string,
+  ): Promise<ExpAuditionResponse> {
+    if (USE_FIXTURE) return fake(fixture.expAuditionFor(hash, metric, parameter, rule))
+    return get<ExpAuditionResponse>(`/experiments/${hash}/audition${metricQuery(metric, parameter, rule)}`)
+  },
+
+  expBias(hash: string, modelId?: number): Promise<ExpBiasResponse> {
+    if (USE_FIXTURE) return fake(fixture.expBiasFor(hash, modelId))
+    const q = modelId ? `?model_id=${modelId}` : ''
+    return get<ExpBiasResponse>(`/experiments/${hash}/bias${q}`)
+  },
+
+  expLeaderboard(hash: string): Promise<ExpLeaderboardResponse> {
+    if (USE_FIXTURE) return fake(fixture.expLeaderboardFor(hash))
+    return get<ExpLeaderboardResponse>(`/experiments/${hash}/leaderboard`)
+  },
+
+  expEvaluations(hash: string, metric?: string): Promise<ExpEvaluationsResponse> {
+    if (USE_FIXTURE) return fake(fixture.expEvaluationsFor(hash))
+    const q = metric ? `?metric=${encodeURIComponent(metric)}` : ''
+    return get<ExpEvaluationsResponse>(`/experiments/${hash}/evaluations${q}`)
+  },
+
+  expModelGroups(hash: string): Promise<ModelGroupsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelGroupsFor(hash))
+    return get<ModelGroupsResponse>(`/experiments/${hash}/model-groups`)
+  },
+
+  expSelectedModel(
+    hash: string,
+    metric?: string,
+    parameter?: string,
+    rule?: string,
+  ): Promise<ExpSelectedModelResponse> {
+    if (USE_FIXTURE) return fake(fixture.expSelectedModelFor(hash, metric, parameter, rule))
+    return get<ExpSelectedModelResponse>(
+      `/experiments/${hash}/selected-model${metricQuery(metric, parameter, rule)}`,
+    )
+  },
+
+  ontology(): Promise<OntologyResponse> {
+    if (USE_FIXTURE) return fake(fixture.ontology)
+    return get<OntologyResponse>('/ontology')
+  },
+
+  /* ---------------------------- hierarchy -------------------------------- */
+
+  modelGroup(id: number, metric?: string, parameter?: string): Promise<ModelGroupDetailResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelGroupDetail(id))
+    return get<ModelGroupDetailResponse>(`/model-groups/${id}${metricQuery(metric, parameter)}`)
+  },
+
+  model(id: number): Promise<ModelCardResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCard(id))
+    return get<ModelCardResponse>(`/models/${id}`)
+  },
+
+  modelCurve(id: number): Promise<ModelCurveResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCurve(id))
+    return get<ModelCurveResponse>(`/models/${id}/curve`)
+  },
+
+  modelHistogram(id: number, bins?: number): Promise<ModelHistogramResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelHistogram(id))
+    const q = bins ? `?bins=${bins}` : ''
+    return get<ModelHistogramResponse>(`/models/${id}/histogram${q}`)
+  },
+
+  modelPredictions(id: number, k?: number): Promise<ModelPredictionsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelPredictions(id, k))
+    const q = k !== undefined ? `?k=${k}` : ''
+    return get<ModelPredictionsResponse>(`/models/${id}/predictions${q}`)
+  },
+
+  /* --------------------------- project-level ----------------------------- */
+
+  metrics(): Promise<MetricsResponse> {
+    if (USE_FIXTURE) return fake(fixture.metrics)
+    return get<MetricsResponse>('/metrics')
+  },
+
+  status(): Promise<StatusResponse> {
+    if (USE_FIXTURE) return fake(fixture.status)
+    return get<StatusResponse>('/status')
+  },
+
+  projectDerivation(): Promise<ProjectDerivationResponse> {
+    if (USE_FIXTURE) return fake(fixture.projectDerivation)
+    return get<ProjectDerivationResponse>('/derivation')
   },
 }

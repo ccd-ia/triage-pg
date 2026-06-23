@@ -13,6 +13,8 @@ import type {
   BiasMetricRow,
   CurrentSourcePin,
   EvaluationRow,
+  ExpAuditionCurveRow,
+  ExpEvaluationRow,
   LeaderboardRow,
   ModelEvaluationRow,
   ProgressResponse,
@@ -20,6 +22,7 @@ import type {
   StageKind,
   StageProgress,
   TemporalPlan,
+  ThresholdCurvePoint,
 } from './types'
 
 /* ----------------------------- metric keys ------------------------------- */
@@ -325,4 +328,216 @@ export function groupLabel(model_group_id: number): string {
 /** Is the given ranking row the rule's pick? (compares to AuditionData.pick). */
 export function isAuditionPick(data: AuditionData, model_group_id: number): boolean {
   return data.pick != null && data.pick === model_group_id
+}
+
+/* ------------------------ feature names (Bug B) ------------------------- */
+
+/** A prettified featurizer feature name: a human label + the raw source. */
+export interface PrettyFeature {
+  pretty: string
+  raw: string
+}
+
+/** Turn an ISO-8601 duration (P180D / P1Y / P6M / P2W) into a short label. */
+function prettyInterval(iso: string): string {
+  // PnYnMnD or PnW. Render the first non-zero component compactly.
+  const m = iso.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?$/i)
+  if (!m) return iso
+  const [, y, mo, w, d] = m
+  if (y) return `${y}y`
+  if (mo) return `${mo}mo`
+  if (w) return `${w}w`
+  if (d) return `${d}d`
+  return iso
+}
+
+/**
+ * Prettify a raw featurizer feature string (Bug B). Handles the canonical DFS
+ * shape `AGG(table.column|interval=Pxxx)` →
+ * `table · agg(column) · <interval>`, plus the simpler categorical one-hot
+ * `table.col=value` → `table · col = value`. Anything it does not recognize is
+ * passed through verbatim (so the raw subline always stays truthful).
+ */
+export function prettyFeature(raw: string): PrettyFeature {
+  // AGG(table.column|interval=P180D[,more]) — the DFS primitive shape.
+  const agg = raw.match(/^([A-Za-z_]+)\(([^)|]+)(?:\|([^)]*))?\)$/)
+  if (agg) {
+    const [, fn, target, opts] = agg
+    const parts: string[] = []
+    // target is usually `table.column`; keep both around the agg call.
+    const dot = target.indexOf('.')
+    const table = dot >= 0 ? target.slice(0, dot) : null
+    const column = dot >= 0 ? target.slice(dot + 1) : target
+    if (table) parts.push(table)
+    parts.push(`${fn.toLowerCase()}(${column})`)
+    if (opts) {
+      const interval = opts.match(/interval=([A-Za-z0-9]+)/i)
+      if (interval) parts.push(prettyInterval(interval[1]))
+    }
+    return { pretty: parts.join(' · '), raw }
+  }
+  // Categorical one-hot: table.col=value
+  const cat = raw.match(/^([A-Za-z_]+)\.([A-Za-z0-9_]+)=(.+)$/)
+  if (cat) {
+    const [, table, col, value] = cat
+    return { pretty: `${table} · ${col} = ${value}`, raw }
+  }
+  // table.column (no agg) — light prettify with a middot.
+  const plain = raw.match(/^([A-Za-z_]+)\.([A-Za-z0-9_]+)$/)
+  if (plain) {
+    const [, table, col] = plain
+    return { pretty: `${table} · ${col}`, raw }
+  }
+  return { pretty: raw, raw }
+}
+
+/* -------------------- experiment audition (8 strategies) ----------------- */
+
+/** Distance-from-best curve shaped wide for recharts (one row per as_of_date). */
+export interface ExpCurvePoint {
+  as_of_date: string
+  [groupLabel: string]: number | string | null
+}
+
+/** Fold experiment-scoped audition distances into wide chart rows + group ids. */
+export function expAuditionChart(
+  curves: ExpAuditionCurveRow[],
+): { rows: ExpCurvePoint[]; groups: { id: number; label: string }[] } {
+  const byGroup = new Map<number, Map<string, number | null>>()
+  const allDates = new Set<string>()
+  for (const c of curves) {
+    allDates.add(c.as_of_date)
+    let g = byGroup.get(c.model_group_id)
+    if (!g) {
+      g = new Map()
+      byGroup.set(c.model_group_id, g)
+    }
+    g.set(c.as_of_date, c.dist_from_best_case)
+  }
+  const dates = [...allDates].sort()
+  const groups = [...byGroup.keys()].map((id) => ({ id, label: groupLabel(id) }))
+  const rows: ExpCurvePoint[] = dates.map((d) => {
+    const row: ExpCurvePoint = { as_of_date: d.slice(0, 7) }
+    for (const { id, label } of groups) {
+      row[label] = byGroup.get(id)?.get(d) ?? null
+    }
+    return row
+  })
+  return { rows, groups }
+}
+
+/* ------------------------- model-group grid (Option 3) ------------------- */
+
+export interface GridCell {
+  model_group_id: number
+  as_of_date: string
+  value: number | null
+  /** True when this is the best value in its column (split). */
+  best: boolean
+}
+
+export interface GridData {
+  /** Distinct as_of_date columns, sorted. */
+  dates: string[]
+  /** One row per model_group, with a value per date. */
+  rows: { model_group_id: number; cells: Map<string, GridCell> }[]
+  /** Global min/max across non-null values, for the heat scale. */
+  min: number
+  max: number
+}
+
+/**
+ * Build the Option-3 model-group × split grid from experiment evaluations for a
+ * single (metric, parameter). One row per model_group, one column per
+ * as_of_date; the best value in each column is flagged. `higherIsBetter`
+ * decides which extreme wins a column and anchors the heat scale.
+ */
+export function buildGrid(
+  rows: ExpEvaluationRow[],
+  metric: string,
+  parameter: string,
+  higherIsBetter: boolean,
+): GridData {
+  const dates = new Set<string>()
+  // model_group_id -> as_of_date -> value (latest model in the group wins a cell)
+  const byGroup = new Map<number, Map<string, number>>()
+  let min = Infinity
+  let max = -Infinity
+  for (const r of rows) {
+    if (r.metric !== metric || (r.parameter ?? '') !== parameter) continue
+    if (r.value == null) continue
+    dates.add(r.as_of_date)
+    let g = byGroup.get(r.model_group_id)
+    if (!g) {
+      g = new Map()
+      byGroup.set(r.model_group_id, g)
+    }
+    // Multiple models per group/date can exist; keep the better one.
+    const prev = g.get(r.as_of_date)
+    if (prev === undefined || (higherIsBetter ? r.value > prev : r.value < prev)) {
+      g.set(r.as_of_date, r.value)
+    }
+    if (r.value < min) min = r.value
+    if (r.value > max) max = r.value
+  }
+  const sortedDates = [...dates].sort()
+  // Best per column.
+  const colBest = new Map<string, number>()
+  for (const d of sortedDates) {
+    let best: number | undefined
+    for (const g of byGroup.values()) {
+      const v = g.get(d)
+      if (v === undefined) continue
+      if (best === undefined || (higherIsBetter ? v > best : v < best)) best = v
+    }
+    if (best !== undefined) colBest.set(d, best)
+  }
+  const gridRows = [...byGroup.entries()].map(([gid, byDate]) => {
+    const cells = new Map<string, GridCell>()
+    for (const d of sortedDates) {
+      const v = byDate.get(d) ?? null
+      cells.set(d, {
+        model_group_id: gid,
+        as_of_date: d,
+        value: v,
+        best: v != null && colBest.get(d) === v,
+      })
+    }
+    return { model_group_id: gid, cells }
+  })
+  // Sort rows by their average value (best groups on top).
+  gridRows.sort((a, b) => {
+    const avg = (cells: Map<string, GridCell>) => {
+      const vals = [...cells.values()].map((c) => c.value).filter((v): v is number => v != null)
+      return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : higherIsBetter ? -Infinity : Infinity
+    }
+    return higherIsBetter ? avg(b.cells) - avg(a.cells) : avg(a.cells) - avg(b.cells)
+  })
+  return {
+    dates: sortedDates,
+    rows: gridRows,
+    min: min === Infinity ? 0 : min,
+    max: max === -Infinity ? 1 : max,
+  }
+}
+
+/* ----------------------- Rayid curve (client k-slider) ------------------- */
+
+/**
+ * Pick the curve point at (or just past) a target population fraction `pct`
+ * (0..1). The series is the SQL-computed source of truth (ADR-0012); the slider
+ * is a pure lookup — no recompute. Returns the closest point by |pct - target|.
+ */
+export function curveAtPct(curve: ThresholdCurvePoint[], target: number): ThresholdCurvePoint | null {
+  if (curve.length === 0) return null
+  let best = curve[0]
+  let bestDist = Math.abs(curve[0].pct - target)
+  for (const p of curve) {
+    const d = Math.abs(p.pct - target)
+    if (d < bestDist) {
+      best = p
+      bestDist = d
+    }
+  }
+  return best
 }

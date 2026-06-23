@@ -419,3 +419,331 @@ export interface ProgressDelta {
   kind: 'cohort' | 'labels' | 'feature_group' | 'matrix' | 'model' | 'evaluation' | 'run'
   status: 'building' | 'built' | 'failed' | 'completed'
 }
+
+/* ========================================================================== */
+/* EXPERIMENT-SCOPED contract (rework — dashboard-api-contract.md §"Experiment-*) */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments — experiment_summary rows                             */
+/* GET /api/experiments/{hash} — summary + config + runs                      */
+/* -------------------------------------------------------------------------- */
+
+/** triage.experiment_summary — one row per experiment (the rail/list shape). */
+export interface ExperimentSummary {
+  experiment_hash: string
+  name: string | null
+  description: string | null
+  author: string | null
+  problem_type: ProblemType | null
+  created_at: string | null
+  n_runs: number
+  last_started_at: string | null
+  last_status: RunStatus | null
+  /** runs.plan rollup of the latest run (n_splits, label_timespan, …). */
+  last_plan: TemporalPlan | null
+}
+
+/** GET /experiments/{hash} — the experiment header detail. */
+export interface ExperimentDetailResponse {
+  summary: ExperimentSummary
+  /** experiments.config jsonb (open shape; name/description stripped from hash). */
+  config: ExperimentConfig | null
+  /** Sibling runs for this experiment, newest first. */
+  runs: RunListItem[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/audition — ranking + curves + 8 strategies      */
+/* -------------------------------------------------------------------------- */
+
+/** experiment_audition ranking row (one per model_group, experiment-scoped). */
+export interface ExpAuditionRankRow {
+  experiment_hash: string
+  metric: string
+  parameter: string
+  model_group_id: number
+  n_splits_evaluated: number
+  avg_value: number | null
+  stddev_value: number | null
+  avg_distance_from_best: number
+  max_regret: number
+}
+
+/** experiment_audition_distances — a model_group's per-split distance row. */
+export interface ExpAuditionCurveRow {
+  experiment_hash: string
+  model_group_id: number
+  metric: string
+  parameter: string
+  as_of_date: string
+  raw_value: number | null
+  best_value: number | null
+  dist_from_best_case: number | null
+}
+
+/** One (rule → picked model_group) entry; all 8 rules are returned. */
+export interface AuditionStrategy {
+  rule: string
+  model_group_id: number | null
+}
+
+export interface ExpAuditionData {
+  empty?: false
+  metric: string
+  parameter: string
+  rule: string
+  ranking: ExpAuditionRankRow[]
+  curves: ExpAuditionCurveRow[]
+  /** model_group_id of the active rule's pick (audition_pick_exp), or null. */
+  pick: number | null
+  k: number // evaluated splits
+  n: number | null // planned splits (any run's plan->n_splits), may be null
+  provisional: boolean
+  /** The 8 selection rules, each with its picked model_group_id. */
+  strategies: AuditionStrategy[]
+}
+
+export type ExpAuditionResponse = ExpAuditionData | EmptyState
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/bias?model_id= — bias_metrics (long format)      */
+/* -------------------------------------------------------------------------- */
+
+/** GET /experiments/{hash}/bias — bare array of long-format rows, OR empty. */
+export type ExpBiasResponse = BiasMetricRow[] | EmptyState
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/leaderboard — triage.leaderboard rows           */
+/* -------------------------------------------------------------------------- */
+
+/** triage.leaderboard row scoped to an experiment_hash (same columns as 0004). */
+export interface ExpLeaderboardRow {
+  experiment_hash: string
+  model_group_id: number
+  model_type: string | null
+  split_kind: string
+  metric: string
+  parameter: string
+  as_of_date: string
+  value: number | null
+  value_expected: number | null
+  value_std: number | null
+  model_id: number
+  train_end_time: string | null
+}
+
+export type ExpLeaderboardResponse = ExpLeaderboardRow[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/evaluations?metric= — test-split evals          */
+/* -------------------------------------------------------------------------- */
+
+/** Experiment-scoped evaluation row (test split, via evaluations ⋈ models ⋈ runs). */
+export interface ExpEvaluationRow {
+  experiment_hash: string
+  model_id: number
+  model_group_id: number
+  split_kind: string
+  as_of_date: string
+  metric: string
+  parameter: string
+  value: number | null
+  num_labeled: number | null
+  num_positive: number | null
+}
+
+export type ExpEvaluationsResponse = ExpEvaluationRow[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/model-groups — model_group_summary rows          */
+/* -------------------------------------------------------------------------- */
+
+/** triage.model_group_summary — one row per (experiment_hash, model_group_id). */
+export interface ModelGroupSummaryRow {
+  experiment_hash: string
+  model_group_id: number
+  model_group_hash: string | null
+  model_type: string | null
+  hyperparameters: Record<string, unknown> | null
+  feature_list: string[] | null
+  n_models: number
+  first_train_end: string | null
+  last_train_end: string | null
+}
+
+export type ModelGroupsResponse = ModelGroupSummaryRow[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/experiments/{hash}/selected-model — selected_model_exp              */
+/* -------------------------------------------------------------------------- */
+
+export interface ExpSelectedModelData {
+  empty?: false
+  metric: string
+  parameter: string
+  rule: string
+  audition_group: number | null
+  audition_model: number | null
+  leaderboard_group: number | null
+  leaderboard_model: number | null
+  diverges: boolean
+}
+
+export type ExpSelectedModelResponse = ExpSelectedModelData | EmptyState
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/model-groups/{id} — group detail (summary + models + over-time)     */
+/* -------------------------------------------------------------------------- */
+
+export interface ModelGroupModelRow {
+  model_id: number
+  train_end_time: string | null
+  run_id: string
+}
+
+export interface ModelGroupDetailResponse {
+  summary: ModelGroupSummaryRow
+  models: ModelGroupModelRow[]
+  /** evals for this group's models (long format, for metric-over-time). */
+  metric_over_time: ExpEvaluationRow[]
+  /** same shape as the experiment evaluations table (test split). */
+  per_split: ExpEvaluationRow[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/models/{id} — feature importances + evals (+ model_group_id)        */
+/* -------------------------------------------------------------------------- */
+
+export interface ModelCardResponse {
+  model_id: number
+  model_group_id: number | null
+  feature_importances: FeatureImportanceRow[]
+  evaluations: ModelEvaluationRow[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/models/{id}/curve — the Rayid threshold curve                       */
+/* -------------------------------------------------------------------------- */
+
+/** One point on triage.model_threshold_curve (cumulative TP/FP by rank). */
+export interface ThresholdCurvePoint {
+  k: number
+  pct: number
+  prec: number | null
+  rec: number | null
+  tp: number
+  fp: number
+  fn: number
+  tn: number
+}
+
+export type ModelCurveResponse = ThresholdCurvePoint[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/models/{id}/histogram — score histogram                             */
+/* -------------------------------------------------------------------------- */
+
+/** One score-histogram bin (width_bucket over prediction_ranks.score). */
+export interface HistogramBin {
+  bin: number
+  lo: number
+  hi: number
+  n: number
+  n_pos: number
+}
+
+export type ModelHistogramResponse = HistogramBin[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/models/{id}/predictions?k= — top-k predictions ⋈ labels             */
+/* -------------------------------------------------------------------------- */
+
+/** triage.prediction_ranks ⋈ labels — one scored entity with its outcome. */
+export interface PredictionRow {
+  entity_id: string | number
+  as_of_date: string
+  score: number
+  rank_abs: number
+  rank_pct: number | null
+  outcome: number | null
+}
+
+export type ModelPredictionsResponse = PredictionRow[] | EmptyState
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/metrics — the metric catalog (for SPA selectors)                    */
+/* -------------------------------------------------------------------------- */
+
+export interface MetricCatalogRow {
+  metric: string
+  parameter: string
+  higher_is_better: boolean
+}
+
+export type MetricsResponse = MetricCatalogRow[]
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/ontology — per-project data profile (sources + volumes)             */
+/* -------------------------------------------------------------------------- */
+
+export interface OntologySourceRow {
+  source_name: string
+  relation: string
+  knowledge_date_column: string | null
+  description: string | null
+}
+
+/** One bucket of a source's volume-over-time series. */
+export interface VolumePoint {
+  period: string
+  n: number
+}
+
+export interface OntologyResponse {
+  sources: OntologySourceRow[]
+  /** source_name → its volume-over-time series. */
+  volumes: Record<string, VolumePoint[]>
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/status — triage status (pins, engine versions, GC, run counts)      */
+/* -------------------------------------------------------------------------- */
+
+/** One GC/artifact-status rollup row (artifacts grouped by kind × status). */
+export interface ArtifactStatusRow {
+  kind: string
+  status: string
+  n: number
+}
+
+export interface StatusResponse {
+  sources: CurrentSourcePin[]
+  engine_versions: Record<string, string> | null
+  gc: ArtifactStatusRow[]
+  /** run counts by status (e.g. {completed: 3, failed: 1}). */
+  runs: Record<string, number>
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/derivation — project-wide derivation graph (shared nodes)           */
+/* -------------------------------------------------------------------------- */
+
+export interface ProjectDerivationNode {
+  artifact_id: string
+  kind: string
+  status: string
+  built_by_run: string | null
+  n_experiments: number
+  n_runs: number
+}
+
+export interface ProjectDerivationEdge {
+  parent_id: string
+  artifact_id: string
+}
+
+export interface ProjectDerivationResponse {
+  nodes: ProjectDerivationNode[]
+  edges: ProjectDerivationEdge[]
+}
