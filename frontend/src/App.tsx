@@ -18,11 +18,13 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useParams,
 } from 'react-router-dom'
 import { api } from './api/client'
 import { useAsync } from './hooks/useAsync'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { GlobalNav } from './components/GlobalNav'
 import { ThemeToggle } from './components/ThemeToggle'
 import { RunRail } from './components/RunRail'
@@ -175,9 +177,12 @@ function ExperimentRail({
 
 /* -------------------------------- routes --------------------------------- */
 
-export default function App() {
+/** Routes wrapped in an error boundary keyed by pathname — a render error is scoped
+ *  to the current view (not a blank app) and clears when you navigate elsewhere. */
+function RoutedContent() {
+  const location = useLocation()
   return (
-    <BrowserRouter>
+    <ErrorBoundary key={location.pathname}>
       <Routes>
         <Route path="/" element={<Navigate to="/experiments" replace />} />
         <Route path="/experiments" element={<ExperimentsRoute />} />
@@ -189,6 +194,14 @@ export default function App() {
         <Route path="/derivation" element={<Shell><ProjectDerivationView /></Shell>} />
         <Route path="*" element={<Navigate to="/experiments" replace />} />
       </Routes>
+    </ErrorBoundary>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <RoutedContent />
     </BrowserRouter>
   )
 }

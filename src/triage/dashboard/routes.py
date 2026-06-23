@@ -27,7 +27,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from psycopg_pool import ConnectionPool
 
@@ -190,7 +190,8 @@ def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
     return _rows(
         pool,
         "select experiment_hash, name, description, author, problem_type, created_at,"
-        "       n_runs, last_started_at, last_status, last_plan"
+        "       n_runs, last_started_at, last_status, last_plan,"
+        "       n_model_groups, n_models, n_splits, n_features, base_rate, cohort_size"
         " from triage.experiment_summary"
         " order by last_started_at desc nulls last, created_at desc",
     )
@@ -205,10 +206,13 @@ def experiment_detail(
     summary = _one(
         pool,
         "select experiment_hash, name, description, author, problem_type, created_at,"
-        "       n_runs, last_started_at, last_status, last_plan"
+        "       n_runs, last_started_at, last_status, last_plan,"
+        "       n_model_groups, n_models, n_splits, n_features, base_rate, cohort_size"
         " from triage.experiment_summary where experiment_hash = %(hash)s",
         params,
     )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="experiment not found")
     config = _one(
         pool,
         "select config from triage.experiments where experiment_hash = %(hash)s",
@@ -477,6 +481,8 @@ def model_group_detail(
         " from triage.model_group_summary where model_group_id = %(g)s limit 1",
         {"g": model_group_id},
     )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="model group not found")
     models = _rows(
         pool,
         "select model_id, train_end_time, run_id from triage.models"
@@ -522,6 +528,8 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
         "select model_id, model_group_id from triage.models where model_id = %(model_id)s",
         {"model_id": model_id},
     )
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
     importances = _rows(
         pool,
         "select model_id, feature, feature_importance, rank_abs, rank_pct"
@@ -572,44 +580,51 @@ def model_histogram(
 @router.get("/models/{model_id}/predictions")
 def model_predictions(
     model_id: int,
-    k: Optional[int] = None,
+    limit: int = 20,
+    offset: int = 0,
     pool: ConnectionPool = Depends(_pool),
 ) -> Any:
-    """Top-k ranked predictions joined to outcome via the model's run's labels artifact.
+    """Ranked predictions (page) joined to outcome via the model's run's labels artifact.
 
-    Empty-state: no predictions for this model yet.
+    Returns ``{rows, total}`` — ``rows`` is the requested ``limit``/``offset`` page ordered by
+    rank, ``total`` the full prediction count for the model (so the SPA can page the "View all"
+    list without over-fetching). Empty-state when the model has no predictions yet.
     """
-    has_pred = _one(
+    total_row = _one(
         pool,
-        "select 1 as ok from triage.prediction_ranks where model_id = %(model_id)s limit 1",
+        "select count(*) as n from triage.prediction_ranks where model_id = %(model_id)s",
         {"model_id": model_id},
     )
-    if not has_pred:
+    total = (total_row or {}).get("n", 0)
+    if not total:
         return _empty(
             "no predictions yet",
             "predictions are written by a completed scoring run (append-only, ADR-0006).",
         )
 
-    # rank_abs over the latest scores, joined to the outcome from the model's run's single
-    # labels artifact (greenfield: one labels per run) on (entity_id, as_of_date) at the
-    # model's training_label_timespan — the same join the Rayid curve uses.
-    sql = (
+    # rank_abs over the latest scores, LEFT-joined to the outcome from the model's run's single
+    # labels artifact (greenfield: one labels per run) on (entity_id, as_of_date) at the model's
+    # training_label_timespan. The labels artifact id is resolved as a *scalar* subselect (not a
+    # run_artifacts join) so an unlabeled prediction stays one row instead of fanning out across
+    # every artifact the run touched.
+    rows = _rows(
+        pool,
         "select pr.entity_id, pr.as_of_date, pr.score, pr.rank_abs, pr.rank_pct, l.outcome"
         " from triage.prediction_ranks pr"
         " join triage.models m on m.model_id = pr.model_id"
-        " left join triage.run_artifacts ra on ra.run_id = m.run_id"
-        " left join triage.artifacts a on a.artifact_id = ra.artifact_id and a.kind = 'labels'"
-        " left join triage.labels l on l.label_hash = ra.artifact_id"
+        " left join triage.labels l"
+        "      on l.label_hash = (select ra.artifact_id from triage.run_artifacts ra"
+        "           join triage.artifacts a on a.artifact_id = ra.artifact_id"
+        "                and a.kind = 'labels'"
+        "           where ra.run_id = m.run_id limit 1)"
         "      and l.entity_id = pr.entity_id and l.as_of_date = pr.as_of_date"
         "      and l.label_timespan = m.training_label_timespan"
         " where pr.model_id = %(model_id)s"
         " order by pr.as_of_date, pr.rank_abs"
+        " limit %(limit)s offset %(offset)s",
+        {"model_id": model_id, "limit": limit, "offset": offset},
     )
-    params: dict[str, Any] = {"model_id": model_id}
-    if k is not None:
-        sql += " limit %(k)s"
-        params["k"] = k
-    return _rows(pool, sql, params)
+    return {"rows": rows, "total": total}
 
 
 # ================================================================ project-level
@@ -632,17 +647,71 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
     """
     sources = _rows(
         pool,
-        "select source_name, relation, knowledge_date_column, description"
+        "select source_name, relation, knowledge_date_column, description, role"
         " from triage.sources order by source_name",
     )
     volumes: dict[str, list[dict]] = {}
+    profile: dict[str, dict] = {}
     for src in sources:
-        volumes[src["source_name"]] = _rows(
+        name = src["source_name"]
+        volumes[name] = _rows(
             pool,
             "select period, n from triage.source_volume(%(name)s, 'month') order by period",
-            {"name": src["source_name"]},
+            {"name": name},
         )
-    return {"sources": sources, "volumes": volumes}
+        profile[name] = (
+            _one(
+                pool,
+                "select total_rows, first_date, last_date, n_distinct_entities"
+                " from triage.source_profile(%(name)s)",
+                {"name": name},
+            )
+            or {}
+        )
+    return {"sources": sources, "volumes": volumes, "profile": profile}
+
+
+@router.get("/entities/{entity_id}")
+def entity_profile(
+    entity_id: int,
+    experiment_hash: Optional[str] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> dict:
+    """Full entity profile: the entity-grain attributes + its label history + its score/rank
+    trajectory across as_of_dates per model group (optionally scoped to one experiment).
+
+    404 when the entity is unknown to the project (no attributes, no labels, no predictions).
+    """
+    attributes = (
+        _one(
+            pool,
+            "select triage.entity_attributes(%(e)s) as attributes",
+            {"e": entity_id},
+        )
+        or {}
+    ).get("attributes")
+    label_history = _rows(
+        pool,
+        "select as_of_date, label_timespan, outcome"
+        " from triage.entity_label_history(%(e)s) order by as_of_date, label_timespan",
+        {"e": entity_id},
+    )
+    score_history = _rows(
+        pool,
+        "select model_group_id, model_id, experiment_hash, as_of_date, score, rank_abs,"
+        "       rank_pct, model_type, hyperparameters, train_end_time"
+        " from triage.entity_score_history(%(e)s, %(hash)s)"
+        " order by model_group_id, as_of_date",
+        {"e": entity_id, "hash": experiment_hash},
+    )
+    if attributes is None and not label_history and not score_history:
+        raise HTTPException(status_code=404, detail="entity not found")
+    return {
+        "entity_id": entity_id,
+        "attributes": attributes,
+        "label_history": label_history,
+        "score_history": score_history,
+    }
 
 
 @router.get("/status")
@@ -667,10 +736,13 @@ def status(pool: ConnectionPool = Depends(_pool)) -> dict:
         "select kind, status, count(*) as n from triage.artifacts"
         " group by kind, status order by kind, status",
     )
-    runs = _rows(
+    run_rows = _rows(
         pool,
         "select status, count(*) as n from triage.runs group by status order by status",
     )
+    # The SPA reads runs as a {status: count} map (StatusResponse.runs: Record<string,number>);
+    # returning the raw rows would render an object as a React child and blank the page.
+    runs = {r["status"]: r["n"] for r in run_rows}
     return {
         "sources": sources,
         "engine_versions": engine_versions,

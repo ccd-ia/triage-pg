@@ -10,6 +10,7 @@
  */
 import type {
   DerivationResponse,
+  EntityProfileResponse,
   ExpAuditionResponse,
   ExpBiasResponse,
   ExpEvaluationsResponse,
@@ -192,10 +193,22 @@ export const api = {
     return get<ModelHistogramResponse>(`/models/${id}/histogram${q}`)
   },
 
-  modelPredictions(id: number, k?: number): Promise<ModelPredictionsResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelPredictions(id, k))
-    const q = k !== undefined ? `?k=${k}` : ''
-    return get<ModelPredictionsResponse>(`/models/${id}/predictions${q}`)
+  modelPredictions(
+    id: number,
+    opts?: { limit?: number; offset?: number },
+  ): Promise<ModelPredictionsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelPredictions(id, opts))
+    const q = new URLSearchParams()
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit))
+    if (opts?.offset !== undefined) q.set('offset', String(opts.offset))
+    const qs = q.toString()
+    return get<ModelPredictionsResponse>(`/models/${id}/predictions${qs ? `?${qs}` : ''}`)
+  },
+
+  entity(id: number, opts?: { experimentHash?: string }): Promise<EntityProfileResponse> {
+    if (USE_FIXTURE) return fake(fixture.entityProfile(id, opts?.experimentHash))
+    const q = opts?.experimentHash ? `?experiment_hash=${opts.experimentHash}` : ''
+    return get<EntityProfileResponse>(`/entities/${id}${q}`)
   },
 
   /* --------------------------- project-level ----------------------------- */

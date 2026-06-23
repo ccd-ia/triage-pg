@@ -143,12 +143,14 @@ sources:
     relation: ontology.entities
     knowledge_date_column: start_time
     version_label: 'dirtyduck-v1'
+    role: entity
     description: Active food-service facilities (DirtyDuck tutorial)
 
   - name: ontology_events
     relation: ontology.events
     knowledge_date_column: date
     version_label: 'dirtyduck-v1'
+    role: event
     description: Food inspection events with result and violations (DirtyDuck tutorial)
 
 # Imputation: count-like features get zero-fill (default), categoricals get zero.

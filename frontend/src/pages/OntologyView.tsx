@@ -1,38 +1,69 @@
 /*
- * OntologyView (/ontology, Q5) — the per-project data profile: each source's
- * volume-over-time (the EDA-style spine). One panel per source from
- * /ontology (sources + volumes), with the relation + knowledge_date_column it is
- * generated from. No hardcoded ontology.* names — the backend derives volumes
- * generically from triage.sources(relation, knowledge_date_column).
+ * OntologyView (/ontology) — the per-project data profile. One panel per registered
+ * source: a humanized title (the source's description), the source_name/relation
+ * demoted to a mono tag + a role badge (entity/event), a stats row (total rows ·
+ * knowledge-date range · distinct entities, from source_profile, migration 0006), and
+ * the volume-over-time spine. No hardcoded ontology.* names — all generic over
+ * triage.sources(relation, knowledge_date_column).
  */
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
-import type { VolumePoint } from '../api/types'
+import type { OntologySourceRow, SourceProfile, VolumePoint } from '../api/types'
+
+function fmtInt(n: number | null | undefined): string {
+  return n == null ? '—' : n.toLocaleString('en-US')
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="cell">
+      <span className="lbl">{label}</span>
+      <span className="val num">{value}</span>
+    </div>
+  )
+}
 
 function SourcePanel({
-  name,
-  relation,
-  kd,
-  description,
+  source,
+  profile,
   series,
 }: {
-  name: string
-  relation: string
-  kd: string | null
-  description: string | null
+  source: OntologySourceRow
+  profile: SourceProfile | undefined
   series: VolumePoint[]
 }) {
   const data = series.map((p) => ({ period: p.period.slice(0, 7), n: p.n }))
+  // Humanize: the description is the headline; source_name/relation are the provenance tag.
+  const title = source.description || source.relation
+  const range =
+    profile?.first_date && profile?.last_date
+      ? `${profile.first_date} → ${profile.last_date}`
+      : '—'
   return (
     <div className="panel">
-      <div className="ch" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <b>{name}</b>
-        <span className="src mono">{relation}{kd ? ` · ${kd}` : ''}</span>
+      <div className="ch" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+        <b>{title}</b>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+          {source.role ? (
+            <span className={`badge ${source.role === 'entity' ? 'b-aud' : 'b-prov'}`}>
+              {source.role}
+            </span>
+          ) : null}
+          <span className="src mono">
+            {source.source_name}
+            {source.knowledge_date_column ? ` · ${source.knowledge_date_column}` : ''}
+          </span>
+        </span>
       </div>
-      {description ? (
-        <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>{description}</div>
-      ) : null}
+      <div className="strip" style={{ marginBottom: 10 }}>
+        <Stat label="rows" value={fmtInt(profile?.total_rows)} />
+        <Stat label="entities" value={fmtInt(profile?.n_distinct_entities)} />
+        <div className="cell">
+          <span className="lbl">range</span>
+          <span className="val mono" style={{ fontSize: 10.5 }}>{range}</span>
+        </div>
+      </div>
       <div style={{ height: 140 }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 6, right: 10, bottom: 0, left: -14 }}>
@@ -66,7 +97,7 @@ export function OntologyView() {
     <main className="page">
       <div className="exphead">
         <h2>Ontology · data profile</h2>
-        <p className="desc">Volume over time per source — the EDA spine for this project.</p>
+        <p className="desc">Each registered source — its volume over time, row counts, and date range.</p>
       </div>
       {onto.loading ? (
         <div className="banner">Loading ontology…</div>
@@ -77,10 +108,8 @@ export function OntologyView() {
           {onto.data.sources.map((s) => (
             <SourcePanel
               key={s.source_name}
-              name={s.source_name}
-              relation={s.relation}
-              kd={s.knowledge_date_column}
-              description={s.description}
+              source={s}
+              profile={onto.data!.profile?.[s.source_name]}
               series={onto.data!.volumes[s.source_name] ?? []}
             />
           ))}
