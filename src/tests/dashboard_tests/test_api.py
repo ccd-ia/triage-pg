@@ -111,6 +111,13 @@ def test_list_experiments(client, seeded):
     assert row["name"] == "Churn baseline"
     assert row["author"] == "tester"
     assert row["n_runs"] == 2  # both runs counted
+    # actuals (migration 0006) — derived from what was built, independent of runs.plan
+    assert row["n_model_groups"] == 3
+    assert row["n_models"] == 9  # 3 groups x 3 splits
+    assert row["n_splits"] == 3  # distinct train_end_time
+    assert row["n_features"] is None  # the fixture seeds no matrices
+    assert row["base_rate"] == 0.5  # outcome = entity_id % 2 over entities 1..4
+    assert row["cohort_size"] == 4
 
 
 def test_experiment_detail(client, seeded):
@@ -122,6 +129,14 @@ def test_experiment_detail(client, seeded):
     assert body["config"]["cohort_name"] == "active"
     # both runs returned, newest first
     assert {r["run_id"] for r in body["runs"]} == {seeded.run_id, seeded.rerun_id}
+    # actuals populate the overview strip even though the fixture's plan has no n_splits source
+    assert body["summary"]["n_models"] == 9
+    assert body["summary"]["n_splits"] == 3
+
+
+def test_experiment_detail_404(client, seeded):
+    resp = client.get("/api/experiments/does-not-exist")
+    assert resp.status_code == 404
 
 
 def test_experiment_audition(client, seeded):
@@ -284,6 +299,11 @@ def test_model_group_detail(client, seeded):
     assert body["per_split"]
 
 
+def test_model_group_detail_404(client, seeded):
+    resp = client.get("/api/model-groups/999999")
+    assert resp.status_code == 404
+
+
 def test_model_detail(client, seeded):
     model_id = seeded.all_models["mg1"][0]  # the first model (has importances)
     resp = client.get(f"/api/models/{model_id}")
@@ -300,6 +320,11 @@ def test_model_detail(client, seeded):
     assert {fi["feature"] for fi in body["feature_importances"]} == {"f1", "f2"}
     assert body["evaluations"]
     assert all(e["model_id"] == model_id for e in body["evaluations"])
+
+
+def test_model_detail_404(client, seeded):
+    resp = client.get("/api/models/999999")
+    assert resp.status_code == 404
 
 
 def test_model_curve(client, seeded):
@@ -328,15 +353,34 @@ def test_model_histogram(client, seeded):
 
 def test_model_predictions(client, seeded):
     model_id = seeded.all_models["mg1"][0]
-    resp = client.get(f"/api/models/{model_id}/predictions", params={"k": 2})
+    resp = client.get(f"/api/models/{model_id}/predictions", params={"limit": 2})
     assert resp.status_code == 200
-    rows = resp.json()
-    assert isinstance(rows, list) and rows
+    body = resp.json()
+    # paged contract (migration 0006): {rows, total}
+    assert set(body) == {"rows", "total"}
+    assert body["total"] == 4  # 4 entities predicted at the last split
+    rows = body["rows"]
     row = rows[0]
     for key in ("entity_id", "as_of_date", "score", "rank_abs", "rank_pct", "outcome"):
         assert key in row
-    assert len(rows) == 2  # top-k applied
+    assert len(rows) == 2  # limit applied
     assert rows[0]["rank_abs"] == 1
+
+
+def test_model_predictions_paging(client, seeded):
+    model_id = seeded.all_models["mg1"][0]
+    page1 = client.get(
+        f"/api/models/{model_id}/predictions", params={"limit": 2, "offset": 0}
+    ).json()
+    page2 = client.get(
+        f"/api/models/{model_id}/predictions", params={"limit": 2, "offset": 2}
+    ).json()
+    assert page1["total"] == page2["total"] == 4
+    # offset advances the rank window; no overlap between the two pages
+    ranks1 = {r["rank_abs"] for r in page1["rows"]}
+    ranks2 = {r["rank_abs"] for r in page2["rows"]}
+    assert ranks1.isdisjoint(ranks2)
+    assert ranks1 == {1, 2}
 
 
 def test_model_predictions_empty_state(client, seeded):
@@ -365,15 +409,22 @@ def test_ontology(client, seeded):
     resp = client.get("/api/ontology")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"sources", "volumes"}
+    assert set(body) == {"sources", "volumes", "profile"}
     names = {s["source_name"] for s in body["sources"]}
     assert "customers" in names
     src = next(s for s in body["sources"] if s["source_name"] == "customers")
-    for key in ("relation", "knowledge_date_column", "description"):
+    for key in ("relation", "knowledge_date_column", "description", "role"):
         assert key in src
     # source_volume runs per source (customers has a knowledge_date_column)
     assert "customers" in body["volumes"]
     assert isinstance(body["volumes"]["customers"], list)
+    # source_profile (migration 0006): total rows + knowledge-date range
+    prof = body["profile"]["customers"]
+    assert prof["total_rows"] == 2
+    assert prof["first_date"] == "2014-01-15"
+    assert prof["last_date"] == "2014-02-20"
+    # customers has no entity_id column -> distinct entities not computed
+    assert prof["n_distinct_entities"] is None
 
 
 def test_status(client, seeded):
@@ -383,9 +434,9 @@ def test_status(client, seeded):
     assert set(body) == {"sources", "engine_versions", "gc", "runs"}
     assert body["sources"][0]["source_name"] == "customers"
     assert body["engine_versions"] == {"featurizer": "0.4.1"}
-    # run counts grouped by status
-    statuses = {r["status"]: r["n"] for r in body["runs"]}
-    assert statuses.get("completed") == 2
+    # run counts as a {status: count} map (the SPA reads Record<string,number>; a list here
+    # would render an object as a React child and blank the page)
+    assert body["runs"] == {"completed": 2}
     # gc tallies are grouped by (kind, status)
     assert any(g["kind"] == "model" and g["status"] == "built" for g in body["gc"])
 
@@ -402,6 +453,67 @@ def test_project_derivation(client, seeded):
     assert cohort["n_runs"] == 2
     assert cohort["n_experiments"] == 1
     assert {"parent_id": "art-cohort", "artifact_id": "art-labels"} in body["edges"]
+
+
+def test_entity_profile(client, seeded):
+    """Entity drill-down: label history + score/rank trajectory for a predicted entity.
+
+    Entity 1 is in the cohort at all 3 splits (labels) and was predicted by mg1's first model
+    at the last split. The seed's source relation has no entity_id, so attributes are null —
+    but the entity is still known via labels + predictions, so this is a 200, not a 404.
+    """
+    resp = client.get("/api/entities/1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"entity_id", "attributes", "label_history", "score_history"}
+    assert body["entity_id"] == 1
+    # 3 labels (one per split, 6-month timespan), outcome = 1 % 2 = 1
+    assert len(body["label_history"]) == 3
+    assert all(r["outcome"] == 1 for r in body["label_history"])
+    # entity 1 was predicted by mg1's first model at the last split (one trajectory point)
+    assert len(body["score_history"]) == 1
+    pt = body["score_history"][0]
+    for key in ("model_group_id", "as_of_date", "score", "rank_abs", "model_type"):
+        assert key in pt
+
+
+def test_entity_profile_attributes(client, seeded, db_pool_greenfield):
+    """When a source is flagged role='entity' (and its relation has entity_id), the entity
+    profile returns that row's attributes as jsonb."""
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "create table facilities (entity_id bigint, name text, kind text, as_of date)"
+        )
+        conn.execute(
+            "insert into facilities values (1, 'east of edens', 'restaurant', date '2014-01-02')"
+        )
+        conn.execute(
+            "insert into triage.sources (source_name, relation, knowledge_date_column, role)"
+            " values ('facilities', 'facilities', 'as_of', 'entity')"
+        )
+    resp = client.get("/api/entities/1")
+    assert resp.status_code == 200
+    attrs = resp.json()["attributes"]
+    assert attrs is not None
+    assert attrs["name"] == "east of edens"
+    assert attrs["kind"] == "restaurant"
+
+
+def test_entity_profile_scoped_to_experiment(client, seeded):
+    """The optional experiment_hash filter scopes the trajectory to one experiment."""
+    resp = client.get(
+        "/api/entities/1", params={"experiment_hash": seeded.experiment_hash}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert all(
+        p["experiment_hash"] == seeded.experiment_hash for p in body["score_history"]
+    )
+
+
+def test_entity_profile_404(client, seeded):
+    resp = client.get("/api/entities/999999")
+    assert resp.status_code == 404
 
 
 # ============================================================== SPA deep-link fallback

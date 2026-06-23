@@ -216,6 +216,7 @@ def _pin_sources(
             relation=spec["relation"],
             knowledge_date_column=spec.get("knowledge_date_column"),
             description=spec.get("description"),
+            role=spec.get("role"),
         )
         # A pinned version is what makes the source cacheable (ADR-0014); without it every
         # derivation touching it is volatile and never a cache hit. An explicit per-source

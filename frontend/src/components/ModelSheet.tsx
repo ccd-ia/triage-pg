@@ -1,114 +1,208 @@
 /*
- * ModelSheet — the model card as a right side-sheet (Option 4). Opened by
- * clicking a grid cell, a model-groups row, or a leaderboard row. Composes:
- *   - ScoreDistributionChart  (/models/{id}/histogram)
- *   - RayidCurveChart + client k-slider → prec/rec + TP/FP/FN/TN (/models/{id}/curve)
- *   - feature importance with PRETTY + RAW names (Bug B prettifier, /models/{id})
- *   - PredictedList (/models/{id}/predictions?k=)
- * Each sub-read is independent (useAsync); a missing one renders its own state.
+ * ModelSheet — the model card as a right side-sheet (Option 4). Opened from a grid
+ * cell, a model-groups row, or a leaderboard row. Composes:
+ *   - a SPLIT SELECTOR over the model group's models (which trained model is shown —
+ *     answers "which model opens"; surfaces /model-groups/{id}, follow-up #2)
+ *   - ScoreDistributionChart (/models/{id}/histogram)
+ *   - RayidCurveChart + client k-slider (/models/{id}/curve)
+ *   - feature importance (top 20 + "View all" modal), PRETTY + RAW names
+ *   - PredictedList (top 20 + "View all" modal); each entity opens the EntityDrawer
  */
+import { useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
 import { prettyFeature } from '../api/transforms'
 import { useExperiment } from '../hooks/useExperiment'
+import { isEmpty, type FeatureImportanceRow } from '../api/types'
 import { ScoreDistributionChart } from './ScoreDistributionChart'
 import { RayidCurveChart } from './RayidCurveChart'
 import { PredictedList } from './PredictedList'
+import { predictionHead, predictionRow } from './predictionRows'
+import { FullListModal } from './FullListModal'
+import { EntityDrawer } from './EntityDrawer'
+
+const INLINE = 20
 
 interface Props {
   modelId: number
-  /** A short human label for the header (e.g. "RF · depth 3 @ 2015-07"). */
   label: string
+  modelGroupId?: number | null
+  experimentHash?: string
+  groupLabelOf?: (gid: number) => string
   onClose: () => void
 }
 
-export function ModelSheet({ modelId, label, onClose }: Props) {
+export function ModelSheet({ modelId, label, modelGroupId, experimentHash, groupLabelOf, onClose }: Props) {
   const { choice, k } = useExperiment()
-  const card = useAsync(() => api.model(modelId), [modelId])
-  const histo = useAsync(() => api.modelHistogram(modelId), [modelId])
-  const curve = useAsync(() => api.modelCurve(modelId), [modelId])
-  // Predicted-list depth follows the selection k (fraction → top-k absolute is
-  // resolved server-side; here we pass a sensible absolute cap derived from k).
-  const topK = Math.max(10, Math.round(k * 200))
-  const preds = useAsync(() => api.modelPredictions(modelId, topK), [modelId, topK])
+  // The trained model actually shown — starts at the opened model, swappable via the
+  // split selector. Reset when the opened model changes (adjust-state-during-render
+  // pattern, so there's no setState-in-effect cascade).
+  const [activeId, setActiveId] = useState(modelId)
+  const [openedId, setOpenedId] = useState(modelId)
+  if (modelId !== openedId) {
+    setOpenedId(modelId)
+    setActiveId(modelId)
+  }
 
-  const features = card.data?.feature_importances ?? []
+  // Sub-sheets/modals
+  const [entityId, setEntityId] = useState<number | null>(null)
+  const [showAllPreds, setShowAllPreds] = useState(false)
+  const [showAllFeats, setShowAllFeats] = useState(false)
+
+  const group = useAsync(
+    () => (modelGroupId != null ? api.modelGroup(modelGroupId) : Promise.resolve(undefined)),
+    [modelGroupId],
+  )
+  const card = useAsync(() => api.model(activeId), [activeId])
+  const histo = useAsync(() => api.modelHistogram(activeId), [activeId])
+  const curve = useAsync(() => api.modelCurve(activeId), [activeId])
+  const preds = useAsync(() => api.modelPredictions(activeId, { limit: INLINE }), [activeId])
+
+  const features = useMemo(() => card.data?.feature_importances ?? [], [card.data])
   const maxImp = features.reduce((m, f) => Math.max(m, f.feature_importance), 0) || 1
+  const topFeatures = features.slice(0, INLINE)
+
+  const models = group.data?.models ?? []
+  const activeModel = models.find((m) => m.model_id === activeId)
 
   return (
     <>
       <div className="sheet-backdrop" onClick={onClose} />
-      <aside className="sheet" role="dialog" aria-label={`model ${modelId}`}>
+      <aside className="sheet" role="dialog" aria-label={`model ${activeId}`}>
         <div className="sh">
           <div>
             <h3>{label}</h3>
             <div className="sub mono">
-              model {modelId}
+              model {activeId}
               {card.data?.model_group_id != null ? ` · group ${card.data.model_group_id}` : ''} ·{' '}
               {choice.metric}
               {choice.parameter}
             </div>
           </div>
-          <button type="button" className="close" onClick={onClose} aria-label="close">
-            ×
-          </button>
+          <button type="button" className="close" onClick={onClose} aria-label="close">×</button>
         </div>
+
+        {models.length > 1 ? (
+          <section>
+            <h4>split (model group · {models.length} models)</h4>
+            <select
+              className="splitsel"
+              value={activeId}
+              onChange={(e) => setActiveId(Number(e.target.value))}
+            >
+              {models.map((m) => (
+                <option key={m.model_id} value={m.model_id}>
+                  {m.train_end_time ? `train end ${m.train_end_time}` : `model ${m.model_id}`} · m{m.model_id}
+                </option>
+              ))}
+            </select>
+            {activeModel?.train_end_time ? (
+              <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>
+                showing the model trained through {activeModel.train_end_time}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <section>
           <h4>score distribution</h4>
-          {histo.data ? (
-            <ScoreDistributionChart bins={histo.data} />
-          ) : (
-            <div className="muted" style={{ fontSize: 11 }}>loading histogram…</div>
-          )}
+          {histo.data ? <ScoreDistributionChart bins={histo.data} /> : <div className="muted" style={{ fontSize: 11 }}>loading histogram…</div>}
         </section>
 
         <section>
           <h4>Rayid curve · k-slider</h4>
-          {curve.data ? (
-            <RayidCurveChart curve={curve.data} initialPct={k} />
-          ) : (
-            <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>
-          )}
+          {curve.data ? <RayidCurveChart curve={curve.data} initialPct={k} /> : <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>}
         </section>
 
         <section>
-          <h4>feature importance · pretty + raw (Bug B fix)</h4>
+          <h4>feature importance · pretty + raw</h4>
           {card.loading ? (
             <div className="muted" style={{ fontSize: 11 }}>loading…</div>
           ) : features.length === 0 ? (
             <div className="muted" style={{ fontSize: 11 }}>no feature importances persisted</div>
           ) : (
-            <div className="featlist">
-              {features.map((f) => {
-                const { pretty, raw } = prettyFeature(f.feature)
-                return (
-                  <div className="featrow" key={f.feature}>
-                    <div>
-                      <div className="pretty">{pretty}</div>
-                      <div className="rawsub">{raw}</div>
+            <>
+              <div className="featlist">
+                {topFeatures.map((f) => {
+                  const { pretty, raw } = prettyFeature(f.feature)
+                  return (
+                    <div className="featrow" key={f.feature}>
+                      <div>
+                        <div className="pretty">{pretty}</div>
+                        <div className="rawsub">{raw}</div>
+                      </div>
+                      <div className="imp">{f.feature_importance.toFixed(3)}</div>
+                      <div className="bar" style={{ width: `${(f.feature_importance / maxImp) * 100}%` }} />
                     </div>
-                    <div className="imp">{f.feature_importance.toFixed(3)}</div>
-                    <div
-                      className="bar"
-                      style={{ width: `${(f.feature_importance / maxImp) * 100}%` }}
-                    />
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+              {features.length > INLINE ? (
+                <button type="button" className="seg" style={{ marginTop: 8 }} onClick={() => setShowAllFeats(true)}>
+                  View all {features.length} features →
+                </button>
+              ) : null}
+            </>
           )}
         </section>
 
         <section>
-          <h4>top predictions (k = {topK})</h4>
+          <h4>top predictions</h4>
           {preds.data ? (
-            <PredictedList data={preds.data} />
+            <PredictedList
+              data={preds.data}
+              onEntityClick={(id) => setEntityId(id)}
+              onViewAll={() => setShowAllPreds(true)}
+            />
           ) : (
             <div className="muted" style={{ fontSize: 11 }}>loading predictions…</div>
           )}
         </section>
       </aside>
+
+      {showAllPreds && preds.data && !isEmpty(preds.data) ? (
+        <FullListModal
+          title={`predictions · ${label}`}
+          total={preds.data.total}
+          loadPage={async (offset, limit) => {
+            const page = await api.modelPredictions(activeId, { offset, limit })
+            return isEmpty(page) ? [] : page.rows
+          }}
+          head={predictionHead()}
+          row={(p) => predictionRow(p, (id) => setEntityId(id))}
+          onClose={() => setShowAllPreds(false)}
+        />
+      ) : null}
+
+      {showAllFeats ? (
+        <FullListModal<FeatureImportanceRow>
+          title={`feature importance · ${label}`}
+          total={features.length}
+          loadPage={(offset, limit) => Promise.resolve(features.slice(offset, offset + limit))}
+          head={<tr><th>feature</th><th className="num">importance</th><th className="num">rank</th></tr>}
+          row={(f) => {
+            const { pretty, raw } = prettyFeature(f.feature)
+            return (
+              <tr key={f.feature}>
+                <td><div className="pretty">{pretty}</div><div className="rawsub">{raw}</div></td>
+                <td className="num">{f.feature_importance.toFixed(4)}</td>
+                <td className="num">{f.rank_abs ?? '—'}</td>
+              </tr>
+            )
+          }}
+          onClose={() => setShowAllFeats(false)}
+        />
+      ) : null}
+
+      {entityId != null ? (
+        <EntityDrawer
+          entityId={entityId}
+          experimentHash={experimentHash}
+          defaultGroupId={modelGroupId ?? card.data?.model_group_id ?? null}
+          groupLabelOf={groupLabelOf}
+          onClose={() => setEntityId(null)}
+        />
+      ) : null}
     </>
   )
 }

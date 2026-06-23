@@ -7,7 +7,7 @@
  * (not `base_rate`); problem_type / n_splits / features / models come off
  * `summary.summary` (run_summary view), n_splits from `summary.plan->n_splits`.
  */
-import type { SummaryResponse } from '../api/types'
+import type { ExperimentSummary, SummaryResponse } from '../api/types'
 import { StatusBadge } from './StatusBadge'
 
 function latestCohortSize(s: SummaryResponse): number | null {
@@ -27,23 +27,38 @@ function fmtInt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
 
-function fmtPct(x: number | null): string {
+function fmtPct(x: number | null | undefined): string {
   return x == null ? '—' : `${(x * 100).toFixed(1)}%`
 }
 
-export function SummaryStrip({ data }: { data: SummaryResponse }) {
+/**
+ * The always-visible strip. `actuals` (the experiment_summary row, migration 0006)
+ * supplies splits/features/models/base-rate/cohort derived from what was BUILT, so the
+ * strip is populated even when runs.plan is null (the pre-plan food runs showed "—").
+ * Live per-split profiles still win for cohort/base-rate when present.
+ */
+export function SummaryStrip({
+  data,
+  actuals,
+}: {
+  data: SummaryResponse
+  actuals?: ExperimentSummary | null
+}) {
   const s = data.summary
-  const nSplits = (s.plan?.n_splits ?? null) as number | null
-  const models = s.n_models != null ? `${s.n_models}` : '—'
+  const nSplits = (s.plan?.n_splits ?? actuals?.n_splits ?? null) as number | null
+  const nFeatures = s.n_features ?? actuals?.n_features ?? null
+  const nModels = s.n_models ?? actuals?.n_models ?? null
+  const cohort = latestCohortSize(data) ?? actuals?.cohort_size ?? null
+  const baseRate = latestBaseRate(data) ?? actuals?.base_rate ?? null
   return (
     <div className="strip">
-      <Cell label="problem" value={s.problem_type ?? '—'} />
+      <Cell label="problem" value={s.problem_type ?? actuals?.problem_type ?? '—'} />
       <Cell label="status" value={<StatusBadge status={s.status} />} />
-      <Cell label="cohort" value={fmtInt(latestCohortSize(data))} numeric />
-      <Cell label="base rate" value={fmtPct(latestBaseRate(data))} numeric />
+      <Cell label="cohort" value={fmtInt(cohort)} numeric />
+      <Cell label="base rate" value={fmtPct(baseRate)} numeric />
       <Cell label="splits" value={fmtInt(nSplits)} numeric />
-      <Cell label="features" value={fmtInt(s.n_features)} numeric />
-      <Cell label="models" value={models} numeric />
+      <Cell label="features" value={fmtInt(nFeatures)} numeric />
+      <Cell label="models" value={fmtInt(nModels)} numeric />
       <Cell label="run" value={s.run_id.slice(0, 8)} mono />
     </div>
   )

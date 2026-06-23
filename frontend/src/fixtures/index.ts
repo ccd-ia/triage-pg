@@ -17,6 +17,9 @@
  */
 import type {
   ArtifactStatusRow,
+  EntityProfileResponse,
+  EntityScorePoint,
+  PredictionRow,
   CohortProfilePoint,
   DerivationResponse,
   ExpAuditionResponse,
@@ -324,6 +327,12 @@ export const experiments: ExperimentSummary[] = [
     last_started_at: '2026-06-21T13:27:00Z',
     last_status: 'building',
     last_plan: { n_splits: 4, label_timespan: '6mo' },
+    n_model_groups: 12,
+    n_models: 48,
+    n_splits: 4,
+    n_features: 120,
+    base_rate: 0.277,
+    cohort_size: 14261,
   },
   {
     experiment_hash: EXP_ACTIVE,
@@ -336,6 +345,12 @@ export const experiments: ExperimentSummary[] = [
     last_started_at: '2026-06-20T09:10:00Z',
     last_status: 'completed',
     last_plan: { n_splits: 4, label_timespan: '6mo' },
+    n_model_groups: 12,
+    n_models: 48,
+    n_splits: 4,
+    n_features: 147,
+    base_rate: 0.277,
+    cohort_size: 14261,
   },
 ]
 
@@ -726,21 +741,63 @@ export function modelHistogram(id: number): ModelHistogramResponse {
   return bins
 }
 
-export function modelPredictions(id: number, k?: number): ModelPredictionsResponse {
-  const top = 12
-  const rows: ModelPredictionsResponse = []
-  for (let i = 0; i < top; i++) {
-    rows.push({
+export function modelPredictions(
+  id: number,
+  opts?: { limit?: number; offset?: number },
+): ModelPredictionsResponse {
+  const total = 200
+  const all: PredictionRow[] = []
+  for (let i = 0; i < total; i++) {
+    all.push({
       entity_id: 9921 - i * 37,
       as_of_date: SPLITS[2],
-      score: Number((0.96 - i * 0.03).toFixed(3)),
+      score: Number(Math.max(0.01, 0.96 - i * 0.0045).toFixed(3)),
       rank_abs: i + 1,
-      rank_pct: Number(((i + 1) / 2000).toFixed(4)),
+      rank_pct: Number(((i + 1) / total).toFixed(4)),
       outcome: i % 3 === 0 ? 1 : 0,
     })
   }
   void id
-  return k ? rows.slice(0, k) : rows
+  const offset = opts?.offset ?? 0
+  const limit = opts?.limit ?? 20
+  return { rows: all.slice(offset, offset + limit), total }
+}
+
+export function entityProfile(id: number, experimentHash?: string): EntityProfileResponse {
+  const groups = [1, 2, 3]
+  const score_history: EntityScorePoint[] = []
+  for (const g of groups) {
+    SPLITS.forEach((d, i) => {
+      score_history.push({
+        model_group_id: g,
+        model_id: g * 10 + i,
+        experiment_hash: experimentHash ?? EXP_ACTIVE,
+        as_of_date: d,
+        score: Number((0.2 + g * 0.05 + i * 0.02).toFixed(4)),
+        rank_abs: 5000 + g * 300 + i * 200,
+        rank_pct: Number((0.4 + g * 0.02).toFixed(3)),
+        model_type: 'sklearn.tree.DecisionTreeClassifier',
+        hyperparameters: { max_depth: 3 + g },
+        train_end_time: d,
+      })
+    })
+  }
+  return {
+    entity_id: id,
+    attributes: {
+      entity_id: id,
+      facility: 'east of edens',
+      facility_type: 'restaurant',
+      zip_code: '60646',
+      address: '6350 n cicero ave',
+    },
+    label_history: SPLITS.map((d, i) => ({
+      as_of_date: d,
+      label_timespan: '6 mons',
+      outcome: i % 2,
+    })),
+    score_history,
+  }
 }
 
 /* ========================================================================== */
@@ -768,14 +825,19 @@ function volumeSeries(base: number, months: number): { period: string; n: number
 
 export const ontology: OntologyResponse = {
   sources: [
-    { source_name: 'inspections', relation: 'clean.inspections', knowledge_date_column: 'inspection_date', description: 'health inspections with results + violations' },
-    { source_name: 'facilities', relation: 'clean.facilities', knowledge_date_column: 'license_start_date', description: 'licensed food facilities' },
-    { source_name: 'complaints', relation: 'clean.complaints', knowledge_date_column: 'received_date', description: 'public complaints by facility' },
+    { source_name: 'inspections', relation: 'clean.inspections', knowledge_date_column: 'inspection_date', description: 'health inspections with results + violations', role: 'event' },
+    { source_name: 'facilities', relation: 'clean.facilities', knowledge_date_column: 'license_start_date', description: 'licensed food facilities', role: 'entity' },
+    { source_name: 'complaints', relation: 'clean.complaints', knowledge_date_column: 'received_date', description: 'public complaints by facility', role: 'event' },
   ],
   volumes: {
     inspections: volumeSeries(420, 36),
     facilities: volumeSeries(90, 36),
     complaints: volumeSeries(150, 36),
+  },
+  profile: {
+    inspections: { total_rows: 74191, first_date: '2014-01-02', last_date: '2017-12-29', n_distinct_entities: 18909 },
+    facilities: { total_rows: 22169, first_date: '2014-01-02', last_date: '2017-12-29', n_distinct_entities: 22169 },
+    complaints: { total_rows: 5400, first_date: '2014-01-05', last_date: '2017-12-20', n_distinct_entities: 3120 },
   },
 }
 

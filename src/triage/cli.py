@@ -644,6 +644,11 @@ def source_register(
         help="Column used for the advisory max() fingerprint.",
     ),
     description: Optional[str] = typer.Option(None, "--description"),
+    role: Optional[str] = typer.Option(
+        None,
+        "--role",
+        help="Source role: 'entity' (one-row-per-entity attributes) or 'event'.",
+    ),
 ) -> None:
     """Declare a source table (idempotent)."""
     engine = get_pool(ctx)
@@ -653,6 +658,7 @@ def source_register(
         relation,
         knowledge_date_column=knowledge_date_column,
         description=description,
+        role=role,
     )
     console.print(f"[green]Source '{name}' registered -> {relation}[/green]")
 

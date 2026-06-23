@@ -334,12 +334,20 @@ export type PredictionsResponse = PredictionRankRow[] | EmptyState
 /* GET /api/runs/{id}/source-pins — run pins + registry head (drift)          */
 /* -------------------------------------------------------------------------- */
 
+/** A source fingerprint (capture_fingerprint): an advisory {row_count, max_knowledge_date}
+ *  jsonb object — NOT a string. Rendered via fmtFingerprint, never as a raw React child. */
+export type Fingerprint =
+  | { row_count?: number; max_knowledge_date?: string | null }
+  | Record<string, unknown>
+  | string
+  | null
+
 /** triage.run_source_pins — a pin frozen at this run's plan time. */
 export interface RunSourcePin {
   run_id: string
   source_name: string
   version_label: string | null
-  fingerprint: string | null
+  fingerprint: Fingerprint
 }
 
 /** triage.current_source_pins — the registry's current head per source. */
@@ -347,7 +355,7 @@ export interface CurrentSourcePin {
   source_name: string
   version_label: string | null
   registered_at: string | null
-  fingerprint: string | null
+  fingerprint: Fingerprint
 }
 
 /** GET /source-pins — the run's frozen pins + the registry's current head. */
@@ -442,6 +450,13 @@ export interface ExperimentSummary {
   last_status: RunStatus | null
   /** runs.plan rollup of the latest run (n_splits, label_timespan, …). */
   last_plan: TemporalPlan | null
+  /* actuals (migration 0006) — the *built* shape, independent of runs.plan. */
+  n_model_groups: number
+  n_models: number
+  n_splits: number
+  n_features: number | null
+  base_rate: number | null
+  cohort_size: number | null
 }
 
 /** GET /experiments/{hash} — the experiment header detail. */
@@ -669,7 +684,13 @@ export interface PredictionRow {
   outcome: number | null
 }
 
-export type ModelPredictionsResponse = PredictionRow[] | EmptyState
+/** A page of ranked predictions + the full count (migration 0006: limit/offset paging). */
+export interface PredictionsPage {
+  rows: PredictionRow[]
+  total: number
+}
+
+export type ModelPredictionsResponse = PredictionsPage | EmptyState
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/metrics — the metric catalog (for SPA selectors)                    */
@@ -692,6 +713,8 @@ export interface OntologySourceRow {
   relation: string
   knowledge_date_column: string | null
   description: string | null
+  /** 'entity' | 'event' | null (migration 0006): which source is the entity grain. */
+  role: string | null
 }
 
 /** One bucket of a source's volume-over-time series. */
@@ -700,10 +723,54 @@ export interface VolumePoint {
   n: number
 }
 
+/** triage.source_profile — total rows + knowledge-date range + distinct entities. */
+export interface SourceProfile {
+  total_rows: number
+  first_date: string | null
+  last_date: string | null
+  n_distinct_entities: number | null
+}
+
 export interface OntologyResponse {
   sources: OntologySourceRow[]
   /** source_name → its volume-over-time series. */
   volumes: Record<string, VolumePoint[]>
+  /** source_name → its profile stats (migration 0006). */
+  profile: Record<string, SourceProfile>
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/entities/{id} — full entity profile (attributes + histories)        */
+/* -------------------------------------------------------------------------- */
+
+/** triage.entity_score_history — one (model_group, as_of_date) trajectory point. */
+export interface EntityScorePoint {
+  model_group_id: number
+  model_id: number
+  experiment_hash: string
+  as_of_date: string
+  score: number
+  rank_abs: number
+  rank_pct: number | null
+  model_type: string | null
+  hyperparameters: Record<string, unknown> | null
+  train_end_time: string | null
+}
+
+/** triage.entity_label_history — outcome over time for the entity. */
+export interface EntityLabelPoint {
+  as_of_date: string
+  label_timespan: string
+  outcome: number | null
+}
+
+/** GET /entities/{id} — the entity-grain attributes + label + score histories. */
+export interface EntityProfileResponse {
+  entity_id: number
+  /** The entity-grain source row as jsonb (role='entity'); null when none resolves. */
+  attributes: Record<string, unknown> | null
+  label_history: EntityLabelPoint[]
+  score_history: EntityScorePoint[]
 }
 
 /* -------------------------------------------------------------------------- */

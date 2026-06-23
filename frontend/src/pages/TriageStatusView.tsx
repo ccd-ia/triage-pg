@@ -6,6 +6,7 @@
  */
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
+import { fmtFingerprint } from '../api/transforms'
 
 export function TriageStatusView() {
   const st = useAsync(() => api.status(), [])
@@ -73,7 +74,7 @@ export function TriageStatusView() {
                   <tr key={p.source_name}>
                     <td>{p.source_name}</td>
                     <td className="mono">{p.version_label ?? '—'}</td>
-                    <td className="mono muted">{p.fingerprint ?? '—'}</td>
+                    <td className="mono muted">{fmtFingerprint(p.fingerprint) ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

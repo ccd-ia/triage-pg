@@ -1,47 +1,39 @@
 /*
- * PredictedList — the top-k predicted entities for a model
- * (/models/{id}/predictions?k=), joined to their realized outcome. Append-only
- * predictions: "current" = the latest scored_at (ADR-0006). Outcome is shown as
- * a hit/miss chip when the label is known (null until the label matures).
+ * PredictedList — the top predicted entities for a model (/models/{id}/predictions),
+ * joined to their realized outcome. Append-only predictions: "current" = the latest
+ * scored_at (ADR-0006). Shows the top page inline; a "View all" opens the full paginated
+ * list. Each entity row is clickable → the entity profile drawer. Row rendering lives in
+ * predictionRows so the inline list and the modal stay identical.
  */
 import type { ModelPredictionsResponse } from '../api/types'
 import { isEmpty } from '../api/types'
 import { EmptyPanel } from './EmptyPanel'
+import { predictionHead, predictionRow } from './predictionRows'
 
-export function PredictedList({ data }: { data: ModelPredictionsResponse }) {
+export function PredictedList({
+  data,
+  onEntityClick,
+  onViewAll,
+}: {
+  data: ModelPredictionsResponse
+  onEntityClick?: (id: number) => void
+  onViewAll?: () => void
+}) {
   if (isEmpty(data)) {
     return <EmptyPanel reason={data.reason} hint={data.hint} />
   }
+  const more = data.total - data.rows.length
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>rank</th>
-          <th>entity</th>
-          <th className="num">pct</th>
-          <th className="num">score</th>
-          <th>outcome</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((p) => (
-          <tr key={`${p.entity_id}-${p.as_of_date}`}>
-            <td>{p.rank_abs}</td>
-            <td className="mono">{p.entity_id}</td>
-            <td className="num">{p.rank_pct == null ? '—' : `${(p.rank_pct * 100).toFixed(2)}%`}</td>
-            <td className="num">{p.score.toFixed(3)}</td>
-            <td>
-              {p.outcome == null ? (
-                <span className="muted">—</span>
-              ) : p.outcome > 0 ? (
-                <span style={{ color: 'var(--ok)' }}>✓ hit</span>
-              ) : (
-                <span className="muted">miss</span>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      <table>
+        <thead>{predictionHead()}</thead>
+        <tbody>{data.rows.map((p) => predictionRow(p, onEntityClick))}</tbody>
+      </table>
+      {more > 0 && onViewAll ? (
+        <button type="button" className="seg" style={{ marginTop: 8 }} onClick={onViewAll}>
+          View all {data.total.toLocaleString('en-US')} →
+        </button>
+      ) : null}
+    </>
   )
 }

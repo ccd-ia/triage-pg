@@ -55,27 +55,37 @@ def register_source(
     relation: str,
     knowledge_date_column: str | None = None,
     description: str | None = None,
+    role: str | None = None,
 ) -> None:
-    """Declare a source (idempotent upsert on the name)."""
+    """Declare a source (idempotent upsert on the name).
+
+    ``role`` is a display-only marker (``'entity'`` | ``'event'`` | ``None``): the entity
+    profile uses ``role='entity'`` to find the one-row-per-entity attributes relation. It
+    never enters source identity or pins (migration 0006).
+    """
     _ = _quote_relation(relation)  # validate early, before anything is stored
     if knowledge_date_column is not None:
         _ = _quote_column(knowledge_date_column)
+    if role is not None and role not in ("entity", "event"):
+        raise ValueError(f"role must be 'entity', 'event', or None; got {role!r}")
     with pool.connection() as conn:
         conn.execute(
             """
                 insert into triage.sources
-                    (source_name, relation, knowledge_date_column, description)
-                values (%(name)s, %(relation)s, %(kdc)s, %(description)s)
+                    (source_name, relation, knowledge_date_column, description, role)
+                values (%(name)s, %(relation)s, %(kdc)s, %(description)s, %(role)s)
                 on conflict (source_name) do update
                     set relation = excluded.relation,
                         knowledge_date_column = excluded.knowledge_date_column,
-                        description = excluded.description
+                        description = excluded.description,
+                        role = excluded.role
                 """,
             {
                 "name": source_name,
                 "relation": relation,
                 "kdc": knowledge_date_column,
                 "description": description,
+                "role": role,
             },
         )
     logger.info(f"Registered source {source_name!r} -> {relation}")

@@ -12,6 +12,7 @@ import type {
   AuditionData,
   BiasMetricRow,
   CurrentSourcePin,
+  Fingerprint,
   EvaluationRow,
   ExpAuditionCurveRow,
   ExpEvaluationRow,
@@ -292,6 +293,22 @@ export interface SourcePinView {
 }
 
 /**
+ * Format a source fingerprint (an advisory {row_count, max_knowledge_date} jsonb object,
+ * NOT a string) to a short label. Renders nothing as a raw object — guards against React
+ * "objects are not valid as a child" crashes (the /status fingerprint regression).
+ */
+export function fmtFingerprint(fp: Fingerprint): string | null {
+  if (fp == null) return null
+  if (typeof fp === 'string') return fp
+  const rc = (fp as { row_count?: number }).row_count
+  const kd = (fp as { max_knowledge_date?: string | null }).max_knowledge_date
+  if (rc != null || kd != null) {
+    return [rc != null ? `${rc} rows` : null, kd ?? null].filter(Boolean).join(' · ')
+  }
+  return JSON.stringify(fp)
+}
+
+/**
  * Join the run's frozen pins against the registry's current head per source;
  * drift = the two version_labels (or fingerprints) differ.
  */
@@ -303,12 +320,12 @@ export function deriveSourcePins(
   for (const c of current) head.set(c.source_name, c)
   return runPins.map((p) => {
     const c = head.get(p.source_name)
-    const pin = p.version_label ?? p.fingerprint ?? '—'
+    const pin = p.version_label ?? fmtFingerprint(p.fingerprint) ?? '—'
     if (!c) return { source: p.source_name, pin, current: null, drift: 'pinned' as const }
-    const cur = c.version_label ?? c.fingerprint ?? null
+    const cur = c.version_label ?? fmtFingerprint(c.fingerprint) ?? null
     const same =
       (p.version_label != null && p.version_label === c.version_label) ||
-      (p.fingerprint != null && p.fingerprint === c.fingerprint)
+      (p.fingerprint != null && fmtFingerprint(p.fingerprint) === fmtFingerprint(c.fingerprint))
     return {
       source: p.source_name,
       pin,

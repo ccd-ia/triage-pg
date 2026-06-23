@@ -62,7 +62,7 @@ function ExperimentProvider({
 export function ExperimentDetail({ hash }: { hash: string }) {
   const [params, setParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>('overview')
-  const [sheetModel, setSheetModel] = useState<{ id: number; label: string } | null>(null)
+  const [sheetModel, setSheetModel] = useState<{ id: number; label: string; groupId: number | null } | null>(null)
 
   /* ---------- experiment-scoped reads ---------- */
   const experiment = useAsync(() => api.experiment(hash), [hash])
@@ -147,7 +147,7 @@ export function ExperimentDetail({ hash }: { hash: string }) {
     (modelId: number, gid: number | null, asOf?: string) => {
       const gl = gid != null ? groupLabelOf(gid) : 'model'
       const label = asOf ? `${gl} @ ${asOf.slice(0, 7)}` : `${gl} · m${modelId}`
-      setSheetModel({ id: modelId, label })
+      setSheetModel({ id: modelId, label, groupId: gid })
     },
     [groupLabelOf],
   )
@@ -164,11 +164,19 @@ export function ExperimentDetail({ hash }: { hash: string }) {
   /* ---------- model-groups row click ---------- */
   const onPickGroup = useCallback(
     (g: ModelGroupSummaryRow) => {
-      // Resolve a representative model_id for the group from the eval rows.
-      const row = (evaluations.data ?? []).find((r) => r.model_group_id === g.model_group_id)
-      const modelId = row?.model_id ?? null
+      // Deterministic: open the group's model at the LATEST split (max as_of_date),
+      // ties broken by model_id — never the arbitrary first eval row. The split selector
+      // in the sheet lets the user step to earlier splits.
+      const rows = (evaluations.data ?? []).filter((r) => r.model_group_id === g.model_group_id)
+      const latest = rows.reduce<ExpEvaluationRow | null>((best, r) => {
+        if (!best) return r
+        if (r.as_of_date > best.as_of_date) return r
+        if (r.as_of_date === best.as_of_date && r.model_id > best.model_id) return r
+        return best
+      }, null)
+      const modelId = latest?.model_id ?? null
       selection.pickModel(modelId ?? 0, g.model_group_id)
-      if (modelId != null) openModel(modelId, g.model_group_id)
+      if (modelId != null) openModel(modelId, g.model_group_id, latest?.as_of_date)
     },
     [evaluations.data, selection, openModel],
   )
@@ -241,7 +249,9 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           <div className="banner">Loading experiment…</div>
         )}
 
-        {summary.data ? <SummaryStrip data={summary.data} /> : null}
+        {summary.data ? (
+          <SummaryStrip data={summary.data} actuals={experiment.data?.summary} />
+        ) : null}
         {summary.data ? <OverviewSparklines data={summary.data} /> : null}
 
         <SelectedModelContextBar
@@ -276,7 +286,11 @@ export function ExperimentDetail({ hash }: { hash: string }) {
             />
           )}
           {tab === 'pipeline' &&
-            (progress.data ? <PipelineGraph data={progress.data} /> : <Loading what="pipeline" />)}
+            (progress.data ? (
+              <PipelineGraph data={progress.data} derivation={derivation.data} />
+            ) : (
+              <Loading what="pipeline" />
+            ))}
           {tab === 'derivation' &&
             (derivation.data ? <DerivationGraph data={derivation.data} /> : <Loading what="derivation" />)}
           {tab === 'audition' &&
@@ -310,6 +324,9 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           <ModelSheet
             modelId={sheetModel.id}
             label={sheetModel.label}
+            modelGroupId={sheetModel.groupId}
+            experimentHash={hash}
+            groupLabelOf={groupLabelOf}
             onClose={() => setSheetModel(null)}
           />
         ) : null}
