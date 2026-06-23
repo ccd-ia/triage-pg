@@ -43,8 +43,10 @@ the source pins, and the sequencing — not the artifact bookkeeping the builder
 
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -73,6 +75,12 @@ from triage.sources import (
 logger = get_logger(__name__)
 
 __all__ = ["run_experiment", "RunResult", "SplitResult", "experiment_hash_for"]
+
+# Cosmetic experiment metadata that is display-only and MUST NOT enter the experiment_hash
+# (migration 0005): two configs differing only in name/description map to the SAME experiment,
+# so identity is stable while the human label can change. ``author`` is derived from the OS
+# user at creation, never read from config, so it never needs stripping.
+_COSMETIC_KEYS = ("name", "description")
 
 
 @dataclass(frozen=True)
@@ -106,14 +114,27 @@ class RunResult:
     num_evaluations: int
 
 
+def _strip_cosmetic(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
+    """A copy of the config with the cosmetic metadata keys removed (migration 0005).
+
+    ``name``/``description`` are display-only and must not affect identity; stripping them
+    here is the single point every caller (hash + stored config) goes through, so a config
+    that differs only in those keys hashes — and stores — identically.
+    """
+    return {k: v for k, v in experiment_config.items() if k not in _COSMETIC_KEYS}
+
+
 def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
     """Stable SHA-256 identity for an experiment from its canonical config.
 
     Reuses :func:`triage.derivation.canonical_json` (sorted keys, normalized types) so the
     same config — regardless of key order or surface form — maps to one ``experiment_hash``.
-    A re-run of the same config therefore lands on the same experiment row.
+    A re-run of the same config therefore lands on the same experiment row. The cosmetic
+    ``name``/``description`` keys are stripped first (migration 0005): they are display-only
+    and changing them must NOT change identity.
     """
-    return hashlib.sha256(canonical_json(experiment_config).encode("ascii")).hexdigest()
+    cleaned = _strip_cosmetic(experiment_config)
+    return hashlib.sha256(canonical_json(cleaned).encode("ascii")).hexdigest()
 
 
 def _as_dates(values: Sequence[Any]) -> list[date]:
@@ -244,17 +265,37 @@ def _create_experiment_and_run(
     Returns ``(experiment_hash, run_id)``. The experiment is keyed by
     :func:`experiment_hash_for` so a re-run reuses it; the run is always new (its ``run_id``
     comes from the DB ``gen_random_uuid()`` default).
+
+    The cosmetic ``name``/``description`` (from the config) and ``author`` (the OS user) are
+    stored on the experiment row but kept OUT of identity: the stored ``config`` is the
+    cleaned config (without name/description) and the hash is over that same cleaned config.
+    ``on conflict do nothing`` keeps the first writer's name/description/author for a re-run.
     """
     exp_hash = experiment_hash_for(experiment_config)
+    name = experiment_config.get("name")
+    description = experiment_config.get("description")
+    # Author = the OS user creating the experiment (getpass.getuser reads the env/passwd; the
+    # USER env var is the documented fallback when neither is available).
+    try:
+        author = getpass.getuser()
+    except (
+        Exception
+    ):  # noqa: BLE001 - getuser() can raise on an unconfigured passwd/env
+        author = os.environ.get("USER")
     with db_engine.connection() as conn:
         conn.execute(
-            "insert into triage.experiments (experiment_hash, config, problem_type)"
-            + " values (%(h)s, cast(%(config)s as jsonb), cast(%(pt)s as triage.problem_type))"
+            "insert into triage.experiments"
+            + " (experiment_hash, config, problem_type, name, description, author)"
+            + " values (%(h)s, cast(%(config)s as jsonb),"
+            + " cast(%(pt)s as triage.problem_type), %(name)s, %(description)s, %(author)s)"
             + " on conflict (experiment_hash) do nothing",
             {
                 "h": exp_hash,
-                "config": canonical_json(experiment_config),
+                "config": canonical_json(_strip_cosmetic(experiment_config)),
                 "pt": problem_type,
+                "name": name,
+                "description": description,
+                "author": author,
             },
         )
         run_id = conn.execute(

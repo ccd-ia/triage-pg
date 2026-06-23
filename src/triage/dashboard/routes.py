@@ -1,17 +1,23 @@
-"""Read-only dashboard endpoints (read-dashboard-spec §5).
+"""Read-only dashboard endpoints (dashboard-api-contract.md).
 
-Every handler is a thin ``SELECT`` over a ``triage.*`` view/function (migration 0004) through
-the request pool (psycopg3, ``dict_row``). No selection/metric/business logic lives here — it
-all lives in the views (ADR-0012). Parameters are ALWAYS bound with psycopg3 ``%(name)s``
-placeholders, never f-string-interpolated (SQL-injection + the global hard rule).
+Every handler is a thin ``SELECT`` over a ``triage.*`` view/function (migrations 0004/0005)
+through the request pool (psycopg3, ``dict_row``). No selection/metric/business logic lives
+here — it all lives in the views (ADR-0012). Parameters are ALWAYS bound with psycopg3
+``%(name)s`` placeholders, never f-string-interpolated (SQL-injection + the global hard rule).
 
-Empty-state contract (spec §3.7): a panel whose source is empty returns ``200`` with
-``{"empty": true, "reason": ..., "hint": ...}`` so the SPA can render the state, rather than an
-empty list the SPA would have to special-case.
+The dashboard hierarchy is **Experiment ▸ Model Group ▸ Model** (migration 0005): analysis
+(audition / bias / leaderboard / model-groups / selected-model) is scoped to the
+**experiment**, not a single run — a re-run cache-shares models, so run-scoped audition goes
+empty (the Q1 bug). The run rail stays primary for live monitoring (runs / summary / progress /
+derivation / source-pins / stream).
 
-Live progress (spec §4): ``GET /runs/{id}/stream`` holds its OWN ``LISTEN run_progress``
-connection (separate from the request pool) and streams ``text/event-stream`` events; it only
-LISTENs (the telemetry emitters own the NOTIFY).
+Empty-state contract: a panel whose source is empty returns ``200`` with
+``{"empty": true, "reason": ..., "hint": ...}`` so the SPA can render the state rather than an
+empty list it would have to special-case.
+
+Live progress: ``GET /runs/{id}/stream`` holds its OWN ``LISTEN run_progress`` connection
+(separate from the request pool) and streams ``text/event-stream`` events; it only LISTENs (the
+telemetry emitters own the NOTIFY).
 """
 
 from __future__ import annotations
@@ -30,6 +36,20 @@ from triage.logging import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# The eight standard audition selection rules, each with its default params (the SPA renders a
+# pick per rule; migration 0005's audition_pick implements all of them). best_average_two_metrics
+# needs a second metric — supplied by the endpoint only when one is available, else skipped.
+_AUDITION_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("best_current_value", {}),
+    ("best_average_value", {}),
+    ("lowest_metric_variance", {}),
+    ("most_frequent_best_dist", {"dist_window": 0.05}),
+    ("best_avg_var_penalized", {"stdev_penalty": 1.0}),
+    ("best_avg_recency_weight", {"curr_weight": 2.0, "decay_type": "linear"}),
+    ("best_average_two_metrics", {}),  # metric2/metric1_weight filled in per-request
+    ("random_model_group", {"seed": "0"}),
+)
 
 
 def _pool(request: Request) -> ConnectionPool:
@@ -55,14 +75,14 @@ def _one(
 
 
 def _empty(reason: str, hint: str) -> dict[str, Any]:
-    """The spec §3.7 empty-state envelope."""
+    """The empty-state envelope (contract §Notes)."""
     return {"empty": True, "reason": reason, "hint": hint}
 
 
-# ---------------------------------------------------------------- runs (rail + summary)
+# ================================================================ runs (rail + monitoring)
 @router.get("/runs")
 def list_runs(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
-    """Rail list of runs (newest first). The headline metric is panel-side off other reads."""
+    """Rail list of runs (newest first)."""
     return _rows(
         pool,
         "select run_id, experiment_hash, profile, purpose, status,"
@@ -112,8 +132,8 @@ def run_progress(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
 
 
 @router.get("/runs/{run_id}/derivation")
-def derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
-    """Derivation graph for the run closure: {nodes, edges} (spec §3.6).
+def run_derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
+    """Derivation graph for the run closure: {nodes, edges}.
 
     Nodes = artifacts the run touched (built OR cache-hit, via run_artifacts); edges =
     artifact_inputs scoped to that node set. A cache-hit node is one this run used but a
@@ -142,187 +162,6 @@ def derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
-# ---------------------------------------------------------------- audition tab
-@router.get("/runs/{run_id}/audition")
-def audition(
-    run_id: UUID,
-    metric: str = "auc_roc",
-    parameter: str = "",
-    rule: str = "best_average_value",
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
-    """Audition ranking + per-split curves + the pick (spec §3.4/§5).
-
-    Empty-state (spec §3.7): < 2 model_groups across < 2 evaluated splits.
-    """
-    params = {"run": str(run_id), "metric": metric, "parameter": parameter}
-    ranking = _rows(
-        pool,
-        "select run_id, metric, parameter, model_group_id, n_splits_evaluated,"
-        "       avg_value, stddev_value, avg_distance_from_best, max_regret"
-        " from triage.audition"
-        " where run_id = %(run)s and metric = %(metric)s and parameter = %(parameter)s"
-        " order by avg_distance_from_best asc, max_regret asc, model_group_id asc",
-        params,
-    )
-    n_groups = len(ranking)
-    n_splits = max((r["n_splits_evaluated"] for r in ranking), default=0)
-    if n_groups < 2 and n_splits < 2:
-        return _empty(
-            "needs >=2 model_groups and >=2 evaluated splits to compare",
-            "audition compares model_groups across test splits; let more of the grid x split"
-            " finish evaluating.",
-        )
-
-    curves = _rows(
-        pool,
-        "select run_id, model_group_id, metric, parameter, as_of_date,"
-        "       raw_value, best_value, dist_from_best_case"
-        " from triage.audition_distances"
-        " where run_id = %(run)s and metric = %(metric)s and parameter = %(parameter)s"
-        " order by model_group_id, as_of_date",
-        params,
-    )
-    pick = _one(
-        pool,
-        "select triage.audition_pick(%(run)s, %(metric)s, %(parameter)s, %(rule)s,"
-        " '{}'::jsonb) as model_group_id",
-        {**params, "rule": rule},
-    )
-    # provisional until every planned split has evaluated (k/N); N from runs.plan.
-    plan = (
-        _one(pool, "select plan from triage.runs where run_id = %(run)s", params) or {}
-    ).get("plan")
-    n_planned = (plan or {}).get("n_splits")
-    return {
-        "metric": metric,
-        "parameter": parameter,
-        "rule": rule,
-        "ranking": ranking,
-        "curves": curves,
-        "pick": (pick or {}).get("model_group_id"),
-        "k": n_splits,
-        "n": n_planned,
-        "provisional": (n_planned is None) or (n_splits < n_planned),
-    }
-
-
-# ---------------------------------------------------------------- bias tab
-@router.get("/runs/{run_id}/bias")
-def bias(
-    run_id: UUID,
-    model_id: Optional[int] = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> Any:
-    """Bias / fairness group-bys for the run's models (optionally a single model).
-
-    Empty-state (spec §3.7): no ``protected_groups`` configured for the run -> no bias_metrics.
-    """
-    # bias is empty when the experiment has no protected_groups -> in-PG bias produced no rows.
-    has_bias = _one(
-        pool,
-        "select 1 as ok from triage.bias_metrics b"
-        " join triage.models m using (model_id)"
-        " where m.run_id = %(run)s limit 1",
-        {"run": str(run_id)},
-    )
-    if not has_bias:
-        return _empty(
-            "no protected_groups configured for this run",
-            "add a protected_groups config (attribute_name/value per entity, as_of_date) so"
-            " in-PG bias metrics are computed (ADR-0007).",
-        )
-
-    sql = (
-        "select b.model_id, b.split_kind, b.as_of_date, b.parameter,"
-        "       b.attribute_name, b.attribute_value, b.metric, b.value,"
-        "       b.ref_group_value, b.disparity"
-        " from triage.bias_metrics b join triage.models m using (model_id)"
-        " where m.run_id = %(run)s"
-    )
-    params: dict[str, Any] = {"run": str(run_id)}
-    if model_id is not None:
-        sql += " and b.model_id = %(model_id)s"
-        params["model_id"] = model_id
-    sql += " order by b.model_id, b.attribute_name, b.attribute_value, b.metric"
-    return _rows(pool, sql, params)
-
-
-# ---------------------------------------------------------------- result cards
-@router.get("/runs/{run_id}/leaderboard")
-def leaderboard(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> list[dict]:
-    """The leaderboard matview (now run-scoped, migration 0004)."""
-    return _rows(
-        pool,
-        "select run_id, model_group_id, model_type, split_kind, metric, parameter,"
-        "       as_of_date, value, value_expected, value_std, model_id, train_end_time"
-        " from triage.leaderboard where run_id = %(run)s"
-        " order by metric, parameter, as_of_date, value desc",
-        {"run": str(run_id)},
-    )
-
-
-@router.get("/runs/{run_id}/evaluations")
-def evaluations(
-    run_id: UUID,
-    metric: Optional[str] = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> list[dict]:
-    """Metric-over-time card: raw evaluations (test split), scoped to the run via models.run_id."""
-    sql = (
-        "select m.run_id, e.model_id, m.model_group_id, e.split_kind, e.as_of_date,"
-        "       e.metric, e.parameter, e.value, e.num_labeled, e.num_positive"
-        " from triage.evaluations e join triage.models m using (model_id)"
-        " where m.run_id = %(run)s and e.split_kind = 'test'"
-    )
-    params: dict[str, Any] = {"run": str(run_id)}
-    if metric is not None:
-        sql += " and e.metric = %(metric)s"
-        params["metric"] = metric
-    sql += " order by e.metric, e.parameter, m.model_group_id, e.as_of_date"
-    return _rows(pool, sql, params)
-
-
-@router.get("/runs/{run_id}/predictions")
-def predictions(
-    run_id: UUID,
-    model_id: Optional[int] = None,
-    k: Optional[int] = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> Any:
-    """Top-predictions card: prediction_ranks (top-k), scoped to a run's models (spec §3.7).
-
-    Empty-state: no completed scoring run -> no predictions for this run's models.
-    """
-    has_pred = _one(
-        pool,
-        "select 1 as ok from triage.predictions p join triage.models m using (model_id)"
-        " where m.run_id = %(run)s limit 1",
-        {"run": str(run_id)},
-    )
-    if not has_pred:
-        return _empty(
-            "no predictions yet",
-            "predictions are written by a completed scoring run (append-only, ADR-0006).",
-        )
-
-    sql = (
-        "select pr.model_id, pr.entity_id, pr.as_of_date, pr.split_kind,"
-        "       pr.score, pr.scored_at, pr.rank_abs, pr.rank_pct"
-        " from triage.prediction_ranks pr join triage.models m using (model_id)"
-        " where m.run_id = %(run)s"
-    )
-    params: dict[str, Any] = {"run": str(run_id)}
-    if model_id is not None:
-        sql += " and pr.model_id = %(model_id)s"
-        params["model_id"] = model_id
-    sql += " order by pr.model_id, pr.as_of_date, pr.rank_abs"
-    if k is not None:
-        sql += " limit %(k)s"
-        params["k"] = k
-    return _rows(pool, sql, params)
-
-
 @router.get("/runs/{run_id}/source-pins")
 def source_pins(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
     """Source pins / drift card.
@@ -344,36 +183,345 @@ def source_pins(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
     return {"run_pins": run_pins, "current": current}
 
 
-@router.get("/runs/{run_id}/selected-model")
-def selected_model(
-    run_id: UUID,
+# ============================================================== experiments (analysis scope)
+@router.get("/experiments")
+def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+    """Experiment rail: one row per experiment (newest first)."""
+    return _rows(
+        pool,
+        "select experiment_hash, name, description, author, problem_type, created_at,"
+        "       n_runs, last_started_at, last_status, last_plan"
+        " from triage.experiment_summary"
+        " order by last_started_at desc nulls last, created_at desc",
+    )
+
+
+@router.get("/experiments/{experiment_hash}")
+def experiment_detail(
+    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
+) -> dict:
+    """Experiment header: summary + raw config + this experiment's runs (newest first)."""
+    params = {"hash": experiment_hash}
+    summary = _one(
+        pool,
+        "select experiment_hash, name, description, author, problem_type, created_at,"
+        "       n_runs, last_started_at, last_status, last_plan"
+        " from triage.experiment_summary where experiment_hash = %(hash)s",
+        params,
+    )
+    config = _one(
+        pool,
+        "select config from triage.experiments where experiment_hash = %(hash)s",
+        params,
+    )
+    runs = _rows(
+        pool,
+        "select run_id, experiment_hash, profile, purpose, status, started_at,"
+        "       finished_at, triage_version, git_hash, batch_job_id"
+        " from triage.runs where experiment_hash = %(hash)s order by started_at desc",
+        params,
+    )
+    return {
+        "summary": summary,
+        "config": (config or {}).get("config"),
+        "runs": runs,
+    }
+
+
+@router.get("/experiments/{experiment_hash}/audition")
+def audition(
+    experiment_hash: str,
     metric: str = "auc_roc",
     parameter: str = "",
     rule: str = "best_average_value",
     pool: ConnectionPool = Depends(_pool),
 ) -> dict:
-    """Selected-model bar: audition pick vs leaderboard #1 + divergence flag (spec §3.5).
+    """Audition ranking + per-split curves + the pick + a pick per standard rule.
 
-    Wraps ``triage.selected_model(run, metric, parameter, rule)`` (migration 0004); the
+    Experiment-scoped (migration 0005): a re-run cache-shares models, so run-scoping is empty
+    (the Q1 bug). Empty-state: < 2 model_groups AND < 2 evaluated splits.
+    """
+    params = {"hash": experiment_hash, "metric": metric, "parameter": parameter}
+    ranking = _rows(
+        pool,
+        "select experiment_hash, metric, parameter, model_group_id, n_splits_evaluated,"
+        "       avg_value, stddev_value, avg_distance_from_best, max_regret"
+        " from triage.audition"
+        " where experiment_hash = %(hash)s and metric = %(metric)s"
+        "   and parameter = %(parameter)s"
+        " order by avg_distance_from_best asc, max_regret asc, model_group_id asc",
+        params,
+    )
+    n_groups = len(ranking)
+    n_splits = max((r["n_splits_evaluated"] for r in ranking), default=0)
+    if n_groups < 2 and n_splits < 2:
+        return _empty(
+            "needs >=2 model_groups and >=2 evaluated splits to compare",
+            "audition compares model_groups across test splits; let more of the grid x split"
+            " finish evaluating.",
+        )
+
+    curves = _rows(
+        pool,
+        "select experiment_hash, model_group_id, metric, parameter, as_of_date,"
+        "       raw_value, best_value, dist_from_best_case"
+        " from triage.audition_distances"
+        " where experiment_hash = %(hash)s and metric = %(metric)s"
+        "   and parameter = %(parameter)s"
+        " order by model_group_id, as_of_date",
+        params,
+    )
+    pick = _one(
+        pool,
+        "select triage.audition_pick(%(hash)s, %(metric)s, %(parameter)s, %(rule)s,"
+        " '{}'::jsonb) as model_group_id",
+        {**params, "rule": rule},
+    )
+
+    # A pick per standard rule (the SPA shows the strategy panel). best_average_two_metrics
+    # needs a SECOND metric; pick any other (metric, parameter) present for this experiment,
+    # else skip that rule gracefully.
+    second = _one(
+        pool,
+        "select metric, parameter from triage.metric_catalog"
+        " where not (metric = %(metric)s and parameter = %(parameter)s)"
+        " order by metric, parameter limit 1",
+        params,
+    )
+    strategies: list[dict[str, Any]] = []
+    for rule_name, rule_params in _AUDITION_RULES:
+        if rule_name == "best_average_two_metrics":
+            if second is None:
+                continue
+            rule_params = {
+                "metric2": second["metric"],
+                "parameter2": second["parameter"],
+                "metric1_weight": 0.5,
+            }
+        gid = _one(
+            pool,
+            "select triage.audition_pick(%(hash)s, %(metric)s, %(parameter)s, %(rule)s,"
+            " %(params)s::jsonb) as model_group_id",
+            {**params, "rule": rule_name, "params": json.dumps(rule_params)},
+        )
+        strategies.append(
+            {"rule": rule_name, "model_group_id": (gid or {}).get("model_group_id")}
+        )
+
+    # provisional until every planned split has evaluated (k/N); N from any run's plan.
+    plan = (
+        _one(
+            pool,
+            "select plan from triage.runs where experiment_hash = %(hash)s"
+            " and plan is not null order by started_at desc limit 1",
+            params,
+        )
+        or {}
+    ).get("plan")
+    n_planned = (plan or {}).get("n_splits")
+    return {
+        "metric": metric,
+        "parameter": parameter,
+        "rule": rule,
+        "ranking": ranking,
+        "curves": curves,
+        "pick": (pick or {}).get("model_group_id"),
+        "k": n_splits,
+        "n": n_planned,
+        "provisional": (n_planned is None) or (n_splits < n_planned),
+        "strategies": strategies,
+    }
+
+
+@router.get("/experiments/{experiment_hash}/bias")
+def bias(
+    experiment_hash: str,
+    model_id: Optional[int] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """Bias / fairness group-bys for the experiment's models (optionally a single model).
+
+    Scoped via ``models ⋈ runs WHERE experiment_hash``. Empty-state: no ``protected_groups``
+    configured -> no bias_metrics.
+    """
+    has_bias = _one(
+        pool,
+        "select 1 as ok from triage.bias_metrics b"
+        " join triage.models m on m.model_id = b.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
+        " where r.experiment_hash = %(hash)s limit 1",
+        {"hash": experiment_hash},
+    )
+    if not has_bias:
+        return _empty(
+            "no protected_groups configured for this experiment",
+            "add a protected_groups config (attribute_name/value per entity, as_of_date) so"
+            " in-PG bias metrics are computed (ADR-0007).",
+        )
+
+    sql = (
+        "select b.model_id, b.split_kind, b.as_of_date, b.parameter,"
+        "       b.attribute_name, b.attribute_value, b.metric, b.value,"
+        "       b.ref_group_value, b.disparity"
+        " from triage.bias_metrics b"
+        " join triage.models m on m.model_id = b.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
+        " where r.experiment_hash = %(hash)s"
+    )
+    params: dict[str, Any] = {"hash": experiment_hash}
+    if model_id is not None:
+        sql += " and b.model_id = %(model_id)s"
+        params["model_id"] = model_id
+    sql += " order by b.model_id, b.attribute_name, b.attribute_value, b.metric"
+    return _rows(pool, sql, params)
+
+
+@router.get("/experiments/{experiment_hash}/leaderboard")
+def leaderboard(
+    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
+) -> list[dict]:
+    """The leaderboard matview, scoped to the experiment (migration 0005)."""
+    return _rows(
+        pool,
+        "select experiment_hash, run_id, model_group_id, model_type, split_kind,"
+        "       metric, parameter, as_of_date, value, value_expected, value_std,"
+        "       model_id, train_end_time"
+        " from triage.leaderboard where experiment_hash = %(hash)s"
+        " order by metric, parameter, as_of_date, value desc",
+        {"hash": experiment_hash},
+    )
+
+
+@router.get("/experiments/{experiment_hash}/evaluations")
+def evaluations(
+    experiment_hash: str,
+    metric: Optional[str] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> list[dict]:
+    """Metric-over-time card: raw evaluations (test split), scoped via evaluations ⋈ models ⋈ runs."""
+    sql = (
+        "select r.experiment_hash, e.model_id, m.model_group_id, e.split_kind, e.as_of_date,"
+        "       e.metric, e.parameter, e.value, e.num_labeled, e.num_positive"
+        " from triage.evaluations e"
+        " join triage.models m on m.model_id = e.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
+        " where r.experiment_hash = %(hash)s and e.split_kind = 'test'"
+    )
+    params: dict[str, Any] = {"hash": experiment_hash}
+    if metric is not None:
+        sql += " and e.metric = %(metric)s"
+        params["metric"] = metric
+    sql += " order by e.metric, e.parameter, m.model_group_id, e.as_of_date"
+    return _rows(pool, sql, params)
+
+
+@router.get("/experiments/{experiment_hash}/model-groups")
+def experiment_model_groups(
+    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
+) -> list[dict]:
+    """Model-group cards for the experiment (the Experiment ▸ Model Group level)."""
+    return _rows(
+        pool,
+        "select experiment_hash, model_group_id, model_group_hash, model_type,"
+        "       hyperparameters, feature_list, n_models, first_train_end, last_train_end"
+        " from triage.model_group_summary where experiment_hash = %(hash)s"
+        " order by model_group_id",
+        {"hash": experiment_hash},
+    )
+
+
+@router.get("/experiments/{experiment_hash}/selected-model")
+def selected_model(
+    experiment_hash: str,
+    metric: str = "auc_roc",
+    parameter: str = "",
+    rule: str = "best_average_value",
+    pool: ConnectionPool = Depends(_pool),
+) -> dict:
+    """Selected-model bar: audition pick vs leaderboard #1 + divergence flag.
+
+    Wraps ``triage.selected_model(hash, metric, parameter, rule)`` (migration 0005); the
     columns are audition_group/audition_model, leaderboard_group/leaderboard_model, diverges.
     """
     row = _one(
         pool,
-        "select * from triage.selected_model(%(run)s, %(metric)s, %(parameter)s, %(rule)s)",
-        {"run": str(run_id), "metric": metric, "parameter": parameter, "rule": rule},
+        "select * from triage.selected_model(%(hash)s, %(metric)s, %(parameter)s, %(rule)s)",
+        {
+            "hash": experiment_hash,
+            "metric": metric,
+            "parameter": parameter,
+            "rule": rule,
+        },
     )
-    if row is None:
+    if row is None or row.get("audition_group") is None:
         return _empty(
-            "no evaluated models for this run yet",
+            "no evaluated models for this experiment yet",
             "the selector needs at least one evaluated model on the metric.",
         )
     return {"metric": metric, "parameter": parameter, "rule": rule, **row}
 
 
-# ---------------------------------------------------------------- model detail drill-down
+# ================================================================ hierarchy detail
+@router.get("/model-groups/{model_group_id}")
+def model_group_detail(
+    model_group_id: int,
+    metric: str = "auc_roc",
+    parameter: str = "",
+    pool: ConnectionPool = Depends(_pool),
+) -> dict:
+    """Model-group drill-down: the card facts + its models + metric-over-time + per-split evals."""
+    summary = _one(
+        pool,
+        "select experiment_hash, model_group_id, model_group_hash, model_type,"
+        "       hyperparameters, feature_list, n_models, first_train_end, last_train_end"
+        " from triage.model_group_summary where model_group_id = %(g)s limit 1",
+        {"g": model_group_id},
+    )
+    models = _rows(
+        pool,
+        "select model_id, train_end_time, run_id from triage.models"
+        " where model_group_id = %(g)s order by train_end_time, model_id",
+        {"g": model_group_id},
+    )
+    params = {"g": model_group_id, "metric": metric, "parameter": parameter}
+    metric_over_time = _rows(
+        pool,
+        "select e.model_id, m.model_group_id, e.as_of_date, e.metric, e.parameter,"
+        "       e.value, e.num_labeled, e.num_positive"
+        " from triage.evaluations e"
+        " join triage.models m on m.model_id = e.model_id"
+        " where m.model_group_id = %(g)s and e.split_kind = 'test'"
+        "   and e.metric = %(metric)s and e.parameter = %(parameter)s"
+        " order by e.as_of_date",
+        params,
+    )
+    per_split = _rows(
+        pool,
+        "select e.model_id, m.model_group_id, e.split_kind, e.as_of_date, e.metric,"
+        "       e.parameter, e.value, e.value_expected, e.value_std, e.num_labeled,"
+        "       e.num_positive"
+        " from triage.evaluations e"
+        " join triage.models m on m.model_id = e.model_id"
+        " where m.model_group_id = %(g)s and e.split_kind = 'test'"
+        " order by e.metric, e.parameter, e.as_of_date",
+        {"g": model_group_id},
+    )
+    return {
+        "summary": summary,
+        "models": models,
+        "metric_over_time": metric_over_time,
+        "per_split": per_split,
+    }
+
+
 @router.get("/models/{model_id}")
 def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
-    """Model-detail drill-down: feature importances + this model's per-split evaluations."""
+    """Model-detail drill-down: the model's group + feature importances + per-split evaluations."""
+    model = _one(
+        pool,
+        "select model_id, model_group_id from triage.models where model_id = %(model_id)s",
+        {"model_id": model_id},
+    )
     importances = _rows(
         pool,
         "select model_id, feature, feature_importance, rank_abs, rank_pct"
@@ -391,20 +539,177 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
     )
     return {
         "model_id": model_id,
+        "model_group_id": (model or {}).get("model_group_id"),
         "feature_importances": importances,
         "evaluations": evals,
     }
 
 
-# ---------------------------------------------------------------- SSE live progress
-# Poll cadence for the listen loop: short enough that a client disconnect is noticed
-# promptly (the loop checks ``request.is_disconnected()`` each tick) and a keep-alive
-# comment is emitted, long enough not to busy-spin.
+@router.get("/models/{model_id}/curve")
+def model_curve(model_id: int, pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+    """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this)."""
+    return _rows(
+        pool,
+        "select k, pct, prec, rec, tp, fp, fn, tn"
+        " from triage.model_threshold_curve(%(model_id)s) order by k",
+        {"model_id": model_id},
+    )
+
+
+@router.get("/models/{model_id}/histogram")
+def model_histogram(
+    model_id: int, bins: int = 20, pool: ConnectionPool = Depends(_pool)
+) -> list[dict]:
+    """Predicted-score histogram (by class) for the model card."""
+    return _rows(
+        pool,
+        "select bin, lo, hi, n, n_pos"
+        " from triage.model_score_histogram(%(model_id)s, %(bins)s) order by bin",
+        {"model_id": model_id, "bins": bins},
+    )
+
+
+@router.get("/models/{model_id}/predictions")
+def model_predictions(
+    model_id: int,
+    k: Optional[int] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """Top-k ranked predictions joined to outcome via the model's run's labels artifact.
+
+    Empty-state: no predictions for this model yet.
+    """
+    has_pred = _one(
+        pool,
+        "select 1 as ok from triage.prediction_ranks where model_id = %(model_id)s limit 1",
+        {"model_id": model_id},
+    )
+    if not has_pred:
+        return _empty(
+            "no predictions yet",
+            "predictions are written by a completed scoring run (append-only, ADR-0006).",
+        )
+
+    # rank_abs over the latest scores, joined to the outcome from the model's run's single
+    # labels artifact (greenfield: one labels per run) on (entity_id, as_of_date) at the
+    # model's training_label_timespan — the same join the Rayid curve uses.
+    sql = (
+        "select pr.entity_id, pr.as_of_date, pr.score, pr.rank_abs, pr.rank_pct, l.outcome"
+        " from triage.prediction_ranks pr"
+        " join triage.models m on m.model_id = pr.model_id"
+        " left join triage.run_artifacts ra on ra.run_id = m.run_id"
+        " left join triage.artifacts a on a.artifact_id = ra.artifact_id and a.kind = 'labels'"
+        " left join triage.labels l on l.label_hash = ra.artifact_id"
+        "      and l.entity_id = pr.entity_id and l.as_of_date = pr.as_of_date"
+        "      and l.label_timespan = m.training_label_timespan"
+        " where pr.model_id = %(model_id)s"
+        " order by pr.as_of_date, pr.rank_abs"
+    )
+    params: dict[str, Any] = {"model_id": model_id}
+    if k is not None:
+        sql += " limit %(k)s"
+        params["k"] = k
+    return _rows(pool, sql, params)
+
+
+# ================================================================ project-level
+@router.get("/metrics")
+def metrics(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+    """The (metric, parameter, higher_is_better) catalog present in this project (SPA selectors)."""
+    return _rows(
+        pool,
+        "select metric, parameter, higher_is_better from triage.metric_catalog"
+        " order by metric, parameter",
+    )
+
+
+@router.get("/ontology")
+def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
+    """Per-project data profile: the registered sources + each source's volume over time.
+
+    Source names come from the trusted ``triage.sources`` table; they are still passed as
+    bound params to ``source_volume`` (defense in depth — the function also regclass-validates).
+    """
+    sources = _rows(
+        pool,
+        "select source_name, relation, knowledge_date_column, description"
+        " from triage.sources order by source_name",
+    )
+    volumes: dict[str, list[dict]] = {}
+    for src in sources:
+        volumes[src["source_name"]] = _rows(
+            pool,
+            "select period, n from triage.source_volume(%(name)s, 'month') order by period",
+            {"name": src["source_name"]},
+        )
+    return {"sources": sources, "volumes": volumes}
+
+
+@router.get("/status")
+def status(pool: ConnectionPool = Depends(_pool)) -> dict:
+    """Project status: current source pins, latest engine versions, GC tallies, run counts."""
+    sources = _rows(
+        pool,
+        "select source_name, version_label, registered_at, fingerprint"
+        " from triage.current_source_pins order by source_name",
+    )
+    latest_plan = (
+        _one(
+            pool,
+            "select plan from triage.runs where plan is not null"
+            " order by started_at desc limit 1",
+        )
+        or {}
+    ).get("plan")
+    engine_versions = (latest_plan or {}).get("engine_versions")
+    gc = _rows(
+        pool,
+        "select kind, status, count(*) as n from triage.artifacts"
+        " group by kind, status order by kind, status",
+    )
+    runs = _rows(
+        pool,
+        "select status, count(*) as n from triage.runs group by status order by status",
+    )
+    return {
+        "sources": sources,
+        "engine_versions": engine_versions,
+        "gc": gc,
+        "runs": runs,
+    }
+
+
+@router.get("/derivation")
+def project_derivation(pool: ConnectionPool = Depends(_pool)) -> dict:
+    """Project-wide derivation graph: every artifact + its inputs, with cross-experiment sharing.
+
+    Nodes carry ``n_experiments``/``n_runs`` from ``triage.artifact_sharing``; a node touched
+    by >1 experiment is shared (the graph highlights it).
+    """
+    nodes = _rows(
+        pool,
+        "select a.artifact_id, a.kind, a.status, a.built_by_run,"
+        "       coalesce(s.n_experiments, 0) as n_experiments,"
+        "       coalesce(s.n_runs, 0)        as n_runs"
+        " from triage.artifacts a"
+        " left join triage.artifact_sharing s on s.artifact_id = a.artifact_id",
+    )
+    edges = _rows(
+        pool,
+        "select parent_id, artifact_id from triage.artifact_inputs",
+    )
+    return {"nodes": nodes, "edges": edges}
+
+
+# ================================================================ SSE live progress
+# Poll cadence for the listen loop: short enough that a client disconnect is noticed promptly
+# (the loop checks ``request.is_disconnected()`` each tick) and a keep-alive comment is emitted,
+# long enough not to busy-spin.
 _SSE_POLL_SECONDS = 1.0
 
 
 async def _run_progress_events(request: Request, conninfo: str, run_id: str):
-    """Yield ``text/event-stream`` frames for the ``run_progress`` channel (spec §4).
+    """Yield ``text/event-stream`` frames for the ``run_progress`` channel.
 
     A dedicated *async* psycopg3 connection (separate from the request pool) in autocommit
     mode does ``LISTEN run_progress`` and forwards each NOTIFY whose ``run_id`` matches (or
@@ -444,7 +749,7 @@ async def _run_progress_events(request: Request, conninfo: str, run_id: str):
 def stream(
     request: Request, run_id: UUID, pool: ConnectionPool = Depends(_pool)
 ) -> StreamingResponse:
-    """SSE endpoint: a long-lived ``LISTEN run_progress`` connection (spec §4)."""
+    """SSE endpoint: a long-lived ``LISTEN run_progress`` connection."""
     # Borrow the pool's conninfo only to open a SEPARATE dedicated connection (the stream must
     # not tie up a request-pool connection for its lifetime).
     conninfo = pool.conninfo
