@@ -35,8 +35,12 @@ METRICS = ["auc_roc", "average_precision"]  # ap mirrors auc so two-metrics == b
 
 @pytest.fixture
 def audition_fixture(db_pool_greenfield):
-    """Seed experiment/run/model_groups/models/evaluations; return (pool, run_id,
-    group_ids{name->id}, latest_model{name->model_id at split C})."""
+    """Seed experiment/run/model_groups/models/evaluations; return (pool, experiment_hash,
+    group_ids{name->id}, latest_model{name->model_id at split C}).
+
+    Audition is experiment-scoped (migration 0005): the scope key is the experiment_hash
+    ('exp-aud'), not the run_id — a re-run cache-shares models, so run-scoping would go empty.
+    """
     pool = db_pool_greenfield
     with pool.connection() as conn:
         conn.execute(
@@ -80,23 +84,23 @@ def audition_fixture(db_pool_greenfield):
                         " values (%(m)s, 'test', %(d)s, %(metric)s, '', %(v)s)",
                         {"m": model_id, "d": split, "metric": metric, "v": value},
                     )
-    return pool, str(run_id), group_ids, latest_model
+    return pool, "exp-aud", group_ids, latest_model
 
 
-def _audition_row(pool, run_id, group_id, metric="auc_roc"):
+def _audition_row(pool, exp, group_id, metric="auc_roc"):
     with pool.connection() as conn:
         return conn.execute(
-            "select * from triage.audition where run_id = %(r)s and metric = %(m)s"
+            "select * from triage.audition where experiment_hash = %(r)s and metric = %(m)s"
             " and parameter = '' and model_group_id = %(g)s",
-            {"r": run_id, "m": metric, "g": group_id},
+            {"r": exp, "m": metric, "g": group_id},
         ).fetchone()
 
 
 def test_audition_view_distance_and_regret(audition_fixture):
-    pool, run_id, gids, _ = audition_fixture
+    pool, exp, gids, _ = audition_fixture
     mg1, mg2, mg3 = gids["mg1"], gids["mg2"], gids["mg3"]
 
-    r1, r2, r3 = (_audition_row(pool, run_id, g) for g in (mg1, mg2, mg3))
+    r1, r2, r3 = (_audition_row(pool, exp, g) for g in (mg1, mg2, mg3))
     assert r1["n_splits_evaluated"] == 3
     # avg distance-from-best and max regret (hand-computed above)
     assert r1["avg_distance_from_best"] == pytest.approx((0.30 + 0.22 + 0.0) / 3)
@@ -110,31 +114,31 @@ def test_audition_view_distance_and_regret(audition_fixture):
     assert r3["stddev_value"] == pytest.approx(0.0)
 
 
-def _pick(pool, run_id, rule, params=None):
+def _pick(pool, exp, rule, params=None):
     with pool.connection() as conn:
         return conn.execute(
             "select triage.audition_pick(%(r)s, 'auc_roc', '', %(rule)s, %(p)s::jsonb)"
             " as g",
-            {"r": run_id, "rule": rule, "p": json.dumps(params or {})},
+            {"r": exp, "rule": rule, "p": json.dumps(params or {})},
         ).fetchone()["g"]
 
 
 def test_selection_rules_each_pick_their_group(audition_fixture):
-    pool, run_id, gids, _ = audition_fixture
+    pool, exp, gids, _ = audition_fixture
     mg1, mg2, mg3 = gids["mg1"], gids["mg2"], gids["mg3"]
 
     # the three discriminating rules pick three different groups
-    assert _pick(pool, run_id, "best_current_value") == mg1
-    assert _pick(pool, run_id, "best_average_value") == mg2
-    assert _pick(pool, run_id, "lowest_metric_variance") == mg3
+    assert _pick(pool, exp, "best_current_value") == mg1
+    assert _pick(pool, exp, "best_average_value") == mg2
+    assert _pick(pool, exp, "lowest_metric_variance") == mg3
 
     # the remaining standard rules (all resolve to the consistent group mg2 here)
-    assert _pick(pool, run_id, "most_frequent_best_dist", {"dist_window": 0.1}) == mg2
-    assert _pick(pool, run_id, "best_avg_var_penalized", {"stdev_penalty": 1.0}) == mg2
+    assert _pick(pool, exp, "most_frequent_best_dist", {"dist_window": 0.1}) == mg2
+    assert _pick(pool, exp, "best_avg_var_penalized", {"stdev_penalty": 1.0}) == mg2
     assert (
         _pick(
             pool,
-            run_id,
+            exp,
             "best_avg_recency_weight",
             {"curr_weight": 5.0, "decay_type": "linear"},
         )
@@ -143,26 +147,26 @@ def test_selection_rules_each_pick_their_group(audition_fixture):
     assert (
         _pick(
             pool,
-            run_id,
+            exp,
             "best_average_two_metrics",
             {"metric2": "average_precision", "parameter2": "", "metric1_weight": 0.5},
         )
         == mg2
     )
     # baseline rule returns *some* valid group deterministically
-    assert _pick(pool, run_id, "random_model_group", {"seed": "7"}) in gids.values()
+    assert _pick(pool, exp, "random_model_group", {"seed": "7"}) in gids.values()
 
     with pytest.raises(Exception, match="unknown audition rule"):
-        _pick(pool, run_id, "no_such_rule")
+        _pick(pool, exp, "no_such_rule")
 
 
 def test_selected_model_divergence(audition_fixture):
-    pool, run_id, gids, latest = audition_fixture
+    pool, exp, gids, latest = audition_fixture
     with pool.connection() as conn:
         row = conn.execute(
             "select * from triage.selected_model(%(r)s, 'auc_roc', '',"
             " 'best_average_value')",
-            {"r": run_id},
+            {"r": exp},
         ).fetchone()
     # default rule (best_average_value) picks mg2; leaderboard #1 (best_current_value)
     # picks mg1 -> they diverge (the §2-C flag).
