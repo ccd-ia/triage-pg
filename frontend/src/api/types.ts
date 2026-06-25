@@ -615,6 +615,9 @@ export interface ModelGroupModelRow {
   model_id: number
   train_end_time: string | null
   run_id: string
+  training_label_timespan: string | null
+  /** test/evaluation period (min test as_of_date) — the period the model is scored on. */
+  test_as_of: string | null
 }
 
 export interface ModelGroupDetailResponse {

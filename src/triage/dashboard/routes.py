@@ -485,8 +485,12 @@ def model_group_detail(
         raise HTTPException(status_code=404, detail="model group not found")
     models = _rows(
         pool,
-        "select model_id, train_end_time, run_id from triage.models"
-        " where model_group_id = %(g)s order by train_end_time, model_id",
+        "select m.model_id, m.train_end_time, m.run_id,"
+        "       m.training_label_timespan,"
+        "       (select min(e.as_of_date) from triage.evaluations e"
+        "          where e.model_id = m.model_id and e.split_kind = 'test') as test_as_of"
+        " from triage.models m"
+        " where m.model_group_id = %(g)s order by m.train_end_time, m.model_id",
         {"g": model_group_id},
     )
     params = {"g": model_group_id, "metric": metric, "parameter": parameter}

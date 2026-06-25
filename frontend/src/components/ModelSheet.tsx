@@ -65,13 +65,22 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   const models = group.data?.models ?? []
   const activeModel = models.find((m) => m.model_id === activeId)
 
+  // Dynamic header: the group name + the ACTIVE model's test period, so it stays correct
+  // when you change splits (the static `label` is only the originally-opened split).
+  const groupName =
+    groupLabelOf && modelGroupId != null
+      ? groupLabelOf(modelGroupId)
+      : label.split(' @ ')[0].split(' · m')[0]
+  const activePeriod = activeModel?.test_as_of ?? activeModel?.train_end_time ?? null
+  const header = activePeriod ? `${groupName} @ ${activePeriod.slice(0, 7)}` : label
+
   return (
     <>
       <div className="sheet-backdrop" onClick={onClose} />
       <aside className="sheet" role="dialog" aria-label={`model ${activeId}`}>
         <div className="sh">
           <div>
-            <h3>{label}</h3>
+            <h3>{header}</h3>
             <div className="sub mono">
               model {activeId}
               {card.data?.model_group_id != null ? ` · group ${card.data.model_group_id}` : ''} ·{' '}
@@ -92,13 +101,20 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             >
               {models.map((m) => (
                 <option key={m.model_id} value={m.model_id}>
-                  {m.train_end_time ? `train end ${m.train_end_time}` : `model ${m.model_id}`} · m{m.model_id}
+                  {m.train_end_time ? `train ≤ ${m.train_end_time}` : `model ${m.model_id}`}
+                  {m.test_as_of ? ` · test ${m.test_as_of}` : ''} · m{m.model_id}
                 </option>
               ))}
             </select>
-            {activeModel?.train_end_time ? (
+            {activeModel ? (
               <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>
-                showing the model trained through {activeModel.train_end_time}
+                trained through <b>{activeModel.train_end_time ?? '—'}</b>
+                {activeModel.test_as_of ? (
+                  <> · scored at <b>{activeModel.test_as_of}</b></>
+                ) : null}
+                {activeModel.training_label_timespan ? (
+                  <> · label window {activeModel.training_label_timespan}</>
+                ) : null}
               </div>
             ) : null}
           </section>

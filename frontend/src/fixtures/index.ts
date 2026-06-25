@@ -650,6 +650,8 @@ export function modelGroupDetail(id: number): ModelGroupDetailResponse {
       model_id: mid + i,
       train_end_time: d,
       run_id: FIXTURE_RUN_ID,
+      training_label_timespan: '6 mons',
+      test_as_of: SPLITS[Math.min(i + 1, SPLITS.length - 1)],
     })),
     metric_over_time: allEvals,
     per_split: allEvals,
