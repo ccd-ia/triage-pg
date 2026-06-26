@@ -45,8 +45,9 @@ import { ExperimentAuditionTab } from '../components/ExperimentAuditionTab'
 import { ExperimentBiasTab } from '../components/ExperimentBiasTab'
 import { PipelineGraph } from '../components/PipelineGraph'
 import { DerivationGraph } from '../components/DerivationGraph'
+import { ConfigPanel } from '../components/ConfigPanel'
 
-type Tab = 'overview' | 'pipeline' | 'derivation' | 'audition' | 'bias' | 'groups'
+type Tab = 'overview' | 'pipeline' | 'derivation' | 'audition' | 'bias' | 'groups' | 'config'
 
 /** Thin provider component (kept here so the hook file stays JSX-free). */
 function ExperimentProvider({
@@ -271,6 +272,7 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           <TabBtn id="audition" tab={tab} set={setTab}>Audition</TabBtn>
           <TabBtn id="bias" tab={tab} set={setTab}>Bias</TabBtn>
           <TabBtn id="groups" tab={tab} set={setTab}>Model Groups</TabBtn>
+          <TabBtn id="config" tab={tab} set={setTab}>Config</TabBtn>
         </div>
 
         <section className="panel">
@@ -317,6 +319,19 @@ export function ExperimentDetail({ hash }: { hash: string }) {
               />
             ) : (
               <Loading what="model groups" />
+            ))}
+          {tab === 'config' &&
+            (experiment.data ? (
+              <ConfigPanel
+                config={experiment.data.config}
+                summary={experiment.data.summary}
+                modelReuse={experiment.data.model_reuse}
+                runs={experiment.data.runs}
+                activeRunId={activeRunId}
+                onSelectRun={onSelectRun}
+              />
+            ) : (
+              <Loading what="config" />
             ))}
         </section>
 

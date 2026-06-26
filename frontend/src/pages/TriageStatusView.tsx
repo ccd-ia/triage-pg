@@ -15,7 +15,7 @@ export function TriageStatusView() {
     <main className="page">
       <div className="exphead">
         <h2>Triage status</h2>
-        <p className="desc">Source pins, engine versions, artifact GC, and run counts.</p>
+        <p className="desc">Database health, execution mode + compute, source pins / drift, engine versions, artifact GC, and run counts.</p>
       </div>
 
       {st.loading ? (
@@ -24,6 +24,52 @@ export function TriageStatusView() {
         <div className="banner err">Failed to load status: {st.error.message}</div>
       ) : st.data ? (
         <div className="cards" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {/* database health */}
+          <div className="card">
+            <div className="ch">
+              <b>Database</b>
+              <span className="src">live · pg catalogs</span>
+            </div>
+            <div className="kv">
+              <KV label="reachable" value={<span style={{ color: 'var(--ok)' }}>● up</span>} />
+              <KV label="version" value={st.data.db.server_version} mono />
+              <KV label="size" value={st.data.db.db_size} />
+              <KV label="connections" value={`${st.data.db.connections} / ${st.data.db.max_connections}`} />
+              <KV label="parallel workers" value={`${st.data.db.max_parallel_workers}`} />
+              <KV label="uptime" value={st.data.db.uptime} />
+            </div>
+          </div>
+
+          {/* execution + compute (latest run) */}
+          <div className="card">
+            <div className="ch">
+              <b>Execution · latest run</b>
+              <span className="src">runs.profile · plan.compute</span>
+            </div>
+            <div className="kv">
+              <KV
+                label="profile"
+                value={
+                  <span className={`badge ${st.data.execution.profile === 'cloud' ? 'b-aud' : 'b-run'}`}>
+                    {st.data.execution.profile === 'cloud' ? 'cloud · AWS Batch' : 'local · in-process'}
+                  </span>
+                }
+              />
+              <KV label="status" value={st.data.execution.status ?? '—'} />
+              <KV
+                label="duration"
+                value={st.data.execution.duration_s != null ? `${st.data.execution.duration_s}s` : '—'}
+              />
+              <KV
+                label="CPUs"
+                value={st.data.compute?.cpu_count != null ? `${st.data.compute.cpu_count}` : 'not recorded'}
+              />
+              <KV label="batch job" value={st.data.execution.batch_job_id ?? '— (local)'} mono />
+              <KV label="triage" value={st.data.execution.triage_version ?? '—'} mono />
+              <KV label="git" value={st.data.execution.git_hash ?? '—'} mono />
+            </div>
+          </div>
+
           {/* run counts */}
           <div className="card">
             <div className="ch">
@@ -114,6 +160,44 @@ export function TriageStatusView() {
               </tbody>
             </table>
           </div>
+
+          {/* source-pin drift (latest run vs registry head) */}
+          <div className="card">
+            <div className="ch">
+              <b>Source pin drift</b>
+              <span className="src">latest run vs registry head</span>
+            </div>
+            {st.data.source_drift.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>source</th>
+                    <th>run pin</th>
+                    <th>head</th>
+                    <th>drift</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {st.data.source_drift.map((d) => (
+                    <tr key={d.source_name}>
+                      <td>{d.source_name}</td>
+                      <td className="mono">{d.run_version ?? '—'}</td>
+                      <td className="mono">{d.head_version ?? '—'}</td>
+                      <td>
+                        {d.drift ? (
+                          <span className="badge b-build">drifted</span>
+                        ) : (
+                          <span style={{ color: 'var(--ok)' }}>in sync</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="muted" style={{ fontSize: 11 }}>no run with frozen pins yet.</div>
+            )}
+          </div>
         </div>
       ) : null}
     </main>
@@ -125,6 +209,15 @@ function RunStat({ label, value }: { label: string; value: number }) {
     <span style={{ display: 'contents' }}>
       <span className="k2">{label}</span>
       <span className="v2">{value}</span>
+    </span>
+  )
+}
+
+function KV({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <span style={{ display: 'contents' }}>
+      <span className="k2">{label}</span>
+      <span className={`v2${mono ? ' mono' : ''}`}>{value}</span>
     </span>
   )
 }

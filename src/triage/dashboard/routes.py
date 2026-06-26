@@ -131,22 +131,44 @@ def run_progress(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
     return {"progress": progress, "plan": (plan or {}).get("plan")}
 
 
+# Per-node temporal split for the derivation graph (swimlane grouping): a MODEL node carries its
+# train_end_time; a MATRIX node carries the train_end of the model that trained on it (train
+# matrix, via train_matrix_uuid) or scored with it (test matrix, via predictions.matrix_uuid).
+# Other kinds (cohort/labels/feature_group/source) have no split. Requires _NODE_SPLIT_JOINS.
+_NODE_SPLIT_SELECT = (
+    " coalesce(mo.train_end_time::text,"
+    "   (select m2.train_end_time::text from triage.models m2"
+    "      where m2.train_matrix_uuid = mx.matrix_uuid order by m2.model_id limit 1),"
+    "   (select m3.train_end_time::text from triage.predictions p"
+    "      join triage.models m3 on m3.model_id = p.model_id"
+    "      where p.matrix_uuid = mx.matrix_uuid order by m3.model_id limit 1)) as split,"
+    " mx.matrix_kind::text as matrix_kind"
+)
+_NODE_SPLIT_JOINS = (
+    " left join triage.models mo on mo.model_hash = a.artifact_id"
+    " left join triage.matrices mx on mx.artifact_id = a.artifact_id"
+)
+
+
 @router.get("/runs/{run_id}/derivation")
 def run_derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
     """Derivation graph for the run closure: {nodes, edges}.
 
     Nodes = artifacts the run touched (built OR cache-hit, via run_artifacts); edges =
     artifact_inputs scoped to that node set. A cache-hit node is one this run used but a
-    *different* run built (``built_by_run`` != this run).
+    *different* run built (``built_by_run`` != this run). Each node carries its temporal
+    ``split`` (+ ``matrix_kind``) so the graph can lay matrices/models out in per-split lanes.
     """
     params = {"run": str(run_id)}
     nodes = _rows(
         pool,
         "select a.artifact_id, a.kind, a.status, a.built_by_run,"
-        "       (a.built_by_run is distinct from %(run)s::uuid) as cache_hit"
-        " from triage.artifacts a"
+        "       (a.built_by_run is distinct from %(run)s::uuid) as cache_hit,"
+        + _NODE_SPLIT_SELECT
+        + " from triage.artifacts a"
         " join triage.run_artifacts ra on ra.artifact_id = a.artifact_id"
-        " where ra.run_id = %(run)s",
+        + _NODE_SPLIT_JOINS
+        + " where ra.run_id = %(run)s",
         params,
     )
     edges = _rows(
@@ -225,10 +247,29 @@ def experiment_detail(
         " from triage.runs where experiment_hash = %(hash)s order by started_at desc",
         params,
     )
+    # Built vs reused: of the models this experiment's runs touched, how many did those runs
+    # actually BUILD vs REUSE from another run's cache (models keep their original builder
+    # run_id on a cache-hit — the Q1 mechanism). So a re-run that cache-shares isn't undercounted.
+    reuse = _one(
+        pool,
+        "with exp_runs as (select run_id from triage.runs where experiment_hash = %(hash)s),"
+        " used as ("
+        "   select distinct mo.model_id, mo.run_id as builder_run"
+        "   from triage.run_artifacts ra"
+        "   join triage.artifacts a on a.artifact_id = ra.artifact_id and a.kind = 'model'"
+        "   join triage.models mo on mo.model_hash = ra.artifact_id"
+        "   where ra.run_id in (select run_id from exp_runs))"
+        " select count(*) filter (where builder_run in (select run_id from exp_runs)) as built,"
+        "        count(*) filter (where builder_run is null"
+        "                          or builder_run not in (select run_id from exp_runs)) as reused"
+        " from used",
+        params,
+    ) or {"built": 0, "reused": 0}
     return {
         "summary": summary,
         "config": (config or {}).get("config"),
         "runs": runs,
+        "model_reuse": reuse,
     }
 
 
@@ -720,21 +761,74 @@ def entity_profile(
 
 @router.get("/status")
 def status(pool: ConnectionPool = Depends(_pool)) -> dict:
-    """Project status: current source pins, latest engine versions, GC tallies, run counts."""
+    """Project control panel: DB health, execution mode + compute, source pins/drift, engine
+    versions, GC tallies, run counts. (If this endpoint answers at all the project DB is
+    reachable — the pool could not connect otherwise.)"""
     sources = _rows(
         pool,
         "select source_name, version_label, registered_at, fingerprint"
         " from triage.current_source_pins order by source_name",
     )
-    latest_plan = (
+    latest = (
         _one(
             pool,
-            "select plan from triage.runs where plan is not null"
-            " order by started_at desc limit 1",
+            "select run_id, plan, profile, purpose, status, started_at, finished_at,"
+            "       extract(epoch from (coalesce(finished_at, now()) - started_at))::int"
+            "         as duration_s,"
+            "       triage_version, git_hash, batch_job_id"
+            " from triage.runs where plan is not null order by started_at desc limit 1",
         )
         or {}
-    ).get("plan")
-    engine_versions = (latest_plan or {}).get("engine_versions")
+    )
+    latest_plan = latest.get("plan") or {}
+    engine_versions = latest_plan.get("engine_versions")
+    # DB health from the live server (pg catalogs) — proves reachability + shows headroom.
+    db = (
+        _one(
+            pool,
+            "select current_setting('server_version') as server_version,"
+            "       pg_size_pretty(pg_database_size(current_database())) as db_size,"
+            "       (select count(*) from pg_stat_activity"
+            "          where datname = current_database()) as connections,"
+            "       (select setting::int from pg_settings"
+            "          where name = 'max_connections') as max_connections,"
+            "       (select setting::int from pg_settings"
+            "          where name = 'max_parallel_workers') as max_parallel_workers,"
+            "       date_trunc('second', now() - pg_postmaster_start_time())::text as uptime",
+        )
+        or {}
+    )
+    db["reachable"] = True
+    # Execution: how/where the latest run ran (local in-process vs cloud AWS Batch).
+    execution = {
+        "profile": latest.get("profile"),
+        "purpose": latest.get("purpose"),
+        "status": latest.get("status"),
+        "started_at": latest.get("started_at"),
+        "finished_at": latest.get("finished_at"),
+        "duration_s": latest.get("duration_s"),
+        "triage_version": latest.get("triage_version"),
+        "git_hash": latest.get("git_hash"),
+        "batch_job_id": latest.get("batch_job_id"),
+    }
+    compute = latest_plan.get(
+        "compute"
+    )  # {cpu_count, profile} (run.py telemetry); null on old runs
+    # Source drift: the latest run's frozen pins vs the registry's current head per source.
+    source_drift = (
+        _rows(
+            pool,
+            "select rsp.source_name, rsp.version_label as run_version,"
+            "       csp.version_label as head_version,"
+            "       (rsp.version_label is distinct from csp.version_label) as drift"
+            " from triage.run_source_pins rsp"
+            " left join triage.current_source_pins csp on csp.source_name = rsp.source_name"
+            " where rsp.run_id = %(run_id)s order by rsp.source_name",
+            {"run_id": latest.get("run_id")},
+        )
+        if latest.get("run_id")
+        else []
+    )
     gc = _rows(
         pool,
         "select kind, status, count(*) as n from triage.artifacts"
@@ -752,6 +846,10 @@ def status(pool: ConnectionPool = Depends(_pool)) -> dict:
         "engine_versions": engine_versions,
         "gc": gc,
         "runs": runs,
+        "db": db,
+        "execution": execution,
+        "compute": compute,
+        "source_drift": source_drift,
     }
 
 
@@ -766,9 +864,11 @@ def project_derivation(pool: ConnectionPool = Depends(_pool)) -> dict:
         pool,
         "select a.artifact_id, a.kind, a.status, a.built_by_run,"
         "       coalesce(s.n_experiments, 0) as n_experiments,"
-        "       coalesce(s.n_runs, 0)        as n_runs"
-        " from triage.artifacts a"
-        " left join triage.artifact_sharing s on s.artifact_id = a.artifact_id",
+        "       coalesce(s.n_runs, 0)        as n_runs,"
+        + _NODE_SPLIT_SELECT
+        + " from triage.artifacts a"
+        " left join triage.artifact_sharing s on s.artifact_id = a.artifact_id"
+        + _NODE_SPLIT_JOINS,
     )
     edges = _rows(
         pool,

@@ -124,11 +124,15 @@ def test_experiment_detail(client, seeded):
     resp = client.get(f"/api/experiments/{seeded.experiment_hash}")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"summary", "config", "runs"}
+    assert set(body) == {"summary", "config", "runs", "model_reuse"}
     assert body["summary"]["experiment_hash"] == seeded.experiment_hash
     assert body["config"]["cohort_name"] == "active"
     # both runs returned, newest first
     assert {r["run_id"] for r in body["runs"]} == {seeded.run_id, seeded.rerun_id}
+    # built vs reused: the fixture's models all belong to run 1 (the builder); both runs
+    # USE them (run_artifacts), so from the experiment all 9 are "built", 0 reused.
+    assert body["model_reuse"]["built"] == 9
+    assert body["model_reuse"]["reused"] == 0
     # actuals populate the overview strip even though the fixture's plan has no n_splits source
     assert body["summary"]["n_models"] == 9
     assert body["summary"]["n_splits"] == 3
@@ -431,7 +435,16 @@ def test_status(client, seeded):
     resp = client.get("/api/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"sources", "engine_versions", "gc", "runs"}
+    assert set(body) == {
+        "sources",
+        "engine_versions",
+        "gc",
+        "runs",
+        "db",
+        "execution",
+        "compute",
+        "source_drift",
+    }
     assert body["sources"][0]["source_name"] == "customers"
     assert body["engine_versions"] == {"featurizer": "0.4.1"}
     # run counts as a {status: count} map (the SPA reads Record<string,number>; a list here
@@ -439,6 +452,17 @@ def test_status(client, seeded):
     assert body["runs"] == {"completed": 2}
     # gc tallies are grouped by (kind, status)
     assert any(g["kind"] == "model" and g["status"] == "built" for g in body["gc"])
+    # DB health (proves reachability + headroom) from the live pg catalogs
+    assert body["db"]["reachable"] is True
+    assert body["db"]["server_version"]
+    assert body["db"]["max_connections"] > 0
+    # execution mode of the latest run (the fixture's run 1/2 are local, completed)
+    assert body["execution"]["profile"] == "local"
+    assert body["execution"]["status"] == "completed"
+    # compute is from runs.plan->compute; the fixture's plan has none -> null (graceful)
+    assert "compute" in body
+    # source drift: the run's pin vs registry head (customers @ v1, no drift)
+    assert any(d["source_name"] == "customers" for d in body["source_drift"])
 
 
 def test_project_derivation(client, seeded):

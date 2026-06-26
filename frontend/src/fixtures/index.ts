@@ -267,6 +267,20 @@ export function progressFor(runId: string): ProgressResponse {
   }
 }
 
+// Inject the split/matrix_kind fields (migration: derivation nodes carry their temporal
+// split) so fixture nodes match the type without hand-editing every literal.
+function addSplitFields<T extends { kind: string }>(
+  n: T,
+  i: number,
+): T & { split: string | null; matrix_kind: string | null } {
+  const isSplitKind = n.kind === 'matrix' || n.kind === 'model'
+  return {
+    ...n,
+    split: isSplitKind ? SPLITS[i % SPLITS.length] : null,
+    matrix_kind: n.kind === 'matrix' ? (i % 2 === 0 ? 'train' : 'test') : null,
+  }
+}
+
 export function derivationFor(runId: string): DerivationResponse {
   const p = RUN_PROFILE[runId] ?? RUN_PROFILE[FIXTURE_RUN_ID]
   // The re-run (a4ee…003) gets cache_hit nodes; the original builds fresh.
@@ -283,7 +297,7 @@ export function derivationFor(runId: string): DerivationResponse {
       { artifact_id: 'mx-123', kind: 'matrix', status: 'built', built_by_run: runId, cache_hit: false },
       { artifact_id: 'mx-4', kind: 'matrix', status: building ? 'building' : 'built', built_by_run: runId, cache_hit: false },
       { artifact_id: 'models', kind: 'model', status: building ? 'building' : 'built', built_by_run: runId, cache_hit: false },
-    ],
+    ].map(addSplitFields),
     edges: [
       { parent_id: 'src-db', artifact_id: 'cohort' },
       { parent_id: 'src-db', artifact_id: 'labels' },
@@ -363,8 +377,11 @@ export function experimentFor(hash: string): ExperimentDetailResponse {
       cohort_name: summary.experiment_hash === EXP_FAILED ? 'failed_inspections' : 'active_facilities',
       label_name: 'failed_inspections · 6mo',
       problem_type: 'classification',
+      temporal_config: { test_durations: '6month', label_timespans: ['6month'] },
+      grid_config: { 'sklearn.tree.DecisionTreeClassifier': { max_depth: [3, 5] } },
     },
     runs: expRuns,
+    model_reuse: { built: 12, reused: 80 },
   }
 }
 
@@ -855,6 +872,31 @@ export const status: StatusResponse = {
     { kind: 'feature_group', status: 'built', n: 2 },
   ])(),
   runs: { completed: 2, building: 1, failed: 1 },
+  db: {
+    server_version: '16.14',
+    db_size: '728 MB',
+    connections: 6,
+    max_connections: 100,
+    max_parallel_workers: 8,
+    uptime: '4 days 10:28:36',
+    reachable: true,
+  },
+  execution: {
+    profile: 'local',
+    purpose: 'experiment',
+    status: 'completed',
+    started_at: '2026-06-23T15:40:20Z',
+    finished_at: '2026-06-23T15:40:26Z',
+    duration_s: 6,
+    triage_version: '0.1.0',
+    git_hash: 'abc1234',
+    batch_job_id: null,
+  },
+  compute: { cpu_count: 10, profile: 'local' },
+  source_drift: [
+    { source_name: 'inspections', run_version: 'dirtyduck-v1', head_version: 'dirtyduck-v1', drift: false },
+    { source_name: 'facilities', run_version: 'dirtyduck-v1', head_version: 'dirtyduck-v2', drift: true },
+  ],
 }
 
 export const projectDerivation: ProjectDerivationResponse = {
@@ -868,7 +910,7 @@ export const projectDerivation: ProjectDerivationResponse = {
     { artifact_id: 'mx-af', kind: 'matrix', status: 'built', built_by_run: '7e4d…04', n_experiments: 1, n_runs: 2 },
     { artifact_id: 'models-fi', kind: 'model', status: 'building', built_by_run: '81a68920…01', n_experiments: 1, n_runs: 1 },
     { artifact_id: 'models-af', kind: 'model', status: 'built', built_by_run: '7e4d…04', n_experiments: 1, n_runs: 2 },
-  ],
+  ].map(addSplitFields),
   edges: [
     { parent_id: 'src-db', artifact_id: 'cohort-fi' },
     { parent_id: 'src-db', artifact_id: 'cohort-af' },

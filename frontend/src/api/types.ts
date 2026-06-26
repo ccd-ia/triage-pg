@@ -189,6 +189,10 @@ export interface DerivationNode {
   built_by_run: string | null
   /** True when used by this run but built by a different run (cache hit, §3.6). */
   cache_hit: boolean
+  /** Temporal split (train_end date) for matrix/model nodes; null for others. */
+  split: string | null
+  /** 'train' | 'test' for matrix nodes; null otherwise. */
+  matrix_kind: string | null
 }
 
 export interface DerivationEdge {
@@ -459,6 +463,12 @@ export interface ExperimentSummary {
   cohort_size: number | null
 }
 
+/** Models the experiment's runs built vs reused from another run's cache (the Q1 mechanism). */
+export interface ModelReuse {
+  built: number
+  reused: number
+}
+
 /** GET /experiments/{hash} — the experiment header detail. */
 export interface ExperimentDetailResponse {
   summary: ExperimentSummary
@@ -466,6 +476,7 @@ export interface ExperimentDetailResponse {
   config: ExperimentConfig | null
   /** Sibling runs for this experiment, newest first. */
   runs: RunListItem[]
+  model_reuse: ModelReuse
 }
 
 /* -------------------------------------------------------------------------- */
@@ -787,12 +798,54 @@ export interface ArtifactStatusRow {
   n: number
 }
 
+/** Live DB health from the pg catalogs (migration-free; proves reachability + headroom). */
+export interface DbHealth {
+  server_version: string
+  db_size: string
+  connections: number
+  max_connections: number
+  max_parallel_workers: number
+  uptime: string
+  reachable: boolean
+}
+
+/** How/where the latest run executed (local in-process vs cloud AWS Batch). */
+export interface ExecutionInfo {
+  profile: string | null
+  purpose: string | null
+  status: RunStatus | null
+  started_at: string | null
+  finished_at: string | null
+  duration_s: number | null
+  triage_version: string | null
+  git_hash: string | null
+  batch_job_id: string | null
+}
+
+/** Compute telemetry stamped into runs.plan (null for runs predating the telemetry). */
+export interface ComputeInfo {
+  cpu_count: number | null
+  profile: string | null
+}
+
+/** A source's frozen run-pin vs the registry's current head (drift = they differ). */
+export interface SourceDriftRow {
+  source_name: string
+  run_version: string | null
+  head_version: string | null
+  drift: boolean
+}
+
 export interface StatusResponse {
   sources: CurrentSourcePin[]
   engine_versions: Record<string, string> | null
   gc: ArtifactStatusRow[]
   /** run counts by status (e.g. {completed: 3, failed: 1}). */
   runs: Record<string, number>
+  db: DbHealth
+  execution: ExecutionInfo
+  compute: ComputeInfo | null
+  source_drift: SourceDriftRow[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -806,6 +859,10 @@ export interface ProjectDerivationNode {
   built_by_run: string | null
   n_experiments: number
   n_runs: number
+  /** Temporal split (train_end date) for matrix/model nodes; null for others. */
+  split: string | null
+  /** 'train' | 'test' for matrix nodes; null otherwise. */
+  matrix_kind: string | null
 }
 
 export interface ProjectDerivationEdge {

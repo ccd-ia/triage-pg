@@ -161,6 +161,40 @@ def _seed_source(engine) -> None:
                 )
 
 
+def test_experiment_hash_ignores_cosmetic():
+    """name/description (top-level) and a source's role/description are display-only and must
+    NOT change identity — editing them or adding a role must not spawn a new experiment.
+    version_label IS identity-relevant (a different loaded version is a different experiment).
+    """
+    base = {
+        "problem_type": "classification",
+        "sources": [{"name": "s", "relation": "x.y", "version_label": "v1"}],
+        "grid_config": {"sklearn.tree.DecisionTreeClassifier": {"max_depth": [3]}},
+    }
+    decorated = {
+        "name": "Pretty Name",
+        "description": "a human description",
+        "problem_type": "classification",
+        "sources": [
+            {
+                "name": "s",
+                "relation": "x.y",
+                "version_label": "v1",
+                "role": "entity",
+                "description": "the entity source",
+            }
+        ],
+        "grid_config": {"sklearn.tree.DecisionTreeClassifier": {"max_depth": [3]}},
+    }
+    assert experiment_hash_for(base) == experiment_hash_for(decorated)
+    # a real change (the loaded data version) DOES change identity
+    changed = {
+        **base,
+        "sources": [{"name": "s", "relation": "x.y", "version_label": "v2"}],
+    }
+    assert experiment_hash_for(base) != experiment_hash_for(changed)
+
+
 def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
     engine = db_pool_greenfield
     _seed_source(engine)

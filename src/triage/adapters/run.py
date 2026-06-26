@@ -81,6 +81,12 @@ __all__ = ["run_experiment", "RunResult", "SplitResult", "experiment_hash_for"]
 # so identity is stable while the human label can change. ``author`` is derived from the OS
 # user at creation, never read from config, so it never needs stripping.
 _COSMETIC_KEYS = ("name", "description")
+# Display-only keys WITHIN each declared source: ``role`` (entity/event marker for the entity
+# profile) and the human ``description`` label the source for the dashboard but don't change
+# what data is read, so they must not enter identity either — editing them (or adding a role)
+# must NOT spawn a new experiment. ``version_label`` IS identity-relevant (a different loaded
+# version is a different experiment) and is deliberately kept.
+_COSMETIC_SOURCE_KEYS = ("role", "description")
 
 
 @dataclass(frozen=True)
@@ -119,9 +125,22 @@ def _strip_cosmetic(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
 
     ``name``/``description`` are display-only and must not affect identity; stripping them
     here is the single point every caller (hash + stored config) goes through, so a config
-    that differs only in those keys hashes — and stores — identically.
+    that differs only in those keys hashes — and stores — identically. The same applies to
+    the per-source display keys (``role``/``description``) — they are stripped from each
+    declared source so labeling a source doesn't change the experiment.
     """
-    return {k: v for k, v in experiment_config.items() if k not in _COSMETIC_KEYS}
+    cleaned = {k: v for k, v in experiment_config.items() if k not in _COSMETIC_KEYS}
+    sources = cleaned.get("sources")
+    if isinstance(sources, list):
+        cleaned["sources"] = [
+            (
+                {k: v for k, v in s.items() if k not in _COSMETIC_SOURCE_KEYS}
+                if isinstance(s, Mapping)
+                else s
+            )
+            for s in sources
+        ]
+    return cleaned
 
 
 def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
@@ -603,6 +622,10 @@ def run_experiment(
             "engine_versions": engine_versions_for("feature_group"),
             "n_feature_groups": 1,
             "n_features": None,
+            # Compute resources for the status screen. Grid search runs as in-container
+            # multiprocessing locally (ADR-0005); we record the host's CPU count as the
+            # worker ceiling. (cloud/Batch sizing belongs to the Batch job, not here.)
+            "compute": {"cpu_count": os.cpu_count(), "profile": profile},
         }
         _record_run_plan(db_engine, run_id, plan)
 

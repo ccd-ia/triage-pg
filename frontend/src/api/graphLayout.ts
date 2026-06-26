@@ -15,6 +15,8 @@ export interface GraphNode {
   kind: string
   label: string
   className: string
+  /** Swimlane key (the temporal split / train_end date); null/undefined = the shared lane. */
+  lane?: string | null
 }
 
 export interface GraphEdge {
@@ -102,4 +104,160 @@ export function collapseKind(
     newEdges.push({ source: s, target: t })
   }
   return { nodes: kept, edges: newEdges, collapsed: victims.length }
+}
+
+const SHARED_LANE = '∑ shared'
+// Pipeline depth per artifact kind — the column a node sits in within its swimlane.
+const COL_BY_KIND: Record<string, number> = {
+  source: 0,
+  cohort: 1,
+  labels: 1,
+  feature_group: 1,
+  matrix: 2,
+  model: 3,
+  evaluate: 4,
+}
+const COL_X = 200
+const SWIM_NODE_H = 46
+const ROW_GAP = 10
+const LANE_GAP = 26
+const LANE_LABEL_W = 96
+
+function laneOf(n: GraphNode): string {
+  return n.lane ?? SHARED_LANE
+}
+
+/**
+ * Collapse model nodes PER LANE (per temporal split) into one "model ×N" node, so each split
+ * lane stays legible while still showing its own model fan-out. Returns the collapsed count.
+ */
+export function collapseModelsByLane(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): { nodes: GraphNode[]; edges: GraphEdge[]; collapsed: number } {
+  const models = nodes.filter((n) => n.kind === 'model')
+  if (models.length < 2) return { nodes, edges, collapsed: 0 }
+
+  const byLane = new Map<string, GraphNode[]>()
+  for (const m of models) {
+    const lane = laneOf(m)
+    const arr = byLane.get(lane) ?? []
+    arr.push(m)
+    byLane.set(lane, arr)
+  }
+  const kept = nodes.filter((n) => n.kind !== 'model')
+  const victimLane = new Map<string, string>()
+  const synthByLane = new Map<string, string>()
+  let collapsed = 0
+  for (const [lane, ms] of byLane) {
+    if (ms.length < 2) {
+      kept.push(...ms)
+      continue
+    }
+    collapsed += ms.length
+    const synthId = `__models_${lane}`
+    synthByLane.set(lane, synthId)
+    for (const m of ms) victimLane.set(m.id, lane)
+    kept.push({
+      id: synthId,
+      kind: 'model',
+      label: `model ×${ms.length}`,
+      className: ms[0].className,
+      lane: ms[0].lane,
+    })
+  }
+  if (!collapsed) return { nodes, edges, collapsed: 0 }
+
+  const remap = (id: string) =>
+    victimLane.has(id) ? synthByLane.get(victimLane.get(id)!)! : id
+  const seen = new Set<string>()
+  const newEdges: GraphEdge[] = []
+  for (const e of edges) {
+    const s = remap(e.source)
+    const t = remap(e.target)
+    if (s === t) continue
+    const key = `${s}->${t}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    newEdges.push({ source: s, target: t })
+  }
+  return { nodes: kept, edges: newEdges, collapsed }
+}
+
+/**
+ * Swimlane layout: one horizontal lane per temporal split (train cutoff → test period), with a
+ * "shared" lane on top for the cohort/labels/feature_group/source nodes that feed every split.
+ * Within a lane, nodes sit in columns by pipeline depth (source→cohort→matrix→model). Emits a
+ * left-edge label node per lane so the splits read top-to-bottom.
+ */
+export function layoutSwimlanes(
+  gnodes: GraphNode[],
+  edges: GraphEdge[],
+): { nodes: Node[]; edges: Edge[] } {
+  const splitLanes = [...new Set(gnodes.map(laneOf).filter((l) => l !== SHARED_LANE))].sort()
+  const lanes = [SHARED_LANE, ...splitLanes]
+
+  // rows per (lane, col) to size each lane's height
+  const rowsPerCol = new Map<string, Map<number, number>>()
+  for (const n of gnodes) {
+    const lane = laneOf(n)
+    const col = COL_BY_KIND[n.kind] ?? 1
+    const m = rowsPerCol.get(lane) ?? new Map<number, number>()
+    m.set(col, (m.get(col) ?? 0) + 1)
+    rowsPerCol.set(lane, m)
+  }
+  const laneY = new Map<string, number>()
+  let y = 0
+  for (const lane of lanes) {
+    const m = rowsPerCol.get(lane) ?? new Map<number, number>()
+    const maxRows = Math.max(1, ...[...m.values(), 1])
+    laneY.set(lane, y)
+    y += maxRows * (SWIM_NODE_H + ROW_GAP) + LANE_GAP
+  }
+
+  const cursor = new Map<string, number>() // `${lane}:${col}` -> next row
+  const ns: Node[] = []
+  for (const lane of lanes) {
+    ns.push({
+      id: `__lane_${lane}`,
+      position: { x: 0, y: laneY.get(lane)! },
+      data: { label: lane === SHARED_LANE ? 'shared' : `split\n${lane}` },
+      className: 'lanelabel',
+      draggable: false,
+      connectable: false,
+      selectable: false,
+      style: { width: LANE_LABEL_W - 14, whiteSpace: 'pre-line' as const },
+    })
+  }
+  for (const n of gnodes) {
+    const lane = laneOf(n)
+    const col = COL_BY_KIND[n.kind] ?? 1
+    const key = `${lane}:${col}`
+    const row = cursor.get(key) ?? 0
+    cursor.set(key, row + 1)
+    ns.push({
+      id: n.id,
+      position: {
+        x: LANE_LABEL_W + col * COL_X,
+        y: laneY.get(lane)! + row * (SWIM_NODE_H + ROW_GAP),
+      },
+      data: { label: n.label },
+      className: n.className,
+      draggable: false,
+      connectable: false,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      style: { whiteSpace: 'pre-line' as const, width: NODE_W },
+    })
+  }
+  const ids = new Set(gnodes.map((n) => n.id))
+  const es: Edge[] = edges
+    .filter((e) => ids.has(e.source) && ids.has(e.target))
+    .map((e) => ({
+      id: `${e.source}->${e.target}`,
+      source: e.source,
+      target: e.target,
+      style: { stroke: 'var(--line)' },
+    }))
+  return { nodes: ns, edges: es }
 }
