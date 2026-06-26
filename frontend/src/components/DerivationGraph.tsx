@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react'
 import { ReactFlow, Background, Controls } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { DerivationNode, DerivationResponse } from '../api/types'
-import { collapseKind, layoutDag, type GraphNode } from '../api/graphLayout'
+import { collapseModelsByLane, layoutSwimlanes, type GraphNode } from '../api/graphLayout'
 
 function nodeClass(n: DerivationNode): string {
   if (n.cache_hit) return 'flownode cachehit'
@@ -30,7 +30,9 @@ function nodeClass(n: DerivationNode): string {
 function nodeLabel(n: DerivationNode): string {
   const shortId = n.artifact_id.length > 10 ? n.artifact_id.slice(0, 10) : n.artifact_id
   const marker = n.cache_hit ? ' ⟲' : n.status === 'building' ? ' ◐' : ''
-  return `${n.kind}\n${shortId}${marker}`
+  // matrices carry train/test; the lane already shows the split date, so keep the label tight.
+  const head = n.kind === 'matrix' && n.matrix_kind ? `matrix·${n.matrix_kind}` : n.kind
+  return `${head}\n${shortId}${marker}`
 }
 
 export function DerivationGraph({ data }: { data: DerivationResponse }) {
@@ -42,10 +44,13 @@ export function DerivationGraph({ data }: { data: DerivationResponse }) {
       kind: n.kind,
       label: nodeLabel(n),
       className: nodeClass(n),
+      lane: n.split, // swimlane = temporal split (train_end); null for shared nodes
     }))
     const gedges = data.edges.map((e) => ({ source: e.parent_id, target: e.artifact_id }))
-    const folded = collapsed ? collapseKind(gnodes, gedges, 'model') : { nodes: gnodes, edges: gedges }
-    return layoutDag(folded.nodes, folded.edges)
+    const folded = collapsed
+      ? collapseModelsByLane(gnodes, gedges)
+      : { nodes: gnodes, edges: gedges }
+    return layoutSwimlanes(folded.nodes, folded.edges)
   }, [data, collapsed])
 
   const nModels = data.nodes.filter((n) => n.kind === 'model').length
@@ -55,17 +60,17 @@ export function DerivationGraph({ data }: { data: DerivationResponse }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         {nModels > 1 ? (
           <button type="button" className="seg" onClick={() => setCollapsed((c) => !c)}>
-            {collapsed ? `▸ expand ${nModels} models` : '▾ collapse models'}
+            {collapsed ? `▸ expand ${nModels} models` : '▾ collapse models per split'}
           </button>
         ) : <span />}
-        <span className="src">artifacts ⋈ artifact_inputs (run closure)</span>
+        <span className="src">artifacts ⋈ artifact_inputs · swimlanes by split</span>
       </div>
-      <div className="flowwrap" style={{ height: 340 }}>
+      <div className="flowwrap" style={{ height: 420 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
           fitView
-          minZoom={0.2}
+          minZoom={0.15}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}

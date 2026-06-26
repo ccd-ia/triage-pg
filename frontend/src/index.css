@@ -1356,3 +1356,96 @@ tr.winner td {
   padding: 1px 5px;
   margin-left: 6px;
 }
+
+/* ---- experiment Config tab: config sections + run timeline ---- */
+.configpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.configpanel .card {
+  width: 100%;
+}
+.codeblock {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 8px;
+}
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tl-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+}
+.tl-run:hover {
+  border-color: var(--line);
+}
+.tl-run.sel {
+  background: var(--acc-bg);
+  border-color: var(--acc-border);
+}
+.tl-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--mut);
+}
+.tl-dot.tl-completed {
+  background: var(--ok);
+}
+.tl-dot.tl-failed {
+  background: var(--bad);
+}
+.tl-dot.tl-started,
+.tl-dot.tl-building {
+  background: var(--warn);
+}
+.tl-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+.tl-meta {
+  font-size: 10.5px;
+}
+
+/* ---- derivation swimlane lane labels ---- */
+.flownode.lanelabel,
+.lanelabel {
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  color: var(--mut);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  text-align: left;
+  padding: 4px 6px;
+  white-space: pre-line;
+}
+.react-flow__node.lanelabel {
+  pointer-events: none;
+}
