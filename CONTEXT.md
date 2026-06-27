@@ -29,8 +29,12 @@ The `(entity_id, as_of_date)`-keyed feature table for training or testing; store
 _Avoid_: dataset, dataframe, feature table
 
 **Experiment**:
-One full pipeline run — cohort → features → matrices → train → predict → evaluate — defined by a single config.
-_Avoid_: run, job, pipeline
+A prediction **problem** and its evaluation protocol — identified by `cohort_config + label_config + temporal_config + problem_type` (the matrix rows, the target `y`, and the train/test splits). Features, model grid, and imputation are NOT part of an Experiment's identity; they vary per **Run** (ADR-0022). Changing the cohort, label, or temporal config is a different Experiment.
+_Avoid_: config, model search, the whole pipeline config
+
+**Run**:
+One attempt at an Experiment's problem — a single execution with a specific `feature_config + grid_config + imputation_config`. Many Runs share one Experiment (different feature sets / grids); their model groups are compared on the same fixed `y` and splits. A Run that rebuilds nothing (all cache hits) is a *replay* (ADR-0022).
+_Avoid_: job, experiment, trial
 
 **Feature engine (featurizer)**:
 The standalone Deep Feature Synthesis SQL-generation engine that synthesizes point-in-time-correct features; it knows nothing of triage concepts.

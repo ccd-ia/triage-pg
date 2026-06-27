@@ -865,6 +865,21 @@ header.bar .brand .dot {
   color: var(--ink);
   background: var(--acc-bg);
 }
+.exphead .meta .pill.warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.replay-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border: 1px solid var(--acc2-border);
+  background: var(--acc2-bg);
+  color: var(--acc2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 
 /* shared-scale sparkline row (4 mini charts under the summary strip) */
 .sparks {
@@ -986,6 +1001,85 @@ header.bar .brand .dot {
   font-size: 10.5px;
   color: var(--warn);
   margin-left: auto;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ctxbar .diverge:hover {
+  filter: brightness(1.12);
+}
+.ctxbar .diverge:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* entity-search toolbar (jump to an entity by id) */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 6px 0 2px;
+}
+.entitysearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.entitysearch input {
+  width: 96px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
+/* audition vs leaderboard compare modal */
+.cmp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 620px) {
+  .cmp-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.cmp-col {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.cmp-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.cmp-tag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--mut);
+}
+.cmp-name {
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--acc);
+  cursor: pointer;
+}
+.cmp-name:disabled {
+  color: var(--ink);
+  cursor: default;
 }
 
 /* sub-tabs (reuse .tabbar/.tabbtn) */
@@ -1448,4 +1542,64 @@ tr.winner td {
 }
 .react-flow__node.lanelabel {
   pointer-events: none;
+}
+
+/* ---- react-flow zoom/fit controls (default is dark-on-dark — barely visible) ---- */
+.react-flow__controls {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--panel2);
+  border-bottom: 1px solid var(--line);
+  width: 24px;
+  height: 24px;
+}
+.react-flow__controls-button:hover {
+  background: var(--panel);
+}
+.react-flow__controls-button svg {
+  fill: var(--ink);
+  max-width: 12px;
+  max-height: 12px;
+}
+
+/* ---- derivation swimlane bands (the visible per-split lane backgrounds) ---- */
+.react-flow__node.laneband {
+  pointer-events: none;
+  border: none;
+  border-top: 1px dashed var(--line2);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+.react-flow__node.laneband.even {
+  background: rgba(128, 128, 128, 0.06);
+}
+.react-flow__node.laneband .react-flow__handle {
+  display: none;
+}
+
+/* ---- entity attribute value renderers (geo point · date range) ---- */
+.geolink {
+  color: var(--acc);
+  text-decoration: none;
+  font-size: 10px;
+}
+.geolink:hover {
+  text-decoration: underline;
+}
+.rangebar {
+  display: inline-block;
+  width: 46px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--acc);
+  opacity: 0.4;
+  margin: 0 6px;
+  vertical-align: middle;
 }

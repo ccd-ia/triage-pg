@@ -6,13 +6,11 @@
  */
 import { useMemo, useState } from 'react'
 import type { ModelGroupSummaryRow } from '../api/types'
+import { abbrevAlgo } from '../api/transforms'
 
 type SortKey = 'model_group_id' | 'model_type' | 'n_models' | 'last_train_end'
 
-function shortType(t: string | null): string {
-  if (!t) return '—'
-  return (t.split('.').pop() ?? t).replace(/Classifier$|Regressor$/, '')
-}
+const shortType = abbrevAlgo
 
 function hyperText(h: Record<string, unknown> | null): string {
   if (!h) return '—'
@@ -26,9 +24,11 @@ interface Props {
   selectedGroupId: number | null
   /** Resolve a group → a model_id (the page provides via leaderboard/evals). */
   onPickGroup: (group: ModelGroupSummaryRow) => void
+  /** Open the group's own detail panel (vs. a row click, which opens its model). */
+  onOpenGroupPanel?: (group: ModelGroupSummaryRow) => void
 }
 
-export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup }: Props) {
+export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup, onOpenGroupPanel }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'model_group_id', dir: 1 })
 
   const sorted = useMemo(() => {
@@ -67,6 +67,7 @@ export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup }: Props
           <th className="clickrow" onClick={() => toggle('last_train_end')}>
             train-end span{arrow('last_train_end')}
           </th>
+          {onOpenGroupPanel ? <th /> : null}
         </tr>
       </thead>
       <tbody>
@@ -85,6 +86,21 @@ export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup }: Props
             <td className="mono">
               {g.first_train_end?.slice(0, 7) ?? '—'} → {g.last_train_end?.slice(0, 7) ?? '—'}
             </td>
+            {onOpenGroupPanel ? (
+              <td>
+                <button
+                  type="button"
+                  className="seg"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenGroupPanel(g)
+                  }}
+                  title="open this group's panel"
+                >
+                  ▤ group
+                </button>
+              </td>
+            ) : null}
           </tr>
         ))}
       </tbody>

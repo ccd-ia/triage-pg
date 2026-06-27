@@ -208,13 +208,18 @@ def source_pins(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
 # ============================================================== experiments (analysis scope)
 @router.get("/experiments")
 def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
-    """Experiment rail: one row per experiment (newest first)."""
+    """Experiment rail: one row per experiment (newest first).
+
+    Soft-archived experiments (``archived_at`` set — e.g. a stale pre-fix duplicate) are hidden
+    here; they stay reachable by direct link via ``/experiments/{hash}``.
+    """
     return _rows(
         pool,
         "select experiment_hash, name, description, author, problem_type, created_at,"
         "       n_runs, last_started_at, last_status, last_plan,"
         "       n_model_groups, n_models, n_splits, n_features, base_rate, cohort_size"
         " from triage.experiment_summary"
+        " where archived_at is null"
         " order by last_started_at desc nulls last, created_at desc",
     )
 
@@ -240,13 +245,60 @@ def experiment_detail(
         "select config from triage.experiments where experiment_hash = %(hash)s",
         params,
     )
+    # Per-run built vs reused artifact counts: a run that BUILT 0 artifacts (everything was a
+    # cache hit from another run) is a "replay" — it ran but produced nothing new. ``built_by_run``
+    # on the artifact is the original builder, so a cache-hit node has a foreign builder.
     runs = _rows(
         pool,
-        "select run_id, experiment_hash, profile, purpose, status, started_at,"
-        "       finished_at, triage_version, git_hash, batch_job_id"
-        " from triage.runs where experiment_hash = %(hash)s order by started_at desc",
+        "select r.run_id, r.experiment_hash, r.profile, r.purpose, r.status, r.started_at,"
+        "       r.finished_at, r.triage_version, r.git_hash, r.batch_job_id,"
+        "       coalesce(ac.n_built, 0) as n_built, coalesce(ac.n_reused, 0) as n_reused"
+        " from triage.runs r"
+        " left join lateral ("
+        "   select count(*) filter (where a.built_by_run = r.run_id) as n_built,"
+        "          count(*) filter (where a.built_by_run is distinct from r.run_id) as n_reused"
+        "   from triage.run_artifacts ra"
+        "   join triage.artifacts a on a.artifact_id = ra.artifact_id"
+        "   where ra.run_id = r.run_id) ac on true"
+        " where r.experiment_hash = %(hash)s order by r.started_at desc",
         params,
     )
+    # Cross-experiment artifact sharing: of the artifacts this experiment's runs touched, how many
+    # were actually built by a run belonging to a DIFFERENT experiment. ~100% means this experiment
+    # rebuilt nothing — it is effectively a duplicate of whatever it borrowed from (e.g. the same
+    # config under a stale pre-fix hash). ``shared_with`` names the dominant lender.
+    sharing = _one(
+        pool,
+        "with exp_runs as (select run_id from triage.runs where experiment_hash = %(hash)s),"
+        " touched as ("
+        "   select distinct a.artifact_id, a.built_by_run"
+        "   from triage.run_artifacts ra"
+        "   join triage.artifacts a on a.artifact_id = ra.artifact_id"
+        "   where ra.run_id in (select run_id from exp_runs)),"
+        " lender as ("
+        "   select es.experiment_hash, es.name, count(*) as n"
+        "   from touched t"
+        "   join triage.runs r2 on r2.run_id = t.built_by_run"
+        "   join triage.experiment_summary es on es.experiment_hash = r2.experiment_hash"
+        "   where r2.experiment_hash <> %(hash)s"
+        "   group by es.experiment_hash, es.name order by n desc limit 1),"
+        " foreign_total as ("
+        "   select count(*) as n from touched t"
+        "   join triage.runs r3 on r3.run_id = t.built_by_run"
+        "   where r3.experiment_hash <> %(hash)s)"
+        " select (select count(*) from touched) as n_total,"
+        "        (select n from foreign_total) as n_foreign,"
+        "        (select n from lender) as n_shared,"
+        "        (select experiment_hash from lender) as shared_with_hash,"
+        "        (select name from lender) as shared_with_name",
+        params,
+    ) or {
+        "n_total": 0,
+        "n_foreign": 0,
+        "n_shared": 0,
+        "shared_with_hash": None,
+        "shared_with_name": None,
+    }
     # Built vs reused: of the models this experiment's runs touched, how many did those runs
     # actually BUILD vs REUSE from another run's cache (models keep their original builder
     # run_id on a cache-hit — the Q1 mechanism). So a re-run that cache-shares isn't undercounted.
@@ -270,6 +322,7 @@ def experiment_detail(
         "config": (config or {}).get("config"),
         "runs": runs,
         "model_reuse": reuse,
+        "artifact_sharing": sharing,
     }
 
 
@@ -512,9 +565,16 @@ def model_group_detail(
     model_group_id: int,
     metric: str = "auc_roc",
     parameter: str = "",
+    experiment_hash: str | None = None,
     pool: ConnectionPool = Depends(_pool),
 ) -> dict:
-    """Model-group drill-down: the card facts + its models + metric-over-time + per-split evals."""
+    """Model-group drill-down: the card facts + its models + metric-over-time + per-split evals.
+
+    A model_group can be SHARED across experiments (content-addressed: same algorithm +
+    hyperparameters + feature_list ⇒ same model_group_id). Pass ``experiment_hash`` to scope
+    the models/evals to one experiment's runs — otherwise the panel shows every experiment's
+    models of this group (e.g. 8 models across two experiments for a 4-split group).
+    """
     summary = _one(
         pool,
         "select experiment_hash, model_group_id, model_group_hash, model_type,"
@@ -524,6 +584,14 @@ def model_group_detail(
     )
     if summary is None:
         raise HTTPException(status_code=404, detail="model group not found")
+    # `(%(exp)s is null or r.experiment_hash = %(exp)s)` keeps the query single-shape whether or
+    # not the caller scopes to an experiment.
+    params = {
+        "g": model_group_id,
+        "metric": metric,
+        "parameter": parameter,
+        "exp": experiment_hash,
+    }
     models = _rows(
         pool,
         "select m.model_id, m.train_end_time, m.run_id,"
@@ -531,18 +599,22 @@ def model_group_detail(
         "       (select min(e.as_of_date) from triage.evaluations e"
         "          where e.model_id = m.model_id and e.split_kind = 'test') as test_as_of"
         " from triage.models m"
-        " where m.model_group_id = %(g)s order by m.train_end_time, m.model_id",
-        {"g": model_group_id},
+        " join triage.runs r on r.run_id = m.run_id"
+        " where m.model_group_id = %(g)s"
+        "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
+        " order by m.train_end_time, m.model_id",
+        params,
     )
-    params = {"g": model_group_id, "metric": metric, "parameter": parameter}
     metric_over_time = _rows(
         pool,
         "select e.model_id, m.model_group_id, e.as_of_date, e.metric, e.parameter,"
         "       e.value, e.num_labeled, e.num_positive"
         " from triage.evaluations e"
         " join triage.models m on m.model_id = e.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s and e.split_kind = 'test'"
         "   and e.metric = %(metric)s and e.parameter = %(parameter)s"
+        "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
         " order by e.as_of_date",
         params,
     )
@@ -553,9 +625,11 @@ def model_group_detail(
         "       e.num_positive"
         " from triage.evaluations e"
         " join triage.models m on m.model_id = e.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s and e.split_kind = 'test'"
+        "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
         " order by e.metric, e.parameter, e.as_of_date",
-        {"g": model_group_id},
+        params,
     )
     return {
         "summary": summary,
@@ -577,7 +651,8 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
         raise HTTPException(status_code=404, detail="model not found")
     importances = _rows(
         pool,
-        "select model_id, feature, feature_importance, rank_abs, rank_pct"
+        "select model_id, feature, feature_importance, rank_abs, rank_pct,"
+        "       importance_kind, signed_value, odds_ratio"
         " from triage.feature_importances where model_id = %(model_id)s"
         " order by rank_abs nulls last, feature",
         {"model_id": model_id},
@@ -692,10 +767,11 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
     """
     sources = _rows(
         pool,
-        "select source_name, relation, knowledge_date_column, description, role"
+        "select source_name, relation, knowledge_date_column, description, role, type_column"
         " from triage.sources order by source_name",
     )
     volumes: dict[str, list[dict]] = {}
+    volumes_by_type: dict[str, list[dict]] = {}
     profile: dict[str, dict] = {}
     for src in sources:
         name = src["source_name"]
@@ -704,6 +780,15 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
             "select period, n from triage.source_volume(%(name)s, 'month') order by period",
             {"name": name},
         )
+        # Per-type series only when the source declares a type_column (e.g. facility_type for
+        # entities, inspection type for events); empty otherwise.
+        if src.get("type_column"):
+            volumes_by_type[name] = _rows(
+                pool,
+                "select period, type_value, n from triage.source_volume_by_type(%(name)s, 'month')"
+                " order by period, type_value",
+                {"name": name},
+            )
         profile[name] = (
             _one(
                 pool,
@@ -713,7 +798,12 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
             )
             or {}
         )
-    return {"sources": sources, "volumes": volumes, "profile": profile}
+    return {
+        "sources": sources,
+        "volumes": volumes,
+        "volumes_by_type": volumes_by_type,
+        "profile": profile,
+    }
 
 
 @router.get("/entities/{entity_id}")
@@ -834,6 +924,26 @@ def status(pool: ConnectionPool = Depends(_pool)) -> dict:
         "select kind, status, count(*) as n from triage.artifacts"
         " group by kind, status order by kind, status",
     )
+    # Where artifacts land on disk/S3 — the parent directory of the matrices (.parquet) and
+    # models (.joblib). storage_uri is relative to the project storage root (set at run time).
+    artifact_paths = _rows(
+        pool,
+        "select 'matrix' as kind,"
+        "       regexp_replace(storage_uri, '/[^/]+$', '') as dir, count(*) as n"
+        " from triage.matrices where storage_uri is not null"
+        " group by 2"
+        " union all"
+        " select 'model', regexp_replace(artifact_uri, '/[^/]+$', ''), count(*)"
+        " from triage.models where artifact_uri is not null"
+        " group by 2 order by kind, dir",
+    )
+    # Experiments overview (not just runs): one row per non-archived experiment.
+    experiments = _rows(
+        pool,
+        "select experiment_hash, name, n_runs, n_models, last_status, last_started_at"
+        " from triage.experiment_summary where archived_at is null"
+        " order by last_started_at desc nulls last",
+    )
     run_rows = _rows(
         pool,
         "select status, count(*) as n from triage.runs group by status order by status",
@@ -846,6 +956,8 @@ def status(pool: ConnectionPool = Depends(_pool)) -> dict:
         "engine_versions": engine_versions,
         "gc": gc,
         "runs": runs,
+        "experiments": experiments,
+        "artifact_paths": artifact_paths,
         "db": db,
         "execution": execution,
         "compute": compute,

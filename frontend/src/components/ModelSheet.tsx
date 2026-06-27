@@ -50,8 +50,11 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   const [showAllFeats, setShowAllFeats] = useState(false)
 
   const group = useAsync(
-    () => (modelGroupId != null ? api.modelGroup(modelGroupId) : Promise.resolve(undefined)),
-    [modelGroupId],
+    () =>
+      modelGroupId != null
+        ? api.modelGroup(modelGroupId, undefined, undefined, experimentHash)
+        : Promise.resolve(undefined),
+    [modelGroupId, experimentHash],
   )
   const card = useAsync(() => api.model(activeId), [activeId])
   const histo = useAsync(() => api.modelHistogram(activeId), [activeId])
@@ -138,14 +141,31 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             <div className="muted" style={{ fontSize: 11 }}>no feature importances persisted</div>
           ) : (
             <>
+              {/* What the number means depends on the estimator: Gini impurity for trees,
+                  |coefficient| for linear models (β + odds-ratio shown for logistic). */}
+              {(() => {
+                const kind = features[0]?.importance_kind
+                if (kind === 'gini')
+                  return <div className="muted" style={{ fontSize: 10.5, marginBottom: 6 }}>Gini importance (mean impurity decrease) — unsigned.</div>
+                if (kind === 'coef' || kind === 'abs_coef')
+                  return <div className="muted" style={{ fontSize: 10.5, marginBottom: 6 }}>|β| on scaled features; <b>β</b> = signed coefficient, <b>OR</b> = odds-ratio exp(β).</div>
+                return null
+              })()}
               <div className="featlist">
                 {topFeatures.map((f) => {
                   const { pretty, raw } = prettyFeature(f.feature)
+                  const isCoef = f.importance_kind === 'coef' || f.importance_kind === 'abs_coef'
                   return (
                     <div className="featrow" key={f.feature}>
                       <div>
                         <div className="pretty">{pretty}</div>
                         <div className="rawsub">{raw}</div>
+                        {isCoef && f.signed_value != null ? (
+                          <div className="rawsub">
+                            β {f.signed_value.toFixed(4)}
+                            {f.odds_ratio != null ? ` · OR ${f.odds_ratio.toFixed(4)}` : ''}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="imp">{f.feature_importance.toFixed(3)}</div>
                       <div className="bar" style={{ width: `${(f.feature_importance / maxImp) * 100}%` }} />

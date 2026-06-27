@@ -19,6 +19,7 @@ import {
 } from 'recharts'
 import type { ThresholdCurvePoint } from '../api/types'
 import { curveAtPct } from '../api/transforms'
+import { tooltipFormatter } from '../api/format'
 
 interface Props {
   curve: ThresholdCurvePoint[]
@@ -62,6 +63,7 @@ export function RayidCurveChart({ curve, initialPct = 0.1 }: Props) {
             <YAxis stroke="var(--mut)" tick={{ fontSize: 9 }} domain={[0, 1]} />
             <Tooltip
               contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
+              formatter={tooltipFormatter(4)}
             />
             <ReferenceLine x={pctInt} stroke="var(--acc)" strokeDasharray="4 3" />
             <Line type="monotone" dataKey="precision" stroke="var(--acc)" strokeWidth={2} dot={false} isAnimationActive={false} />

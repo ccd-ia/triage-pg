@@ -83,6 +83,71 @@ export function TriageStatusView() {
             </div>
           </div>
 
+          {/* experiments overview */}
+          <div className="card">
+            <div className="ch">
+              <b>Experiments</b>
+              <span className="src">experiment_summary</span>
+            </div>
+            {st.data.experiments && st.data.experiments.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>experiment</th>
+                    <th className="num">runs</th>
+                    <th className="num">models</th>
+                    <th>status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {st.data.experiments.map((e) => (
+                    <tr key={e.experiment_hash}>
+                      <td>
+                        {e.name ?? e.experiment_hash.slice(0, 12)}{' '}
+                        <code className="mono muted" style={{ fontSize: 10 }}>{e.experiment_hash.slice(0, 8)}</code>
+                      </td>
+                      <td className="num">{e.n_runs}</td>
+                      <td className="num">{e.n_models ?? '—'}</td>
+                      <td className="muted">{e.last_status ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="muted" style={{ fontSize: 11 }}>no experiments yet.</div>
+            )}
+          </div>
+
+          {/* artifact storage paths */}
+          <div className="card">
+            <div className="ch">
+              <b>Artifact storage</b>
+              <span className="src">matrices · models (parent dir)</span>
+            </div>
+            {st.data.artifact_paths && st.data.artifact_paths.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>kind</th>
+                    <th>directory</th>
+                    <th className="num">n</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {st.data.artifact_paths.map((a) => (
+                    <tr key={`${a.kind}-${a.dir}`}>
+                      <td>{a.kind}</td>
+                      <td className="mono" style={{ fontSize: 10.5 }}>{a.dir || '·'}/</td>
+                      <td className="num">{a.n}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="muted" style={{ fontSize: 11 }}>no stored artifacts yet (paths are relative to the project storage root).</div>
+            )}
+          </div>
+
           {/* engine versions */}
           <div className="card">
             <div className="ch">

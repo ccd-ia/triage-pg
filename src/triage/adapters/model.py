@@ -570,28 +570,37 @@ def _insert_model_row(
 
 
 def _feature_importance_values(estimator, n_features: int):
-    """Extract per-feature importances from the estimator, or None if it exposes none.
+    """Extract per-feature importances (+ kind, signed coef, odds-ratio) from the estimator.
 
-    Tree/ensemble estimators expose ``feature_importances_``; linear models expose ``coef_``
-    (we take the magnitude of the first/only row for ranking). Anything else -> None (no rows
-    persisted, which is fine — ADR-0011 persists what the estimator offers).
+    Returns a dict ``{ranking, kind, signed, odds}`` or None if the estimator exposes nothing:
+
+    * Tree/ensemble (``feature_importances_``) → ``kind='gini'``; ``signed``/``odds`` are None
+      (impurity importances are unsigned and have no odds interpretation).
+    * Linear (``coef_``, e.g. (Scaled)LogisticRegression) → ``kind='coef'``; ``signed`` is the
+      coefficient β, ``odds`` is the odds-ratio exp(β), ``ranking`` is |β|. With
+      ``ScaledLogisticRegression`` the coefficients are on minmax-scaled features, so |β| is
+      comparable across features (otherwise |β| is scale-dependent — surfaced in the UI label).
     """
     import numpy as np
 
     if hasattr(estimator, "feature_importances_"):
-        values = np.asarray(estimator.feature_importances_, dtype=float).ravel()
+        ranking = np.asarray(estimator.feature_importances_, dtype=float).ravel()
+        kind, signed, odds = "gini", None, None
     elif hasattr(estimator, "coef_"):
         coef = np.asarray(estimator.coef_, dtype=float)
-        values = np.abs(coef[0] if coef.ndim > 1 else coef).ravel()
+        signed = (coef[0] if coef.ndim > 1 else coef).ravel()
+        ranking = np.abs(signed)
+        odds = np.exp(signed)
+        kind = "coef"
     else:
         return None
-    if values.shape[0] != n_features:
+    if ranking.shape[0] != n_features:
         logger.warning(
-            f"estimator exposed {values.shape[0]} importances for {n_features} features"
+            f"estimator exposed {ranking.shape[0]} importances for {n_features} features"
             + " — skipping feature-importance persistence (geometry mismatch)"
         )
         return None
-    return values
+    return {"ranking": ranking, "kind": kind, "signed": signed, "odds": odds}
 
 
 def _persist_feature_importances(
@@ -604,19 +613,29 @@ def _persist_feature_importances(
     """
     import numpy as np
 
-    values = _feature_importance_values(estimator, len(feature_columns))
-    if values is None:
+    fi = _feature_importance_values(estimator, len(feature_columns))
+    if fi is None:
         logger.debug(
             f"model_id={model_id} estimator exposes no feature importances — none persisted"
         )
         return
 
-    pairs = list(zip(feature_columns, values, strict=True))
+    kind, signed, odds = fi["kind"], fi["signed"], fi["odds"]
+    # (feature, |importance|, signed β | None, odds-ratio exp(β) | None) per feature.
+    quads = [
+        (
+            feature,
+            float(fi["ranking"][i]),
+            None if signed is None else float(signed[i]),
+            None if odds is None else float(odds[i]),
+        )
+        for i, feature in enumerate(feature_columns)
+    ]
     # Sort by |importance| desc, then feature name asc for a deterministic ranking.
-    order = sorted(pairs, key=lambda p: (-abs(p[1]), p[0]))
+    order = sorted(quads, key=lambda q: (-abs(q[1]), q[0]))
     n = len(order)
     rows = []
-    for rank0, (feature, importance) in enumerate(order):
+    for rank0, (feature, importance, signed_value, odds_ratio) in enumerate(order):
         rank_abs = rank0 + 1
         rank_pct = (n - rank_abs) / (n - 1) if n > 1 else 1.0
         rows.append(
@@ -626,17 +645,25 @@ def _persist_feature_importances(
                 "feature_importance": float(importance),
                 "rank_abs": rank_abs,
                 "rank_pct": float(rank_pct),
+                "importance_kind": kind,
+                "signed_value": signed_value,
+                "odds_ratio": odds_ratio,
             }
         )
     with db_engine.connection() as conn, conn.cursor() as cur:
         cur.executemany(
             "insert into triage.feature_importances"
-            + " (model_id, feature, feature_importance, rank_abs, rank_pct)"
-            + " values (%(model_id)s, %(feature)s, %(feature_importance)s, %(rank_abs)s, %(rank_pct)s)"
+            + " (model_id, feature, feature_importance, rank_abs, rank_pct,"
+            + "  importance_kind, signed_value, odds_ratio)"
+            + " values (%(model_id)s, %(feature)s, %(feature_importance)s, %(rank_abs)s,"
+            + "  %(rank_pct)s, %(importance_kind)s, %(signed_value)s, %(odds_ratio)s)"
             + " on conflict (model_id, feature) do update set"
             + "  feature_importance = excluded.feature_importance,"
             + "  rank_abs = excluded.rank_abs,"
-            + "  rank_pct = excluded.rank_pct",
+            + "  rank_pct = excluded.rank_pct,"
+            + "  importance_kind = excluded.importance_kind,"
+            + "  signed_value = excluded.signed_value,"
+            + "  odds_ratio = excluded.odds_ratio",
             rows,
         )
     logger.debug(f"Persisted {len(rows)} feature importance(s) for model_id={model_id}")

@@ -1,17 +1,15 @@
 /*
  * App shell (Option 4) — top bar (title + theme toggle) · left GLOBAL nav
- * (Runs · Experiments · Ontology · Triage-status · Derivation) · routed content.
+ * (Experiments · Ontology · Triage-status · Derivation) · routed content.
  *
- * Routing model (rework plan):
+ * Routing model:
  *   /experiments            — experiment index (landing)
  *   /experiments/:hash      — the experiment detail (analysis is experiment-scoped)
- *   /runs                   — run rail (monitoring), newest run resolves to its experiment
- *   /runs/:id               — resolve the run's experiment_hash → redirect to
- *                             /experiments/:hash?run=:id (run anchors the monitoring panels)
+ *   /runs/:id               — deep-link resolver: look up the run's experiment_hash →
+ *                             redirect to /experiments/:hash?run=:id (run anchors the
+ *                             monitoring panels). Runs are NOT a top-level nav item — a
+ *                             run is reached from the experiment header's sibling runs.
  *   /ontology · /status · /derivation — project-level views
- *
- * The run rail stays primary for monitoring; clicking a run lands on its
- * experiment with that run anchoring Pipeline/Derivation.
  */
 import {
   BrowserRouter,
@@ -27,7 +25,6 @@ import { useAsync } from './hooks/useAsync'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { GlobalNav } from './components/GlobalNav'
 import { ThemeToggle } from './components/ThemeToggle'
-import { RunRail } from './components/RunRail'
 import { ExperimentsList } from './pages/ExperimentsList'
 import { ExperimentDetail } from './pages/ExperimentDetail'
 import { OntologyView } from './pages/OntologyView'
@@ -68,37 +65,13 @@ function Shell({ rail, children }: { rail?: React.ReactNode; children: React.Rea
 
 /* ----------------------------- runs (monitoring) ------------------------- */
 
-/** /runs — the run rail; selecting a run resolves to its experiment. */
-function RunsRoute() {
-  const navigate = useNavigate()
-  const runs = useAsync(() => api.listRuns(), [])
-  return (
-    <Shell
-      rail={
-        <RunRail
-          runs={runs.data ?? []}
-          selectedId={undefined}
-          onSelect={(id) => navigate(`/runs/${id}`)}
-        />
-      }
-    >
-      <main className="page">
-        <div className="exphead">
-          <h2>Runs</h2>
-          <p className="desc">Pick a run to open its experiment (analysis aggregates all runs of the experiment).</p>
-        </div>
-        {runs.loading ? <div className="banner">Loading runs…</div> : null}
-        {runs.data && runs.data.length === 0 ? <div className="banner">No runs found.</div> : null}
-      </main>
-    </Shell>
-  )
-}
-
-/** /runs/:id — resolve experiment_hash via /summary, then redirect. */
+/** /runs/:id — resolve experiment_hash via /summary, then redirect into the experiment.
+ *  Kept for deep links (e.g. a run URL pasted from elsewhere); runs are no longer a
+ *  top-level destination (reached from the experiment header instead). */
 function RunResolve() {
   const { id } = useParams<{ id: string }>()
   const summary = useAsync(() => (id ? api.summary(id) : Promise.resolve(undefined)), [id])
-  if (!id) return <Navigate to="/runs" replace />
+  if (!id) return <Navigate to="/experiments" replace />
   if (summary.loading) {
     return (
       <Shell>
@@ -169,6 +142,10 @@ function ExperimentRail({
           <small>
             {e.n_runs} run{e.n_runs === 1 ? '' : 's'} · {e.last_status ?? '—'}
           </small>
+          {/* distinguishing shape so two same-name-looking configs are visibly different */}
+          <small className="muted">
+            {e.n_model_groups} group{e.n_model_groups === 1 ? '' : 's'} · {e.n_models} model{e.n_models === 1 ? '' : 's'}
+          </small>
         </button>
       ))}
     </aside>
@@ -187,7 +164,6 @@ function RoutedContent() {
         <Route path="/" element={<Navigate to="/experiments" replace />} />
         <Route path="/experiments" element={<ExperimentsRoute />} />
         <Route path="/experiments/:hash" element={<ExperimentRoute />} />
-        <Route path="/runs" element={<RunsRoute />} />
         <Route path="/runs/:id" element={<RunResolve />} />
         <Route path="/ontology" element={<Shell><OntologyView /></Shell>} />
         <Route path="/status" element={<Shell><TriageStatusView /></Shell>} />

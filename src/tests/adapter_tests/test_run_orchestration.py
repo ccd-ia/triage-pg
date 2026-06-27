@@ -161,37 +161,42 @@ def _seed_source(engine) -> None:
                 )
 
 
-def test_experiment_hash_ignores_cosmetic():
-    """name/description (top-level) and a source's role/description are display-only and must
-    NOT change identity — editing them or adding a role must not spawn a new experiment.
-    version_label IS identity-relevant (a different loaded version is a different experiment).
+def test_experiment_hash_is_the_problem_only():
+    """ADR-0022: identity is the PROBLEM (cohort+label+temporal+problem_type). name/description,
+    a source's role/description, the source version_label, the feature/grid config — all of these
+    are run-level (the attempt / the data snapshot) and must NOT change the experiment. A change
+    to the cohort/label/temporal IS a different experiment.
     """
     base = {
         "problem_type": "classification",
+        "cohort_config": {"query": "select 1 as entity_id"},
+        "label_config": {"query": "select 1 as entity_id, 1 as outcome"},
+        "temporal_config": {"test_durations": "6month"},
         "sources": [{"name": "s", "relation": "x.y", "version_label": "v1"}],
         "grid_config": {"sklearn.tree.DecisionTreeClassifier": {"max_depth": [3]}},
     }
+    # name/description, source role/description, a DIFFERENT data version, and a different grid
+    # are all run-level — same problem, same experiment.
     decorated = {
+        **base,
         "name": "Pretty Name",
         "description": "a human description",
-        "problem_type": "classification",
         "sources": [
             {
                 "name": "s",
                 "relation": "x.y",
-                "version_label": "v1",
+                "version_label": "v2",  # newer data snapshot -> still the same problem (a new run)
                 "role": "entity",
                 "description": "the entity source",
             }
         ],
-        "grid_config": {"sklearn.tree.DecisionTreeClassifier": {"max_depth": [3]}},
+        "grid_config": {
+            "sklearn.ensemble.RandomForestClassifier": {"n_estimators": [100]}
+        },
     }
     assert experiment_hash_for(base) == experiment_hash_for(decorated)
-    # a real change (the loaded data version) DOES change identity
-    changed = {
-        **base,
-        "sources": [{"name": "s", "relation": "x.y", "version_label": "v2"}],
-    }
+    # a change to the PROBLEM (the cohort) IS a different experiment
+    changed = {**base, "cohort_config": {"query": "select 2 as entity_id"}}
     assert experiment_hash_for(base) != experiment_hash_for(changed)
 
 

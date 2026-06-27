@@ -11,8 +11,10 @@ interface Item {
   label: string
 }
 
+// Runs are not a top-level destination: a run only exists inside an experiment, so it is
+// reached from the experiment header (sibling runs) — not the global nav. /runs/:id still
+// resolves (deep links) and redirects into its experiment.
 const ITEMS: Item[] = [
-  { to: '/runs', icon: '▤', label: 'Runs' },
   { to: '/experiments', icon: '✦', label: 'Experiments' },
   { to: '/ontology', icon: '◳', label: 'Ontology' },
   { to: '/status', icon: '◷', label: 'Triage status' },

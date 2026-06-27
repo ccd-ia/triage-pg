@@ -22,6 +22,7 @@ import {
 import type { ExpAuditionResponse, MetricCatalogRow } from '../api/types'
 import { isEmpty } from '../api/types'
 import { expAuditionChart, groupLabel } from '../api/transforms'
+import { tooltipFormatter } from '../api/format'
 import { EmptyPanel } from './EmptyPanel'
 
 const COLORS = ['#3fb950', '#d29922', '#f85149', '#58a6ff', '#bc8cff', '#56d4dd']
@@ -106,6 +107,7 @@ export function ExperimentAuditionTab({
                 <YAxis stroke="var(--mut)" tick={{ fontSize: 9 }} />
                 <Tooltip
                   contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
+                  formatter={tooltipFormatter(4)}
                 />
                 {groups.map((g, i) => (
                   <Line
@@ -137,6 +139,7 @@ export function ExperimentAuditionTab({
                 <YAxis type="category" dataKey="group" stroke="var(--mut)" tick={{ fontSize: 9 }} width={70} />
                 <Tooltip
                   contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
+                  formatter={tooltipFormatter(4)}
                 />
                 <Bar dataKey="regret" fill="var(--acc)" isAnimationActive={false} radius={[0, 3, 3, 0]} />
               </BarChart>

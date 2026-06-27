@@ -207,16 +207,39 @@ export function layoutSwimlanes(
     rowsPerCol.set(lane, m)
   }
   const laneY = new Map<string, number>()
+  const laneH = new Map<string, number>() // the node-rows height of each lane (sans the gap)
   let y = 0
   for (const lane of lanes) {
     const m = rowsPerCol.get(lane) ?? new Map<number, number>()
     const maxRows = Math.max(1, ...[...m.values(), 1])
+    const rowsH = maxRows * (SWIM_NODE_H + ROW_GAP)
     laneY.set(lane, y)
-    y += maxRows * (SWIM_NODE_H + ROW_GAP) + LANE_GAP
+    laneH.set(lane, rowsH)
+    y += rowsH + LANE_GAP
   }
+
+  // Width of the widest lane = the deepest pipeline column reached + a node + the label gutter.
+  let maxCol = 0
+  for (const n of gnodes) maxCol = Math.max(maxCol, COL_BY_KIND[n.kind] ?? 1)
+  const bandW = LANE_LABEL_W + maxCol * COL_X + NODE_W + 24
 
   const cursor = new Map<string, number>() // `${lane}:${col}` -> next row
   const ns: Node[] = []
+  // Lane BANDS first (behind everything): a full-width tinted rectangle per lane so the
+  // splits read as visible horizontal bands, not just a label + floating nodes.
+  lanes.forEach((lane, idx) => {
+    ns.push({
+      id: `__band_${lane}`,
+      position: { x: -12, y: laneY.get(lane)! - ROW_GAP / 2 },
+      data: { label: '' },
+      className: `laneband ${idx % 2 === 0 ? 'even' : 'odd'}`,
+      draggable: false,
+      connectable: false,
+      selectable: false,
+      zIndex: 0,
+      style: { width: bandW, height: (laneH.get(lane) ?? SWIM_NODE_H) + ROW_GAP },
+    })
+  })
   for (const lane of lanes) {
     ns.push({
       id: `__lane_${lane}`,
@@ -226,6 +249,7 @@ export function layoutSwimlanes(
       draggable: false,
       connectable: false,
       selectable: false,
+      zIndex: 1,
       style: { width: LANE_LABEL_W - 14, whiteSpace: 'pre-line' as const },
     })
   }
@@ -245,6 +269,7 @@ export function layoutSwimlanes(
       className: n.className,
       draggable: false,
       connectable: false,
+      zIndex: 1,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       style: { whiteSpace: 'pre-line' as const, width: NODE_W },

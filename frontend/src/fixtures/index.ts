@@ -382,6 +382,7 @@ export function experimentFor(hash: string): ExperimentDetailResponse {
     },
     runs: expRuns,
     model_reuse: { built: 12, reused: 80 },
+    artifact_sharing: { n_total: 23, n_foreign: 0, n_shared: 0, shared_with_hash: null, shared_with_name: null },
   }
 }
 

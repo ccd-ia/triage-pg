@@ -11,6 +11,7 @@
  */
 import { Area, AreaChart, ReferenceArea, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import type { SummaryResponse } from '../api/types'
+import { tooltipFormatter } from '../api/format'
 
 interface Mini {
   title: string
@@ -80,6 +81,7 @@ function MiniChart({ mini }: { mini: Mini }) {
             <Tooltip
               contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
               labelFormatter={() => mini.title}
+              formatter={tooltipFormatter(4)}
             />
             {showShade ? (
               <ReferenceArea

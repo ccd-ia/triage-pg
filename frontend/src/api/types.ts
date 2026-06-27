@@ -56,6 +56,10 @@ export interface RunListItem {
   triage_version: string | null
   git_hash: string | null
   batch_job_id: string | null
+  /* built vs reused artifact counts (present on /experiments/{hash} runs). A run with
+   * n_built === 0 (and n_reused > 0) is a "replay" — it ran but rebuilt nothing. */
+  n_built?: number
+  n_reused?: number
 }
 
 /* -------------------------------------------------------------------------- */
@@ -67,10 +71,20 @@ export interface RunListItem {
  * passes runs.plan through verbatim. The SPA reads `n_splits` (planned splits)
  * and the temporal window/frequency strings when present.
  */
+/** The run's ATTEMPT at the problem (ADR-0022): the per-run feature/grid/imputation config
+ *  recorded on runs.plan. The experiment row itself only carries the problem. */
+export interface ExperimentAttempt {
+  feature_config?: unknown
+  grid_config?: Record<string, unknown> | null
+  imputation_config?: unknown
+}
+
 export interface TemporalPlan {
   n_splits?: number | null
   label_timespan?: string | null
   history?: string | null
+  /** per-run feature/grid/imputation config (ADR-0022). */
+  attempt?: ExperimentAttempt | null
   [key: string]: unknown
 }
 
@@ -399,6 +413,12 @@ export interface FeatureImportanceRow {
   feature_importance: number
   rank_abs: number | null
   rank_pct: number | null
+  /** 'gini' (trees) | 'coef'/'abs_coef' (linear). null for pre-0009 rows. */
+  importance_kind?: string | null
+  /** signed coefficient β (linear models only). */
+  signed_value?: number | null
+  /** odds-ratio exp(β) (linear models only). */
+  odds_ratio?: number | null
 }
 
 /** triage.evaluations row for a single model (long format, all splits). */
@@ -469,6 +489,20 @@ export interface ModelReuse {
   reused: number
 }
 
+/**
+ * Cross-experiment artifact sharing. Of the artifacts this experiment's runs touched,
+ * how many were actually built by a DIFFERENT experiment's run. n_foreign === n_total
+ * means this experiment rebuilt nothing — it duplicates whatever it borrowed from
+ * (`shared_with_name`, the dominant lender, e.g. the same config under a stale hash).
+ */
+export interface ArtifactSharing {
+  n_total: number
+  n_foreign: number
+  n_shared: number
+  shared_with_hash: string | null
+  shared_with_name: string | null
+}
+
 /** GET /experiments/{hash} — the experiment header detail. */
 export interface ExperimentDetailResponse {
   summary: ExperimentSummary
@@ -477,6 +511,7 @@ export interface ExperimentDetailResponse {
   /** Sibling runs for this experiment, newest first. */
   runs: RunListItem[]
   model_reuse: ModelReuse
+  artifact_sharing: ArtifactSharing
 }
 
 /* -------------------------------------------------------------------------- */
@@ -729,6 +764,8 @@ export interface OntologySourceRow {
   description: string | null
   /** 'entity' | 'event' | null (migration 0006): which source is the entity grain. */
   role: string | null
+  /** the categorical column volume is broken out by, e.g. facility_type (migration 0009). */
+  type_column?: string | null
 }
 
 /** One bucket of a source's volume-over-time series. */
@@ -745,10 +782,19 @@ export interface SourceProfile {
   n_distinct_entities: number | null
 }
 
+/** One (period, type, count) point for the per-type volume series. */
+export interface TypeVolumePoint {
+  period: string | null
+  type_value: string | null
+  n: number
+}
+
 export interface OntologyResponse {
   sources: OntologySourceRow[]
   /** source_name → its volume-over-time series. */
   volumes: Record<string, VolumePoint[]>
+  /** source_name → volume broken out by the source's type_column (entities/events). */
+  volumes_by_type?: Record<string, TypeVolumePoint[]>
   /** source_name → its profile stats (migration 0006). */
   profile: Record<string, SourceProfile>
 }
@@ -836,12 +882,33 @@ export interface SourceDriftRow {
   drift: boolean
 }
 
+/** A distinct artifact storage directory (parent of the matrices/.parquet, models/.joblib). */
+export interface ArtifactPathRow {
+  kind: string
+  dir: string
+  n: number
+}
+
+/** One experiment row for the status overview. */
+export interface StatusExperimentRow {
+  experiment_hash: string
+  name: string | null
+  n_runs: number
+  n_models: number | null
+  last_status: RunStatus | null
+  last_started_at: string | null
+}
+
 export interface StatusResponse {
   sources: CurrentSourcePin[]
   engine_versions: Record<string, string> | null
   gc: ArtifactStatusRow[]
   /** run counts by status (e.g. {completed: 3, failed: 1}). */
   runs: Record<string, number>
+  /** experiments overview (not just runs). */
+  experiments?: StatusExperimentRow[]
+  /** where artifacts land on disk/S3 (parent dirs of matrices/models). */
+  artifact_paths?: ArtifactPathRow[]
   db: DbHealth
   execution: ExecutionInfo
   compute: ComputeInfo | null

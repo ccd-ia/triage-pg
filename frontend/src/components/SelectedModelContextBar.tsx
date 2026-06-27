@@ -23,6 +23,8 @@ interface Props {
   manualAvailable: boolean
   /** Open the active model's sheet. */
   onOpenModel: () => void
+  /** Open the audition-vs-leaderboard compare modal (only meaningful when they diverge). */
+  onCompare?: () => void
 }
 
 export function SelectedModelContextBar({
@@ -32,6 +34,7 @@ export function SelectedModelContextBar({
   modelLabel,
   manualAvailable,
   onOpenModel,
+  onCompare,
 }: Props) {
   const { source, modelId, setSource } = useExperiment()
   const data = selected && !isEmpty(selected) ? selected : undefined
@@ -90,7 +93,15 @@ export function SelectedModelContextBar({
       </span>
 
       {diverges && data ? (
-        <span className="diverge">⚠ leaderboard #1 ≠ audition pick — click to compare</span>
+        <button
+          type="button"
+          className="diverge"
+          onClick={onCompare}
+          disabled={!onCompare}
+          title="compare the audition pick against leaderboard #1"
+        >
+          ⚠ leaderboard #1 ≠ audition pick — click to compare
+        </button>
       ) : null}
     </div>
   )

@@ -126,7 +126,9 @@ feature_config:
       temporal:
         mode: as_of
 
-# Tiny grid for a fast first run: 1 DecisionTree depth + 1 RandomForest
+# Tiny grid for a fast first run: DecisionTree + RandomForest + triage's ScaledLogisticRegression
+# (minmax-scaler + LR — use this rather than plain sklearn LogisticRegression so the coefficients
+# are on comparable [0,1]-scaled features; the adapter persists signed β + odds-ratio exp(β)).
 grid_config:
   'sklearn.tree.DecisionTreeClassifier':
     max_depth: [3, 5]
@@ -135,6 +137,10 @@ grid_config:
     n_estimators: [10]
     max_depth: [3]
     min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [0.01, 1.0]
+    penalty: ['l2']
+    max_iter: [1000]
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).
@@ -144,6 +150,7 @@ sources:
     knowledge_date_column: start_time
     version_label: 'dirtyduck-v1'
     role: entity
+    type_column: facility_type   # break entity volume out by facility type (Ontology view)
     description: Active food-service facilities (DirtyDuck tutorial)
 
   - name: ontology_events
@@ -151,6 +158,7 @@ sources:
     knowledge_date_column: date
     version_label: 'dirtyduck-v1'
     role: event
+    type_column: type            # break event volume out by inspection type (Ontology view)
     description: Food inspection events with result and violations (DirtyDuck tutorial)
 
 # Imputation: count-like features get zero-fill (default), categoricals get zero.

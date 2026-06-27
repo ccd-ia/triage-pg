@@ -20,6 +20,10 @@ interface Props {
 export function ExperimentHeader({ data, activeRunId, onSelectRun }: Props) {
   const s = data.summary
   const name = s.name ?? s.experiment_hash.slice(0, 12)
+  // Cross-experiment artifact overlap: ~100% foreign ⇒ this experiment rebuilt nothing and is a
+  // duplicate of its dominant lender (e.g. the same config under a stale pre-fix hash).
+  const sh = data.artifact_sharing
+  const sharePct = sh && sh.n_total > 0 ? sh.n_foreign / sh.n_total : 0
   return (
     <div className="exphead">
       <h2>{name}</h2>
@@ -29,19 +33,35 @@ export function ExperimentHeader({ data, activeRunId, onSelectRun }: Props) {
         <span className="pill">{s.problem_type ?? '—'}</span>
         <span className="pill">author · {s.author ?? '—'}</span>
         <span className="pill">{s.n_runs} run{s.n_runs === 1 ? '' : 's'}</span>
+        {sh && sharePct >= 0.99 && sh.shared_with_name ? (
+          <span
+            className="pill warn"
+            title={`every artifact of this experiment was built by ${sh.shared_with_name} — it rebuilt nothing`}
+          >
+            ⟲ shares 100% of artifacts with {sh.shared_with_name}
+          </span>
+        ) : sh && sharePct > 0 && sh.shared_with_name ? (
+          <span className="pill" title={`reuses ${sh.n_shared}/${sh.n_total} artifacts from ${sh.shared_with_name}`}>
+            ⟲ reuses {Math.round(sharePct * 100)}% (mostly {sh.shared_with_name})
+          </span>
+        ) : null}
         <div className="siblings">
-          {data.runs.map((r) => (
-            <button
-              key={r.run_id}
-              type="button"
-              className={`sib${r.run_id === activeRunId ? ' on' : ''}`}
-              onClick={() => onSelectRun(r.run_id)}
-              title={r.purpose ?? r.run_id}
-            >
-              <span className="mono">{r.run_id.slice(0, 8)}</span>
-              <StatusBadge status={r.status} />
-            </button>
-          ))}
+          {data.runs.map((r) => {
+            const replay = r.n_built === 0 && (r.n_reused ?? 0) > 0
+            return (
+              <button
+                key={r.run_id}
+                type="button"
+                className={`sib${r.run_id === activeRunId ? ' on' : ''}`}
+                onClick={() => onSelectRun(r.run_id)}
+                title={replay ? `${r.run_id} · replay (built 0 / reused ${r.n_reused})` : (r.purpose ?? r.run_id)}
+              >
+                <span className="mono">{r.run_id.slice(0, 8)}</span>
+                <StatusBadge status={r.status} />
+                {replay ? <span className="replay-badge">replay</span> : null}
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>

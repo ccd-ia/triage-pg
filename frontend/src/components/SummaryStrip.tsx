@@ -47,6 +47,7 @@ export function SummaryStrip({
   const s = data.summary
   const nSplits = (s.plan?.n_splits ?? actuals?.n_splits ?? null) as number | null
   const nFeatures = s.n_features ?? actuals?.n_features ?? null
+  const nGroups = actuals?.n_model_groups ?? null
   const nModels = s.n_models ?? actuals?.n_models ?? null
   const cohort = latestCohortSize(data) ?? actuals?.cohort_size ?? null
   const baseRate = latestBaseRate(data) ?? actuals?.base_rate ?? null
@@ -58,6 +59,7 @@ export function SummaryStrip({
       <Cell label="base rate" value={fmtPct(baseRate)} numeric />
       <Cell label="splits" value={fmtInt(nSplits)} numeric />
       <Cell label="features" value={fmtInt(nFeatures)} numeric />
+      <Cell label="groups" value={fmtInt(nGroups)} numeric />
       <Cell label="models" value={fmtInt(nModels)} numeric />
       <Cell label="run" value={s.run_id.slice(0, 8)} mono />
     </div>

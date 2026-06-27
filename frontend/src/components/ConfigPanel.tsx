@@ -6,6 +6,7 @@
  */
 import { useState } from 'react'
 import type {
+  ExperimentAttempt,
   ExperimentConfig,
   ExperimentSummary,
   ModelReuse,
@@ -58,6 +59,7 @@ function leaf(classPath: string): string {
 
 export function ConfigPanel({
   config,
+  attempt,
   summary,
   modelReuse,
   runs,
@@ -65,6 +67,8 @@ export function ConfigPanel({
   onSelectRun,
 }: {
   config: ExperimentConfig | null
+  /** the active run's attempt (feature/grid/imputation) — ADR-0022; these vary per run. */
+  attempt?: ExperimentAttempt | null
   summary: ExperimentSummary
   modelReuse: ModelReuse
   runs: RunListItem[]
@@ -72,9 +76,12 @@ export function ConfigPanel({
   onSelectRun: (runId: string) => void
 }) {
   const c = (config ?? {}) as Record<string, unknown>
+  // The experiment carries the PROBLEM (cohort/label/temporal); the grid + features belong to
+  // the RUN's attempt (ADR-0022). Fall back to config for pre-0022 experiment rows.
   const temporal = asRecord(c.temporal_config)
-  const grid = asRecord(c.grid_config)
-  const features = asRecord(c.feature_config)
+  const grid = asRecord(attempt?.grid_config) ?? asRecord(c.grid_config)
+  const features = asRecord(attempt?.feature_config) ?? asRecord(c.feature_config)
+  const fromAttempt = !!asRecord(attempt?.grid_config)
   const cohort = asRecord(c.cohort_config)
   const label = asRecord(c.label_config)
 
@@ -117,7 +124,7 @@ export function ConfigPanel({
         <section className="card">
           <div className="ch">
             <b>Model grid</b>
-            <span className="src">config.grid_config</span>
+            <span className="src">{fromAttempt ? 'run.plan.attempt · grid_config' : 'config.grid_config'}</span>
           </div>
           {Object.entries(grid).map(([classPath, params]) => (
             <div key={classPath} style={{ marginBottom: 8 }}>
@@ -133,7 +140,7 @@ export function ConfigPanel({
         <section className="card">
           <div className="ch">
             <b>Features</b>
-            <span className="src">config.feature_config</span>
+            <span className="src">{fromAttempt ? 'run.plan.attempt · feature_config' : 'config.feature_config'}</span>
           </div>
           <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
             {summary.n_features != null ? `${summary.n_features} features` : 'feature engine (featurizer) config'}

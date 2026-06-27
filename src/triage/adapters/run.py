@@ -76,18 +76,6 @@ logger = get_logger(__name__)
 
 __all__ = ["run_experiment", "RunResult", "SplitResult", "experiment_hash_for"]
 
-# Cosmetic experiment metadata that is display-only and MUST NOT enter the experiment_hash
-# (migration 0005): two configs differing only in name/description map to the SAME experiment,
-# so identity is stable while the human label can change. ``author`` is derived from the OS
-# user at creation, never read from config, so it never needs stripping.
-_COSMETIC_KEYS = ("name", "description")
-# Display-only keys WITHIN each declared source: ``role`` (entity/event marker for the entity
-# profile) and the human ``description`` label the source for the dashboard but don't change
-# what data is read, so they must not enter identity either — editing them (or adding a role)
-# must NOT spawn a new experiment. ``version_label`` IS identity-relevant (a different loaded
-# version is a different experiment) and is deliberately kept.
-_COSMETIC_SOURCE_KEYS = ("role", "description")
-
 
 @dataclass(frozen=True)
 class SplitResult:
@@ -120,40 +108,35 @@ class RunResult:
     num_evaluations: int
 
 
-def _strip_cosmetic(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
-    """A copy of the config with the cosmetic metadata keys removed (migration 0005).
+# An Experiment IS the prediction problem (ADR-0022): the matrix rows (cohort), the target y
+# (label, which carries problem_type), and the train/test splits (temporal). features/grid/
+# imputation are how you ATTACK the problem — they belong to the Run, not the experiment, so
+# they are deliberately NOT part of identity. Changing cohort/label/temporal is a new problem.
+_PROBLEM_KEYS = ("cohort_config", "label_config", "temporal_config", "problem_type")
 
-    ``name``/``description`` are display-only and must not affect identity; stripping them
-    here is the single point every caller (hash + stored config) goes through, so a config
-    that differs only in those keys hashes — and stores — identically. The same applies to
-    the per-source display keys (``role``/``description``) — they are stripped from each
-    declared source so labeling a source doesn't change the experiment.
+
+def _problem_identity(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
+    """The problem triple (+ problem_type) that identifies an Experiment (ADR-0022).
+
+    Two configs differing only in features, grid, imputation, source pins, or name/description
+    are the SAME experiment (one problem) attacked by different runs. Only the cohort, label,
+    and temporal config — the matrix rows, target, and splits — define the problem.
     """
-    cleaned = {k: v for k, v in experiment_config.items() if k not in _COSMETIC_KEYS}
-    sources = cleaned.get("sources")
-    if isinstance(sources, list):
-        cleaned["sources"] = [
-            (
-                {k: v for k, v in s.items() if k not in _COSMETIC_SOURCE_KEYS}
-                if isinstance(s, Mapping)
-                else s
-            )
-            for s in sources
-        ]
-    return cleaned
+    return {k: experiment_config.get(k) for k in _PROBLEM_KEYS}
 
 
 def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
-    """Stable SHA-256 identity for an experiment from its canonical config.
+    """Stable SHA-256 identity for an experiment = its prediction PROBLEM (ADR-0022).
 
-    Reuses :func:`triage.derivation.canonical_json` (sorted keys, normalized types) so the
-    same config — regardless of key order or surface form — maps to one ``experiment_hash``.
-    A re-run of the same config therefore lands on the same experiment row. The cosmetic
-    ``name``/``description`` keys are stripped first (migration 0005): they are display-only
-    and changing them must NOT change identity.
+    Hashes only the canonical ``cohort_config + label_config + temporal_config + problem_type``
+    (via :func:`triage.derivation.canonical_json`), so a re-run that merely adds features or
+    models is the SAME experiment (a new run), while a different cohort/label/temporal is a new
+    experiment. features/grid/imputation/sources are excluded — they are the run's attempt and
+    are recorded on ``runs.plan`` instead.
     """
-    cleaned = _strip_cosmetic(experiment_config)
-    return hashlib.sha256(canonical_json(cleaned).encode("ascii")).hexdigest()
+    return hashlib.sha256(
+        canonical_json(_problem_identity(experiment_config)).encode("ascii")
+    ).hexdigest()
 
 
 def _as_dates(values: Sequence[Any]) -> list[date]:
@@ -236,6 +219,7 @@ def _pin_sources(
             knowledge_date_column=spec.get("knowledge_date_column"),
             description=spec.get("description"),
             role=spec.get("role"),
+            type_column=spec.get("type_column"),
         )
         # A pinned version is what makes the source cacheable (ADR-0014); without it every
         # derivation touching it is volatile and never a cache hit. An explicit per-source
@@ -311,7 +295,9 @@ def _create_experiment_and_run(
             + " on conflict (experiment_hash) do nothing",
             {
                 "h": exp_hash,
-                "config": canonical_json(_strip_cosmetic(experiment_config)),
+                # The experiment stores its PROBLEM (cohort+label+temporal+problem_type, ADR-0022);
+                # the per-run feature/grid/imputation config lives on runs.plan.attempt.
+                "config": canonical_json(_problem_identity(experiment_config)),
                 "pt": problem_type,
                 "name": name,
                 "description": description,
@@ -622,6 +608,14 @@ def run_experiment(
             "engine_versions": engine_versions_for("feature_group"),
             "n_feature_groups": 1,
             "n_features": None,
+            # The run's ATTEMPT at the problem (ADR-0022): the feature/grid/imputation config
+            # that varies per run (the experiment row only carries the problem). Recorded here so
+            # runs are distinguishable and reproducible.
+            "attempt": {
+                "feature_config": experiment_config.get("feature_config"),
+                "grid_config": experiment_config.get("grid_config"),
+                "imputation_config": experiment_config.get("imputation_config"),
+            },
             # Compute resources for the status screen. Grid search runs as in-container
             # multiprocessing locally (ADR-0005); we record the host's CPU count as the
             # worker ceiling. (cloud/Batch sizing belongs to the Batch job, not here.)

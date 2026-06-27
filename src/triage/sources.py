@@ -56,29 +56,37 @@ def register_source(
     knowledge_date_column: str | None = None,
     description: str | None = None,
     role: str | None = None,
+    type_column: str | None = None,
 ) -> None:
     """Declare a source (idempotent upsert on the name).
 
     ``role`` is a display-only marker (``'entity'`` | ``'event'`` | ``None``): the entity
-    profile uses ``role='entity'`` to find the one-row-per-entity attributes relation. It
-    never enters source identity or pins (migration 0006).
+    profile uses ``role='entity'`` to find the one-row-per-entity attributes relation.
+    ``type_column`` is the categorical column that types the rows (e.g. ``facility_type`` for
+    entities, the inspection ``type`` for events) — the Ontology view breaks volume out by it.
+    Both are display-only; they never enter source identity or pins (migrations 0006 / 0009).
     """
     _ = _quote_relation(relation)  # validate early, before anything is stored
     if knowledge_date_column is not None:
         _ = _quote_column(knowledge_date_column)
+    if type_column is not None:
+        _ = _quote_column(type_column)
     if role is not None and role not in ("entity", "event"):
         raise ValueError(f"role must be 'entity', 'event', or None; got {role!r}")
     with pool.connection() as conn:
         conn.execute(
             """
                 insert into triage.sources
-                    (source_name, relation, knowledge_date_column, description, role)
-                values (%(name)s, %(relation)s, %(kdc)s, %(description)s, %(role)s)
+                    (source_name, relation, knowledge_date_column, description, role,
+                     type_column)
+                values (%(name)s, %(relation)s, %(kdc)s, %(description)s, %(role)s,
+                        %(type_column)s)
                 on conflict (source_name) do update
                     set relation = excluded.relation,
                         knowledge_date_column = excluded.knowledge_date_column,
                         description = excluded.description,
-                        role = excluded.role
+                        role = excluded.role,
+                        type_column = excluded.type_column
                 """,
             {
                 "name": source_name,
@@ -86,6 +94,7 @@ def register_source(
                 "kdc": knowledge_date_column,
                 "description": description,
                 "role": role,
+                "type_column": type_column,
             },
         )
     logger.info(f"Registered source {source_name!r} -> {relation}")

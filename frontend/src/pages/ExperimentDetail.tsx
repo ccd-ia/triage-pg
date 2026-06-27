@@ -33,7 +33,7 @@ import {
   type ExperimentSelection,
   type ResolvedSelection,
 } from '../hooks/useExperiment'
-import { groupLabel } from '../api/transforms'
+import { groupLabel, abbrevAlgo, hyperSuffix } from '../api/transforms'
 import { ExperimentHeader } from '../components/ExperimentHeader'
 import { SummaryStrip } from '../components/SummaryStrip'
 import { OverviewSparklines } from '../components/OverviewSparklines'
@@ -41,11 +41,15 @@ import { SelectedModelContextBar } from '../components/SelectedModelContextBar'
 import { ModelGroupGrid } from '../components/ModelGroupGrid'
 import { ModelGroupsTable } from '../components/ModelGroupsTable'
 import { ModelSheet } from '../components/ModelSheet'
+import { ModelGroupSheet } from '../components/ModelGroupSheet'
 import { ExperimentAuditionTab } from '../components/ExperimentAuditionTab'
 import { ExperimentBiasTab } from '../components/ExperimentBiasTab'
 import { PipelineGraph } from '../components/PipelineGraph'
 import { DerivationGraph } from '../components/DerivationGraph'
 import { ConfigPanel } from '../components/ConfigPanel'
+import { EntitySearch } from '../components/EntitySearch'
+import { EntityDrawer } from '../components/EntityDrawer'
+import { AuditionCompareModal } from '../components/AuditionCompareModal'
 
 type Tab = 'overview' | 'pipeline' | 'derivation' | 'audition' | 'bias' | 'groups' | 'config'
 
@@ -64,6 +68,9 @@ export function ExperimentDetail({ hash }: { hash: string }) {
   const [params, setParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>('overview')
   const [sheetModel, setSheetModel] = useState<{ id: number; label: string; groupId: number | null } | null>(null)
+  const [groupPanel, setGroupPanel] = useState<number | null>(null)
+  const [searchEntity, setSearchEntity] = useState<number | null>(null)
+  const [compareOpen, setCompareOpen] = useState(false)
 
   /* ---------- experiment-scoped reads ---------- */
   const experiment = useAsync(() => api.experiment(hash), [hash])
@@ -132,9 +139,10 @@ export function ExperimentDetail({ hash }: { hash: string }) {
     (gid: number): string => {
       const g = modelGroups.data?.find((m) => m.model_group_id === gid)
       if (!g) return groupLabel(gid)
-      const leaf = (g.model_type?.split('.').pop() ?? '').replace(/Classifier$|Regressor$/, '')
-      const depth = g.hyperparameters?.max_depth
-      return leaf ? `${leaf}${depth != null ? ` · depth ${depth}` : ''}` : groupLabel(gid)
+      const leaf = abbrevAlgo(g.model_type)
+      if (!leaf || leaf === '—') return groupLabel(gid)
+      const suffix = hyperSuffix(g.model_type, g.hyperparameters)
+      return suffix ? `${leaf} · ${suffix}` : leaf
     },
     [modelGroups.data],
   )
@@ -262,7 +270,12 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           modelLabel={modelLabelForBar}
           manualAvailable={manualAvailable}
           onOpenModel={onOpenActiveModel}
+          onCompare={() => setCompareOpen(true)}
         />
+
+        <div className="toolbar">
+          <EntitySearch onOpen={setSearchEntity} />
+        </div>
 
         {/* sub-tabs */}
         <div className="subtabs">
@@ -316,6 +329,7 @@ export function ExperimentDetail({ hash }: { hash: string }) {
                 groups={modelGroups.data}
                 selectedGroupId={selection.modelGroupId}
                 onPickGroup={onPickGroup}
+                onOpenGroupPanel={(g) => setGroupPanel(g.model_group_id)}
               />
             ) : (
               <Loading what="model groups" />
@@ -324,6 +338,7 @@ export function ExperimentDetail({ hash }: { hash: string }) {
             (experiment.data ? (
               <ConfigPanel
                 config={experiment.data.config}
+                attempt={summary.data?.summary.plan?.attempt ?? null}
                 summary={experiment.data.summary}
                 modelReuse={experiment.data.model_reuse}
                 runs={experiment.data.runs}
@@ -343,6 +358,46 @@ export function ExperimentDetail({ hash }: { hash: string }) {
             experimentHash={hash}
             groupLabelOf={groupLabelOf}
             onClose={() => setSheetModel(null)}
+          />
+        ) : null}
+
+        {groupPanel != null ? (
+          <ModelGroupSheet
+            groupId={groupPanel}
+            label={groupLabelOf(groupPanel)}
+            metric={metric.metric}
+            parameter={metric.parameter}
+            experimentHash={hash}
+            metrics={metricsCat.data ?? []}
+            onOpenModel={(mid, asOf) => openModel(mid, groupPanel, asOf)}
+            onClose={() => setGroupPanel(null)}
+          />
+        ) : null}
+
+        {searchEntity != null ? (
+          <EntityDrawer
+            entityId={searchEntity}
+            experimentHash={hash}
+            defaultGroupId={selection.modelGroupId}
+            groupLabelOf={groupLabelOf}
+            onClose={() => setSearchEntity(null)}
+          />
+        ) : null}
+
+        {compareOpen && sm && sm.audition_group != null && sm.leaderboard_group != null ? (
+          <AuditionCompareModal
+            auditionGroup={sm.audition_group}
+            leaderboardGroup={sm.leaderboard_group}
+            metric={metric.metric}
+            parameter={metric.parameter}
+            rule={rule}
+            experimentHash={hash}
+            groupLabelOf={groupLabelOf}
+            onOpenGroup={(gid) => {
+              setCompareOpen(false)
+              setGroupPanel(gid)
+            }}
+            onClose={() => setCompareOpen(false)}
           />
         ) : null}
       </main>

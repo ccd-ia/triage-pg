@@ -6,6 +6,7 @@
  */
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { HistogramBin } from '../api/types'
+import { tooltipFormatter } from '../api/format'
 
 export function ScoreDistributionChart({ bins }: { bins: HistogramBin[] }) {
   const data = bins.map((b) => ({
@@ -22,6 +23,7 @@ export function ScoreDistributionChart({ bins }: { bins: HistogramBin[] }) {
           <YAxis stroke="var(--mut)" tick={{ fontSize: 9 }} />
           <Tooltip
             contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
+            formatter={tooltipFormatter(4)}
           />
           <Bar dataKey="neg" stackId="s" fill="var(--mut)" isAnimationActive={false} />
           <Bar dataKey="pos" stackId="s" fill="var(--acc)" isAnimationActive={false} />

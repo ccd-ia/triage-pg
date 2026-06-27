@@ -70,6 +70,17 @@ function plannedFor(kind: StageKind, plan: TemporalPlan | null): number {
  * rows count toward N; any "building"/"running" row makes the stage current; a
  * stage with N>0 and N>=M (when M known) is done; otherwise todo.
  */
+/** Stage → the run_progress artifact kind(s) that feed it. run_progress emits the SINGULAR
+ *  artifact kinds (matrix/model/feature_group); the pipeline stages are plural — without this
+ *  mapping `matrices`/`models` never matched and a completed run showed them as TODO. */
+const STAGE_PROGRESS_KINDS: Record<StageKind, string[]> = {
+  cohort: ['cohort'],
+  labels: ['labels'],
+  matrices: ['matrix', 'feature_group'],
+  models: ['model'],
+  evaluate: ['evaluation', 'evaluate'],
+}
+
 export function deriveStages(data: ProgressResponse): StageProgress[] {
   const byKind = new Map<string, { built: number; building: number; failed: number; total: number }>()
   for (const r of data.progress) {
@@ -82,8 +93,24 @@ export function deriveStages(data: ProgressResponse): StageProgress[] {
     byKind.set(r.kind, acc)
   }
 
-  return STAGE_ORDER.map((kind) => {
-    const acc = byKind.get(kind)
+  // Fold the run_progress rows for a stage's underlying artifact kinds into one accumulator.
+  const fold = (kinds: string[]) => {
+    const acc = { built: 0, building: 0, failed: 0, total: 0 }
+    let any = false
+    for (const k of kinds) {
+      const a = byKind.get(k)
+      if (!a) continue
+      any = true
+      acc.built += a.built
+      acc.building += a.building
+      acc.failed += a.failed
+      acc.total += a.total
+    }
+    return any ? acc : null
+  }
+
+  const result = STAGE_ORDER.map((kind) => {
+    const acc = fold(STAGE_PROGRESS_KINDS[kind])
     const m = plannedFor(kind, data.plan)
     if (!acc) {
       return { kind, status: 'todo' as const, n: 0, m }
@@ -95,6 +122,17 @@ export function deriveStages(data: ProgressResponse): StageProgress[] {
     else status = 'todo'
     return { kind, status, n: acc.built, m: m || acc.total || acc.built }
   })
+
+  // evaluate has no artifact telemetry in run_progress; mirror the models stage — evaluations
+  // are produced right after training in the same run, so a done models stage ⇒ evaluate done.
+  const models = result.find((s) => s.kind === 'models')
+  const evaluate = result.find((s) => s.kind === 'evaluate')
+  if (evaluate && evaluate.status === 'todo' && models && models.status !== 'todo') {
+    evaluate.status = models.status
+    evaluate.n = models.n
+    evaluate.m = models.m
+  }
+  return result
 }
 
 /* ----------------------- evaluations -> overlay series ------------------- */
@@ -340,6 +378,49 @@ export function deriveSourcePins(
 /** model_group label for the audition table when the API gives only ids. */
 export function groupLabel(model_group_id: number): string {
   return `group ${model_group_id}`
+}
+
+/** Short algorithm code (RF, DT, GB, ET, LR…) from a full estimator path/class name. */
+const ALGO_ABBREV: Record<string, string> = {
+  RandomForestClassifier: 'RF',
+  RandomForestRegressor: 'RF',
+  DecisionTreeClassifier: 'DT',
+  DecisionTreeRegressor: 'DT',
+  GradientBoostingClassifier: 'GB',
+  GradientBoostingRegressor: 'GB',
+  ExtraTreesClassifier: 'ET',
+  ExtraTreesRegressor: 'ET',
+  LogisticRegression: 'LR',
+  ScaledLogisticRegression: 'sLR',
+  LinearRegression: 'OLS',
+}
+export function abbrevAlgo(modelType: string | null | undefined): string {
+  if (!modelType) return '—'
+  const leaf = modelType.split('.').pop() ?? modelType
+  return ALGO_ABBREV[leaf] ?? leaf.replace(/Classifier$|Regressor$/, '')
+}
+
+/** A short, DISTINGUISHING hyperparameter suffix for a group label — algorithm-aware so each
+ *  estimator family shows the parameter(s) that actually vary it (trees: depth; logistic: C +
+ *  penalty; otherwise the first hyperparameter). Keeps the grid/labels narrow but unambiguous. */
+export function hyperSuffix(
+  modelType: string | null | undefined,
+  hp: Record<string, unknown> | null | undefined,
+): string {
+  if (!hp || Object.keys(hp).length === 0) return ''
+  const leaf = (modelType ?? '').split('.').pop() ?? ''
+  if (/Logistic/i.test(leaf)) {
+    const parts: string[] = []
+    if (hp.C != null) parts.push(`C=${String(hp.C)}`)
+    if (hp.penalty != null) parts.push(String(hp.penalty))
+    if (parts.length) return parts.join(' · ')
+  }
+  if (hp.max_depth != null) {
+    const n = hp.n_estimators != null ? ` · n=${String(hp.n_estimators)}` : ''
+    return `depth ${String(hp.max_depth)}${n}`
+  }
+  const [k, v] = Object.entries(hp)[0]
+  return `${k}=${String(v)}`
 }
 
 /** Is the given ranking row the rule's pick? (compares to AuditionData.pick). */

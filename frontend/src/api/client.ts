@@ -172,9 +172,19 @@ export const api = {
 
   /* ---------------------------- hierarchy -------------------------------- */
 
-  modelGroup(id: number, metric?: string, parameter?: string): Promise<ModelGroupDetailResponse> {
+  modelGroup(
+    id: number,
+    metric?: string,
+    parameter?: string,
+    experimentHash?: string,
+  ): Promise<ModelGroupDetailResponse> {
     if (USE_FIXTURE) return fake(fixture.modelGroupDetail(id))
-    return get<ModelGroupDetailResponse>(`/model-groups/${id}${metricQuery(metric, parameter)}`)
+    const q = new URLSearchParams()
+    if (metric) q.set('metric', metric)
+    if (parameter !== undefined && parameter !== '') q.set('parameter', parameter)
+    if (experimentHash) q.set('experiment_hash', experimentHash)
+    const qs = q.toString()
+    return get<ModelGroupDetailResponse>(`/model-groups/${id}${qs ? `?${qs}` : ''}`)
   },
 
   model(id: number): Promise<ModelCardResponse> {

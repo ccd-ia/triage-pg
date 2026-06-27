@@ -124,7 +124,7 @@ def test_experiment_detail(client, seeded):
     resp = client.get(f"/api/experiments/{seeded.experiment_hash}")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"summary", "config", "runs", "model_reuse"}
+    assert set(body) == {"summary", "config", "runs", "model_reuse", "artifact_sharing"}
     assert body["summary"]["experiment_hash"] == seeded.experiment_hash
     assert body["config"]["cohort_name"] == "active"
     # both runs returned, newest first
@@ -138,9 +138,52 @@ def test_experiment_detail(client, seeded):
     assert body["summary"]["n_splits"] == 3
 
 
+def test_experiment_detail_replay_run_built_nothing(client, seeded):
+    """Per-run built/reused: the builder run built every artifact (cohort + labels + 9 models =
+    11); the re-run cache-shared all of them, so it built 0 — it is a 'replay'."""
+    body = client.get(f"/api/experiments/{seeded.experiment_hash}").json()
+    by_id = {r["run_id"]: r for r in body["runs"]}
+    builder = by_id[seeded.run_id]
+    replay = by_id[seeded.rerun_id]
+    assert builder["n_built"] == 11 and builder["n_reused"] == 0
+    assert replay["n_built"] == 0 and replay["n_reused"] == 11
+
+
+def test_experiment_detail_artifact_sharing(client, seeded):
+    """The fixture's two runs both belong to exp-dash, so nothing is built by a *foreign*
+    experiment: n_total counts the touched artifacts, n_foreign is 0, no lender named.
+    """
+    sharing = client.get(f"/api/experiments/{seeded.experiment_hash}").json()[
+        "artifact_sharing"
+    ]
+    assert sharing["n_total"] == 11
+    assert sharing["n_foreign"] == 0
+    assert sharing["shared_with_name"] is None
+
+
 def test_experiment_detail_404(client, seeded):
     resp = client.get("/api/experiments/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_list_experiments_hides_archived(client, seeded, db_pool_greenfield):
+    """A soft-archived experiment (archived_at set) drops off the /experiments list but stays
+    reachable by direct link via /experiments/{hash}."""
+    assert any(
+        e["experiment_hash"] == seeded.experiment_hash
+        for e in client.get("/api/experiments").json()
+    )
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "update triage.experiments set archived_at = now() where experiment_hash = %(h)s",
+            {"h": seeded.experiment_hash},
+        )
+    assert all(
+        e["experiment_hash"] != seeded.experiment_hash
+        for e in client.get("/api/experiments").json()
+    )
+    # direct link still resolves
+    assert client.get(f"/api/experiments/{seeded.experiment_hash}").status_code == 200
 
 
 def test_experiment_audition(client, seeded):
@@ -308,6 +351,24 @@ def test_model_group_detail_404(client, seeded):
     assert resp.status_code == 404
 
 
+def test_model_group_detail_scoped_to_experiment(client, seeded):
+    """A model_group can be shared across experiments; ?experiment_hash= scopes the models/evals
+    to one experiment's runs. The seed's group belongs to exp-dash; a foreign hash yields none.
+    """
+    gid = seeded.group_ids["mg1"]
+    scoped = client.get(
+        f"/api/model-groups/{gid}",
+        params={"metric": "auc_roc", "experiment_hash": seeded.experiment_hash},
+    ).json()
+    assert {m["model_id"] for m in scoped["models"]} == set(seeded.all_models["mg1"])
+    # a different experiment owns none of this group's models
+    foreign = client.get(
+        f"/api/model-groups/{gid}", params={"experiment_hash": "does-not-exist"}
+    ).json()
+    assert foreign["models"] == []
+    assert foreign["metric_over_time"] == []
+
+
 def test_model_detail(client, seeded):
     model_id = seeded.all_models["mg1"][0]  # the first model (has importances)
     resp = client.get(f"/api/models/{model_id}")
@@ -413,12 +474,20 @@ def test_ontology(client, seeded):
     resp = client.get("/api/ontology")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"sources", "volumes", "profile"}
+    assert set(body) == {"sources", "volumes", "volumes_by_type", "profile"}
     names = {s["source_name"] for s in body["sources"]}
     assert "customers" in names
     src = next(s for s in body["sources"] if s["source_name"] == "customers")
-    for key in ("relation", "knowledge_date_column", "description", "role"):
+    for key in (
+        "relation",
+        "knowledge_date_column",
+        "description",
+        "role",
+        "type_column",
+    ):
         assert key in src
+    # the seed's source has no type_column → no per-type series for it
+    assert "customers" not in body["volumes_by_type"]
     # source_volume runs per source (customers has a knowledge_date_column)
     assert "customers" in body["volumes"]
     assert isinstance(body["volumes"]["customers"], list)
@@ -440,6 +509,8 @@ def test_status(client, seeded):
         "engine_versions",
         "gc",
         "runs",
+        "experiments",
+        "artifact_paths",
         "db",
         "execution",
         "compute",
@@ -450,6 +521,10 @@ def test_status(client, seeded):
     # run counts as a {status: count} map (the SPA reads Record<string,number>; a list here
     # would render an object as a React child and blank the page)
     assert body["runs"] == {"completed": 2}
+    # experiments overview (not just runs): the seeded experiment is listed
+    assert any(
+        e["experiment_hash"] == seeded.experiment_hash for e in body["experiments"]
+    )
     # gc tallies are grouped by (kind, status)
     assert any(g["kind"] == "model" and g["status"] == "built" for g in body["gc"])
     # DB health (proves reachability + headroom) from the live pg catalogs
@@ -521,6 +596,52 @@ def test_entity_profile_attributes(client, seeded, db_pool_greenfield):
     assert attrs is not None
     assert attrs["name"] == "east of edens"
     assert attrs["kind"] == "restaurant"
+
+
+def test_entity_label_history_includes_null_grid(client, seeded, db_pool_greenfield):
+    """The label history is the full cohort as_of grid (migration 0008): an as_of date where the
+    entity is in the cohort but has no matured label surfaces with outcome=None, not hidden.
+    """
+    extra = "2015-07-01"
+    with db_pool_greenfield.connection() as conn:
+        # entity 1 joins the cohort at a 4th as_of, but no label row is written for it there.
+        conn.execute(
+            "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
+            " values ('art-cohort', 1, %(d)s)",
+            {"d": extra},
+        )
+    rows = client.get("/api/entities/1").json()["label_history"]
+    by_date = {r["as_of_date"]: r["outcome"] for r in rows}
+    assert extra in by_date and by_date[extra] is None  # shown, with a NULL outcome
+    assert by_date["2014-01-01"] == 1  # the matured ones still carry their outcome
+
+
+def test_entity_attributes_geo_decoded(client, seeded, db_pool_greenfield):
+    """A PostGIS geography/geometry attribute renders as {lon,lat,geojson,kind} instead of WKB
+    hex (migration 0008). Skipped where PostGIS is not installed in the test server."""
+    with db_pool_greenfield.connection() as conn:
+        try:
+            conn.execute("create extension if not exists postgis")
+        except (
+            Exception
+        ):  # noqa: BLE001 - environment without PostGIS: nothing to assert
+            pytest.skip("PostGIS not available in the test server")
+        conn.execute(
+            "create table geo_facilities (entity_id bigint, name text, as_of date,"
+            " location geography)"
+        )
+        conn.execute(
+            "insert into geo_facilities values (1, 'east', date '2014-01-02',"
+            " ST_SetSRID(ST_MakePoint(-87.65, 41.95), 4326)::geography)"
+        )
+        conn.execute(
+            "insert into triage.sources (source_name, relation, knowledge_date_column, role)"
+            " values ('geo_facilities', 'geo_facilities', 'as_of', 'entity')"
+        )
+    loc = client.get("/api/entities/1").json()["attributes"]["location"]
+    assert loc["kind"] == "geo"
+    assert abs(loc["lon"] - (-87.65)) < 1e-6 and abs(loc["lat"] - 41.95) < 1e-6
+    assert loc["geojson"]["type"] == "Point"
 
 
 def test_entity_profile_scoped_to_experiment(client, seeded):
