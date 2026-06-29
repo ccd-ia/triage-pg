@@ -1,0 +1,194 @@
+# DirtyDuck Greenfield — SURVIVAL (time-to-event, ADR-0010)
+# Reuses the SAME food inspections DB; the label emits (duration, event_observed).
+#
+# Problem: HOW LONG until a facility's NEXT FAILED inspection, with right-censoring?
+#   For each entity with inspections in the window: duration = days from as_of to the first
+#   fail (event_observed=1); if no fail occurs in the window, it is censored at the window end
+#   (event_observed=0). Validated on real data: 6382 rows, 1589 events, 4793 censored.
+#
+# STATUS (ADR-0010): survival is "schema-ready, deferred". This config exercises the LABEL path
+# end-to-end — build_labels writes (duration, event_observed) into triage.labels — and proves
+# the schema carries survival. The TRAINING + EVALUATION bolt-on (a survival estimator + the
+# C-index metric) is future work; a full `triage run` is NOT expected to complete past labels
+# until that lands. The grid below is a placeholder so the config validates.
+# Data: ontology.entities (facilities), ontology.events (inspections, result, date).
+
+problem_type: survival
+
+temporal_config:
+  feature_start_time: '2014-01-01'
+  feature_end_time: '2017-07-01'
+  label_start_time: '2015-01-01'
+  label_end_time: '2017-07-01'
+  # Retrain every 6 months — gives us 5 splits
+  model_update_frequency: '6month'
+  # One training row per entity every 6 months
+  training_as_of_date_frequencies: '6month'
+  training_label_timespans: ['6month']
+  # Test: 1 date at the split boundary (0day duration = point-in-time test)
+  test_as_of_date_frequencies: '6month'
+  test_durations: '0day'
+  test_label_timespans: ['6month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: active_facilities
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.activity_period @> {as_of_date}::date
+
+label_config:
+  name: time_to_next_failed_inspection
+  # Survival columns (ADR-0010): duration (days) + event_observed (1=fail seen, 0=censored).
+  # min(date) filter (...) is the first FAILED inspection in the window; if none, the COALESCE
+  # censors at the window length. Both branches are integer day counts (date - date).
+  query: |
+    select
+      entity_id,
+      coalesce(
+        min(date) filter (where result = 'fail') - {as_of_date}::date,
+        (({as_of_date}::date + {label_timespan})::date - {as_of_date}::date)
+      )::integer as duration,
+      (bool_or(result = 'fail'))::integer as event_observed
+    from ontology.events
+    where {as_of_date}::date <= date
+      and date < {as_of_date}::date + {label_timespan}
+    group by entity_id
+
+# featurizer ER-graph: facilities are the target entity, inspections are child events.
+# Aggregation windows are ISO-8601 (featurizer format, not timechop format).
+feature_config:
+  target: facilities
+  max_depth: 2
+  intervals:
+    - P1M
+    - P3M
+    - P6M
+
+  entities:
+    - alias: facilities
+      id: entity_id
+      table: ontology.entities
+      # ontology.entities is not a time-series table (no temporal_ix needed for the target
+      # entity itself; featurizer only requires temporal_ix on child event entities).
+      # Direct target-entity categoricals via featurizer v0.4.0 fixed-vocabulary one-hot
+      # (adapter-spec §4 declarative path): featurizer emits deterministic 0/1 columns named
+      # "facilities.<col>=<value>" — already numeric, so the matrix adapter's ordinal encoder
+      # no longer fires on them. role:identifier excludes the restaurant name explicitly
+      # (explicit > silent omission, since featurizer is exhaustive). Vocabularies are the
+      # top values (facility_type top-15 ≈ 96% of entities; the long tail → all-zero "other").
+      variables:
+        facility:
+          type: text
+          role: identifier
+        facility_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "restaurant"
+            - "grocery store"
+            - "school"
+            - "unknown"
+            - "children's services facility"
+            - "bakery"
+            - "daycare (2 - 6 years)"
+            - "daycare above and under 2 years"
+            - "liquor"
+            - "long term care"
+            - "catering"
+            - "mobile food preparer"
+            - "mobile food dispenser"
+            - "daycare combo 1586"
+            - "hospital"
+        zip_code:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "60647"
+            - "60657"
+            - "60614"
+            - "60611"
+            - "60608"
+            - "60618"
+            - "60622"
+            - "60607"
+            - "60639"
+            - "60625"
+            - "60623"
+            - "60640"
+
+    - alias: inspections
+      id: ~
+      table: ontology.events
+      # 'date' is when the inspection happened = when it became known (knowledge date).
+      temporal_ix: date
+      variables:
+        result:
+          type: categorical
+        risk:
+          type: categorical
+        type:
+          type: categorical
+
+  relationships:
+    - parent:
+        entity: facilities
+        key: entity_id
+      child:
+        entity: inspections
+        key: entity_id
+      temporal:
+        mode: as_of
+
+  # Feature groups + mixing strategies (ADR-0023). Optional. Uncomment to expand this ONE
+  # experiment into several RUNS (ADR-0022), one per feature subset, so you can ask "do the
+  # inspection-history features add lift over the facility attributes?". Each strategy combination
+  # becomes a Run sharing this experiment's cohort/labels/splits, so their leaderboards compare
+  # directly. Absent ⇒ one implicit group = all features = one run (today's behaviour).
+  #
+  # feature_groups:
+  #   # group_by source_entity (default) partitions columns by the entity in the feature name:
+  #   # DirtyDuck → {facilities (the facility_type/zip one-hots), inspections (the aggregations)}.
+  #   group_by: source_entity
+  #   strategies: [all, leave-one-out, leave-one-in, all-combinations]
+  #   all_combinations_max_groups: 6   # guard: all-combinations is 2^N-1 runs
+  #   # Or define groups explicitly by column-name glob (overrides group_by) for finer control:
+  #   # definitions:
+  #   #   facility_attrs:     ["facilities.*"]
+  #   #   inspection_history: ["*(inspections.*"]
+
+# PLACEHOLDER grid. Survival training/evaluation is the deferred ADR-0010 bolt-on (no survival
+# estimator + C-index yet), so a full run stops after the labels stage; this grid only makes the
+# config schema-valid. When survival lands, replace with survival estimators (e.g. sksurv /
+# lifelines) that consume (duration, event_observed).
+grid_config:
+  'sklearn.tree.DecisionTreeRegressor':
+    max_depth: [3]
+
+# Declare the data sources so the derivation DAG can pin them.
+# version_label is static so repeated runs are idempotent (no re-bump on re-run).
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: start_time
+    version_label: 'dirtyduck-v1'
+    role: entity
+    type_column: facility_type   # break entity volume out by facility type (Ontology view)
+    description: Active food-service facilities (DirtyDuck tutorial)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'dirtyduck-v1'
+    role: event
+    type_column: type            # break event volume out by inspection type (Ontology view)
+    description: Food inspection events with result and violations (DirtyDuck tutorial)
+
+# Imputation: count-like features get zero-fill (default), categoricals get zero.
+# The zero strategy is fit-free (safe on train and test equally).
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero
