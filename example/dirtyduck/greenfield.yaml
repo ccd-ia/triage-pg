@@ -126,6 +126,23 @@ feature_config:
       temporal:
         mode: as_of
 
+  # Feature groups + mixing strategies (ADR-0023). Optional. Uncomment to expand this ONE
+  # experiment into several RUNS (ADR-0022), one per feature subset, so you can ask "do the
+  # inspection-history features add lift over the facility attributes?". Each strategy combination
+  # becomes a Run sharing this experiment's cohort/labels/splits, so their leaderboards compare
+  # directly. Absent ⇒ one implicit group = all features = one run (today's behaviour).
+  #
+  # feature_groups:
+  #   # group_by source_entity (default) partitions columns by the entity in the feature name:
+  #   # DirtyDuck → {facilities (the facility_type/zip one-hots), inspections (the aggregations)}.
+  #   group_by: source_entity
+  #   strategies: [all, leave-one-out, leave-one-in, all-combinations]
+  #   all_combinations_max_groups: 6   # guard: all-combinations is 2^N-1 runs
+  #   # Or define groups explicitly by column-name glob (overrides group_by) for finer control:
+  #   # definitions:
+  #   #   facility_attrs:     ["facilities.*"]
+  #   #   inspection_history: ["*(inspections.*"]
+
 # Tiny grid for a fast first run: DecisionTree + RandomForest + triage's ScaledLogisticRegression
 # (minmax-scaler + LR — use this rather than plain sklearn LogisticRegression so the coefficients
 # are on comparable [0,1]-scaled features; the adapter persists signed β + odds-ratio exp(β)).

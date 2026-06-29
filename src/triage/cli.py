@@ -372,14 +372,17 @@ def run_command(
 
     result = handle.run_result
     console.print(
-        f"[green]Run {str(result.run_id)[:8]}… completed:[/green]"
-        f" {result.num_models} model(s), {result.num_predictions} prediction(s),"
-        f" {result.num_evaluations} evaluation(s)."
+        f"[green]Experiment {result.experiment_hash[:12]}… completed:[/green]"
+        f" {result.num_runs} run(s), {result.num_models} model(s),"
+        f" {result.num_predictions} prediction(s), {result.num_evaluations} evaluation(s)."
     )
-    console.print(
-        f"[cyan]Experiment:[/cyan] {result.experiment_hash[:12]}…"
-        f"  [cyan]storage:[/cyan] {profile_obj.storage_root}"
-    )
+    for run in result.runs:
+        console.print(
+            f"  [cyan]run {str(run.run_id)[:8]}…[/cyan] ([magenta]{run.feature_group}[/magenta]):"
+            f" {run.num_models} model(s), {run.num_predictions} prediction(s),"
+            f" {run.num_evaluations} evaluation(s)."
+        )
+    console.print(f"[cyan]storage:[/cyan] {profile_obj.storage_root}")
 
 
 @app.command("audition")

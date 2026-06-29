@@ -80,12 +80,19 @@ def partition_features(
     *,
     group_by: str = "source_entity",
     definitions: Mapping[str, Sequence[str]] | None = None,
+    target_alias: str | None = None,
 ) -> dict[str, list[str]]:
     """Partition ``feature_names`` into ``{group_name: [columns]}``.
 
     Every feature column must land in exactly one group. A column matching no group (or, under
     explicit definitions, more than one) is a loud ``ValueError`` — a typo'd glob must not
     silently drop or double-count features.
+
+    Under ``group_by='source_entity'`` the source entity is read from the feature name
+    (``COUNT(orders.amount…)`` → ``orders``; one-hot ``facilities.zip=…`` → ``facilities``). The
+    target entity's *plain* direct variables carry no ``<alias>.`` prefix (featurizer names them
+    bare, e.g. ``age``); these are attributed to ``target_alias``. A column that matches no alias
+    and has no ``target_alias`` to fall back on is a loud error.
     """
     if definitions is not None:
         return _partition_explicit(feature_names, definitions)
@@ -97,7 +104,7 @@ def partition_features(
     groups: dict[str, list[str]] = {}
     unmatched: list[str] = []
     for column in feature_names:
-        alias = _source_entity(column, entity_aliases)
+        alias = _source_entity(column, entity_aliases) or target_alias
         if alias is None:
             unmatched.append(column)
             continue
@@ -105,7 +112,8 @@ def partition_features(
     if unmatched:
         raise ValueError(
             "feature_groups group_by='source_entity' could not map "
-            f"{len(unmatched)} column(s) to any entity alias {list(entity_aliases)!r}: "
+            f"{len(unmatched)} column(s) to any entity alias {list(entity_aliases)!r}"
+            f"{f' or target {target_alias!r}' if target_alias else ''}: "
             f"{unmatched[:5]}{'…' if len(unmatched) > 5 else ''}. "
             "Declare explicit feature_groups.definitions for these columns."
         )

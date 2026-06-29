@@ -48,19 +48,25 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from triage.adapters.cohort import build_cohort
+from triage.adapters.feature_groups import (
+    DEFAULT_ALL_COMBINATIONS_MAX_GROUPS,
+    FeatureSubset,
+    mix_strategies,
+    partition_features,
+)
 from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.temporal import TemporalConfig
-from triage.artifacts import _notify_run_progress
+from triage.artifacts import _notify_run_progress, record_use
 from triage.component.timechop import Timechop
 from triage.derivation import canonical_json, engine_versions_for
 from triage.logging import get_logger
@@ -74,7 +80,13 @@ from triage.sources import (
 
 logger = get_logger(__name__)
 
-__all__ = ["run_experiment", "RunResult", "SplitResult", "experiment_hash_for"]
+__all__ = [
+    "run_experiment",
+    "ExperimentResult",
+    "RunResult",
+    "SplitResult",
+    "experiment_hash_for",
+]
 
 
 @dataclass(frozen=True)
@@ -106,6 +118,44 @@ class RunResult:
     num_models: int
     num_predictions: int
     num_evaluations: int
+    feature_group: str = "all-features"
+    """The feature-group subset this run attacked the problem with (ADR-0023). Default
+    ``'all-features'`` when no feature_groups are configured (one implicit group)."""
+
+
+@dataclass(frozen=True)
+class ExperimentResult:
+    """What :func:`run_experiment` returns: one Experiment (the problem) and its Runs.
+
+    An Experiment is the prediction problem (cohort+label+temporal+problem_type, ADR-0022); each
+    Run is one attempt at it. Without feature groups there is exactly one Run (``runs[0]``); with
+    feature-group strategies (ADR-0023) there is one Run per feature subset, all sharing
+    ``experiment_hash``, the cohort/labels, and the splits — so their leaderboards are directly
+    comparable.
+    """
+
+    experiment_hash: str
+    problem_type: str
+    cohort_artifact_id: str
+    labels_artifact_id: str
+    source_pins: dict[str, str | None]
+    runs: list[RunResult]
+
+    @property
+    def num_runs(self) -> int:
+        return len(self.runs)
+
+    @property
+    def num_models(self) -> int:
+        return sum(r.num_models for r in self.runs)
+
+    @property
+    def num_predictions(self) -> int:
+        return sum(r.num_predictions for r in self.runs)
+
+    @property
+    def num_evaluations(self) -> int:
+        return sum(r.num_evaluations for r in self.runs)
 
 
 # An Experiment IS the prediction problem (ADR-0022): the matrix rows (cohort), the target y
@@ -318,6 +368,78 @@ def _create_experiment_and_run(
     return exp_hash, str(run_id)
 
 
+def _create_run(
+    db_engine: ConnectionPool, exp_hash: str, profile: str, random_seed: int
+) -> str:
+    """Create an additional 'started' run under an EXISTING experiment (ADR-0023 fan-out).
+
+    Used when feature-group strategies expand one experiment into several runs (one per feature
+    subset). The experiment row already exists (created by :func:`_create_experiment_and_run`);
+    this just mints another run under it.
+    """
+    with db_engine.connection() as conn:
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status, random_seed)"
+            + " values (%(h)s, %(profile)s, 'started', %(seed)s) returning run_id",
+            {"h": exp_hash, "profile": profile, "seed": random_seed},
+        ).fetchone()["run_id"]
+        _notify_run_progress(conn, str(run_id), "run", "started")
+    return str(run_id)
+
+
+def _feature_subsets(
+    feature_config: Mapping[str, Any], feature_names: Sequence[str]
+) -> list[FeatureSubset]:
+    """Resolve the run fan-out: the feature-column subsets one experiment expands into.
+
+    Reads ``feature_config['feature_groups']`` (ADR-0023). Absent ⇒ a single implicit group =
+    all features = one run (today's behaviour). Present ⇒ partition the columns into groups
+    (by ``source_entity`` parsed from the feature names, or explicit globs) and sweep the
+    declared strategies into subsets. ``feature_groups`` is a triage-pg adapter concern and is
+    stripped from the config the featurizer sees (see :func:`_featurizer_only`), so featurizer
+    stays group-agnostic (ADR-0008).
+    """
+    fg = (
+        feature_config.get("feature_groups")
+        if isinstance(feature_config, Mapping)
+        else None
+    )
+    if not fg:
+        return [
+            FeatureSubset(
+                label="all-features",
+                group_names=("all",),
+                columns=tuple(sorted(feature_names)),
+            )
+        ]
+    entity_aliases = [
+        e["alias"] for e in feature_config.get("entities", []) if "alias" in e
+    ]
+    groups = partition_features(
+        feature_names,
+        entity_aliases,
+        group_by=fg.get("group_by", "source_entity"),
+        definitions=fg.get("definitions"),
+        target_alias=feature_config.get("target"),
+    )
+    return mix_strategies(
+        groups,
+        fg.get("strategies") or ["all"],
+        all_combinations_max_groups=fg.get(
+            "all_combinations_max_groups", DEFAULT_ALL_COMBINATIONS_MAX_GROUPS
+        ),
+    )
+
+
+def _featurizer_only(feature_config: Mapping[str, Any]) -> dict[str, Any]:
+    """The featurizer ER-graph config with the triage-pg-only ``feature_groups`` key removed.
+
+    featurizer must never see ``feature_groups`` (ADR-0008/0023): it would reject the unknown
+    key, and it would wrongly enter the feature_group derivation identity.
+    """
+    return {k: v for k, v in feature_config.items() if k != "feature_groups"}
+
+
 def _refresh_leaderboard(db_engine: ConnectionPool) -> None:
     """Refresh the ``triage.leaderboard`` materialized view so reads see this run (ADR-0007).
 
@@ -494,7 +616,7 @@ def run_experiment(
     random_seed: int = 0,
     metric_config: Mapping[str, Any] | None = None,
     cache_policy: str = "exact",
-) -> RunResult:
+) -> ExperimentResult:
     """Execute a whole experiment end-to-end and return its run lineage (ADR-0012).
 
     Sequences the F1/F2/F3 builders into one pass: experiment + run rows → source pinning →
@@ -529,8 +651,10 @@ def run_experiment(
         cache_policy: cache lookup policy threaded to the builders ('exact' default).
 
     Returns:
-        A :class:`RunResult` with the run id, experiment hash, cohort/labels ids, the frozen
-        source pins, per-split build outcomes, and the model/prediction/evaluation counts.
+        An :class:`ExperimentResult` with the experiment hash, cohort/labels ids, the frozen
+        source pins, and ``runs`` — one :class:`RunResult` per feature-group subset (ADR-0023),
+        or a single run when no feature groups are configured. Each RunResult carries that run's
+        per-split build outcomes + model/prediction/evaluation counts.
 
     Raises:
         ValueError: on a malformed config (missing keys, empty grid, no splits, multi-test).
@@ -555,23 +679,30 @@ def run_experiment(
     # de-dupe while keeping order; labels are built for every timespan a split will join.
     label_timespans = list(dict.fromkeys(label_timespans))
 
-    exp_hash, run_id = _create_experiment_and_run(
+    featurizer_config = _featurizer_only(feature_config)
+
+    # The experiment (the PROBLEM) + the FIRST run. Feature-group strategies (ADR-0023) expand
+    # into more runs once the feature columns are known (below); without them this is the only run.
+    exp_hash, first_run_id = _create_experiment_and_run(
         db_engine, experiment_config, problem_type, profile, random_seed
     )
+    current_run_id = first_run_id
 
     try:
-        frozen_pins = _pin_sources(db_engine, run_id, declared_sources, source_pins)
+        frozen_pins = _pin_sources(
+            db_engine, first_run_id, declared_sources, source_pins
+        )
 
         splits = _generate_splits(temporal_config)
         all_as_of_dates = _union_as_of_dates(splits)
         logger.info(
-            f"Run {run_id[:8]}…: {len(splits)} split(s) over"
+            f"Experiment {exp_hash[:8]}…: {len(splits)} split(s) over"
             + f" {len(all_as_of_dates)} distinct as_of_date(s)"
         )
 
         cohort_artifact_id = build_cohort(
             db_engine,
-            run_id,
+            first_run_id,
             cohort_query_template=cohort_config["query"],
             as_of_dates=all_as_of_dates,
             config=cohort_config,
@@ -580,7 +711,7 @@ def run_experiment(
         )
         labels_artifact_id = build_labels(
             db_engine,
-            run_id,
+            first_run_id,
             cohort_artifact_id=cohort_artifact_id,
             label_query_template=label_config["query"],
             as_of_dates=all_as_of_dates,
@@ -593,54 +724,16 @@ def run_experiment(
 
         grid = _grid_specs(grid_config)
 
-        # Record the planned shape now (after timechop + grid) so the read-dashboard's
-        # pipeline-DAG denominators (matrices/models N/M) + experiment-summary are available
-        # WHILE the run builds (ADR-0021, read-dashboard-spec §3.1). One train + one test
-        # matrix per split; one model per (grid spec, split); grid specs are the model_groups.
-        # n_features is unknown until the first matrix lands — filled in the split loop below.
-        plan: dict[str, Any] = {
-            "n_splits": len(splits),
-            "n_matrices": 2 * len(splits),
-            "n_model_groups": len(grid),
-            "n_models": len(grid) * len(splits),
-            "estimator_types": sorted({class_path for class_path, _ in grid}),
-            "temporal": temporal_config.canonical(),
-            "engine_versions": engine_versions_for("feature_group"),
-            "n_feature_groups": 1,
-            "n_features": None,
-            # The run's ATTEMPT at the problem (ADR-0022): the feature/grid/imputation config
-            # that varies per run (the experiment row only carries the problem). Recorded here so
-            # runs are distinguishable and reproducible.
-            "attempt": {
-                "feature_config": experiment_config.get("feature_config"),
-                "grid_config": experiment_config.get("grid_config"),
-                "imputation_config": experiment_config.get("imputation_config"),
-            },
-            # Compute resources for the status screen. Grid search runs as in-container
-            # multiprocessing locally (ADR-0005); we record the host's CPU count as the
-            # worker ceiling. (cloud/Batch sizing belongs to the Batch job, not here.)
-            "compute": {"cpu_count": os.cpu_count(), "profile": profile},
-        }
-        _record_run_plan(db_engine, run_id, plan)
-
-        split_results: list[SplitResult] = []
-        all_model_ids: list[int] = []
-        total_predictions = 0
-        total_evaluations = 0
-
-        for split in splits:
-            (
-                train_matrix,
-                test_matrix,
-                train_dates,
-                test_dates,
-                train_timespan,
-                test_timespan,
-            ) = _build_split(
+        # Build the FULL (all-features) matrices once per split, under the first run. featurizer
+        # runs here; every feature-group subset is then a column PROJECTION of these same Parquet
+        # files (ADR-0023) — no featurizer re-run, no projected copies. feature_names come from
+        # the full train matrix, so groups are partitioned over real output columns.
+        full_splits: list[tuple[Any, ...]] = [
+            _build_split(
                 db_engine,
-                run_id,
+                first_run_id,
                 split,
-                featurizer_config=feature_config,
+                featurizer_config=featurizer_config,
                 cohort_artifact_id=cohort_artifact_id,
                 labels_artifact_id=labels_artifact_id,
                 temporal_config=temporal_config,
@@ -649,89 +742,167 @@ def run_experiment(
                 storage_root=storage_root,
                 source_pins=frozen_pins,
             )
+            for split in splits
+        ]
+        feature_names = list(full_splits[0][0].feature_names)
+        shared_matrix_ids = [
+            mid
+            for ft, fs, *_ in full_splits
+            for mid in (ft.matrix_artifact_id, fs.matrix_artifact_id)
+        ]
 
-            # Fill the feature count once the first matrix is built (it's unknown at plan time).
-            if plan["n_features"] is None and train_matrix.num_features is not None:
-                plan["n_features"] = train_matrix.num_features
-                _record_run_plan(db_engine, run_id, plan)
+        subsets = _feature_subsets(feature_config, feature_names)
+        # First subset reuses the run that built the shared artifacts; the rest get new runs.
+        run_ids = [first_run_id] + [
+            _create_run(db_engine, exp_hash, profile, random_seed) for _ in subsets[1:]
+        ]
+        logger.info(
+            f"Experiment {exp_hash[:8]}…: {len(subsets)} feature-group run(s)"
+            + f" [{', '.join(s.label for s in subsets)}]"
+        )
 
-            split_model_ids: list[int] = []
-            split_model_artifact_ids: list[str] = []
-            split_predictions = 0
-            split_evaluations = 0
-            train_end_time = max(train_dates) if train_dates else None
-
-            for class_path, hyperparameters in grid:
-                model = build_model(
+        run_results: list[RunResult] = []
+        for subset, run_id in zip(subsets, run_ids, strict=True):
+            current_run_id = run_id
+            if run_id != first_run_id:
+                # New runs reuse the shared cohort/labels/full-matrices via usage edges
+                # (the builders already recorded them for the first run).
+                record_use(
                     db_engine,
                     run_id,
-                    train_matrix_result=train_matrix,
-                    class_path=class_path,
-                    hyperparameters=hyperparameters,
-                    random_seed=random_seed,
-                    storage=storage,
-                    storage_root=storage_root,
-                    train_end_time=train_end_time,
-                    training_label_timespan=train_timespan,
-                    source_pins=frozen_pins,
-                    policy=cache_policy,
+                    [cohort_artifact_id, labels_artifact_id, *shared_matrix_ids],
                 )
-                # as_of_date=None → evaluate the model at EVERY test as_of_date in the
-                # split (one evaluation row-set per prediction time), not just the last
-                # one (WS1 / per-as_of_date evaluation).
-                score = score_and_evaluate(
-                    db_engine,
-                    model.model_id,
-                    model.estimator,
-                    test_matrix_result=test_matrix,
-                    as_of_date=None,
-                    label_timespan=test_timespan,
-                    metric_config=metric_config,
-                )
-                split_model_ids.append(model.model_id)
-                split_model_artifact_ids.append(model.model_artifact_id)
-                all_model_ids.append(model.model_id)
-                split_predictions += score.num_predictions
-                split_evaluations += score.num_evaluations
 
-            total_predictions += split_predictions
-            total_evaluations += split_evaluations
-            split_results.append(
-                SplitResult(
-                    train_as_of_dates=train_dates,
-                    test_as_of_dates=test_dates,
-                    train_matrix=train_matrix,
-                    test_matrix=test_matrix,
-                    model_ids=split_model_ids,
-                    model_artifact_ids=split_model_artifact_ids,
-                    num_predictions=split_predictions,
-                    num_evaluations=split_evaluations,
+            plan: dict[str, Any] = {
+                "n_splits": len(splits),
+                "n_matrices": 2 * len(splits),
+                "n_model_groups": len(grid),
+                "n_models": len(grid) * len(splits),
+                "estimator_types": sorted({class_path for class_path, _ in grid}),
+                "temporal": temporal_config.canonical(),
+                "engine_versions": engine_versions_for("feature_group"),
+                "n_feature_groups": len(subsets),
+                "n_features": len(subset.columns),
+                # The run's ATTEMPT at the problem (ADR-0022): feature/grid/imputation. With
+                # feature groups (ADR-0023) the attempt also records WHICH subset this run used.
+                "attempt": {
+                    "feature_config": featurizer_config,
+                    "grid_config": experiment_config.get("grid_config"),
+                    "imputation_config": experiment_config.get("imputation_config"),
+                    "feature_group": subset.label,
+                    "feature_group_members": list(subset.group_names),
+                },
+                "compute": {"cpu_count": os.cpu_count(), "profile": profile},
+            }
+            _record_run_plan(db_engine, run_id, plan)
+
+            split_results: list[SplitResult] = []
+            run_model_ids: list[int] = []
+            run_predictions = 0
+            run_evaluations = 0
+
+            for (
+                full_train,
+                full_test,
+                train_dates,
+                test_dates,
+                train_timespan,
+                test_timespan,
+            ) in full_splits:
+                # Project the shared full matrices to this subset's columns: same Parquet, fewer
+                # feature_names. fit-based imputation is per-column, so the subset's values are
+                # unchanged; the subset enters the model's feature_list (and model_group) identity.
+                train_matrix = replace(full_train, feature_names=list(subset.columns))
+                test_matrix = replace(full_test, feature_names=list(subset.columns))
+
+                split_model_ids: list[int] = []
+                split_model_artifact_ids: list[str] = []
+                split_predictions = 0
+                split_evaluations = 0
+                train_end_time = max(train_dates) if train_dates else None
+
+                for class_path, hyperparameters in grid:
+                    model = build_model(
+                        db_engine,
+                        run_id,
+                        train_matrix_result=train_matrix,
+                        class_path=class_path,
+                        hyperparameters=hyperparameters,
+                        random_seed=random_seed,
+                        storage=storage,
+                        storage_root=storage_root,
+                        train_end_time=train_end_time,
+                        training_label_timespan=train_timespan,
+                        source_pins=frozen_pins,
+                        policy=cache_policy,
+                    )
+                    # as_of_date=None → evaluate at EVERY test as_of_date (WS1).
+                    score = score_and_evaluate(
+                        db_engine,
+                        model.model_id,
+                        model.estimator,
+                        test_matrix_result=test_matrix,
+                        as_of_date=None,
+                        label_timespan=test_timespan,
+                        metric_config=metric_config,
+                    )
+                    split_model_ids.append(model.model_id)
+                    split_model_artifact_ids.append(model.model_artifact_id)
+                    run_model_ids.append(model.model_id)
+                    split_predictions += score.num_predictions
+                    split_evaluations += score.num_evaluations
+
+                run_predictions += split_predictions
+                run_evaluations += split_evaluations
+                split_results.append(
+                    SplitResult(
+                        train_as_of_dates=train_dates,
+                        test_as_of_dates=test_dates,
+                        train_matrix=train_matrix,
+                        test_matrix=test_matrix,
+                        model_ids=split_model_ids,
+                        model_artifact_ids=split_model_artifact_ids,
+                        num_predictions=split_predictions,
+                        num_evaluations=split_evaluations,
+                    )
+                )
+
+            _mark_run(db_engine, run_id, "completed")
+            logger.info(
+                f"Run {run_id[:8]}… ({subset.label}) completed:"
+                + f" {len(run_model_ids)} model(s), {run_predictions} prediction(s),"
+                + f" {run_evaluations} evaluation(s)"
+            )
+            run_results.append(
+                RunResult(
+                    run_id=run_id,
+                    experiment_hash=exp_hash,
+                    problem_type=problem_type,
+                    cohort_artifact_id=cohort_artifact_id,
+                    labels_artifact_id=labels_artifact_id,
+                    source_pins=dict(frozen_pins),
+                    splits=split_results,
+                    model_ids=run_model_ids,
+                    num_models=len(run_model_ids),
+                    num_predictions=run_predictions,
+                    num_evaluations=run_evaluations,
+                    feature_group=subset.label,
                 )
             )
 
-        _mark_run(db_engine, run_id, "completed")
     except Exception as exc:
-        _mark_run(db_engine, run_id, "failed", error=str(exc))
-        logger.error(f"Run {run_id[:8]}… failed: {exc}")
+        _mark_run(db_engine, current_run_id, "failed", error=str(exc))
+        logger.error(f"Run {current_run_id[:8]}… failed: {exc}")
         raise
 
     _refresh_leaderboard(db_engine)
-    logger.info(
-        f"Run {run_id[:8]}… completed: {len(all_model_ids)} model(s),"
-        + f" {total_predictions} prediction(s), {total_evaluations} evaluation(s)"
-    )
-    return RunResult(
-        run_id=run_id,
+    return ExperimentResult(
         experiment_hash=exp_hash,
         problem_type=problem_type,
         cohort_artifact_id=cohort_artifact_id,
         labels_artifact_id=labels_artifact_id,
         source_pins=dict(frozen_pins),
-        splits=split_results,
-        model_ids=all_model_ids,
-        num_models=len(all_model_ids),
-        num_predictions=total_predictions,
-        num_evaluations=total_evaluations,
+        runs=run_results,
     )
 
 

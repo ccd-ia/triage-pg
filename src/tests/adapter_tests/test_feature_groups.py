@@ -47,6 +47,17 @@ def test_partition_source_entity_unmatched_column_is_loud():
         partition_features([*_FACILITY_COLS, "orphan_column"], _ALIASES)
 
 
+def test_partition_source_entity_bare_target_var_falls_back_to_target():
+    # featurizer names the target's PLAIN direct variables bare (no '<alias>.' prefix), e.g.
+    # 'age'; these belong to the target entity, not an orphan error.
+    cols = ["age", "COUNT(orders.amount|interval=P3650D)"]
+    groups = partition_features(cols, ["customers", "orders"], target_alias="customers")
+    assert groups == {
+        "customers": ["age"],
+        "orders": ["COUNT(orders.amount|interval=P3650D)"],
+    }
+
+
 def test_partition_explicit_globs():
     groups = partition_features(
         _FACILITY_COLS + _INSPECTION_COLS,

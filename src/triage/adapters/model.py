@@ -249,6 +249,11 @@ def build_model(
         "class_path": class_path,
         "hyperparameters": canonical_hp,
         "random_seed": random_seed,
+        # The feature set is part of the model's identity. Usually it is fully determined by the
+        # train-matrix parent, but feature groups (ADR-0023) project several subsets out of ONE
+        # shared full matrix, so two subset models share a parent and must be told apart by their
+        # feature_list — otherwise the second subset would cache-hit the first's (wrong-width) model.
+        "feature_list": sorted(feature_list),
     }
     engine_versions = engine_versions_for(MODEL_KIND, class_path)
     model_derivation = derive(

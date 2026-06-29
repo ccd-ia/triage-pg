@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from psycopg_pool import ConnectionPool
-from triage.profiles.protocols import StorageAdapter
 
 from triage.derivation import canonical_json
 from triage.logging import get_logger
+from triage.profiles.protocols import StorageAdapter
 
 logger = get_logger(__name__)
 
@@ -27,8 +27,9 @@ __all__ = ["RunHandle", "InProcessExecution", "BatchExecution"]
 
 @dataclass(frozen=True)
 class RunHandle:
-    """The outcome of an execution. Local carries the in-process ``RunResult``; cloud carries
-    the Batch ``job_id`` (the run completes asynchronously inside the job)."""
+    """The outcome of an execution. Local carries the in-process ``ExperimentResult`` (its
+    ``runs`` are the feature-group runs, ADR-0023); cloud carries the Batch ``job_id`` (the run
+    completes asynchronously inside the job)."""
 
     run_result: Any | None = None
     batch_job_id: str | None = None

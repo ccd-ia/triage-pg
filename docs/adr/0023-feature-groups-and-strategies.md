@@ -42,13 +42,18 @@ triage's `FeatureGroupMixer`):
 the Run's *attempt*. One `triage run` with strategies **fans out into N Runs** under one
 Experiment, so their leaderboards are directly comparable (same labels, same splits).
 
-**4. Mechanism: column projection of a single featurizer pass.** featurizer runs once per split
-(full feature set); each subset is a **projection** of those columns into its own
-`feature_group` + `matrix` derivation nodes. The feature-subset (a sorted column list, hashed)
-enters the `feature_group` node identity, so distinct subsets get distinct identities and caches,
-and a subset shared across strategies (e.g. `all` == the full `all-combinations` top) is built
-once and reused (ADR-0013/0015). Fit-based imputation (ADR-0009) re-fits on the projected
-*train* columns — the leakage boundary is unchanged.
+**4. Mechanism: column projection of a single featurizer pass; the subset enters the MODEL
+identity.** featurizer runs once per split (the full `feature_group` + `matrix` artifacts are
+built once, under the first run, and shared via the DAG cache + `run_artifacts` usage edges).
+Each subset is then a pure **column projection** of that one Parquet: a `MatrixResult` carrying
+the same `storage_uri` but the subset's `feature_names`. There is **no per-subset matrix node or
+projected Parquet copy** — instead the subset (a sorted `feature_list`) enters the **model
+artifact identity** (and the `model_group` hash), so two subsets over the shared full matrix mint
+distinct models / model-groups (and the read dashboard groups them separately for comparison).
+Fit-based imputation (ADR-0009) was already applied per-column in the full matrix, and imputation
+is per-column independent, so a projected subset needs no re-fit — the leakage boundary is
+unchanged. `feature_groups` is nested under `feature_config` for authoring convenience but is
+**stripped** by the adapter before featurizer (or the `feature_group` node identity) sees it.
 
 ## Considered alternatives
 

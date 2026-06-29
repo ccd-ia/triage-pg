@@ -11,6 +11,7 @@ import os
 
 import pytest
 
+from triage.adapters.feature_groups import mix_strategies, partition_features
 from triage.adapters.run import experiment_hash_for, run_experiment
 from triage.profiles.storage import LocalStorage
 
@@ -206,9 +207,13 @@ def test_run_experiment_end_to_end(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "store")
     config = _experiment_config()
 
-    result = run_experiment(
+    experiment = run_experiment(
         engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
     )
+    # No feature groups -> exactly one run; the rest of this test is run-scoped. (RunResult
+    # carries experiment_hash / cohort / labels / counts too, so result.* below is unchanged.)
+    assert experiment.num_runs == 1
+    result = experiment.runs[0]
 
     # ---- lineage: experiment + run rows, run completed
     assert result.experiment_hash == experiment_hash_for(config)
@@ -379,7 +384,7 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
 
     first = run_experiment(
         engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
-    )
+    ).runs[0]
 
     def counts():
         with engine.connection() as conn:
@@ -402,7 +407,7 @@ def test_run_experiment_cache_reuse_on_rerun(db_pool_greenfield, tmp_path):
 
     second = run_experiment(
         engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
-    )
+    ).runs[0]
     after_second = counts()
 
     # same experiment hash (same config) — a re-run reuses the experiment row
@@ -461,7 +466,7 @@ def test_run_experiment_emits_live_progress(db_pool_greenfield, tmp_path):
             storage=LocalStorage(),
             storage_root=storage,
             random_seed=42,
-        )
+        ).runs[0]
         # Drain generously; the run emits well over a dozen NOTIFYs. Bounded by
         # timeout so a missing terminal event surfaces as a failure, not a hang.
         payloads = [
@@ -488,3 +493,64 @@ def test_run_experiment_emits_live_progress(db_pool_greenfield, tmp_path):
     assert ("evaluation", "completed") in seen
     # nothing failed in a clean run
     assert not any(status == "failed" for _, status in seen)
+
+
+def test_feature_group_fanout_runs_share_one_experiment(db_pool_greenfield, tmp_path):
+    """ADR-0023: feature-group strategies fan one experiment out into N runs (one per feature
+    subset), all sharing the experiment hash, cohort, and labels. The orchestrator's runs must
+    equal the mixer's subsets over the REAL featurizer columns; each leave-one-in run trains on a
+    strict subset of the 'all' run's features (distinct model feature_list)."""
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    storage = str(tmp_path / "store")
+
+    config = _experiment_config()
+    # customers (target, age) + orders (aggregations) -> 2 source-entity groups.
+    config["feature_config"]["feature_groups"] = {
+        "strategies": ["all", "leave-one-in"],
+        "group_by": "source_entity",
+    }
+
+    experiment = run_experiment(
+        engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
+    )
+
+    # one experiment (the problem), many runs (the attempts) — all share the hash. Feature groups
+    # live in feature_config, which is NOT part of identity (ADR-0022), so the hash is unchanged.
+    assert experiment.experiment_hash == experiment_hash_for(config)
+    assert all(r.experiment_hash == experiment.experiment_hash for r in experiment.runs)
+
+    # The fan-out equals the mixer's subsets over the ACTUAL produced columns.
+    all_run = next(r for r in experiment.runs if r.feature_group == "all")
+    full_feats = list(all_run.splits[0].train_matrix.feature_names)
+    aliases = [e["alias"] for e in _featurizer_config()["entities"]]
+    # bare 'age' (target direct var) -> the target group, mirroring the orchestrator.
+    groups = partition_features(
+        full_feats, aliases, target_alias=_featurizer_config()["target"]
+    )
+    assert (
+        len(groups) >= 2
+    ), f"expected ≥2 source-entity groups, got {list(groups)} from {full_feats}"
+    expected = mix_strategies(groups, ["all", "leave-one-in"])
+    assert experiment.num_runs == len(expected)
+    assert {r.feature_group for r in experiment.runs} == {s.label for s in expected}
+
+    # DB: N run rows under the ONE experiment.
+    with engine.connection() as conn:
+        n_runs = conn.execute(
+            "select count(*) as n from triage.runs where experiment_hash = %(h)s",
+            {"h": experiment.experiment_hash},
+        ).fetchone()["n"]
+    assert n_runs == experiment.num_runs
+
+    # Each leave-one-in run trains on a STRICT subset of the all-features run.
+    for run in experiment.runs:
+        if run.feature_group == "all":
+            continue
+        sub = set(run.splits[0].train_matrix.feature_names)
+        assert sub < set(full_feats), f"{run.feature_group} not a strict subset"
+        # the projected matrices reuse the SAME parquet as the full run (no re-featurize)
+        assert (
+            run.splits[0].train_matrix.storage_uri
+            == all_run.splits[0].train_matrix.storage_uri
+        )
