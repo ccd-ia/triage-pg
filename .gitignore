@@ -51,3 +51,5 @@ dirtyduck/docker-compose.override.yml
 # Local model artifacts: `triage run` writes serialized models to the storage root
 # (the repo root under the local profile). These are regenerable run output, never source.
 *.joblib
+# Real KDD Cup 2014 DonorsChoose data (large; not committed — tutorial image ships a subset)
+donorschoose/real/

@@ -85,3 +85,19 @@ tutorial-logs:
 # Clean up DirtyDuck resources (removes containers, images, volumes)
 tutorial-clean:
     docker compose -f dirtyduck/docker-compose.yml down --rmi all --remove-orphans --volumes
+
+# Start DonorsChoose (KDD Cup 2014) EWS tutorial database (build + up)
+donors-up:
+    docker compose -f donorschoose/docker-compose.yml up -d --build donors_db
+
+# psql into the DonorsChoose database
+donors-shell:
+    docker compose -f donorschoose/docker-compose.yml exec donors_db psql -U donors_user -d donors
+
+# Stop DonorsChoose
+donors-down:
+    docker compose -f donorschoose/docker-compose.yml stop
+
+# Clean up DonorsChoose resources (containers, images, volumes — frees the baked data)
+donors-clean:
+    docker compose -f donorschoose/docker-compose.yml down --rmi all --remove-orphans --volumes
