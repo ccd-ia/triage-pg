@@ -1,8 +1,59 @@
 # featurizer scale validation — the per-as_of_date CTE cost (ADR-0008)
 
-**Status:** validated 2026-06-17 · **Verdict:** (a) scalable as-is for our
-realistic volumes, with a known featurizer-side optimization filed for later if
-volumes grow. · **Benchmark:** [`benchmarks/featurizer_scale.py`](../benchmarks/featurizer_scale.py)
+**Status:** validated 2026-06-17 @ featurizer **v0.3.0** · **re-validated
+2026-06-28 @ featurizer v0.4.1** (numbers within ~3% of baseline; verdict
+unchanged — see [Re-validation](#re-validation--2026-06-28--featurizer-v041)) ·
+**Verdict:** (a) scalable as-is for our realistic volumes, with a known
+featurizer-side optimization filed for later if volumes grow. · **Benchmark:**
+[`benchmarks/featurizer_scale.py`](../benchmarks/featurizer_scale.py)
+
+## Re-validation — 2026-06-28 @ featurizer v0.4.1
+
+The pin advanced from v0.3.0 to **v0.4.1** (v0.4.0 added direct-categorical
+one-hot with a fixed vocabulary + a feature manifest; v0.4.1 added examples and
+the triage-faithful DirtyDuck fixture). Those changes touch the *column set*, not
+the `cross join lateral` SQL **shape**, so the scaling characterization should be
+invariant. Re-ran the same benchmark (same config → still 33 output columns, same
+hardware: Apple M5 Max, PostgreSQL 16.14) to confirm empirically.
+
+**PRIMARY** — execution time vs #as_of_dates (20,000 entities, 600,000 visits, 33 cols):
+
+| #as_of_dates | v0.3.0 exec (s) | v0.4.1 exec (s) | Δ      | v0.4.1 s/date | v0.4.1 vs 1 date |
+|--------------|-----------------|-----------------|--------|---------------|------------------|
+| 1            | 1.421           | 1.372           | −3.4%  | 1.372         | 1.00x            |
+| 5            | 6.836           | 6.678           | −2.3%  | 1.336         | 4.87x            |
+| 10           | 12.839          | 12.773          | −0.5%  | 1.277         | 9.31x            |
+| 20           | 23.426          | 23.409          | −0.1%  | 1.170         | 17.06x           |
+| 40           | 38.229          | 38.122          | −0.3%  | 0.953         | 27.78x           |
+
+Per-as_of_date cost at v0.4.1: **mean 1.222 s, CV 12.3%**, monotonically
+declining (1.372 → 0.953 s/date). 40 dates = **27.78×** a single date — still
+**sub-linear** (cf. v0.3.0: mean 1.24 s, CV 13.3%, 26.90×).
+
+**SECONDARY** — execution time vs #entities (12 as_of_dates, 30 events/entity):
+
+| #entities | #visits   | v0.3.0 exec (s) | v0.4.1 exec (s) | Δ     |
+|-----------|-----------|-----------------|-----------------|-------|
+| 1,000     | 30,000    | 0.761           | 0.749           | −1.6% |
+| 10,000    | 300,000   | 7.624           | 7.562           | −0.8% |
+| 100,000   | 3,000,000 | 76.713          | 76.075          | −0.8% |
+
+Still clean **linear** in entity/event volume (each 10× of entities ≈ 10× the
+time). Every point is within ~3% of the v0.3.0 baseline — i.e. measurement
+noise, not a behavioral change.
+
+**Conclusion:** the verdict below is **re-confirmed at v0.4.1** — featurizer's
+`cross join lateral` re-evaluation remains the *benign* constant-to-sub-linear
+case, not the feared superlinear one. No change to the adapter
+(`src/triage/adapters/matrix.py`) or to ADR-0008's decision is warranted. (One
+benign benchmark-only note at v0.4.1: featurizer now emits an explicit warning
+that a *direct* categorical passed without a declared vocabulary/role would crash
+a downstream encoder — that is the synthetic benchmark's `region` column, not a
+triage-path issue; the triage adapter declares categorical roles per ADR-0009's
+2026-06-21 extension.)
+
+The original v0.3.0 methodology, full results, and forward-headroom analysis are
+preserved verbatim below.
 
 ## What this validates
 
