@@ -660,7 +660,6 @@ def run_experiment(
             split_predictions = 0
             split_evaluations = 0
             train_end_time = max(train_dates) if train_dates else None
-            test_as_of = max(test_dates) if test_dates else None
 
             for class_path, hyperparameters in grid:
                 model = build_model(
@@ -677,12 +676,15 @@ def run_experiment(
                     source_pins=frozen_pins,
                     policy=cache_policy,
                 )
+                # as_of_date=None → evaluate the model at EVERY test as_of_date in the
+                # split (one evaluation row-set per prediction time), not just the last
+                # one (WS1 / per-as_of_date evaluation).
                 score = score_and_evaluate(
                     db_engine,
                     model.model_id,
                     model.estimator,
                     test_matrix_result=test_matrix,
-                    as_of_date=test_as_of,
+                    as_of_date=None,
                     label_timespan=test_timespan,
                     metric_config=metric_config,
                 )

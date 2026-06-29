@@ -563,3 +563,108 @@ def test_feature_importance_values_tree_gini():
     assert fi["kind"] == "gini"
     assert fi["signed"] is None and fi["odds"] is None
     assert list(fi["ranking"]) == [0.7, 0.3]
+
+
+def test_evaluation_is_per_as_of_date(db_pool_greenfield, tmp_path):
+    """A test split spanning several as_of_dates is evaluated ONCE PER PREDICTION TIME
+    (WS1), not collapsed at max(test_dates); triage.evaluations_windowed rolls them up.
+    """
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+
+    # A SECOND test as_of_date beyond TEST_AS_OF, with its own label window
+    # [2015-01-01, 2015-07-01) -> a knowledge_date of 2015-02-01.
+    test_as_of_2 = date(2015, 1, 1)
+    with engine.connection() as conn:
+        for customer_id, outcome in _LABELS.items():
+            conn.execute(
+                "insert into label_src (entity_id, knowledge_date, outcome)"
+                " values (%(eid)s, cast(%(kd)s as date), %(out)s)",
+                {"eid": customer_id, "kd": "2015-02-01", "out": outcome},
+            )
+
+    storage = str(tmp_path / "store")
+    test_dates = [TEST_AS_OF, test_as_of_2]
+    cohort, labels = _build_cohort_and_labels(
+        engine, run_id, [TRAIN_AS_OF, *test_dates]
+    )
+
+    temporal = _temporal_config()
+    policy = ImputationPolicy.model_validate(
+        {"all": {"type": "zero"}, "mean": {"type": "mean"}}
+    )
+    common = dict(
+        featurizer_config=_featurizer_config(),
+        cohort_artifact_id=cohort,
+        labels_artifact_id=labels,
+        temporal_config=temporal,
+        imputation_policy=policy,
+        label_timespan=LABEL_TIMESPAN,
+        storage=LocalStorage(),
+        storage_root=storage,
+        source_pins=_PINS,
+    )
+    train = build_matrix(
+        engine,
+        run_id,
+        matrix_kind="train",
+        as_of_dates=[TRAIN_AS_OF],
+        lookback="6 months",
+        **common,
+    )
+    test = build_matrix(
+        engine,
+        run_id,
+        matrix_kind="test",
+        as_of_dates=test_dates,
+        train_matrix_artifact_id=train.matrix_artifact_id,
+        **common,
+    )
+    model = build_model(
+        engine,
+        run_id,
+        train_matrix_result=train,
+        class_path=CLASS_PATH,
+        hyperparameters={"max_depth": 3},
+        random_seed=42,
+        storage=LocalStorage(),
+        storage_root=storage,
+        train_end_time=TRAIN_AS_OF,
+        training_label_timespan=LABEL_TIMESPAN,
+        source_pins=_PINS,
+    )
+
+    # as_of_date=None -> evaluate EVERY distinct test as_of_date.
+    result = score_and_evaluate(
+        engine,
+        model.model_id,
+        model.estimator,
+        test,
+        as_of_date=None,
+        label_timespan=LABEL_TIMESPAN,
+        metric_config={"metrics": ["precision@", "auc_roc"], "thresholds": ["50_pct"]},
+    )
+    assert result.num_predictions == 12  # 6 entities × 2 prediction times
+
+    with engine.connection() as conn:
+        eval_dates = [
+            r["as_of_date"]
+            for r in conn.execute(
+                "select distinct as_of_date from triage.evaluations"
+                " where model_id = %(m)s order by as_of_date",
+                {"m": model.model_id},
+            ).fetchall()
+        ]
+        windowed = conn.execute(
+            "select n_as_of_dates, window_start, window_end"
+            " from triage.evaluations_windowed"
+            " where model_id = %(m)s and metric = 'auc_roc' and parameter = ''",
+            {"m": model.model_id},
+        ).fetchone()
+    # one evaluation row-set PER prediction time (not just max(test_dates))
+    assert eval_dates == [TEST_AS_OF, test_as_of_2]
+    # the windowed view rolls the two prediction times up
+    assert windowed["n_as_of_dates"] == 2
+    assert windowed["window_start"] == TEST_AS_OF
+    assert windowed["window_end"] == test_as_of_2

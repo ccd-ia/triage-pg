@@ -743,7 +743,11 @@ def score_and_evaluate(
         model_id: the model these scores belong to (``triage.models.model_id``).
         estimator: the fitted estimator (from :class:`ModelResult`).
         test_matrix_result: the F2 :class:`MatrixResult` for the *test* matrix.
-        as_of_date: the scoring date evaluation runs at (must match the test matrix's date).
+        as_of_date: optional. When ``None`` (the orchestrator default), the model is
+            evaluated at EVERY distinct ``as_of_date`` present in the test matrix — one
+            metric row-set per prediction time (WS1). When a value is passed, evaluation
+            is restricted to that single date (back-compat / single-date callers).
+            Predictions are always recorded for every matrix row regardless.
         label_timespan: the label horizon the test labels were built with (selects the
             matching ``triage.labels`` rows for evaluation).
         split_kind: ``triage.split_kind`` for the prediction rows (default ``'test'``).
@@ -768,6 +772,11 @@ def score_and_evaluate(
     )
     test_matrix_uuid = str(as_uuid(test_matrix_result.matrix_artifact_id))
 
+    if compute_bias and not bias_parameter:
+        raise ValueError(
+            "compute_bias=True requires bias_parameter (a top-k threshold, e.g. '10_pct')"
+        )
+
     try:
         scores = score_matrix(estimator, test_matrix_result)
         num_predictions = record_predictions(
@@ -777,34 +786,42 @@ def score_and_evaluate(
             scores,
             matrix_uuid=test_matrix_uuid,
         )
-        num_evaluations = evaluate_in_db(
-            db_engine,
-            model_id,
-            as_of_date,
-            label_timespan,
-            split_kind=split_kind,
-            metric_config=cfg,
-            subset_hash=subset_hash,
-        )
+        # Evaluate PER PREDICTION TIME. A model whose test split spans several
+        # as_of_dates is used to predict once per date; triage.evaluations is keyed
+        # on as_of_date, so we write one metric row-set per date rather than a single
+        # number collapsed at the window's max date. The distinct prediction times come
+        # from the test matrix's own rows (point-in-time correct by construction). An
+        # explicit ``as_of_date`` argument, if given, restricts evaluation to that one
+        # date (back-compat / single-date callers).
+        if as_of_date is not None:
+            eval_dates: list[Any] = [as_of_date]
+        else:
+            eval_dates = sorted({row["as_of_date"] for row in scores})
+        num_evaluations = 0
         num_bias = 0
-        if compute_bias:
-            if not bias_parameter:
-                raise ValueError(
-                    "compute_bias=True requires bias_parameter (a top-k threshold,"
-                    + " e.g. '10_pct')"
-                )
-            num_bias = compute_bias_in_db(
+        for eval_date in eval_dates:
+            num_evaluations += evaluate_in_db(
                 db_engine,
                 model_id,
-                as_of_date,
+                eval_date,
                 label_timespan,
-                bias_parameter,
                 split_kind=split_kind,
-                ref_groups=dict(bias_ref_groups or {}),
+                metric_config=cfg,
+                subset_hash=subset_hash,
             )
+            if compute_bias:
+                num_bias += compute_bias_in_db(
+                    db_engine,
+                    model_id,
+                    eval_date,
+                    label_timespan,
+                    bias_parameter,
+                    split_kind=split_kind,
+                    ref_groups=dict(bias_ref_groups or {}),
+                )
     except Exception:
         logger.error(
-            f"score_and_evaluate failed for model_id={model_id} at {as_of_date}"
+            f"score_and_evaluate failed for model_id={model_id}"
             + f" (test matrix {test_matrix_result.matrix_artifact_id[:12]}…)"
         )
         raise
