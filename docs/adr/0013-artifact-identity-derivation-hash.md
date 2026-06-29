@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-11
+- Status update (2026-06-28): Implemented — `triage/derivation.py` (dual-Merkle identity, `as_uuid`), lookup-or-create in the builders; `artifacts`/`artifact_inputs`/`run_artifacts` schema.
 
 Every built artifact (cohort, labels, features, matrix, model, prediction run,
 evaluation) is identified by a **derivation hash** à la Guix: SHA-256 over its

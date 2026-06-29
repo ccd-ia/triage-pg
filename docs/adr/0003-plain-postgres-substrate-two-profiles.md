@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented — `src/triage/profiles/` (auth/storage/execution adapters, local + cloud) with fail-fast `load_profile`; seam spec in [`docs/cloud-profile-spec.md`](../cloud-profile-spec.md).
 
 triage-pg targets **plain PostgreSQL with no proprietary extensions**, so the schema, SQL, and PL/pgSQL run identically on a laptop, Docker, a self-hosted server, or RDS. Environment-specific concerns are isolated behind three small swappable adapters — **auth** (password/local vs IAM), **storage** (local filesystem vs S3), **execution** (in-process vs AWS Batch) — yielding a **local/default** profile (standalone PG; dev, teaching, tests, client-own-PG) and a **cloud** profile (the ccd-ia hosted instance). Standalone PG is non-negotiable: the test suite (`pytest-postgresql`/CI) and the DirtyDuck tutorial run against local Postgres, where IAM auth cannot exist — so the cloud profile is always an *additional* path, never a replacement.
 

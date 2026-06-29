@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-11
+- Status update (2026-06-28): Implemented — `derivation.engine_versions_for()` hashes the featurizer release into feature_group identity (strict, with a `policy='logical'` ENGINE-DRIFT fallback).
 
 A version enters a derivation hash (ADR-0013) iff it can change the artifact's
 **output bytes given identical config and inputs** — the compiler-vs-runtime

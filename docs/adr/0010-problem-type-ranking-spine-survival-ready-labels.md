@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented — `problem_type` discriminator (classification / regression / regression-ranking) on the score→rank→evaluate spine; survival `(duration, event_observed)` columns present (survival metric / C-index deferred).
 
 triage-pg's architecture is a problem-type-agnostic **ranking/prioritization spine**: produce a score → rank entities → evaluate the ranking. A `problem_type` discriminator on the experiment selects three swaps on that spine — how to rank, the ranking metric, and the label shape — supporting **classification** (rank by P(y=1); AUC, precision@k), **regression-as-ranking** (rank by predicted value; precision@k + RMSE), and **pure regression** (RMSE/MAE/R², ranking incidental). Regression-as-ranking is the primary mode for continuous targets.
 

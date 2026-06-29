@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented — PL/pgSQL precision@k/recall@k/auc_roc/average_precision/regression + `compute_bias_metrics` (migration 0002); `component/catwalk/in_pg_evaluation.py`. Aequitas dropped for SQL group-bys over `triage.protected_groups`.
 
 Evaluation metrics (precision@k, recall@k, AUC, and regression RMSE/MAE/R²), model leaderboards, and audition run as **PL/pgSQL functions plus (materialized) views over the predictions table**, not in Python — they need only `(entity_id, score, label)`, which lives in PostgreSQL regardless of where matrices are stored. **Bias/fairness metrics are reimplemented as SQL group-bys**, dropping the Aequitas library.
 

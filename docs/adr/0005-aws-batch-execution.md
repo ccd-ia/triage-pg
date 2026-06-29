@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented (code), not yet exercised on live AWS — `profiles/execution.py` `BatchExecution` (one Batch job per experiment); rq + multicore orchestration removed.
 
 In the cloud profile, each experiment runs as **one AWS Batch job** (the triage-pg container + config + the target project's connection); cross-experiment parallelism is Batch's queue, and grid-search parallelism stays as multiprocessing inside the container. Batch becomes the distributed runner, so **rq and the multicore-orchestration code are removed**. The local profile runs the same experiment in-process / in a local container.
 

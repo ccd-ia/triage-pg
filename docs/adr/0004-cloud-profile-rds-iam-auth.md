@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented (code), not yet exercised on live AWS — `profiles/auth.py` `CloudAuth` mints short-lived RDS-IAM tokens via boto3 `rds.generate_db_auth_token`.
 
 The cloud profile runs managed PostgreSQL (RDS/Aurora) and authenticates via **IAM database authentication**: per-project PG roles + per-project IAM roles, with RDS issuing short-lived tokens — **no database passwords stored anywhere**. This is the only mechanism that gives per-project credential scoping to ephemeral AWS Batch jobs (which run semi-trusted code, since experiment configs instantiate arbitrary Python classes) while honoring the no-plaintext-secrets rule, and it removes DBA toil (HA/backups/PITR are managed).
 

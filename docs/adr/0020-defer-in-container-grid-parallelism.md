@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-20
+- Status update (2026-06-28): Deferred by design — the grid×split loop in `adapters/run.py` remains serial; re-introducing multiprocessing is gated by this ADR.
 
 ADR-0005 envisioned grid-search parallelism as in-container multiprocessing, but the
 grid×split loop (`adapters/run.py`) is **serial** today, and we are keeping it that way for

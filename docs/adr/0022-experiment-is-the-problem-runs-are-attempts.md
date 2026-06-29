@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-26
 - Deciders: Adolfo, Claude
+- Status update (2026-06-28): Implemented — `experiment_hash_for()` / `_problem_identity` in `adapters/run.py`; re-hash landed and the food DB re-seeded to one Experiment (commit 31539249, 2026-06-26).
 
 `experiment_hash` was a content hash over the **whole** config (cohort + label + temporal +
 features + grid + imputation, minus cosmetic name/description — ADR-0001, `adapters/run.py`).

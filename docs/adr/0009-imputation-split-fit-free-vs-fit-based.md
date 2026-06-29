@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented — fit-free flags in featurizer; fit-based train-only stats persisted to `matrices.metadata` and reused by the test split via the train-matrix parent edge (leakage boundary property-tested); `adapters/imputation.py`.
 
 Imputation is deliberately split across the two repos along a leakage boundary. **featurizer** (the split-agnostic feature engine) performs only **fit-free** imputation — zero/constant fills plus the `*_imp` flag column. **triage-pg's adapter** performs all **fit-based** imputation (mean/median/mode): the statistic is computed on the **training split only** and applied to both train and test. The reason: fit-based imputation fitted over the full `cohort × as_of_dates` matrix would leak test-period distribution into training, and only triage-pg knows the timechop train/test split — a concept featurizer must never learn.
 

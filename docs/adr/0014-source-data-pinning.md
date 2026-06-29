@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-11
+- Status update (2026-06-28): Implemented — `triage/sources.py` + `triage source` CLI; `sources`/`source_versions`/`run_source_pins`; unpinned-but-declared sources warn and skip cache.
 
 Source tables cannot be content-hashed cheaply, so they enter derivation hashes
 (ADR-0013) as **declared pins**: configs explicitly declare the source tables

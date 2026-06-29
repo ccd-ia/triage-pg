@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-12
+- Status update (2026-06-28): Implemented — `triage gc` / `triage archive` CLI; `artifacts.collect()` deletes outputs through the storage adapter (local FS + s3fs), flips rows to `collected`; covered by `src/tests/test_gc.py`.
 
 Garbage collection's default unit is the **output**, never the record: dead
 artifacts (unreachable from any root) have their outputs deleted — Parquet

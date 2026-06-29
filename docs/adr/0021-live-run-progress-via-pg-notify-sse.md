@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-20
+- Status update (2026-06-28): Implemented — dashboard run-monitor emits `pg_notify('run_progress', …)` on begin_artifact/mark_built/mark_failed + run transitions, streamed via SSE (`dashboard/routes.py` `/api/runs/{id}/stream`) with a REST poll fallback.
 
 The read dashboard's run-monitor (ADR-0012, `docs/read-dashboard-spec.md`) shows a run's
 pipeline DAG progressing online. We get there with **two halves**: REST reads of a

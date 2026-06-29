@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-19
 - Deciders: Adolfo De Unánue
+- Status update (2026-06-28): Implemented — migration 0003 adds `runs.purpose` (experiment/retrain/forward_score) + `runs.prediction_date`; inherited Retrain/RetrainModel ORM tables removed.
 
 ## Context
 

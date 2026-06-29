@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-04
+- Status update (2026-06-28): Implemented — standalone postmodeling module removed; feature importances persisted at train (β/odds, migration 0009) + diagnostic SQL views + dashboard panels.
 
 triage-pg has **no standalone postmodeling module** (old triage's was ~8.8k LOC). Model analysis dissolves into three places already in the architecture: (a) **model-derived artifacts** — global/individual feature importances — are computed from the trained estimator and **persisted to PG at train time**; (b) **diagnostic SQL views** (crosstabs, error analysis, score distributions) over the predictions table (± the Parquet matrix); (c) **dashboard panels** presenting all of it. Performance, leaderboards, and bias are already SQL views per ADR-0007.
 

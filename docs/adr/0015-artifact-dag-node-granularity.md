@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-06-11
+- Status update (2026-06-28): Implemented — per-(config, as_of_date) cohort/labels/feature nodes, matrices per split-side, models the last cached node; cross-run cache reuse covered by the run_experiment E2E.
 
 The derivation DAG (ADR-0013) gets these nodes and no others: cohort and labels
 per **(config, as_of_date)**, features per **(feature group, as_of_date)** —
