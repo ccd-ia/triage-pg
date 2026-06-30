@@ -1,0 +1,270 @@
+# DonorsChoose (KDD Cup 2014) — Greenfield End-to-End Run
+#
+# Problem (early-warning system): for a classroom project that was just posted, will it FAIL
+# to be fully funded within 4 months? The positive class (outcome=1, "unfunded") is the project
+# that needs help — the one an operator would intervene on. Source data: the donorschoose docker
+# (`just donors-up`), schemas clean.* / ontology.* (raw→clean→ontology, pg-data-discovery).
+#
+# Temporal framing (the EWS panel): a monthly as_of grid. A project enters the cohort at the
+# grid point in the month AFTER it was posted — so every cohort row has date_posted strictly
+# *before* its as_of_date, which is what makes the point-in-time featurizer join (forced to the
+# exclusive `<` boundary by the matrix adapter) include the project's own posting-time data
+# (static attributes + resource line items) while still excluding anything in its future. Each
+# project is therefore scored exactly once, at one as_of_date.
+
+problem_type: classification
+
+temporal_config:
+  # Postings run 2012-01..2013-12; donations run to 2014-04-15, so the 4-month label window of
+  # the last cohort (posted 2013-12 → as_of 2014-01 → window to 2014-05) is essentially observed.
+  feature_start_time: '2012-01-01'
+  feature_end_time: '2014-05-01'
+  label_start_time: '2012-02-01'   # earliest as_of with a non-empty cohort (projects posted 2012-01)
+  label_end_time: '2014-05-01'
+  # Retrain every 6 months → a handful of temporal splits over the two years of data.
+  model_update_frequency: '6month'
+  # One monthly training row per as_of; each project lands in exactly one (cohort masks it there).
+  training_as_of_date_frequencies: '1month'
+  training_label_timespans: ['4month']
+  test_as_of_date_frequencies: '1month'
+  test_durations: '0day'           # single point-in-time test as_of per split
+  test_label_timespans: ['4month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: posted_projects
+  # Projects posted in the month ending at as_of_date (so date_posted < as_of_date — point-in-time
+  # safe for the project's own posting-time features under the exclusive as-of boundary).
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.date_posted >= {as_of_date}::date - interval '1 month'
+      and e.date_posted <  {as_of_date}::date
+
+label_config:
+  name: unfunded_4mo
+  # outcome = 1 ("unfunded", the EWS positive) when total donations raised by as_of + label_timespan
+  # fall short of the project's asking price. Donations are the label source only (never a feature:
+  # zero at posting + leakage if used). Computed point-in-time from clean.donations vs total_price.
+  query: |
+    select
+      e.entity_id,
+      (coalesce(sum(d.donation_to_project) filter (
+         where d.donation_timestamp < {as_of_date}::date + {label_timespan}), 0)
+       < e.total_price)::int as outcome
+    from ontology.entities as e
+    left join clean.donations as d on d.projectid = e.projectid
+    where e.date_posted >= {as_of_date}::date - interval '1 month'
+      and e.date_posted <  {as_of_date}::date
+    group by e.entity_id, e.total_price
+
+# featurizer ER-graph (ADR-0008). The target entity is the posted PROJECT; three child streams hang
+# off it, all joined as-of (knowledge_date < as_of_date):
+#   * resources       — the project's own requested line items (declared at posting → leakage-free).
+#   * teacher_history — the SAME projects table, re-aliased and joined on teacher_acctid: the
+#                       teacher's prior postings (a self-referential as-of join, the experience signal).
+#   * school_history  — likewise on schoolid: the school's prior postings.
+# Aggregation windows are ISO-8601 (featurizer format). max_depth 2 is ample — each child alias has
+# no outgoing edge, so the graph is a star, not a chain.
+feature_config:
+  target: projects
+  max_depth: 2
+  intervals:
+    - P1M
+    - P6M
+    - P12M
+
+  # A focused primitive set (like the featurizer examples). The FULL default set applies abs /
+  # rolling_* / lag transformations at BOTH the child-measure and parent-aggregation level, which —
+  # across three numeric-bearing child streams — explodes into deeply-nested feature names that
+  # collide once truncated (and blows past PostgreSQL's 1664-columns-per-row limit). These
+  # cross-sectional EWS features want plain aggregations + identity, nothing time-windowed-within.
+  aggregations:
+    - count
+    - sum
+    - mean
+    - max
+    - stddev
+  transformations:
+    - identity
+
+  entities:
+    - alias: projects
+      id: entity_id
+      table: ontology.entities
+      # The target entity carries NO temporal_ix (featurizer needs it only on the child event
+      # streams; declaring date_posted here would pass it through as a Date "feature"). The static
+      # project attributes are point-in-time features known AT posting = at the decision point.
+      # Low-cardinality categoricals use featurizer v0.4.0 fixed-vocabulary one-hot (role:categorical
+      # + vocabulary) → deterministic numeric "projects.<col>=<value>" 0/1 columns (the adapter's
+      # ordinal encoder correctly stands down). Long-tail values fall into an all-zero "other".
+      variables:
+        poverty_level:
+          type: categorical
+          role: categorical
+          vocabulary: ["highest poverty", "high poverty", "moderate poverty", "low poverty"]
+        grade_level:
+          type: categorical
+          role: categorical
+          vocabulary: ["Grades PreK-2", "Grades 3-5", "Grades 6-8", "Grades 9-12"]
+        primary_focus_area:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Literacy & Language"
+            - "Math & Science"
+            - "Music & The Arts"
+            - "Applied Learning"
+            - "Special Needs"
+            - "History & Civics"
+            - "Health & Sports"
+        resource_type:
+          type: categorical
+          role: categorical
+          vocabulary: ["Technology", "Supplies", "Books", "Other"]
+        teacher_prefix:
+          type: categorical
+          role: categorical
+          vocabulary: ["Mrs.", "Ms.", "Mr."]
+        school_metro:
+          type: categorical
+          role: categorical
+          vocabulary: ["urban", "suburban", "rural"]
+        school_state:
+          type: categorical
+          role: categorical
+          vocabulary: ["CA", "NY", "TX", "FL", "IL", "NC", "GA", "PA", "SC", "MI", "OK", "IN"]
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+    - alias: resources
+      id: ~                         # keyless child: line items, aggregated only (mirrors DirtyDuck)
+      table: ontology.events
+      # 'date' = the project's date_posted (resources are declared at posting → knowledge date).
+      temporal_ix: date
+      variables:
+        project_resource_type:
+          type: categorical
+        line_total:
+          type: numeric
+        item_unit_price:
+          type: numeric
+        item_quantity:
+          type: numeric
+
+    # The teacher's prior projects: ontology.entities re-aliased, joined on teacher_acctid, as-of.
+    # COUNT → how many projects this teacher has posted before now; SUM/AVG over total_price /
+    # students_reached → their typical ask / reach. NOTE: under this cohort framing the current
+    # project (date_posted < as_of_date) is itself included in its teacher's history — a benign +1
+    # self-count on known-at-decision data, not leakage. On the full KDD data 43.5% of teachers
+    # have repeat projects (≈6% in the baked 3k subset), so the signal is real at scale.
+    - alias: teacher_history
+      id: entity_id
+      table: ontology.entities
+      temporal_ix: date_posted
+      variables:
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+    # The school's prior projects (same pattern, on schoolid). 76% of schools repeat on full data
+    # (≈25% in the subset) — the stronger of the two history signals here.
+    - alias: school_history
+      id: entity_id
+      table: ontology.entities
+      temporal_ix: date_posted
+      variables:
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+  relationships:
+    - parent:
+        entity: projects
+        key: entity_id
+      child:
+        entity: resources
+        key: entity_id
+      temporal:
+        mode: as_of
+    - parent:
+        entity: projects
+        key: teacher_acctid
+      child:
+        entity: teacher_history
+        key: teacher_acctid
+      temporal:
+        mode: as_of
+    - parent:
+        entity: projects
+        key: schoolid
+      child:
+        entity: school_history
+        key: schoolid
+      temporal:
+        mode: as_of
+
+  # Feature groups + mixing strategies (ADR-0023). Optional. Uncomment to fan this ONE experiment
+  # out into several RUNS (ADR-0022) — one per feature subset — so you can ask "do the teacher/school
+  # history features add lift over the project's own attributes + resources?". group_by source_entity
+  # partitions columns by the entity in the feature name → {projects, resources, teacher_history,
+  # school_history}. Each strategy combination shares this experiment's cohort/labels/splits, so the
+  # leaderboards compare directly. Absent ⇒ one implicit group = all features = one run.
+  #
+  # feature_groups:
+  #   group_by: source_entity
+  #   strategies: [all, leave-one-out, leave-one-in]
+  #   all_combinations_max_groups: 4
+
+# Tiny grid for a fast first run: DecisionTree + RandomForest + triage's ScaledLogisticRegression
+# (minmax-scaler + LR, so coefficients are on comparable [0,1]-scaled features; the adapter persists
+# signed β + odds-ratio exp(β)).
+grid_config:
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [3, 5]
+    min_samples_split: [50]
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [10]
+    max_depth: [3]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [0.01, 1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+
+# Declare the data sources so the derivation DAG can pin them (version_label static ⇒ idempotent re-runs).
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: date_posted
+    version_label: 'donorschoose-v1'
+    role: entity
+    type_column: primary_focus_area   # break entity volume out by focus area (Ontology view)
+    description: Posted classroom projects — the target entity (DonorsChoose KDD Cup 2014)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'donorschoose-v1'
+    role: event
+    type_column: project_resource_type   # break event volume out by resource type (Ontology view)
+    description: Requested resource line items, the project's child event stream (DonorsChoose)
+
+  - name: clean_donations
+    relation: clean.donations
+    knowledge_date_column: donation_timestamp
+    version_label: 'donorschoose-v1'
+    description: Donations — the label source only (4-month funding outcome), never a feature
+
+# Imputation: count-like features get zero-fill (default), everything else gets zero. The zero
+# strategy is fit-free (identical on train and test → no leakage). History aggregations over a
+# teacher/school with no prior projects legitimately impute to zero ("no track record").
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

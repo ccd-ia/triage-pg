@@ -56,3 +56,41 @@ just donors-shell     # psql into it
 just donors-down      # stop
 just donors-clean     # remove container + image + volume
 ```
+
+## Running the experiment end-to-end
+
+The greenfield run writes its results (`triage.*` schema: cohorts, labels, matrices, models,
+predictions, evaluations) into the **same** database that holds the source `ontology.*` data — so
+the steps are: start the DB, point triage at it, create the `triage.*` schema, then run.
+
+```bash
+# 1. start the tutorial DB (default host port 5436; override with DONORS_PG_PORT if taken)
+just donors-up
+
+# 2. a dev DB config for triage (baked tutorial creds; gitignored, recreate as needed)
+cat > donorschoose-database.yaml <<'YAML'
+host: 127.0.0.1
+user: donors_user
+pass: some_password
+port: 5436
+db: donors
+YAML
+
+# 3. create the triage results schema inside the donors DB (DATABASE_URL overrides the recipe's
+#    default database.yaml target)
+DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5436/donors \
+  just alembic upgrade head
+
+# 4. run cohort → labels → matrices → train → predict → evaluate
+uv run triage --dbfile donorschoose-database.yaml run \
+  example/donorschoose/greenfield.yaml --project-path /tmp/donors-run
+```
+
+A successful run reports something like *1 run, 20 models, 1820 predictions, 120 evaluations*
+across 4 temporal splits (6-month retrain cadence over 2012–2013). The featurizer ER-graph
+(`example/donorschoose/greenfield.yaml`) synthesizes ~175 features per matrix: the project's own
+one-hot attributes + numeric ask, resource-line-item aggregations, and the **self-referential
+teacher/school prior-posting history** (an as-of self-join on `teacher_acctid` / `schoolid`). On
+the baked subset the signal is modest (test AUC ≈ 0.58, average-precision ≈ 0.42 over a ~0.32
+base rate); the teacher/school history features carry far more weight on the full KDD data, where
+43.5% of teachers and 76% of schools have repeat projects.

@@ -53,3 +53,5 @@ dirtyduck/docker-compose.override.yml
 *.joblib
 # Real KDD Cup 2014 DonorsChoose data (large; not committed — tutorial image ships a subset)
 donorschoose/real/
+# DonorsChoose dev DB config (baked tutorial creds; never committed — see README to recreate)
+donorschoose-database.yaml
