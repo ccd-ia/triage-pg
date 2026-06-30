@@ -4,9 +4,9 @@
 default:
     @just --list
 
-# Preview documentation locally
+# List the project docs (plain Markdown, rendered on GitHub — start at docs/README.md)
 docs:
-    cd docs && uv run mkdocs serve
+    @echo "Greenfield docs are plain Markdown — start at docs/README.md:" && ls docs/*.md && echo "ADRs:" && ls docs/adr/*.md
 
 # Run alembic commands (e.g., just alembic upgrade head)
 alembic *ARGS:

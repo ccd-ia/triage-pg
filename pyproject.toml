@@ -88,18 +88,9 @@ dashboard = [
   "uvicorn[standard]>=0.32",
   "httpx>=0.27",
 ]
-docs = [
-  "mkdocs==1.6.1",
-  "pymdown-extensions==10.8",
-  "mkdocs-material==9.4.6",
-  "mkdocstrings==0.29.1",
-  "mkdocstrings-python==1.16.10",
-]
-
 [project.urls]
-Documentation = "https://dssg.github.io/triage/"
-"Source Code" = "https://github.com/dssg/triage"
-Tutorial = "https://dssg.github.io/triage/dirtyduck/"
+"Source Code" = "https://github.com/ccd-ia/triage-pg"
+Documentation = "https://github.com/ccd-ia/triage-pg/tree/main/docs"
 
 [project.scripts]
 triage = "triage.cli:execute"
