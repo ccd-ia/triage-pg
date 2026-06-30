@@ -55,3 +55,6 @@ dirtyduck/docker-compose.override.yml
 donorschoose/real/
 # DonorsChoose dev DB config (baked tutorial creds; never committed — see README to recreate)
 donorschoose-database.yaml
+# Chicago 311 larger/real export (not committed — tutorial image ships a baked subset) + dev DB config
+chicago311/chi311_db/real/
+chicago311-database.yaml

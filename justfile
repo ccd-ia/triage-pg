@@ -101,3 +101,19 @@ donors-down:
 # Clean up DonorsChoose resources (containers, images, volumes — frees the baked data)
 donors-clean:
     docker compose -f donorschoose/docker-compose.yml down --rmi all --remove-orphans --volumes
+
+# Start Chicago 311 Service Requests EWS tutorial database (build + up)
+chi311-up:
+    docker compose -f chicago311/docker-compose.yml up -d --build chi311_db
+
+# psql into the Chicago 311 database
+chi311-shell:
+    docker compose -f chicago311/docker-compose.yml exec chi311_db psql -U chi311_user -d chi311
+
+# Stop Chicago 311
+chi311-down:
+    docker compose -f chicago311/docker-compose.yml stop
+
+# Clean up Chicago 311 resources (containers, images, volumes — frees the baked data)
+chi311-clean:
+    docker compose -f chicago311/docker-compose.yml down --rmi all --remove-orphans --volumes

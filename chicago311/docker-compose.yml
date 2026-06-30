@@ -1,0 +1,30 @@
+# Chicago 311 Service Requests — Early-Warning-System tutorial database.
+# Mirrors donorschoose/docker-compose.yml. Ships a baked real-data subset by default; mount a larger
+# Socrata export over /data/requests.csv to use more data (see the commented volume + README).
+
+services:
+  chi311_db:
+    build:
+      context: ./chi311_db
+    image: chicago311/db
+    environment:
+      POSTGRES_USER: chi311_user
+      POSTGRES_PASSWORD: some_password
+      POSTGRES_DB: chi311
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # To load a larger / different export instead of the baked subset, drop a CSV with the same
+      # 21-column header into ./chi311_db/real/requests.csv and uncomment (the loader COPYs from
+      # /data either way). Then `docker compose down -v && docker compose up -d` so init re-runs:
+      # - ./chi311_db/real/requests.csv:/data/requests.csv:ro
+    ports:
+      # host port overridable to avoid collisions (DirtyDuck 5434/5435, DonorsChoose 5436).
+      - "${CHI311_PG_PORT:-5438}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chi311_user -d chi311"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  db-data:

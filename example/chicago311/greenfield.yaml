@@ -1,0 +1,226 @@
+# Chicago 311 Service Requests — Greenfield End-to-End Run
+#
+# Problem (early-warning system): for a service request that was just filed, will it take LONGER
+# than the SLA (14 days) to resolve? The positive class (outcome=1, "slow") is the request an
+# operator would escalate. Source data: the chicago311 docker (`just chi311-up`), schemas clean.* /
+# ontology.* (raw→clean→ontology, pg-data-discovery). Subset: 30,654 field-service requests filed
+# in 2019 across three community areas (Austin, Logan Square, Roseland), five crew-dispatch types.
+#
+# Temporal framing (the EWS panel): a monthly as_of grid. A request enters the cohort at the grid
+# point in the month AFTER it was filed — so every cohort row has created_date strictly *before* its
+# as_of_date, point-in-time-safe under the matrix adapter's forced exclusive (<) as-of boundary.
+# Each request is scored exactly once, at one as_of_date.
+
+problem_type: classification
+
+temporal_config:
+  # Requests run 2019-01..2019-12; closed_date observed well past year-end, so the 14-day label of
+  # the last cohort (filed 2019-12 → as_of 2020-01 → resolves by 2020-01-14) is fully observed.
+  feature_start_time: '2019-01-01'
+  feature_end_time: '2020-01-15'
+  label_start_time: '2019-02-01'   # earliest as_of with a non-empty cohort (requests filed 2019-01)
+  label_end_time: '2020-01-15'
+  # Retrain quarterly → a handful of temporal splits across the year.
+  model_update_frequency: '3month'
+  # One monthly training row per as_of; each request lands in exactly one (cohort masks it there).
+  training_as_of_date_frequencies: '1month'
+  training_label_timespans: ['14day']   # the SLA — also the label-observability horizon for timechop
+  test_as_of_date_frequencies: '1month'
+  test_durations: '0day'                # single point-in-time test as_of per split
+  test_label_timespans: ['14day']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: filed_requests
+  # Requests filed in the month ending at as_of_date (so created_date < as_of_date — point-in-time
+  # safe for the request's own filing-time features under the exclusive as-of boundary).
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+label_config:
+  name: slow_resolution
+  # outcome = 1 ("slow", the EWS positive) when the request is not resolved within the SLA window
+  # ({label_timespan}, default 14 days) of its FILING. The SLA is tied to creation, so it is applied
+  # to created_date — not as_of — which keeps the label honest regardless of the monthly grid slack.
+  # closed_date is the label source (never a feature: it is the future we are predicting).
+  query: |
+    select
+      e.entity_id,
+      (e.closed_date is null
+       or e.closed_date >= e.created_date + {label_timespan})::int as outcome
+    from ontology.entities as e
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+# featurizer ER-graph (ADR-0008). The target entity is the filed REQUEST; two backlog streams hang
+# off it, both joined as-of (knowledge_date < as_of_date) over ontology.events (the filing-event
+# stream — only where/what/when, never resolution):
+#   * area_backlog — events keyed on community_area: recent request volume + type-mix in the same
+#                    neighbourhood (the load signal — busy areas clear work slower).
+#   * type_demand  — events keyed on sr_type: recent demand for the same service citywide-in-subset
+#                    (queue signal — high-demand services back up).
+# Aggregation windows are short (days/weeks) — 311 dynamics move far faster than DonorsChoose funding.
+feature_config:
+  target: requests
+  max_depth: 2
+  intervals:
+    - P7D
+    - P30D
+    - P90D
+
+  # A focused primitive set (like the featurizer examples). The full default set applies
+  # abs/rolling/lag at both child-measure and parent-aggregation level → deeply-nested colliding
+  # names over the count streams (and blows past PostgreSQL's 1664-column limit). Plain aggregations
+  # + identity is exactly what these cross-sectional backlog counts want.
+  aggregations:
+    - count
+    - sum
+    - mean
+    - max
+    - stddev
+  transformations:
+    - identity
+
+  entities:
+    - alias: requests
+      id: entity_id
+      table: ontology.entities
+      # The target entity carries NO temporal_ix (featurizer needs it only on the child event
+      # stream). Filing-time attributes are point-in-time features known AT filing = the decision
+      # point. Low-cardinality categoricals use featurizer v0.4.0 fixed-vocabulary one-hot
+      # (role:categorical + vocabulary) → deterministic numeric "requests.<col>=<value>" 0/1
+      # columns; community_area is left numeric (only three values — a clean fixed effect).
+      variables:
+        sr_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Weed Removal Request"
+            - "Street Light Out Complaint"
+            - "Pothole in Street Complaint"
+            - "Graffiti Removal Request"
+            - "Rodent Baiting/Rat Complaint"
+        owner_department:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Streets and Sanitation"
+            - "CDOT - Department of Transportation"
+        origin:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Phone Call"
+            - "Mass Entry"
+            - "Internet"
+            - "Mobile Device"
+            - "Alderman's Office"
+        # NOTE: community_area is the area_backlog JOIN KEY, so it must NOT also be a declared
+        # variable here (featurizer would emit an ambiguous reference, exactly as a parent key that
+        # doubles as a feature). The neighbourhood fixed effect comes in via `ward` (finer geography,
+        # not a join key) plus the area_backlog aggregations.
+        ward:
+          type: numeric
+        created_day_of_week:
+          type: numeric
+        created_hour:
+          type: numeric
+        created_month:
+          type: numeric
+
+    - alias: area_backlog
+      id: ~                         # keyless child: filing events, aggregated only (count + type-mix)
+      table: ontology.events
+      # 'date' = the request's created_date (filing) = its knowledge date → point-in-time-safe.
+      temporal_ix: date
+      variables:
+        sr_type:
+          type: categorical
+
+    - alias: type_demand
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      # No measure variables: sr_type is this child's JOIN KEY (declaring it again would emit an
+      # ambiguous "sr_type, sr_type as sr_type"), and the signal we want is purely the recent COUNT
+      # of same-type requests — which featurizer emits from the temporal_ix (COUNT(type_demand.date)).
+      variables: {}
+
+  relationships:
+    # area_backlog: how busy is this request's neighbourhood right now?
+    - parent:
+        entity: requests
+        key: community_area
+      child:
+        entity: area_backlog
+        key: community_area
+      temporal:
+        mode: as_of
+    # type_demand: how much of this service type is being requested right now? Keyed on
+    # sr_short_code (1:1 with sr_type) so the demand grouping matches the sr_type feature without
+    # sr_type doubling as both a join key and a one-hot column.
+    - parent:
+        entity: requests
+        key: sr_short_code
+      child:
+        entity: type_demand
+        key: sr_short_code
+      temporal:
+        mode: as_of
+
+  # Feature groups + mixing strategies (ADR-0023). Optional. Uncomment to fan this ONE experiment
+  # out into several RUNS (ADR-0022) — one per feature subset — e.g. "do the area/type backlog
+  # features add lift over the request's own attributes?". group_by source_entity partitions columns
+  # by the entity in the feature name → {requests, area_backlog, type_demand}. Absent ⇒ one implicit
+  # group = all features = one run.
+  #
+  # feature_groups:
+  #   group_by: source_entity
+  #   strategies: [all, leave-one-out, leave-one-in]
+  #   all_combinations_max_groups: 3
+
+# Tiny grid for a fast first run: DecisionTree + RandomForest + triage's ScaledLogisticRegression
+# (minmax-scaler + LR, so coefficients are on comparable [0,1]-scaled features; the adapter persists
+# signed β + odds-ratio exp(β)).
+grid_config:
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [3, 5]
+    min_samples_split: [50]
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [10]
+    max_depth: [3]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [0.01, 1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+
+# Declare the data sources so the derivation DAG can pin them (version_label static ⇒ idempotent re-runs).
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: created_date
+    version_label: 'chicago311-v1'
+    role: entity
+    type_column: sr_type          # break entity volume out by request type (Ontology view)
+    description: Filed 311 service requests — the target entity (Chicago 311, 2019 subset)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'chicago311-v1'
+    role: event
+    type_column: sr_type          # break event volume out by request type (Ontology view)
+    description: Filing events (location/type/date) — the backlog child stream (Chicago 311)
+
+# Imputation: count-like features get zero-fill (default), everything else gets zero. The zero
+# strategy is fit-free (identical on train and test → no leakage). Backlog counts over an area/type
+# with no recent requests legitimately impute to zero ("no recent load").
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero
