@@ -31,19 +31,22 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from triage.cli import resolve_db_url
+from triage.dashboard.auth import AuthBackend, resolve_auth_backend
 from triage.dashboard.routes import router
+from triage.dashboard.write_routes import default_experiment_runner, write_router
 from triage.logging import get_logger
 from triage.util.db import connection_pool
 
 logger = get_logger(__name__)
 
+# The registry control-plane DB URL for the write surface (ADR-0002). Optional: the read
+# dashboard runs without it; write routes 503 when it (and an injected registry_pool) are absent.
+_REGISTRY_URL_ENV = "TRIAGE_REGISTRY_URL"
+
 # Static dir for the built SPA bundle. Defaults to the packaged static/ dir; override with
 # TRIAGE_DASHBOARD_STATIC (the Docker dashboard image + the native preview point it at the
 # Vite build output, spec §6).
-_STATIC_DIR = pathlib.Path(
-    os.environ.get("TRIAGE_DASHBOARD_STATIC")
-    or (pathlib.Path(__file__).parent / "static")
-)
+_STATIC_DIR = pathlib.Path(os.environ.get("TRIAGE_DASHBOARD_STATIC") or (pathlib.Path(__file__).parent / "static"))
 
 
 class _SpaStaticFiles(StaticFiles):
@@ -91,43 +94,78 @@ def _open_project_pool() -> ConnectionPool:
     return connection_pool(dburl)
 
 
-def create_app(pool: Optional[ConnectionPool] = None) -> FastAPI:
-    """Build the dashboard FastAPI app.
+def _open_registry_pool() -> Optional[ConnectionPool]:
+    """Open the registry control-plane pool from ``TRIAGE_REGISTRY_URL`` if set, else ``None``.
 
-    When ``pool`` is provided (the tests pass the ``db_pool_greenfield`` pool) it is used
-    as-is and the app does not own its lifecycle; otherwise the lifespan opens a pool over the
-    project DB from the environment and closes it at shutdown.
+    The registry is optional: the read dashboard needs no control plane, so a missing
+    ``TRIAGE_REGISTRY_URL`` is not an error — the write routes simply 503 until one is configured
+    (auth._registry_pool). Set it to the registry DB and run ``just alembic-registry upgrade head``.
+    """
+    url = os.environ.get(_REGISTRY_URL_ENV)
+    if not url:
+        return None
+    logger.info("dashboard: opening registry control-plane pool (write surface enabled)")
+    return connection_pool(url)
+
+
+def create_app(
+    pool: Optional[ConnectionPool] = None,
+    *,
+    registry_pool: Optional[ConnectionPool] = None,
+    auth_backend: Optional[AuthBackend] = None,
+    experiment_runner=None,
+) -> FastAPI:
+    """Build the dashboard FastAPI app (read + write surfaces).
+
+    When ``pool`` is provided (the tests pass the ``db_pool_greenfield`` pool) it is used as-is and
+    the app does not own its lifecycle; otherwise the lifespan opens a pool over the project DB from
+    the environment and closes it at shutdown.
+
+    The write surface (ADR-0002/0024) adds three injectables, all optional:
+
+    * ``registry_pool`` — the control-plane pool. If ``None``, the lifespan opens one from
+      ``TRIAGE_REGISTRY_URL`` (else leaves it ``None`` → write routes 503). Tests inject a pool.
+    * ``auth_backend`` — the user-identity seam. Defaults to :func:`resolve_auth_backend` (the
+      ``TRIAGE_AUTH`` env, ``trusted`` locally).
+    * ``experiment_runner`` — the submit runner. Defaults to :func:`default_experiment_runner`
+      (real in-process / Batch run); tests inject a stub so no training happens.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         owns_pool = pool is None
+        owns_registry = registry_pool is None
         app.state.pool = pool if pool is not None else _open_project_pool()
+        app.state.registry_pool = registry_pool if registry_pool is not None else _open_registry_pool()
         try:
             yield
         finally:
             if owns_pool and app.state.pool is not None:
                 app.state.pool.close()
+            if owns_registry and app.state.registry_pool is not None:
+                app.state.registry_pool.close()
 
     app = FastAPI(
-        title="triage-pg read dashboard API",
-        version="1.0",
-        summary="Read-only JSON API over the in-PG dashboard views (ADR-0012).",
+        title="triage-pg dashboard API",
+        version="1.1",
+        summary="JSON API over the in-PG views (read) + registry write surface (ADR-0012/0024).",
         lifespan=lifespan,
     )
-    # An explicitly-injected pool is also stashed eagerly so a TestClient that never enters
-    # the lifespan (rare) still resolves get_pool; the lifespan re-affirms it.
+    # Injected dependencies are stashed eagerly so a TestClient that never enters the lifespan
+    # (rare) still resolves them; the lifespan re-affirms the pools.
     if pool is not None:
         app.state.pool = pool
+    app.state.registry_pool = registry_pool
+    app.state.auth_backend = auth_backend if auth_backend is not None else resolve_auth_backend()
+    app.state.experiment_runner = experiment_runner if experiment_runner is not None else default_experiment_runner
 
     # /api first so the SPA static fallback below never shadows the JSON API (an unknown
     # /api/* path keeps its 404 {"detail": "Not Found"} rather than being served index.html).
     app.include_router(router, prefix="/api")
+    app.include_router(write_router, prefix="/api")
 
     if _STATIC_DIR.is_dir():
-        app.mount(
-            "/", _SpaStaticFiles(directory=str(_STATIC_DIR), html=True), name="static"
-        )
+        app.mount("/", _SpaStaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
 
     return app
 

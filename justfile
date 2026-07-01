@@ -8,6 +8,10 @@ default:
 docs:
     @echo "Greenfield docs are plain Markdown — start at docs/README.md:" && ls docs/*.md && echo "ADRs:" && ls docs/adr/*.md
 
+# Serve the dashboard app — read views + write surface (set TRIAGE_REGISTRY_URL to enable POST routes)
+serve PORT="8000":
+    uv run uvicorn triage.dashboard.app:app --host 127.0.0.1 --port {{PORT}}
+
 # Run alembic commands (e.g., just alembic upgrade head)
 alembic *ARGS:
     PYTHONPATH=src uv run alembic \

@@ -70,3 +70,4 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0019](adr/0019-psycopg3-native-data-layer.md) psycopg3-native data layer · [0021](adr/0021-live-run-progress-via-pg-notify-sse.md) Live run progress via pg_notify → SSE
 - [0022](adr/0022-experiment-is-the-problem-runs-are-attempts.md) An Experiment is the problem; runs are attempts
 - [0023](adr/0023-feature-groups-and-strategies.md) Feature groups + mixing strategies
+- [0024](adr/0024-write-webapp-registry-auth-seam.md) Write webapp: POST routes over the registry + a pluggable user-auth seam
