@@ -103,7 +103,15 @@ def build_cohort(
     _validate_template(cohort_query_template)
     if not as_of_dates:
         raise ValueError("build_cohort requires at least one as_of_date")
-    canonical_config = dict(config)
+    # The DATES ARE IDENTITY: the artifact's rows are materialized exactly for these
+    # as_of_dates, so a config-identical run with a different temporal grid must be a
+    # cache MISS — reusing an artifact built for other dates silently serves empty/partial
+    # cohort slices to every downstream matrix (found live: a 60-day survival grid
+    # cache-hitting the 14-day EWS grid's cohort produced 0-entity test matrices).
+    canonical_config = {
+        **dict(config),
+        "as_of_dates": sorted(d.isoformat() for d in as_of_dates),
+    }
 
     derivation = derive(
         kind=COHORT_KIND,

@@ -153,7 +153,16 @@ def build_labels(
         cacheable=parent["cacheable"],
     )
 
-    canonical_config = dict(config)
+    # The dates/timespans/projection ARE identity (mirrors build_cohort): the rows are
+    # materialized exactly for this (as_of_dates × label_timespans) grid with the
+    # problem_type's column projection, so a different grid or projection must be a cache
+    # MISS, never a silent partial reuse.
+    canonical_config = {
+        **dict(config),
+        "as_of_dates": sorted(d.isoformat() for d in as_of_dates),
+        "label_timespans": list(label_timespans),
+        "problem_type": problem_type,
+    }
     derivation = derive(
         kind=LABELS_KIND,
         config=canonical_config,

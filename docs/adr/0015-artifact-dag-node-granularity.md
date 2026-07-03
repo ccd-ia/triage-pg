@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-11
 - Status update (2026-06-28): Implemented — per-(config, as_of_date) cohort/labels/feature nodes, matrices per split-side, models the last cached node; cross-run cache reuse covered by the run_experiment E2E.
+- Status update (2026-07-03): **Correctness fix + an honest divergence note.** The implementation builds ONE cohort/labels artifact over the UNION of split dates (not the per-date nodes this ADR specified), and its identity config omitted the dates entirely — so a config-identical experiment with a *different temporal grid* cache-hit an artifact whose rows never covered the new grid's dates (found live: a 60-day survival grid reusing the 14-day EWS grid's cohort produced 0-entity test matrices and silently partial train matrices). Fixed: the sorted `as_of_dates` union (and, for labels, the timespans + problem_type projection) now enters the cohort/labels identity (`adapters/{cohort,labels}.py`). Consequence: extending a date range rebuilds the whole cohort/labels (cheap SQL inserts) instead of only new dates — the per-date granularity this ADR designed remains the recorded refinement path if that cost ever matters.
 
 The derivation DAG (ADR-0013) gets these nodes and no others: cohort and labels
 per **(config, as_of_date)**, features per **(feature group, as_of_date)** —
