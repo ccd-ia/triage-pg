@@ -85,13 +85,26 @@ export function ExperimentDetail({ hash }: { hash: string }) {
   const [metric, setMetric] = useState({ metric: 'precision@', parameter: '10_pct' })
   const [rule, setRule] = useState(DEFAULT_RULE)
 
+  // Regression/survival experiments have no 'precision@' rows (rmse/c_index instead): the
+  // EFFECTIVE metric is the selection when the data-driven catalog carries it, else the
+  // catalog's first entry — derived, not state, so the analysis panels are never empty for a
+  // non-classification problem_type and no effect/setState cascade is needed.
+  const effectiveMetric = useMemo(() => {
+    const cat = metricsCat.data
+    if (!cat || cat.length === 0) return metric
+    const exists = cat.some(
+      (x) => x.metric === metric.metric && (x.parameter ?? '') === metric.parameter,
+    )
+    return exists ? metric : { metric: cat[0].metric, parameter: cat[0].parameter ?? '' }
+  }, [metricsCat.data, metric])
+
   const audition = useAsync(
-    () => api.expAudition(hash, metric.metric, metric.parameter, rule),
-    [hash, metric.metric, metric.parameter, rule],
+    () => api.expAudition(hash, effectiveMetric.metric, effectiveMetric.parameter, rule),
+    [hash, effectiveMetric.metric, effectiveMetric.parameter, rule],
   )
   const selectedModel = useAsync(
-    () => api.expSelectedModel(hash, metric.metric, metric.parameter, rule),
-    [hash, metric.metric, metric.parameter, rule],
+    () => api.expSelectedModel(hash, effectiveMetric.metric, effectiveMetric.parameter, rule),
+    [hash, effectiveMetric.metric, effectiveMetric.parameter, rule],
   )
 
   /* ---------- resolved selection for the context/sheet ---------- */
@@ -232,10 +245,12 @@ export function ExperimentDetail({ hash }: { hash: string }) {
   /* ---------- metric catalog → higher_is_better for the grid ---------- */
   const higherIsBetter = useMemo(() => {
     const m = metricsCat.data?.find(
-      (x) => x.metric === metric.metric && (x.parameter ?? '') === metric.parameter,
+      (x) =>
+        x.metric === effectiveMetric.metric &&
+        (x.parameter ?? '') === effectiveMetric.parameter,
     )
     return m?.higher_is_better ?? true
-  }, [metricsCat.data, metric])
+  }, [metricsCat.data, effectiveMetric])
 
   if (experiment.error) {
     return (
@@ -292,8 +307,8 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           {tab === 'overview' && (
             <ModelGroupGrid
               rows={evalRows}
-              metric={metric.metric}
-              parameter={metric.parameter}
+              metric={effectiveMetric.metric}
+              parameter={effectiveMetric.parameter}
               higherIsBetter={higherIsBetter}
               labelFor={groupLabelOf}
               selectedGroupId={selection.modelGroupId}
@@ -313,8 +328,8 @@ export function ExperimentDetail({ hash }: { hash: string }) {
               <ExperimentAuditionTab
                 data={audition.data}
                 metrics={metricsCat.data ?? []}
-                metric={metric.metric}
-                parameter={metric.parameter}
+                metric={effectiveMetric.metric}
+                parameter={effectiveMetric.parameter}
                 rule={rule}
                 onMetric={onMetric}
                 onRule={onRule}
@@ -365,8 +380,8 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           <ModelGroupSheet
             groupId={groupPanel}
             label={groupLabelOf(groupPanel)}
-            metric={metric.metric}
-            parameter={metric.parameter}
+            metric={effectiveMetric.metric}
+            parameter={effectiveMetric.parameter}
             experimentHash={hash}
             metrics={metricsCat.data ?? []}
             onOpenModel={(mid, asOf) => openModel(mid, groupPanel, asOf)}
@@ -388,8 +403,8 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           <AuditionCompareModal
             auditionGroup={sm.audition_group}
             leaderboardGroup={sm.leaderboard_group}
-            metric={metric.metric}
-            parameter={metric.parameter}
+            metric={effectiveMetric.metric}
+            parameter={effectiveMetric.parameter}
             rule={rule}
             experimentHash={hash}
             groupLabelOf={groupLabelOf}

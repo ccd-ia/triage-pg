@@ -820,6 +820,10 @@ def run_experiment(
     feature_config = _require(experiment_config, "feature_config")
     grid_config = _require(experiment_config, "grid_config")
     declared_sources = experiment_config.get("sources", [])
+    _require_survival_extra(problem_type)
+    metric_config = _resolve_metric_config(
+        experiment_config, problem_type, metric_config
+    )
 
     temporal_config = TemporalConfig.model_validate(
         _require(experiment_config, "temporal_config")
@@ -1068,3 +1072,49 @@ def _require(config: Mapping[str, Any], key: str) -> Any:
             + f" (have: {sorted(config)})"
         )
     return config[key]
+
+
+def _require_survival_extra(problem_type: str) -> None:
+    """Fail fast (before any build) when survival is requested without the extra installed."""
+    if problem_type != "survival":
+        return
+    import importlib.util
+
+    if importlib.util.find_spec("sksurv") is None:
+        raise ValueError(
+            "problem_type 'survival' requires the survival extra (scikit-survival) —"
+            " install it with `uv sync --extra survival` (ADR-0026)"
+        )
+
+
+def _resolve_metric_config(
+    experiment_config: Mapping[str, Any],
+    problem_type: str,
+    override: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """The evaluation metric set for this experiment, resolved by precedence.
+
+    Explicit ``metric_config`` argument (CLI/tests) > the config's ``evaluation`` block
+    (the ``triage.evaluate_model`` jsonb shape: ``metrics``/``thresholds``/
+    ``regression_metrics``/``survival_metrics``) > the problem-type default. Defaults:
+    classification keeps the inherited set; the regression family gets rmse/mae/r2
+    (``regression_ranking`` users who want ranking metrics too must declare them —
+    precision@k assumes a binary outcome, which a continuous target does not have by
+    default); survival gets the C-index (ADR-0010/0026).
+    """
+    from triage.component.catwalk.in_pg_evaluation import (
+        DEFAULT_CLASSIFICATION_CONFIG,
+        DEFAULT_REGRESSION_CONFIG,
+        DEFAULT_SURVIVAL_CONFIG,
+    )
+
+    if override is not None:
+        return dict(override)
+    block = experiment_config.get("evaluation")
+    if block:
+        return dict(block)
+    if problem_type in ("regression", "regression_ranking"):
+        return dict(DEFAULT_REGRESSION_CONFIG)
+    if problem_type == "survival":
+        return dict(DEFAULT_SURVIVAL_CONFIG)
+    return dict(DEFAULT_CLASSIFICATION_CONFIG)

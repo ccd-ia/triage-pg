@@ -1,0 +1,191 @@
+# Chicago 311 — SURVIVAL (time-to-resolution, ADR-0010/0026)
+# Reuses the SAME chicago311 DB as greenfield.yaml; only problem_type, the label, the horizon,
+# and the grid change. The EWS asked "will this request MISS the 14-day SLA?" (binary); this asks
+# the finer question the schema was designed to carry: HOW LONG until it resolves, with natural
+# right-censoring — a request still open at the end of the observation window is censored, its
+# partial follow-up preserved instead of discarded (the information binary triage threw away).
+#
+# Label shape (ADR-0010): (duration, event_observed) per cohort row.
+#   duration       = days from FILING (created_date) to closure, when closed inside the window;
+#                    else days from filing to the window end (the censoring time).
+#   event_observed = closed inside the window. The window is {as_of_date} + {label_timespan}
+#                    (60 days), so every request filed in the prior month gets 60–90 days of
+#                    follow-up; varying censor horizons are exactly what survival handles.
+# Estimators rank by predicted RISK (higher = resolves later / never) — same ranking spine, the
+# C-index (triage.c_index, migration 0011) evaluates it.
+
+problem_type: survival
+
+temporal_config:
+  feature_start_time: '2019-01-01'
+  feature_end_time: '2020-01-15'
+  label_start_time: '2019-02-01'
+  label_end_time: '2020-01-15'
+  model_update_frequency: '3month'
+  training_as_of_date_frequencies: '1month'
+  # 60-day observation window: p75 of days-to-close is ~18d, so most closures are events and the
+  # slow tail (the interesting risk) is censored — a real, non-degenerate censoring mix (~10-15%).
+  training_label_timespans: ['60day']
+  test_as_of_date_frequencies: '1month'
+  test_durations: '0day'
+  test_label_timespans: ['60day']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: filed_requests
+  # Same cohort as the EWS config: requests filed in the month ending at as_of_date.
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+label_config:
+  name: time_to_resolution
+  # created/closed are timestamps → day durations via epoch arithmetic. event_observed is a real
+  # boolean (triage.labels.event_observed is boolean; emit the comparison directly, never ::int).
+  query: |
+    select
+      e.entity_id,
+      case
+        when e.closed_date is not null
+         and e.closed_date < {as_of_date}::date + {label_timespan}
+        then extract(epoch from (e.closed_date - e.created_date)) / 86400.0
+        else extract(epoch from (({as_of_date}::date + {label_timespan}) - e.created_date)) / 86400.0
+      end as duration,
+      (e.closed_date is not null
+       and e.closed_date < {as_of_date}::date + {label_timespan}) as event_observed
+    from ontology.entities as e
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+# Identical featurizer ER-graph to greenfield.yaml (the features don't change with the problem
+# type — only y does): request attributes + area_backlog + type_demand as-of children.
+feature_config:
+  target: requests
+  max_depth: 2
+  intervals:
+    - P7D
+    - P30D
+    - P90D
+
+  aggregations:
+    - count
+    - sum
+    - mean
+    - max
+    - stddev
+  transformations:
+    - identity
+
+  entities:
+    - alias: requests
+      id: entity_id
+      table: ontology.entities
+      variables:
+        sr_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Weed Removal Request"
+            - "Street Light Out Complaint"
+            - "Pothole in Street Complaint"
+            - "Graffiti Removal Request"
+            - "Rodent Baiting/Rat Complaint"
+        owner_department:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Streets and Sanitation"
+            - "CDOT - Department of Transportation"
+        origin:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Phone Call"
+            - "Mass Entry"
+            - "Internet"
+            - "Mobile Device"
+            - "Alderman's Office"
+        ward:
+          type: numeric
+        created_day_of_week:
+          type: numeric
+        created_hour:
+          type: numeric
+        created_month:
+          type: numeric
+
+    - alias: area_backlog
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables:
+        sr_type:
+          type: categorical
+
+    - alias: type_demand
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables: {}
+
+  relationships:
+    - parent:
+        entity: requests
+        key: community_area
+      child:
+        entity: area_backlog
+        key: community_area
+      temporal:
+        mode: as_of
+    - parent:
+        entity: requests
+        key: sr_short_code
+      child:
+        entity: type_demand
+        key: sr_short_code
+      temporal:
+        mode: as_of
+
+# Survival estimators (ADR-0026: scikit-survival, the `triage[survival]` extra). ScaledCoxPH
+# is the house wrapper (MinMaxScaler + Cox — raw CoxPHSurvivalAnalysis overflows on unscaled
+# backlog COUNTs in the thousands next to 0/1 one-hots); its log-hazard coefficients persist
+# as importances at train time (ADR-0011). The small RSF is the nonlinear comparison. Both
+# `predict` a RISK score → predictions.score (higher = resolves later).
+grid_config:
+  'triage.component.catwalk.estimators.survival.ScaledCoxPHSurvivalAnalysis':
+    alpha: [0.1]
+  'sksurv.ensemble.RandomSurvivalForest':
+    n_estimators: [10]
+    max_depth: [3]
+    min_samples_split: [50]
+
+# Default evaluation for survival is {survival_metrics: [c_index]} — declared explicitly here
+# for teaching visibility (an `evaluation` block overrides the problem-type default).
+evaluation:
+  survival_metrics:
+    - c_index
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: created_date
+    version_label: 'chicago311-v1'
+    role: entity
+    type_column: sr_type
+    description: Filed 311 service requests — the target entity (Chicago 311, 2019 subset)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'chicago311-v1'
+    role: event
+    type_column: sr_type
+    description: Filing events (location/type/date) — the backlog child stream (Chicago 311)
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

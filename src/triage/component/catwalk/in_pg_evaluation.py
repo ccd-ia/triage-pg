@@ -29,6 +29,9 @@ DEFAULT_CLASSIFICATION_CONFIG = {
 DEFAULT_REGRESSION_CONFIG = {
     "regression_metrics": ["rmse", "mae", "r2"],
 }
+DEFAULT_SURVIVAL_CONFIG = {
+    "survival_metrics": ["c_index"],
+}
 
 
 def evaluate_in_db(
@@ -45,7 +48,7 @@ def evaluate_in_db(
     Calls ``triage.evaluate_model``, which upserts into ``triage.evaluations``.
 
     Args:
-        db_engine (sqlalchemy.engine.Engine): connection to the project DB.
+        db_engine (psycopg_pool.ConnectionPool): pool for the project DB.
         model_id (int): the model to evaluate.
         as_of_date (str | datetime.date): the prediction date to evaluate at.
         label_timespan (str): label timespan interval the labels were built with
@@ -119,7 +122,7 @@ def compute_bias_in_db(
     (ADR-0007).
 
     Args:
-        db_engine (sqlalchemy.engine.Engine): connection to the project DB.
+        db_engine (psycopg_pool.ConnectionPool): pool for the project DB.
         model_id (int): the model to audit.
         as_of_date (str | datetime.date): the prediction date.
         label_timespan (str): label timespan interval (e.g. ``'6 months'``).

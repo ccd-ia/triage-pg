@@ -400,6 +400,17 @@ def _fit_estimator(
     estimator = _instantiate(estimator_cls, hyperparameters, random_seed)
 
     x, feature_columns, frame = _design_X(train_matrix_result, storage)
+
+    # Survival estimators (ADR-0010/0026): a scikit-survival estimator consumes the structured
+    # (event_observed, duration) label pair instead of `outcome`. Detected by the estimator's
+    # package, not by threading problem_type here — the label geometry is already fixed by the
+    # train matrix (built from the survival label projection), so the estimator kind is the
+    # only extra fact needed.
+    if _is_survival_estimator(estimator):
+        return _fit_survival_estimator(
+            estimator, class_path, train_matrix_result, x, feature_columns, frame
+        )
+
     if "outcome" not in frame.columns:
         raise ValueError(
             f"train matrix {train_matrix_result.storage_uri} has no 'outcome' column —"
@@ -424,6 +435,53 @@ def _fit_estimator(
     logger.debug(
         f"Fitted {class_path} on {n_labeled}/{frame.height} labeled rows ×"
         + f" {len(feature_columns)} features"
+    )
+    return estimator, feature_columns
+
+
+def _is_survival_estimator(estimator) -> bool:
+    """True for scikit-survival estimators OR triage wrappers that declare themselves survival
+    (``is_survival_estimator = True``, e.g. ScaledCoxPHSurvivalAnalysis — ADR-0026)."""
+    if getattr(estimator, "is_survival_estimator", False):
+        return True
+    return type(estimator).__module__.split(".", 1)[0] == "sksurv"
+
+
+def _fit_survival_estimator(
+    estimator, class_path, train_matrix_result, x, feature_columns, frame
+):
+    """Fit a scikit-survival estimator on the (duration, event_observed) label pair.
+
+    The structured ``y`` is ``Surv.from_arrays(event, time)`` (ADR-0026); rows where either
+    survival column is NULL (unlabeled cohort members) are dropped, mirroring the outcome path.
+    The fitted estimator's ``predict`` returns a RISK score — higher = higher risk = ranked
+    first — which is exactly what the ranking spine stores in ``predictions.score`` (ADR-0010).
+    """
+    missing = [c for c in ("duration", "event_observed") if c not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"train matrix {train_matrix_result.storage_uri} has no {missing!r} column(s) —"
+            + " survival training requires the (duration, event_observed) label pair"
+            + " (ADR-0010; build labels with problem_type='survival')"
+        )
+    from sksurv.util import Surv
+
+    duration = frame.get_column("duration")
+    event = frame.get_column("event_observed")
+    labeled = (duration.is_not_null() & event.is_not_null()).to_numpy()
+    n_labeled = int(labeled.sum())
+    if n_labeled == 0:
+        raise ValueError(
+            f"train matrix {train_matrix_result.storage_uri} has no labeled survival rows"
+            + " (every duration/event_observed is NULL) — cannot fit an estimator"
+        )
+    event_np = event.fill_null(False).to_numpy().astype(bool)
+    duration_np = duration.fill_null(0.0).to_numpy().astype(float)
+    y_fit = Surv.from_arrays(event=event_np[labeled], time=duration_np[labeled])
+    estimator.fit(x[labeled], y_fit)
+    logger.debug(
+        f"Fitted survival estimator {class_path} on {n_labeled}/{frame.height} labeled rows"
+        + f" ({int(event_np[labeled].sum())} events) × {len(feature_columns)} features"
     )
     return estimator, feature_columns
 
@@ -543,10 +601,14 @@ def _insert_model_row(
     model_size_bytes: int,
     random_seed: int,
 ) -> int:
-    """INSERT the ``triage.models`` row; return the generated ``model_id``.
+    """INSERT (or reclaim) the ``triage.models`` row; return its ``model_id``.
 
     ``model_hash`` is the model artifact_id (FK → artifacts); ``train_matrix_uuid`` is
-    ``as_uuid(train_matrix_artifact_id)`` (FK → matrices, ADR-0015).
+    ``as_uuid(train_matrix_artifact_id)`` (FK → matrices, ADR-0015). Idempotent on
+    ``model_hash``: a run that crashed AFTER inserting the row but BEFORE ``mark_built``
+    leaves the artifact rebuildable — the retry rebuilds it under the same identity and
+    must reclaim the existing row (refreshing the rebuild's run/uri/size), not collide
+    with it.
     """
     with db_engine.connection() as conn:
         model_id = conn.execute(
@@ -558,6 +620,10 @@ def _insert_model_row(
             + "  cast(%(train_end_time)s as date),"
             + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
             + "  'joblib', %(model_size_bytes)s, %(random_seed)s)"
+            + " on conflict (model_hash) do update set"
+            + "  run_id = excluded.run_id,"
+            + "  artifact_uri = excluded.artifact_uri,"
+            + "  model_size_bytes = excluded.model_size_bytes"
             + " returning model_id",
             {
                 "model_group_id": model_group_id,
@@ -588,16 +654,27 @@ def _feature_importance_values(estimator, n_features: int):
     """
     import numpy as np
 
-    if hasattr(estimator, "feature_importances_"):
-        ranking = np.asarray(estimator.feature_importances_, dtype=float).ravel()
-        kind, signed, odds = "gini", None, None
-    elif hasattr(estimator, "coef_"):
-        coef = np.asarray(estimator.coef_, dtype=float)
-        signed = (coef[0] if coef.ndim > 1 else coef).ravel()
-        ranking = np.abs(signed)
-        odds = np.exp(signed)
-        kind = "coef"
-    else:
+    # `hasattr` PROPAGATES a property that raises anything but AttributeError —
+    # sksurv's RandomSurvivalForest raises NotImplementedError from
+    # `feature_importances_` (impurity importances are undefined for survival splits).
+    # An estimator that refuses to expose importances is a no-importances estimator.
+    try:
+        if hasattr(estimator, "feature_importances_"):
+            ranking = np.asarray(estimator.feature_importances_, dtype=float).ravel()
+            kind, signed, odds = "gini", None, None
+        elif hasattr(estimator, "coef_"):
+            coef = np.asarray(estimator.coef_, dtype=float)
+            signed = (coef[0] if coef.ndim > 1 else coef).ravel()
+            ranking = np.abs(signed)
+            odds = np.exp(signed)
+            kind = "coef"
+        else:
+            return None
+    except NotImplementedError:
+        logger.debug(
+            f"{type(estimator).__name__} raises NotImplementedError for importances —"
+            + " none persisted"
+        )
         return None
     if ranking.shape[0] != n_features:
         logger.warning(
@@ -865,6 +942,15 @@ def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]
             raise ValueError(
                 f"test matrix {matrix_result.storage_uri} is missing key column {key!r}"
             )
+    if frame.height == 0:
+        # An empty cohort at this matrix's dates is a data condition, not a code error —
+        # crashing here would throw away every model already trained. Skip LOUDLY: zero
+        # predictions (and hence zero evaluations) for this matrix.
+        logger.warning(
+            f"matrix {matrix_result.matrix_artifact_id[:12]}… has 0 rows (empty cohort at"
+            + " its as_of_dates) — nothing to score; skipping predictions for it"
+        )
+        return []
     scores = _score_column(estimator, x)
     entity_ids = frame.get_column("entity_id").to_list()
     as_of_dates = frame.get_column("as_of_date").to_list()

@@ -6,11 +6,11 @@
 #   fail (event_observed=1); if no fail occurs in the window, it is censored at the window end
 #   (event_observed=0). Validated on real data: 6382 rows, 1589 events, 4793 censored.
 #
-# STATUS (ADR-0010): survival is "schema-ready, deferred". This config exercises the LABEL path
-# end-to-end — build_labels writes (duration, event_observed) into triage.labels — and proves
-# the schema carries survival. The TRAINING + EVALUATION bolt-on (a survival estimator + the
-# C-index metric) is future work; a full `triage run` is NOT expected to complete past labels
-# until that lands. The grid below is a placeholder so the config validates.
+# STATUS (ADR-0010/0026): survival is FULLY RUNNABLE. The label path writes
+# (duration, event_observed) into triage.labels; scikit-survival estimators (the
+# `triage[survival]` extra) fit the structured pair and predict a RISK score onto the
+# ranking spine; triage.c_index (migration 0011, validated against sksurv's
+# concordance_index_censored) evaluates it.
 # Data: ontology.entities (facilities), ontology.events (inspections, result, date).
 
 problem_type: survival
@@ -50,7 +50,7 @@ label_config:
         min(date) filter (where result = 'fail') - {as_of_date}::date,
         (({as_of_date}::date + {label_timespan})::date - {as_of_date}::date)
       )::integer as duration,
-      (bool_or(result = 'fail'))::integer as event_observed
+      bool_or(result = 'fail') as event_observed
     from ontology.events
     where {as_of_date}::date <= date
       and date < {as_of_date}::date + {label_timespan}
@@ -158,13 +158,18 @@ feature_config:
   #   #   facility_attrs:     ["facilities.*"]
   #   #   inspection_history: ["*(inspections.*"]
 
-# PLACEHOLDER grid. Survival training/evaluation is the deferred ADR-0010 bolt-on (no survival
-# estimator + C-index yet), so a full run stops after the labels stage; this grid only makes the
-# config schema-valid. When survival lands, replace with survival estimators (e.g. sksurv /
-# lifelines) that consume (duration, event_observed).
+# Survival estimators (ADR-0026: scikit-survival — install with `uv sync --extra survival`).
+# ScaledCoxPH (the house MinMax+Cox wrapper — raw Cox overflows on unscaled count features)
+# persists log-hazard coefficients as importances at train time (ADR-0011); the small RSF is
+# the nonlinear comparison. Both `predict` a RISK score (higher = fails sooner) that lands
+# on the ranking spine; triage.c_index evaluates it (defaults via problem_type: survival).
 grid_config:
-  'sklearn.tree.DecisionTreeRegressor':
+  'triage.component.catwalk.estimators.survival.ScaledCoxPHSurvivalAnalysis':
+    alpha: [0.1]
+  'sksurv.ensemble.RandomSurvivalForest':
+    n_estimators: [10]
     max_depth: [3]
+    min_samples_split: [50]
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).

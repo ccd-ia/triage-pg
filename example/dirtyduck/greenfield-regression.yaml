@@ -4,10 +4,11 @@
 # Problem: HOW MANY violations will a facility accumulate over the next 6 months?
 #   The target is a continuous count (mean ≈ 5, range 1–64 on real 2014-2017 data).
 # problem_type 'regression_ranking' is ADR-0010's PRIMARY path for continuous targets: the
-# model predicts a continuous score, entities are RANKED by it, and the same ranking metrics
-# (precision@k / recall@k) evaluate the ranking — so this runs E2E with no extra wiring.
-# (Pure 'regression' with rmse/mae/r2 also exists — triage.regression_metric — but needs a
-# regression metric_config plumbed through the CLI; tracked separately.)
+# model predicts a continuous score and entities are RANKED by it. The regression family now
+# defaults to rmse/mae/r2 (triage.regression_metric), and the `evaluation` block below shows
+# selecting a NON-default set — the block is the triage.evaluate_model jsonb shape
+# ({metrics, thresholds, regression_metrics, survival_metrics}) and overrides the
+# problem-type default when present.
 # Data: ontology.entities (facilities), ontology.events (inspections + violations jsonb).
 
 problem_type: regression_ranking
@@ -48,6 +49,14 @@ label_config:
     where {as_of_date}::date <= date
       and date < {as_of_date}::date + {label_timespan}
     group by entity_id
+
+# Metric selection (lands in triage.evaluate_model as jsonb). A deliberately NON-default set:
+# rmse + mae only (the default for the regression family would add r2). Delete this block to
+# get the problem-type default.
+evaluation:
+  regression_metrics:
+    - rmse
+    - mae
 
 # featurizer ER-graph: facilities are the target entity, inspections are child events.
 # Aggregation windows are ISO-8601 (featurizer format, not timechop format).

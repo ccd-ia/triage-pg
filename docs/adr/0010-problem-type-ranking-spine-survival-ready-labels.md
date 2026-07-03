@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-04
 - Status update (2026-06-28): Implemented — `problem_type` discriminator (classification / regression / regression-ranking) on the score→rank→evaluate spine; survival `(duration, event_observed)` columns present (survival metric / C-index deferred).
+- Status update (2026-07-03): **Every problem_type is now fully runnable** (v1-completion plan Phase 3, ADR-0026). Survival: scikit-survival estimators (+ the `ScaledCoxPHSurvivalAnalysis` house wrapper) fit the `(duration, event_observed)` pair and `triage.c_index` (migration 0011) evaluates on the ranking spine — live-proven on Chicago 311 time-to-resolution (C-index up to 0.79; in-PG values match `concordance_index_censored` to 1e-9 on the real data) and DirtyDuck time-to-failure. Regression family: the `evaluation` config block selects metrics (defaults rmse/mae/r2), live-proven on the DirtyDuck regression config.
 
 triage-pg's architecture is a problem-type-agnostic **ranking/prioritization spine**: produce a score → rank entities → evaluate the ranking. A `problem_type` discriminator on the experiment selects three swaps on that spine — how to rank, the ranking metric, and the label shape — supporting **classification** (rank by P(y=1); AUC, precision@k), **regression-as-ranking** (rank by predicted value; precision@k + RMSE), and **pure regression** (RMSE/MAE/R², ranking incidental). Regression-as-ranking is the primary mode for continuous targets.
 
