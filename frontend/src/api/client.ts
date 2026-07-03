@@ -352,6 +352,12 @@ export const api = {
     return get<Submission[]>(`/submissions${q}`)
   },
 
+  /** On-request AWS Batch job status for a cloud submission (no background polling). */
+  batchStatus(jobId: string): Promise<{ job_id: string; status: string; reason: string | null }> {
+    if (USE_FIXTURE) return fake({ job_id: jobId, status: 'SUCCEEDED', reason: null })
+    return get(`/batch-status/${encodeURIComponent(jobId)}`)
+  },
+
   /** Dry-run validation of a config (as raw YAML/JSON text or a parsed object). */
   validateConfig(body: {
     config?: Record<string, unknown>

@@ -303,10 +303,41 @@ function SubmissionTable({ rows }: { rows: Submission[] }) {
             <td>
               <span className={`badge ${s.profile === 'cloud' ? 'b-aud' : 'b-run'}`}>{s.profile}</span>
             </td>
-            <td className="mono muted">{s.batch_job_id ?? '—'}</td>
+            <td className="mono muted">
+              {s.batch_job_id ? <BatchStatusCell jobId={s.batch_job_id} /> : '—'}
+            </td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+/** The Batch job id + an on-demand status check (pull-based — cloud-profile-spec §7). */
+function BatchStatusCell({ jobId }: { jobId: string }) {
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function check() {
+    setBusy(true)
+    try {
+      const res = await api.batchStatus(jobId)
+      setStatus(res.status + (res.reason ? ` (${res.reason})` : ''))
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <span>
+      {jobId}{' '}
+      {status ? (
+        <span className="badge b-run">{status}</span>
+      ) : (
+        <button type="button" className="btn" onClick={check} disabled={busy} style={{ fontSize: 10, padding: '1px 6px' }}>
+          {busy ? '…' : 'check'}
+        </button>
+      )}
+    </span>
   )
 }

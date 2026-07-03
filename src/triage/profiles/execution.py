@@ -22,7 +22,34 @@ from triage.profiles.protocols import StorageAdapter
 
 logger = get_logger(__name__)
 
-__all__ = ["RunHandle", "InProcessExecution", "BatchExecution"]
+__all__ = ["RunHandle", "InProcessExecution", "BatchExecution", "batch_job_status"]
+
+
+def batch_job_status(job_id: str, *, region: str) -> dict[str, Any]:
+    """Describe one Batch job (cloud-profile-spec §7 — the status backfill's read).
+
+    Returns ``{job_id, status, reason, stopped_at}``. A job Batch no longer knows (its
+    history retention is ~7 days) comes back as status ``UNKNOWN`` rather than an error —
+    the caller decides what an unknowable job means for its run row.
+    """
+    import boto3
+
+    batch = boto3.client("batch", region_name=region)
+    jobs = batch.describe_jobs(jobs=[job_id])["jobs"]
+    if not jobs:
+        return {
+            "job_id": job_id,
+            "status": "UNKNOWN",
+            "reason": "job not found (expired from Batch history?)",
+            "stopped_at": None,
+        }
+    job = jobs[0]
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "reason": job.get("statusReason"),
+        "stopped_at": job.get("stoppedAt"),
+    }
 
 
 @dataclass(frozen=True)

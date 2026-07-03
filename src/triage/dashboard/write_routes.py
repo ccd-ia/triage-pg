@@ -335,6 +335,26 @@ def get_example_configs(
     return entries
 
 
+@write_router.get("/batch-status/{job_id}")
+def get_batch_status(
+    job_id: str, principal: Principal = Depends(current_principal)
+) -> dict:
+    """On-request AWS Batch job status for a cloud submission (cloud-profile-spec §7).
+
+    Read-only and pull-based — no background polling thread; the CLI backfill
+    (``triage runs status``) is the state-mutating path.
+    """
+    region = os.environ.get("AWS_REGION")
+    if not region:
+        raise HTTPException(
+            status_code=503,
+            detail="AWS_REGION is not configured on this instance (cloud profile only)",
+        )
+    from triage.profiles.execution import batch_job_status
+
+    return batch_job_status(job_id, region=region)
+
+
 # --------------------------------------------------------------------------- submissions
 
 

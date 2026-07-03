@@ -58,3 +58,6 @@ donorschoose-database.yaml
 # Chicago 311 larger/real export (not committed — tutorial image ships a baked subset) + dev DB config
 chicago311/chi311_db/real/
 chicago311-database.yaml
+
+# Terraform local state/providers (infra/terraform; the lock file IS committed)
+.terraform/

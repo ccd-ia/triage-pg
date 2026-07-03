@@ -66,6 +66,10 @@ project_app = typer.Typer(
     help="Project lifecycle — registry row + database + triage schema (ADR-0002)."
 )
 app.add_typer(project_app, name="project")
+runs_app = typer.Typer(
+    help="Inspect runs — AWS Batch status backfill (cloud-profile-spec §7)."
+)
+app.add_typer(runs_app, name="runs")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -861,6 +865,84 @@ def project_list(
             p["database_name"],
             p["status"],
             str(p["created_at"].date()),
+        )
+    console.print(table)
+
+
+@runs_app.command("status")
+def runs_status(
+    ctx: typer.Context,
+    run_id: Optional[str] = typer.Option(
+        None, "--run-id", help="Check one run (default: every run with a Batch job id)."
+    ),
+    all_pending: bool = typer.Option(
+        False, "--all-pending", help="Only runs still marked 'started'."
+    ),
+    region: Optional[str] = typer.Option(
+        None, "--region", help="AWS region (default: $AWS_REGION)."
+    ),
+) -> None:
+    """Poll AWS Batch for cloud runs and backfill terminal state onto triage.runs.
+
+    A Batch job that died hard (container OOM, spot reclaim) never marks its own run row,
+    leaving status='started' forever. This polls describe_jobs: a FAILED job whose run is
+    still 'started' is marked 'failed' with the Batch statusReason; everything else is
+    reported read-only (a healthy job updates its own row from inside the container).
+    """
+    from triage.profiles.execution import batch_job_status
+
+    aws_region = region or os.environ.get("AWS_REGION")
+    if not aws_region:
+        raise typer.BadParameter(
+            "no AWS region — pass --region or set AWS_REGION (cloud-profile-spec §5)"
+        )
+    engine = get_pool(ctx)
+    sql = (
+        "select run_id, experiment_hash, status, batch_job_id, started_at"
+        " from triage.runs where batch_job_id is not null"
+    )
+    params: Dict[str, Any] = {}
+    if run_id:
+        sql += " and run_id = %(r)s"
+        params["r"] = run_id
+    if all_pending:
+        sql += " and status = 'started'"
+    sql += " order by started_at desc"
+    with engine.connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    if not rows:
+        console.print("[yellow]No cloud runs with a Batch job id matched.[/yellow]")
+        return
+
+    table = Table(title="Cloud runs — AWS Batch status", box=box.SIMPLE_HEAVY)
+    table.add_column("Run")
+    table.add_column("Run status")
+    table.add_column("Batch job")
+    table.add_column("Batch status")
+    table.add_column("Reason")
+    table.add_column("Backfill")
+    for row in rows:
+        info = batch_job_status(row["batch_job_id"], region=aws_region)
+        backfilled = ""
+        if info["status"] == "FAILED" and row["status"] == "started":
+            with engine.connection() as conn:
+                conn.execute(
+                    "update triage.runs set status = 'failed', finished_at = now(),"
+                    " error = %(e)s where run_id = %(r)s",
+                    {
+                        "e": "AWS Batch job failed: "
+                        + (info["reason"] or "no statusReason"),
+                        "r": row["run_id"],
+                    },
+                )
+            backfilled = "[red]marked failed[/red]"
+        table.add_row(
+            str(row["run_id"])[:8] + "…",
+            row["status"],
+            row["batch_job_id"],
+            info["status"],
+            (info["reason"] or "")[:48],
+            backfilled,
         )
     console.print(table)
 

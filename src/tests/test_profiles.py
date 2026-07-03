@@ -272,6 +272,46 @@ def test_batch_execution_stages_config_and_submits(aws_credentials):
     assert jobs[0]["parameters"]["profile"] == "cloud"
 
 
+@mock_aws
+def test_batch_job_status_reads_and_handles_unknown(aws_credentials):
+    """The §7 status backfill read: a real job reports its Batch status; an unknown id is
+    UNKNOWN (never an exception — Batch history expires, the run row may outlive it)."""
+    from triage.profiles.execution import batch_job_status
+
+    boto3.client("s3", region_name=REGION).create_bucket(Bucket=BUCKET)
+    _provision_batch(REGION)
+    execution = BatchExecution(
+        region=REGION,
+        job_queue="triage-queue",
+        job_definition="triage-jobdef",
+        config_uri=f"s3://{BUCKET}/scope/config.json",
+    )
+    handle = execution.run(
+        None,
+        {"problem_type": "classification"},
+        storage=S3Storage(region=REGION),
+        storage_root=f"s3://{BUCKET}/scope",
+    )
+
+    info = batch_job_status(handle.batch_job_id, region=REGION)
+    assert info["job_id"] == handle.batch_job_id
+    # moto walks the job through the Batch lifecycle; any real lifecycle state is fine here —
+    # the contract under test is shape + no-exception, not moto's scheduler timing.
+    assert info["status"] in (
+        "SUBMITTED",
+        "PENDING",
+        "RUNNABLE",
+        "STARTING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+    )
+
+    missing = batch_job_status("no-such-job-id", region=REGION)
+    assert missing["status"] == "UNKNOWN"
+    assert "not found" in missing["reason"]
+
+
 # -------------------------------------------------------------------------------------- profile
 
 

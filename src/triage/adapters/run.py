@@ -509,9 +509,19 @@ def _create_experiment_and_run(
             },
         )
         run_id = conn.execute(
-            "insert into triage.runs (experiment_hash, profile, status, random_seed)"
-            + " values (%(h)s, %(profile)s, 'started', %(seed)s) returning run_id",
-            {"h": exp_hash, "profile": profile, "seed": random_seed},
+            "insert into triage.runs (experiment_hash, profile, status, random_seed,"
+            + " batch_job_id)"
+            + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
+            + " returning run_id",
+            {
+                "h": exp_hash,
+                "profile": profile,
+                "seed": random_seed,
+                # Inside an AWS Batch container, Batch injects AWS_BATCH_JOB_ID — recording it
+                # correlates this run with its job so `triage runs status` can backfill a
+                # terminal Batch state (cloud-profile-spec §7). NULL locally.
+                "job": os.environ.get("AWS_BATCH_JOB_ID"),
+            },
         ).fetchone()["run_id"]
         # Live telemetry (read-dashboard-spec §4): the run has started. Emitted on
         # the same COMMIT as the runs INSERT.
@@ -533,9 +543,16 @@ def _create_run(
     """
     with db_engine.connection() as conn:
         run_id = conn.execute(
-            "insert into triage.runs (experiment_hash, profile, status, random_seed)"
-            + " values (%(h)s, %(profile)s, 'started', %(seed)s) returning run_id",
-            {"h": exp_hash, "profile": profile, "seed": random_seed},
+            "insert into triage.runs (experiment_hash, profile, status, random_seed,"
+            + " batch_job_id)"
+            + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
+            + " returning run_id",
+            {
+                "h": exp_hash,
+                "profile": profile,
+                "seed": random_seed,
+                "job": os.environ.get("AWS_BATCH_JOB_ID"),
+            },
         ).fetchone()["run_id"]
         _notify_run_progress(conn, str(run_id), "run", "started")
     return str(run_id)
