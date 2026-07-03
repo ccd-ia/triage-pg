@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-02
 - Deciders: Adolfo, Claude
+- Status update (2026-07-03): Implemented — `dashboard/project_routing.py` (`resolve_active_pool`/`pool_for_slug`/`project_dburl`), top-bar `ProjectSwitcher` (commit `76eb46fc`); live-proven across the three tutorial DBs. The stale deep-link 404 is fixed (v1-completion plan Phase 2): switching navigates to the project-neutral `/experiments` list instead of reloading in place. Context-driven panel refresh (no full reload) stays deferred.
 
 The read dashboard binds ONE project database per app instance (ADR-0012); the registry
 (ADR-0002) lists many projects, each isolated in its own database. ADR-0024 deferred *routing*

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-01
 - Deciders: Adolfo, Claude
+- Status update (2026-07-03): Implemented — `triage/registry.py`, `dashboard/auth.py` (`Principal`/`AuthBackend`/`TrustedHeaderAuth`), `dashboard/write_routes.py`; covered by `dashboard_tests/test_write_api.py` (commits `b657b17f` backend, `e9310683` frontend). The deferred per-project routing landed next day (ADR-0025); real IdP auth (OIDC) is scheduled — v1-completion plan Phase 4, ADR-0028.
 
 The read dashboard (ADR-0012/0021, `docs/read-dashboard-spec.md`) is a read-only JSON API over
 the in-PG views; the spec deferred the **write webapp** (config submission + project/user
