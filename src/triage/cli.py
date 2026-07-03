@@ -486,6 +486,37 @@ def predictlist_command(
     console.print("[green]Prediction list generated.[/green]")
 
 
+@app.command("score")
+def score_command(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    prediction_date: Optional[datetime] = typer.Argument(
+        None,
+        help="Prediction date (YYYY-MM-DD). Omitted = today — so a cron/EventBridge line"
+        " needs no date arithmetic.",
+    ),
+    project_path: pathlib.Path = typer.Option(
+        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    ),
+) -> None:
+    """Forward-score a model (the ADR-0027 monitoring entrypoint; alias of predictlist).
+
+    Safe to re-invoke: predictions are append-only (ADR-0006) and the run records
+    purpose='forward_score' + the prediction date (ADR-0018). Schedule it with the
+    operator's scheduler — cron locally, EventBridge→Batch in cloud (docs/monitoring.md).
+    """
+    when = (
+        parse_date(prediction_date).date()
+        if prediction_date is not None
+        else datetime.now().date()
+    )
+    engine = get_pool(ctx)
+    predict_forward(engine, model_id, when, storage_dir=str(project_path))
+    console.print(
+        f"[green]Forward-scored model {model_id} at {when} (append-only).[/green]"
+    )
+
+
 @app.command("analyze-config")
 def analyze_config(
     config: str = typer.Argument(..., help="Experiment config to inspect."),

@@ -30,6 +30,7 @@ import { ExperimentDetail } from './pages/ExperimentDetail'
 import { OntologyView } from './pages/OntologyView'
 import { TriageStatusView } from './pages/TriageStatusView'
 import { ProjectDerivationView } from './pages/ProjectDerivationView'
+import { MonitoringView } from './pages/MonitoringView'
 import { ProjectsView } from './pages/ProjectsView'
 import { SubmissionsView } from './pages/SubmissionsView'
 import { ProjectSwitcher } from './components/ProjectSwitcher'
@@ -192,6 +193,7 @@ function RoutedContent() {
         <Route path="/experiments/:hash" element={<ExperimentRoute />} />
         <Route path="/runs/:id" element={<RunResolve />} />
         <Route path="/ontology" element={<Shell><OntologyView /></Shell>} />
+        <Route path="/monitoring" element={<Shell><MonitoringView /></Shell>} />
         <Route path="/status" element={<Shell><TriageStatusView /></Shell>} />
         <Route path="/derivation" element={<Shell><ProjectDerivationView /></Shell>} />
         <Route path="/projects" element={<Shell><ProjectsView /></Shell>} />

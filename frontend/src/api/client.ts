@@ -21,6 +21,9 @@ import type {
   ExperimentSummary,
   Member,
   MetricsResponse,
+  MonitoringDrift,
+  MonitoringOutcomeRow,
+  MonitoringVolumeRow,
   ModelCardResponse,
   ModelCurveResponse,
   ModelGroupDetailResponse,
@@ -315,6 +318,39 @@ export const api = {
   projectDerivation(): Promise<ProjectDerivationResponse> {
     if (USE_FIXTURE) return fake(fixture.projectDerivation)
     return get<ProjectDerivationResponse>('/derivation')
+  },
+
+  /* ------------------------ monitoring (ADR-0027) ------------------------ */
+
+  monitoringVolume(modelGroupId?: number): Promise<MonitoringVolumeRow[]> {
+    if (USE_FIXTURE) return fake([...fixture.monitoringVolume])
+    const q = modelGroupId !== undefined ? `?model_group_id=${modelGroupId}` : ''
+    return get<MonitoringVolumeRow[]>(`/monitoring/volume${q}`)
+  },
+
+  monitoringDrift(params: {
+    modelGroupId: number
+    referenceFrom: string
+    referenceTo: string
+    windowFrom: string
+    windowTo: string
+  }): Promise<MonitoringDrift> {
+    if (USE_FIXTURE) return fake(fixture.monitoringDrift)
+    const q = new URLSearchParams({
+      model_group_id: String(params.modelGroupId),
+      reference_from: params.referenceFrom,
+      reference_to: params.referenceTo,
+      window_from: params.windowFrom,
+      window_to: params.windowTo,
+    })
+    return get<MonitoringDrift>(`/monitoring/drift?${q.toString()}`)
+  },
+
+  monitoringOutcomes(modelGroupId: number, metric?: string): Promise<MonitoringOutcomeRow[]> {
+    if (USE_FIXTURE) return fake([...fixture.monitoringOutcomes])
+    const q = new URLSearchParams({ model_group_id: String(modelGroupId) })
+    if (metric) q.set('metric', metric)
+    return get<MonitoringOutcomeRow[]>(`/monitoring/outcomes?${q.toString()}`)
   },
 
   /* ------------------------ write surface (ADR-0024) --------------------- */

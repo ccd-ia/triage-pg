@@ -1049,3 +1049,68 @@ def stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# --------------------------------------------------------------------- monitoring (ADR-0027)
+# Thin reads over migration 0012 — everything the Monitoring view shows IS these
+# views/functions (ADR-0012: no UI-only logic). Windows are parameters (the pinned-reference
+# policy is the operator's convention, docs/monitoring.md).
+
+
+@router.get("/monitoring/volume")
+def monitoring_volume(
+    model_group_id: Optional[int] = None, pool: ConnectionPool = Depends(_pool)
+) -> list[dict]:
+    """The scoring heartbeat: predictions + distinct entities per (group, model, split, day)."""
+    sql = "select * from triage.monitoring_volume"
+    params: dict = {}
+    if model_group_id is not None:
+        sql += " where model_group_id = %(g)s"
+        params["g"] = model_group_id
+    sql += " order by scored_on, model_id"
+    return _rows(pool, sql, params)
+
+
+@router.get("/monitoring/drift")
+def monitoring_drift(
+    model_group_id: int,
+    reference_from: str,
+    reference_to: str,
+    window_from: str,
+    window_to: str,
+    pool: ConnectionPool = Depends(_pool),
+) -> dict:
+    """PSI + KS between a pinned reference window and a scoring window (scored_at bounds)."""
+    row = _one(
+        pool,
+        "select * from triage.monitoring_score_drift(%(g)s, cast(%(rf)s as timestamptz),"
+        " cast(%(rt)s as timestamptz), cast(%(wf)s as timestamptz),"
+        " cast(%(wt)s as timestamptz))",
+        {
+            "g": model_group_id,
+            "rf": reference_from,
+            "rt": reference_to,
+            "wf": window_from,
+            "wt": window_to,
+        },
+    )
+    return row or {"psi": None, "ks": None, "n_reference": 0, "n_window": 0}
+
+
+@router.get("/monitoring/outcomes")
+def monitoring_outcomes(
+    model_group_id: int,
+    metric: Optional[str] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> list[dict]:
+    """Realized metrics over time (evaluations upserts sequenced per model group)."""
+    sql = (
+        "select * from triage.monitoring_outcome_tracking"
+        " where model_group_id = %(g)s"
+    )
+    params: dict = {"g": model_group_id}
+    if metric:
+        sql += " and metric = %(m)s"
+        params["m"] = metric
+    sql += " order by as_of_date, computed_at"
+    return _rows(pool, sql, params)

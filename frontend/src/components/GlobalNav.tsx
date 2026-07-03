@@ -17,6 +17,7 @@ interface Item {
 const ITEMS: Item[] = [
   { to: '/experiments', icon: '✦', label: 'Experiments' },
   { to: '/ontology', icon: '◳', label: 'Ontology' },
+  { to: '/monitoring', icon: '∿', label: 'Monitoring' },
   { to: '/status', icon: '◷', label: 'Triage status' },
 ]
 

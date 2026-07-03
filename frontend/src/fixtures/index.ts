@@ -1026,8 +1026,44 @@ export function fxCreateSubmission(projectSlug: string, profile: 'local' | 'clou
 
 import type {
   ExampleConfig,
+  MonitoringDrift,
+  MonitoringOutcomeRow,
+  MonitoringVolumeRow,
   ValidateConfigResult,
 } from '../api/types'
+
+/* ------------------------------ monitoring (ADR-0027) ---------------------- */
+
+export const monitoringVolume: MonitoringVolumeRow[] = [1, 2, 3, 4].map((i) => ({
+  model_group_id: 7,
+  model_id: 42,
+  split_kind: 'production',
+  scored_on: `2026-0${i}-01`,
+  n_predictions: 4800 + i * 120,
+  n_entities: 4800 + i * 120,
+  first_as_of_date: `2026-0${i}-01`,
+  last_as_of_date: `2026-0${i}-01`,
+}))
+
+export const monitoringDrift: MonitoringDrift = {
+  psi: 0.083,
+  ks: 0.061,
+  n_reference: 4920,
+  n_window: 5280,
+}
+
+export const monitoringOutcomes: MonitoringOutcomeRow[] = [1, 2, 3].map((i) => ({
+  model_group_id: 7,
+  model_id: 42,
+  purpose: 'forward_score',
+  split_kind: 'production',
+  as_of_date: `2026-0${i}-01`,
+  metric: 'precision@',
+  parameter: '100_abs',
+  value: 0.42 - i * 0.03,
+  num_labeled: 4800,
+  computed_at: `2026-0${i + 1}-02T09:00:00Z`,
+}))
 
 export const exampleConfigs: ExampleConfig[] = [
   {

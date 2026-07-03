@@ -995,6 +995,42 @@ export interface Submission {
   submitted_at: string
 }
 
+/* ------------------------------ monitoring (ADR-0027) ---------------------- */
+
+/** A triage.monitoring_volume row — the scoring heartbeat. */
+export interface MonitoringVolumeRow {
+  model_group_id: number
+  model_id: number
+  split_kind: string
+  scored_on: string
+  n_predictions: number
+  n_entities: number
+  first_as_of_date: string
+  last_as_of_date: string
+}
+
+/** triage.monitoring_score_drift(...) — PSI + KS between two scored_at windows. */
+export interface MonitoringDrift {
+  psi: number | null
+  ks: number | null
+  n_reference: number
+  n_window: number
+}
+
+/** A triage.monitoring_outcome_tracking row — realized metrics over time. */
+export interface MonitoringOutcomeRow {
+  model_group_id: number
+  model_id: number
+  purpose: string | null
+  split_kind: string
+  as_of_date: string
+  metric: string
+  parameter: string
+  value: number | null
+  num_labeled: number | null
+  computed_at: string
+}
+
 /** POST /api/validate-config — the core's dry-run verdict (nothing persisted, nothing run). */
 export interface ValidateConfigResult {
   valid: boolean

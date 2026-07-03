@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-04
 - Status update (2026-06-28): Implemented — append-only `triage.predictions` with `scored_at` + `split_kind`, quarterly-partitioned (migration 0001); E2E asserts append-only.
+- Status update (2026-07-03): The deferred monitoring *features* (scheduled forward scoring, drift/volume/outcome SQL views, dashboard panel) are being built — v1-completion plan Phase 6; the architecture will be recorded in ADR-0027.
 
 The predictions table is **append-only**: every scoring run inserts rows carrying a `scored_at` wall-clock timestamp alongside `as_of_date`, and the table is time-partitioned. This is cheap insurance for the (deferred) production-monitoring use case — prediction history, drift, and trajectories become a `GROUP BY` later with zero migration — whereas a current-state table that overwrites on re-run can never recover history it never recorded.
 
