@@ -30,6 +30,7 @@ __all__ = [
     "list_projects",
     "get_project",
     "create_project",
+    "mark_project_dropped",
     "get_user_by_email",
     "get_or_create_user",
     "add_member",
@@ -58,7 +59,9 @@ def _validate_slug(slug: str) -> str:
 # --------------------------------------------------------------------------- projects
 
 
-def list_projects(pool: ConnectionPool, *, include_archived: bool = False) -> list[dict]:
+def list_projects(
+    pool: ConnectionPool, *, include_archived: bool = False
+) -> list[dict]:
     """All registry projects (active only unless ``include_archived``), newest first."""
     sql = "select project_id, slug, display_name, database_name, status, created_at, archived_at from registry.projects"
     if not include_archived:
@@ -98,6 +101,26 @@ def create_project(
             " created_at, archived_at",
             {"slug": slug, "dn": display_name, "db": db_name},
         ).fetchone()
+
+
+def mark_project_dropped(pool: ConnectionPool, *, slug: str) -> dict:
+    """Tombstone a project whose database has been dropped (``triage project drop``).
+
+    The row is kept — submissions foreign-key to it and the control plane's history should
+    say a project existed — but ``status='dropped'`` takes it out of every active listing
+    and the switcher. Raises ``ValueError`` for an unknown slug (fail loud, per the house rule).
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "update registry.projects set status = 'dropped', dropped_at = now()"
+            " where slug = %(slug)s"
+            " returning project_id, slug, display_name, database_name, status,"
+            " created_at, archived_at, dropped_at",
+            {"slug": slug},
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"no registry project with slug {slug!r}")
+    return row
 
 
 # --------------------------------------------------------------------------- users
@@ -174,7 +197,9 @@ def list_members(pool: ConnectionPool, *, project_id: UUID) -> list[dict]:
         ).fetchall()
 
 
-def member_role(pool: ConnectionPool, *, project_id: UUID, user_id: UUID) -> Optional[str]:
+def member_role(
+    pool: ConnectionPool, *, project_id: UUID, user_id: UUID
+) -> Optional[str]:
     """The user's role on the project, or ``None`` if they are not a member."""
     with pool.connection() as conn:
         row = conn.execute(

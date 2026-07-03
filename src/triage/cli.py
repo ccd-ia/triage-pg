@@ -63,6 +63,10 @@ source_app = typer.Typer(
     help="Manage declared data sources and their version pins (ADR-0014)."
 )
 app.add_typer(source_app, name="source")
+project_app = typer.Typer(
+    help="Project lifecycle — registry row + database + triage schema (ADR-0002)."
+)
+app.add_typer(project_app, name="project")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -74,8 +78,14 @@ CONFIG_VERSION = "v8"
 
 @dataclass
 class CLIState:
-    db_url: str
+    """Resolved CLI context. ``db_url`` is ``None`` when no project-DB config was found —
+    resolution is lazy so registry-only commands (``triage project …``) run without one;
+    ``db_error`` carries the original resolution error for the command that does need it.
+    """
+
+    db_url: Optional[str]
     setup_path: Optional[pathlib.Path]
+    db_error: Optional[str] = None
 
 
 def natural_number(value: int) -> int:
@@ -239,9 +249,16 @@ def get_state(ctx: typer.Context) -> CLIState:
     return state
 
 
-def get_pool(ctx: typer.Context):
+def require_db_url(ctx: typer.Context) -> str:
+    """The resolved project-database URL — raising the deferred resolution error if none."""
     state = get_state(ctx)
-    return connection_pool(state.db_url)
+    if state.db_url is None:
+        raise typer.BadParameter(state.db_error or "Database connection not provided.")
+    return state.db_url
+
+
+def get_pool(ctx: typer.Context):
+    return connection_pool(require_db_url(ctx))
 
 
 def short_description(value: Optional[str]) -> str:
@@ -297,12 +314,19 @@ def triage_callback(
     # Reconfigure logging with the requested level
     configure_logging(default_level=log_level.upper())
 
-    db_url = resolve_db_url(dbfile)
+    # Lazy resolution: registry-only commands (triage project …) must run without a project-DB
+    # config, so a resolution failure is stored and raised by the first command that needs it.
+    db_error: Optional[str] = None
+    try:
+        db_url: Optional[str] = resolve_db_url(dbfile)
+    except typer.BadParameter as exc:
+        db_url, db_error = None, str(exc)
     setup_path = resolve_setup_path(setup)
     if setup_path:
         load_setup_module(setup_path)
-    ctx.obj = CLIState(db_url=db_url, setup_path=setup_path)
-    logger.info("Using database %s", db_url)
+    ctx.obj = CLIState(db_url=db_url, setup_path=setup_path, db_error=db_error)
+    if db_url is not None:
+        logger.info("Using database %s", db_url)
     if setup_path:
         logger.info("Setup module: %s", setup_path)
 
@@ -340,10 +364,9 @@ def run_command(
     pool via ``profile.auth``, and wraps the headless core via ``profile.execution`` — in-process
     locally, or one AWS Batch job submitted (returning the ``job_id`` immediately) in cloud.
     """
-    state = get_state(ctx)
     profile_obj = load_profile(
         profile,
-        dburl=state.db_url,
+        dburl=require_db_url(ctx),
         storage_root=str(project_path) if profile == "local" else None,
     )
     config_data = load_experiment_config(config)
@@ -521,7 +544,7 @@ def db_upgrade(
         help="Target schema revision (default head).",
     ),
 ) -> None:
-    upgrade_db(revision=revision, dburl=get_state(ctx).db_url)
+    upgrade_db(revision=revision, dburl=require_db_url(ctx))
     console.print("[green]Database upgraded.[/green]")
 
 
@@ -532,7 +555,7 @@ def db_downgrade(
         "-1", "--revision", "-r", help="Schema revision to downgrade to."
     ),
 ) -> None:
-    downgrade_db(revision=revision, dburl=get_state(ctx).db_url)
+    downgrade_db(revision=revision, dburl=require_db_url(ctx))
     console.print("[green]Database downgraded.[/green]")
 
 
@@ -541,13 +564,13 @@ def db_stamp(
     ctx: typer.Context,
     revision: str = typer.Argument(..., help="Revision to stamp the DB with."),
 ) -> None:
-    stamp_db(revision=revision, dburl=get_state(ctx).db_url)
+    stamp_db(revision=revision, dburl=require_db_url(ctx))
     console.print("[green]Database stamped.[/green]")
 
 
 @db_app.command("history")
 def db_history_command(ctx: typer.Context) -> None:
-    db_history(dburl=get_state(ctx).db_url)
+    db_history(dburl=require_db_url(ctx))
 
 
 @db_app.command("up")
@@ -719,6 +742,122 @@ def source_show(
     if drifted:
         body += "\n[red]DRIFT: data changed since the current pin.[/red]"
     console.print(Panel.fit(body, title=f"Source: {name}"))
+
+
+def _registry_pool_from_env():
+    """Open a pool on the registry control plane (``TRIAGE_REGISTRY_URL``) — fail fast."""
+    from triage import project_lifecycle
+
+    try:
+        url = project_lifecycle.registry_url_from_env()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    return url, connection_pool(url)
+
+
+@project_app.command("create")
+def project_create(
+    slug: str = typer.Argument(
+        ..., help="url-safe id; also names the per-project database (ADR-0002)."
+    ),
+    display_name: Optional[str] = typer.Option(
+        None, "--display-name", help="Human-facing name (defaults to the slug)."
+    ),
+    database_name: Optional[str] = typer.Option(
+        None, "--database-name", help="Target database name (defaults to the slug)."
+    ),
+) -> None:
+    """Create a project end-to-end: registry row → CREATE DATABASE → triage schema (head).
+
+    Needs TRIAGE_REGISTRY_URL (the control plane) and a maintenance connection —
+    TRIAGE_MAINT_URL, else the registry cluster's 'postgres' database (ADR-0002).
+    """
+    from triage import project_lifecycle
+
+    registry_url, pool = _registry_pool_from_env()
+    try:
+        maint_url = project_lifecycle.maintenance_url(registry_url)
+        project = project_lifecycle.create_project(
+            pool,
+            slug=slug,
+            maint_url=maint_url,
+            display_name=display_name,
+            database_name=database_name,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    finally:
+        pool.close()
+    console.print(
+        f"[green]Project '{project['slug']}' created:[/green] database"
+        f" [cyan]{project['database_name']}[/cyan] provisioned + triage schema at head."
+        " Run experiments against it with PG*/DATABASE_URL pointed at that database."
+    )
+
+
+@project_app.command("drop")
+def project_drop(
+    slug: str = typer.Argument(..., help="Project to tear down."),
+    confirm: str = typer.Option(
+        ...,
+        "--confirm",
+        help="Repeat the slug exactly to confirm the irreversible DROP DATABASE.",
+    ),
+) -> None:
+    """DROP the project's database (WITH FORCE) and tombstone its registry row (ADR-0002)."""
+    from triage import project_lifecycle
+
+    registry_url, pool = _registry_pool_from_env()
+    try:
+        maint_url = project_lifecycle.maintenance_url(registry_url)
+        project = project_lifecycle.drop_project(
+            pool, slug=slug, confirm=confirm, maint_url=maint_url
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    finally:
+        pool.close()
+    console.print(
+        f"[green]Project '{project['slug']}' dropped[/green] — database"
+        f" [cyan]{project['database_name']}[/cyan] removed; registry row kept as a"
+        f" tombstone (dropped_at {project['dropped_at']})."
+    )
+
+
+@project_app.command("list")
+def project_list(
+    show_all: bool = typer.Option(
+        False, "--all", help="Include archived and dropped projects."
+    ),
+) -> None:
+    """List registry projects (active only by default)."""
+    from triage import registry as registry_module
+
+    _, pool = _registry_pool_from_env()
+    try:
+        projects = registry_module.list_projects(pool, include_archived=show_all)
+    finally:
+        pool.close()
+    if not projects:
+        console.print("[yellow]No projects registered.[/yellow]")
+        return
+    table = Table(title="Registry projects", box=box.SIMPLE_HEAVY)
+    table.add_column("Slug")
+    table.add_column("Display name")
+    table.add_column("Database")
+    table.add_column("Status")
+    table.add_column("Created")
+    for p in projects:
+        table.add_row(
+            p["slug"],
+            p["display_name"],
+            p["database_name"],
+            p["status"],
+            str(p["created_at"].date()),
+        )
+    console.print(table)
 
 
 @app.command("archive")

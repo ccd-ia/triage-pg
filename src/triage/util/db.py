@@ -34,6 +34,21 @@ def libpq_conninfo(dburl) -> str:
     return dburl
 
 
+def swap_dbname(base_url: str, database_name: str) -> str:
+    """Return ``base_url`` with only its database (path) segment replaced by ``database_name``.
+
+    Preserves scheme (incl. the ``+psycopg`` tag), credentials, host, port, and query — only the
+    database changes. This is the ADR-0002 shared-cluster / cloud-RDS routing primitive, shared by
+    the dashboard project switcher (ADR-0025) and the project lifecycle (``triage project``).
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(base_url)
+    return urlunsplit(
+        (parts.scheme, parts.netloc, f"/{database_name}", parts.query, parts.fragment)
+    )
+
+
 def connection_pool(
     dburl, *, min_size: int = 1, max_size: int = 10, **kwargs
 ) -> ConnectionPool:

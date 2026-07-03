@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from triage import registry
 from triage.logging import get_logger
-from triage.util.db import connection_pool, libpq_conninfo
+from triage.util.db import connection_pool, libpq_conninfo, swap_dbname
 
 logger = get_logger(__name__)
 
@@ -60,25 +59,13 @@ def _project_db_map() -> dict[str, str]:
     return parsed
 
 
-def _swap_dbname(base_url: str, database_name: str) -> str:
-    """Return ``base_url`` with only its database (path) segment replaced by ``database_name``.
-
-    Preserves scheme (incl. the ``+psycopg`` tag), credentials, host, port, and query — only the
-    database changes, which is exactly the ADR-0002 shared-cluster / cloud-RDS routing.
-    """
-    parts = urlsplit(base_url)
-    return urlunsplit(
-        (parts.scheme, parts.netloc, f"/{database_name}", parts.query, parts.fragment)
-    )
-
-
 def project_dburl(slug: str, database_name: str, base_url: str | None) -> str:
     """Resolve a project's database URL (env-map override, else dbname-swap on ``base_url``)."""
     mapping = _project_db_map()
     if slug in mapping:
         return mapping[slug]
     if base_url:
-        return _swap_dbname(base_url, database_name)
+        return swap_dbname(base_url, database_name)
     raise ValueError(
         f"cannot resolve a database URL for project {slug!r}: no {_DB_MAP_ENV} entry and no base"
         " project URL to swap the database name onto (set TRIAGE_PROJECT_DB_MAP for a local"

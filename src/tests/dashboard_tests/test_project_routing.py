@@ -17,7 +17,8 @@ from triage import registry
 from triage.component.registry_schema import upgrade_registry_db
 from triage.dashboard.app import create_app
 from triage.dashboard.auth import TrustedHeaderAuth
-from triage.dashboard.project_routing import _swap_dbname, project_dburl
+from triage.dashboard.project_routing import project_dburl
+from triage.util.db import swap_dbname as _swap_dbname
 
 # --------------------------------------------------------------------------- pure unit (no DB)
 

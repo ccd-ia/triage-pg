@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-04
 - Status update (2026-06-28): Partially implemented — `registry` control-plane schema built (`registry_schema/.../0001_initial_registry_schema.py`: projects/users/project_members/submissions) and per-project DBs in use; cross-project routing wiring still partial.
+- Status update (2026-07-03): **Implemented in full.** Routing landed via ADR-0025 (commit `76eb46fc`); the project **lifecycle** gap closed the same day (v1-completion plan Phase 2): `triage project create/drop/list` (`src/triage/project_lifecycle.py` — registry row → CREATE DATABASE → triage schema at head; drop = `DROP DATABASE … WITH (FORCE)` + a `status='dropped'` tombstone, registry migration 0002). The webapp still creates registry rows only (least privilege) and reports `database_ready`. Conformance: `docs/adr-conformance.md`.
 
 Each **project** is an isolated PostgreSQL **database** inside one shared cluster (database-level isolation; teardown is `DROP DATABASE`). A single triage-pg instance serves many projects and routes each incoming experiment to the right project database; the cross-cutting state that makes that possible — projects, users, per-project routing/connection info, permissions, webapp auth — lives in a dedicated **registry database**, since it cannot live inside any per-project DB. Multiple users collaborate within a project.
 
