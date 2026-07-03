@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: triage-pg v1 Completion — ADR Conformance, Teaching-Ready Local, Gated Cloud, Monitoring</title>
+<style>
+:root {
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --muted: #5b6675;
+  --accent: #2f6690;        /* PostgreSQL slate-blue */
+  --accent-soft: #e8f0f6;
+  --amber: #b45309;         /* gated / warning */
+  --ok: #2e7d32;
+  --danger: #b3261e;
+  --border: #e3e6ea;
+  --code-bg: #f2f4f7;
+  --radius: 8px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 1rem 4rem;
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; }
+h1 { font-size: 1.7rem; line-height: 1.25; border-bottom: 3px solid var(--accent); padding: 1.2rem 0 .6rem; }
+h2 { font-size: 1.3rem; color: var(--accent); margin-top: 2.4rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+h3 { font-size: 1.08rem; margin-top: 1.6rem; }
+h4 { font-size: .98rem; margin: 1.2rem 0 .4rem; color: var(--ink); }
+code {
+  font: .86em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 4px; padding: .08em .35em;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .9rem 1rem; overflow-x: auto;
+}
+pre code { background: none; border: none; padding: 0; }
+figure { margin: 1.4rem 0; text-align: center; }
+figure img { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); }
+figcaption { font-size: .85rem; color: var(--muted); margin-top: .4rem; }
+details.meta { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .5rem .9rem; margin: .8rem 0; }
+details.meta summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+details.meta dl { display: grid; grid-template-columns: 10rem 1fr; gap: .25rem .8rem; font-size: .88rem; margin: .6rem 0 .3rem; }
+details.meta dt { color: var(--muted); }
+details.meta dd { margin: 0; word-break: break-word; }
+.phase {
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  border-radius: var(--radius); padding: .4rem 1.3rem 1.1rem; margin: 1.4rem 0;
+}
+.phase.gated { border-left-color: var(--amber); }
+.status { font-weight: 700; color: var(--accent); background: var(--accent-soft); }
+ul.checklist { list-style: none; padding-left: .3rem; }
+ul.checklist li { margin: .35rem 0; padding-left: .2rem; }
+.loop {
+  background: var(--accent-soft); border: 1px dashed var(--accent); border-radius: var(--radius);
+  padding: .7rem 1rem; margin-top: 1rem; font-size: .92rem;
+}
+.tag {
+  display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+  border-radius: 3px; padding: .1em .5em; margin-right: .4em; text-transform: uppercase;
+}
+.tag.existing { background: var(--accent-soft); color: var(--accent); }
+.tag.new { background: #e6f2e8; color: var(--ok); }
+.tag.gated { background: #fdf1e2; color: var(--amber); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 1rem 0; }
+th, td { border: 1px solid var(--border); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+td.ok { color: var(--ok); font-weight: 600; }
+td.warn { color: var(--amber); font-weight: 600; }
+section#questionables details, section#amendments details {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .5rem .9rem; margin: .6rem 0;
+}
+section#questionables summary { cursor: pointer; font-weight: 600; }
+.qa-answer { color: var(--muted); }
+.callout {
+  border-left: 4px solid var(--amber); background: #fdf7ec;
+  border-radius: 0 var(--radius) var(--radius) 0; padding: .7rem 1rem; margin: 1rem 0; font-size: .93rem;
+}
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: triage-pg v1 Completion — ADR Conformance, Teaching-Ready Local, Gated Cloud, Monitoring</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-07-02T23:48-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-02T23:48-06:00, 2026-07-03T01:20-06:00 (Phase 1 built), 2026-07-03T03:05-06:00 (Phase 2 built + featurizer 0.4.2 bump), 2026-07-03T04:20-06:00 (Phases 3–5 built; cloud apply gated), 2026-07-03T05:25-06:00 (Phases 6–7 built; ALL PHASES DONE — remaining [f]: cloud-gate items, tag-on-commit, pre-existing typecheck)</dd>
+        <dt>commits</dt>      <dd>—</dd>
+        <dt>agent name</dt>   <dd>claude-fable-5 (Claude Code)</dd>
+        <dt>session id</dt>   <dd>triage/2026-07-02-plan-session</dd>
+        <dt>back refs</dt>    <dd>docs/adr/0001–0025, docs/cloud-profile-spec.md, docs/adapter-spec.md, docs/schema-design.md, docs/derivation-dag.md, CONTEXT.md, TODO.org, ai-docs/triage-session-summary.org</dd>
+        <dt>forward refs</dt> <dd>docs/adr-conformance.md, docs/adr/0026–0028, docs/{quickstart,cloud-runbook,monitoring}.md, infra/terraform/, migrations 0011–0012 (+ registry 0002), src/triage/{project_lifecycle.py,dashboard/oidc.py}, example/chicago311/greenfield-survival.yaml</dd>
+      </dl>
+    </details>
+  </header>
+
+  <!-- Hero image — synced to the :root visual identity. Replace with <img> once generated. -->
+  <figure>
+    <!-- {{HERO_IMAGE: a PostgreSQL elephant silhouette at the center of a completion roadmap — five milestones from "local v1" through "cloud (gated)" to "monitoring", minimal slate-blue/amber palette, under 10 words}} -->
+    <figcaption>The road from a green local v1 to a monitored, cloud-capable triage-pg.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>Drive the triage-pg greenfield rewrite to <strong>successful completion</strong> as scoped by the maintainer on 2026-07-02: a <strong>teaching-ready local v1</strong> plus <strong>production-monitoring readiness</strong>, with the cloud profile's Terraform authored now and its live validation <strong>gated</strong> on AWS account readiness. The plan additionally performs an <strong>ADR conformance audit</strong> — verifying that the code fulfills all 25 accepted ADRs and that the ADRs themselves still make sense — and pulls in four previously-deferred items: the UI/UX backlog pair, regression <code>metric_config</code> plumbing, the survival C-index path, and real (OIDC) webapp auth.</p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>The project is in an unusual, good position: 23 of 25 ADRs are implemented and verified, the full suite is green (394 passed), and three real tutorial datasets run E2E. What remains is not one build but a <em>closure problem</em> — a set of gaps that individually look small but collectively separate "works on my laptop" from "done":</p>
+    <ul>
+      <li><strong>ADR drift.</strong> Status lines lag reality (ADR-0012 still says the write webapp is "in progress"; ADR-0002 says routing is "partial" though ADR-0025 landed it). One documented contradiction exists: <code>docs/cloud-profile-spec.md</code> §3 declares <code>catwalk/storage.py</code> retired, while its own implementation note admits it was <em>not</em> (still imported by <code>cli.py</code> and 4 test files). Nobody has re-read the 25 decisions end-to-end against the code.</li>
+      <li><strong>ADR-0002 is incomplete.</strong> The registry lists projects and routes to them, but <em>creating</em> a project doesn't create or migrate its database — there is no <code>triage project create</code>. Teardown (<code>DROP DATABASE</code>) is likewise manual folklore.</li>
+      <li><strong>ADR-0004/0005 code has never touched AWS.</strong> CloudAuth and BatchExecution are moto-tested only; there is no Terraform, no runbook, no <code>triage runs status</code> Batch poll (verified: no <code>describe_jobs</code> call exists anywhere).</li>
+      <li><strong>ADR-0006's payoff is unbuilt.</strong> Predictions are append-only precisely to enable monitoring — but no drift views, no scheduled forward scoring, no monitoring panel exist.</li>
+      <li><strong>ADR-0010 is two-thirds done.</strong> The survival-ready label schema exists; the survival train/eval path (estimators + C-index) does not. Regression <code>metric_config</code> stops at a default inside <code>in_pg_evaluation.py</code> — not selectable from the experiment config.</li>
+      <li><strong>ADR-0024's auth is a placeholder.</strong> <code>TrustedHeaderAuth</code> is laptop-only by design; any shared deployment needs the promised IdP-backed drop-in.</li>
+      <li><strong>Known UX debt.</strong> The submit form is a raw-JSON textarea; switching projects on a deep-link 404s (both recorded in TODO.org).</li>
+    </ul>
+    <figure>
+      <!-- {{PROBLEM_IMAGE: a nearly-complete jigsaw of a database/pipeline picture with six labeled missing pieces (lifecycle, cloud, monitoring, survival, auth, UX), minimal palette, under 10 words}} -->
+      <figcaption>Six missing pieces on an otherwise-complete board.</figcaption>
+    </figure>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>Seven phases, ordered so that verification precedes construction and every phase leaves <code>main</code> green. Phase 1 audits all 25 ADRs against the code and fixes the decision record itself. Phase 2 closes the local v1 (project lifecycle, storage retirement, the two UX fixes, submit-form validation). Phase 3 completes the problem-type spine (regression metrics, survival C-index — each behind its own config, with a new ADR for survival's implementation choices). Phase 4 lands OIDC auth behind the existing <code>AuthBackend</code> seam. Phase 5 authors the full Terraform + runbook + Batch status backfill, with <code>terraform apply</code> and the live E2E explicitly <strong>gated</strong>. Phase 6 builds the monitoring layer over the append-only predictions table (scheduled forward scoring + drift SQL views + a dashboard panel, with a new architecture ADR). Phase 7 is the release sweep. Three new ADRs (0026 survival, 0027 monitoring, 0028 OIDC flow) capture the hard-to-reverse choices this plan introduces.</p>
+    <figure>
+      <!-- {{SOLUTION_IMAGE: seven ascending steps labeled Audit, Local, Problem types, Auth, Cloud (gated), Monitoring, Release — amber lock icon on the cloud step, minimal palette, under 10 words}} -->
+      <figcaption>Seven phases; the cloud apply is the one gated step.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>docs/adr/0001–0025-*.md</code> — the decision record under audit; status lines get appended (never rewritten)</li>
+      <li><span class="tag existing">existing</span> <code>docs/cloud-profile-spec.md</code> — cloud seam spec; §3 storage-retirement contradiction to resolve; §7 lists the Batch-status follow-on</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py</code> — gains <code>project create/drop</code> and <code>runs status</code>; loses its <code>catwalk.storage.Store.factory</code> import</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/registry.py</code> — control-plane access; project-lifecycle helpers land beside it</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/storage.py</code> — inherited CSV-era store; retired in Phase 2 (with <code>src/tests/catwalk_tests/test_storage.py</code>, <code>src/tests/test_utils_pandas.py</code>, <code>src/tests/catwalk_tests/utils.py</code>, <code>src/tests/conftest.py</code> fixture cleanup)</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/in_pg_evaluation.py</code> — <code>metric_config</code> already reaches the PL/pgSQL dispatcher; Phase 3 plumbs it from the experiment YAML and adds regression/survival defaults</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/{run,model,matrix,labels,forward}.py</code> — survival estimator wiring (model), duration/event matrix columns (matrix/labels), forward-score entrypoint for monitoring (forward), config plumbing (run)</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/results_schema/alembic/versions/</code> — migrations 0001–0010 exist; new ones start at 0011</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/profiles/{auth,execution,storage,protocols}.py</code> — cloud adapters (moto-tested); <code>execution.py</code> gains the job-status reader</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/dashboard/{app,routes,write_routes,auth,project_routing}.py</code> — validate-config route, OIDC backend, monitoring endpoints</li>
+      <li><span class="tag existing">existing</span> <code>frontend/src/</code> — ProjectSwitcher deep-link fix, SubmissionsView form rework, Monitoring view, login flow</li>
+      <li><span class="tag existing">existing</span> <code>example/{dirtyduck,donorschoose,chicago311}/greenfield.yaml</code> — exposed via the config-picker API; chicago311 gains a survival variant</li>
+      <li><span class="tag existing">existing</span> <code>pyproject.toml</code>, <code>justfile</code> — new optional extras (<code>survival</code>, <code>oidc</code>), new recipes (<code>just tf-validate</code>)</li>
+      <li><span class="tag existing">existing</span> <code>CONTEXT.md</code>, <code>TODO.org</code>, <code>docs/README.md</code> — glossary/docs sweep in Phase 7</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>docs/adr-conformance.md</code> — the Phase-1 audit: one row per ADR with verdict + code/test evidence</li>
+      <li><span class="tag new">new</span> <code>docs/adr/0026-survival-estimators-and-c-index.md</code> — survival implementation decisions (library, C-index locus, ties)</li>
+      <li><span class="tag new">new</span> <code>docs/adr/0027-monitoring-architecture.md</code> — scheduled forward scoring + drift views; explicitly no daemon</li>
+      <li><span class="tag new">new</span> <code>docs/adr/0028-oidc-auth-backend.md</code> — in-app OIDC (authlib) vs proxy-injected identity</li>
+      <li><span class="tag new">new</span> <code>src/triage/project_lifecycle.py</code> — create/drop project DB + alembic upgrade + registry row (ADR-0002 completion)</li>
+      <li><span class="tag new">new</span> <code>src/triage/component/results_schema/alembic/versions/0011_monitoring_views.py</code> — score-drift / volume / outcome-tracking views (number may shift if Phase 3 needs a migration first)</li>
+      <li><span class="tag new">new</span> <code>src/triage/dashboard/oidc.py</code> — <code>OidcAuth(AuthBackend)</code> + login/callback/logout routes</li>
+      <li><span class="tag new">new</span> <code>infra/terraform/{main,rds,s3,batch,iam,variables,outputs}.tf</code> — the full cloud footprint, applied only when gated open</li>
+      <li><span class="tag new">new</span> <code>docs/cloud-runbook.md</code> — apply → bootstrap PG/IAM roles → push image → smoke E2E, step by step</li>
+      <li><span class="tag new">new</span> <code>docs/monitoring.md</code> — how to schedule forward scoring locally (cron) and in cloud (EventBridge→Batch)</li>
+      <li><span class="tag new">new</span> <code>example/chicago311/greenfield-survival.yaml</code> — time-to-resolution survival config (natural censoring)</li>
+      <li><span class="tag new">new</span> <code>src/tests/{test_project_lifecycle,test_survival,test_monitoring_views,dashboard_tests/test_oidc,dashboard_tests/test_validate_config}.py</code> — per-phase test modules</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <!-- ================= PHASE 1 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 1: ADR Conformance Audit &amp; Decision-Record Hygiene</h3>
+      <p>Re-read all 25 ADRs against the code and produce an evidence-backed conformance report. This is the maintainer's explicit ask ("check that we are fulfilling the ADRs and that the ADRs make sense") and it de-risks every later phase: Phases 2–6 each close a gap this audit formally establishes. No behavior changes in this phase — docs only.</p>
+
+      <h4>1. Build the conformance table</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Create <code>docs/adr-conformance.md</code>: one row per ADR — decision summary, verdict (<em>fulfilled / partial / stale-status / contradiction</em>), and concrete evidence (module path + test path). Seed from the audit already performed for this plan (see Notes → ADR audit findings).</li>
+        <li><code class="status">[x]</code> For each <em>fulfilled</em> ADR, spot-verify the evidence actually holds (run the named test module, confirm the named file/function exists) rather than trusting status lines.</li>
+        <li><code class="status">[x]</code> Check ADR-0007's outstanding consequence — "SQL bias-metrics validated against known Aequitas outputs". The metric functions were validated against sklearn; determine whether <code>compute_bias_metrics</code> ever got an Aequitas-reference test. If not, add one (a small fixture with hand-computed disparity ratios matching Aequitas' definitions) or record in the ADR why sklearn-style validation suffices.</li>
+        <li><code class="status">[x]</code> Verify <code>.out-of-scope/deep-learning.md</code> is still honored (no torch/keras/deep-learning surface crept in).</li>
+      </ul>
+
+      <h4>2. Fix stale and contradictory records</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> ADR-0002: append a status line — routing is now implemented (ADR-0025); the remaining gap is the project lifecycle (this plan, Phase 2).</li>
+        <li><code class="status">[x]</code> ADR-0012: append a status line — the write webapp shipped (ADR-0024); "deferred (in progress)" is stale.</li>
+        <li><code class="status">[x]</code> ADR-0024 / ADR-0025: append implemented-status lines with commit refs (<code>b657b17f</code>/<code>e9310683</code>, <code>76eb46fc</code>) matching the house convention of the other 23.</li>
+        <li><code class="status">[x]</code> <code>docs/cloud-profile-spec.md</code> §3: annotate the storage-retirement contradiction — the decision text says <code>catwalk/storage.py</code> "is retired", the implementation note says it wasn't. Record that Phase 2 of this plan retires it (do not silently rewrite the decision text).</li>
+        <li><code class="status">[x]</code> ADR-0006 / ADR-0010: append status lines noting this plan builds the deferred monitoring features (Phase 6) and survival path (Phase 3), so the deferrals have an end date.</li>
+      </ul>
+
+      <h4>3. Sanity-check the decisions themselves</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Review each ADR's "Considered alternatives" for assumptions that changed since acceptance (e.g. ADR-0020's serial grid: confirm it still holds for the monitoring workload — scheduled forward scores are single-model, so it does; note it). Flag — do not unilaterally revise — anything that no longer makes sense, and review flags with the maintainer before Phase 2 starts.</li>
+        <li><code class="status">[x]</code> Confirm the three planned new ADRs (0026–0028) each pass the three-criteria bar (hard to reverse + surprising without context + real trade-off) and record the criteria check inside each ADR's Context section when written in Phases 3/4/6.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <p>This phase is documentation-only, so validation is (a) the suite stays untouched-green, proving no accidental code edits, and (b) mechanical checks that the record is complete.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code> — still 394 passed, 12 skipped (nothing but docs changed)</li>
+        <li><code class="status">[x]</code> <code>ls docs/adr-conformance.md &amp;&amp; grep -c '^| 00' docs/adr-conformance.md</code> — the table exists and has 25 ADR rows</li>
+        <li><code class="status">[x]</code> <code>grep -L 'Status' docs/adr/00*.md</code> — returns nothing: every ADR carries a status/status-update line</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 2 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 2: Teaching-Ready Local v1 — Lifecycle, Retirement, UX</h3>
+      <p>Close every local-profile gap: complete ADR-0002 with a real project lifecycle, retire the inherited storage module (resolving the spec contradiction), fix the two TODO.org UX items, and give the submit form a validation-backed authoring path. After this phase, a student or client can go from zero to a running, inspectable project without folklore.</p>
+
+      <figure>
+        <!-- {{PHASE_IMAGE: flow of "triage project create" — registry row, CREATE DATABASE, alembic migrate, dashboard switcher — four connected nodes, minimal palette, under 10 words}} -->
+        <figcaption>One command takes a project from name to migrated database.</figcaption>
+      </figure>
+
+      <h4>1. Project lifecycle (ADR-0002 completion)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> New <code>src/triage/project_lifecycle.py</code>: <code>create_project(registry_pool, maint_url, slug, …)</code> — insert the registry row, <code>CREATE DATABASE</code> via a maintenance connection (autocommit; psycopg3 — CREATE DATABASE cannot run in a transaction), then run the triage-schema alembic <code>upgrade head</code> against the new DB. Idempotency: fail loud if the registry row or database already exists (no silent adopt).</li>
+        <li><code class="status">[x]</code> <code>drop_project(…)</code>: require the slug typed back (<code>--confirm &lt;slug&gt;</code>) exactly like modern destructive CLIs; drop the database, then soft-delete or remove the registry row (decision: keep the registry row with a <code>dropped_at</code> timestamp — the audit trail of submissions references it).</li>
+        <li><code class="status">[x]</code> CLI: <code>triage project create &lt;slug&gt;</code> / <code>triage project drop &lt;slug&gt; --confirm &lt;slug&gt;</code> / <code>triage project list</code>. Maintenance URL from <code>TRIAGE_MAINT_URL</code> else the registry URL's cluster with <code>dbname=postgres</code> — fail fast if neither resolves (per the error-handling house rule).</li>
+        <li><code class="status">[x]</code> Webapp: <code>POST /api/projects</code> keeps creating only the registry row (control-plane), but the response now carries <code>database_ready: bool</code> (does the routed DB exist + have the schema?) so the UI can surface "created, awaiting provisioning" honestly. Full DB provisioning from the webapp stays out — creating databases needs cluster-superuser-ish credentials the webapp deliberately doesn't hold (see Questionables).</li>
+        <li><code class="status">[x]</code> Tests <code>src/tests/test_project_lifecycle.py</code>: create → registry row + DB exists + <code>alembic_version</code> populated + dashboard routing resolves it; drop → DB gone, registry row tombstoned; create-twice fails loud; missing maintenance URL fails naming the variable.</li>
+      </ul>
+
+      <h4>2. Retire <code>catwalk/storage.py</code> (resolves the spec §3 contradiction)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Migrate <code>cli.py</code>'s <code>Store.factory</code> YAML/config loading to plain <code>pathlib</code>/<code>yaml.safe_load</code> (it reads local config files — no storage abstraction needed).</li>
+        <li><code class="status">[x]</code> Port or delete the four dependent test files (<code>catwalk_tests/test_storage.py</code>, <code>catwalk_tests/utils.py</code>, <code>test_utils_pandas.py</code>, the <code>conftest.py</code> fixtures) — anything still exercising retired behavior goes; anything guarding live behavior moves onto <code>profiles/storage.py</code>.</li>
+        <li><code class="status">[x]</code> Delete <code>src/triage/component/catwalk/storage.py</code>; <code>grep -rn "catwalk.storage" src/</code> must return zero hits; append the closing status note to <code>docs/cloud-profile-spec.md</code> §3.</li>
+      </ul>
+
+      <h4>3. Project-switch deep-link fix (TODO.org)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>frontend/src/components/ProjectSwitcher.tsx</code>: on switch, <code>setActiveProject(slug)</code> then navigate to <code>/experiments</code> (project-neutral) before reload — a stale <code>/experiments/&lt;hash&gt;</code> deep-link from project A can no longer 404 under project B.</li>
+        <li><code class="status">[x]</code> Note in the code and ADR-0025 that this remains the v1 full-reload model; the context-driven refresh refinement stays deferred.</li>
+      </ul>
+
+      <h4>4. Submit-form UX: validate endpoint + config picker + file upload (TODO.org)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Backend <code>POST /api/validate-config</code> (write router): accepts JSON <em>or</em> YAML body, runs the same shape-validation the submit path uses <em>plus</em> derives the would-be <code>experiment_hash</code> (ADR-0022 problem identity) — dry-run only, nothing persisted. Returns <code>{experiment_hash, problem_type, n_feature_groups, errors: []}</code> with structured, path-addressed errors.</li>
+        <li><code class="status">[x]</code> Backend <code>GET /api/example-configs</code>: serves the committed <code>example/*/greenfield*.yaml</code> (name + description + raw YAML) so the picker needs no filesystem access from the SPA.</li>
+        <li><code class="status">[x]</code> <code>POST /api/submissions</code>: accept YAML as well as JSON (server-side <code>yaml.safe_load</code>; pyyaml is already a dependency) so users can paste exactly what <code>triage run</code> consumes.</li>
+        <li><code class="status">[x]</code> Frontend <code>SubmissionsView</code>: config source = <em>pick an example</em> / <em>upload .yaml/.json</em> / <em>paste</em>; a <strong>Validate</strong> button calling the dry-run route; render the derived experiment hash + errors inline; Submit disabled until validation passes. (Monaco/JSON-schema autocomplete stays deferred — see Questionables.)</li>
+        <li><code class="status">[x]</code> Tests <code>dashboard_tests/test_validate_config.py</code>: valid YAML → hash + zero errors; broken cohort SQL placeholder → structured error naming the path; YAML submission E2E with the stubbed runner.</li>
+      </ul>
+
+      <h4>5. Teaching docs</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>docs/quickstart.md</code>: the zero-to-experiment path — <code>just chi311-up</code> → <code>triage project create</code> → <code>triage run example/chicago311/greenfield.yaml</code> → dashboard walk; link the three datasets' READMEs; add to <code>docs/README.md</code> index.</li>
+      </ul>
+
+      <h4>6. Testing Strategy</h4>
+      <p>Backend behavior via pytest against <code>pytest-postgresql</code>-managed clusters (project lifecycle needs a real CREATE DATABASE, which the per-test PG server provides); frontend via typescript build + lint; edge cases: create-twice, drop-without-confirm, YAML-with-tabs, config missing <code>{as_of_date}</code> placeholder, stale deep-link switch.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_project_lifecycle.py src/tests/dashboard_tests/ -v</code> — new lifecycle + validate-config + routing tests pass</li>
+        <li><code class="status">[x]</code> <code>just test</code> — full suite green including the retirement fallout (393 passed, 9 skipped: 19 retired tests out, 15 new in; no orphaned imports)</li>
+        <li><code class="status">[x]</code> <code>grep -rn "catwalk.storage" src/ | grep -v egg-info | wc -l</code> — outputs 0: the module is fully retired</li>
+        <li><code class="status">[f]</code> <code>uv run ruff check src/ &amp;&amp; just typecheck</code> — ruff clean; <strong>typecheck [f]: pre-existing failure</strong> — basedpyright fails at clean HEAD too (501 errors there vs 497 after these changes, net −4). No regression introduced; burn-down flagged for the maintainer.</li>
+        <li><code class="status">[x]</code> <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — SPA compiles strict + clean</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 3 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 3: Problem-Type Completion — Regression Metrics &amp; Survival C-Index</h3>
+      <p>Finish what ADR-0010 designed: every declared <code>problem_type</code> becomes fully runnable. Regression gets its <code>metric_config</code> selectable from the experiment YAML (the PL/pgSQL functions already exist); survival gets its first real train/eval path on the schema that has been ready since migration 0001. New <strong>ADR-0026</strong> records the survival implementation trade-offs.</p>
+
+      <h4>1. Regression <code>metric_config</code> plumbing</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Experiment config gains an optional <code>evaluation.metrics</code>/<code>evaluation.thresholds</code> block; <code>adapters/run.py</code> passes it through to <code>score_and_evaluate</code> → <code>in_pg_evaluation.py</code> (which already accepts <code>metric_config</code> — verified). Absent block ⇒ current defaults byte-for-byte (classification default unchanged; add <code>DEFAULT_REGRESSION_CONFIG</code> = rmse/mae/r2 and use it when <code>problem_type</code> is regression-family).</li>
+        <li><code class="status">[x]</code> Confirm (or add) rmse/mae/r2 dispatch inside the migration-0002 PL/pgSQL evaluator for regression problem types; if a schema change is required it becomes migration 0011 and the monitoring migration shifts to 0012.</li>
+        <li><code class="status">[x]</code> Update <code>example/dirtyduck</code>'s regression variant config to exercise a non-default metric set; E2E-run it on the food DB docker.</li>
+      </ul>
+
+      <h4>2. ADR-0026 + survival dependency seam</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Write <code>docs/adr/0026-survival-estimators-and-c-index.md</code>: (a) estimator library — recommend <strong>scikit-survival</strong> (sklearn-compatible <code>fit(X, structured_y)</code>, fits the existing catwalk seam; lifelines is DataFrame-centric) as an <em>optional extra</em> <code>triage[survival]</code>; (b) C-index locus — recommend <strong>PL/pgSQL</strong> (ADR-0007 consistency: it is a ranking metric over <code>(score, duration, event_observed)</code>, all in PG) with the comparable-pairs definition (Harrell's C) and the deterministic tie policy from schema-design §8; (c) risk-score orientation convention (higher score = higher risk = ranked first). Record the pair-count performance envelope and the escape hatch (compute in Python at scoring time) if PL/pgSQL proves too slow beyond ~10⁵ predictions/split.</li>
+        <li><code class="status">[x]</code> <code>uv add --optional survival scikit-survival</code>; import guarded — <code>problem_type: survival</code> without the extra fails at config-validation time naming the extra (never mid-run).</li>
+      </ul>
+
+      <h4>3. Survival pipeline path</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Label → matrix: <code>adapters/matrix.py</code> carries <code>(duration, event_observed)</code> through assembly when <code>problem_type = 'survival'</code> (columns already exist on <code>triage.labels</code> per ADR-0010; they are label columns, never features).</li>
+        <li><code class="status">[x]</code> <code>adapters/model.py</code>: survival estimator support — build the structured <code>y</code> (<code>Surv.from_arrays(event, duration)</code>), grid entries like <code>sksurv.linear_model.CoxPHSurvivalAnalysis</code> / <code>sksurv.ensemble.RandomSurvivalForest</code>; persist coefficient-based importances for Cox (the ADR-0011 train-time write).</li>
+        <li><code class="status">[x]</code> Scoring: predicted risk goes into the existing append-only <code>predictions.score</code> (ADR-0006/0010 spine unchanged — rank by risk).</li>
+        <li><code class="status">[x]</code> Migration (0011 or 0012 per task 1): PL/pgSQL <code>triage.c_index(model_id, as_of_date, …)</code> over comparable pairs, wired into the evaluation dispatcher under <code>problem_type = 'survival'</code>; alembic downgrade drops it cleanly (roundtrip-tested like 0008 taught us).</li>
+        <li><code class="status">[x]</code> <code>example/chicago311/greenfield-survival.yaml</code>: time-to-resolution with natural censoring (open requests at label-window end ⇒ <code>event_observed = false</code>) — the label query emits <code>(duration, event_observed)</code> per the ADR-0010 contract; E2E on the chi311 docker (port 5438).</li>
+      </ul>
+
+      <h4>4. Dashboard awareness</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Metric catalog + experiment/model panels render <code>c_index</code> and the regression metrics with problem-type-appropriate labels (no classification-only assumptions in <code>frontend/src/pages</code>).</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>Cross-validation against reference implementations is the core discipline (as migration 0002 was validated against sklearn): the PL/pgSQL C-index must match <code>sksurv.metrics.concordance_index_censored</code> on randomized fixtures, including ties and heavy censoring. E2E proves the full path on real data.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_survival.py -v</code> — C-index matches sksurv reference on 200-row randomized fixtures (exact to 1e-9; seeded), censoring respected, ties deterministic; survival E2E trains Cox + RSF on a small fixture and writes evaluations</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -k "metric_config or regression" -v</code> — metric selection reaches PL/pgSQL; defaults unchanged when block absent (golden-value regression test)</li>
+        <li><code class="status">[x]</code> <code>just chi311-up &amp;&amp; uv run triage run example/chicago311/greenfield-survival.yaml</code> — live survival E2E completes with populated c_index evaluations</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -k migration -v &amp;&amp; just test</code> — alembic roundtrip green; whole suite green</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 4 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 4: Real Auth — OIDC Behind the Existing Seam</h3>
+      <p>Replace laptop-only <code>TrustedHeaderAuth</code> as the shared-deployment story, exactly as ADR-0024 promised: one new <code>AuthBackend</code> class, selected by <code>TRIAGE_AUTH=oidc</code>, routes untouched. New <strong>ADR-0028</strong> records the flow choice.</p>
+
+      <h4>1. ADR-0028 — flow choice</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Write <code>docs/adr/0028-oidc-auth-backend.md</code>: recommend <strong>in-app OIDC Authorization Code flow via authlib</strong> (signed session cookie; IdP-agnostic — Keycloak/Auth0/Google all speak discovery), over (a) proxy-injected identity (oauth2-proxy + TrustedHeaderAuth — already implicitly supported, documented as the zero-code alternative) and (b) rolling our own JWT validation. Session secret from <code>TRIAGE_SESSION_SECRET</code>, fail-fast when missing under <code>TRIAGE_AUTH=oidc</code>.</li>
+      </ul>
+
+      <h4>2. Backend</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv add --optional oidc authlib itsdangerous</code>; new <code>src/triage/dashboard/oidc.py</code>: <code>OidcAuth</code> implementing the <code>AuthBackend</code> protocol — resolves the session cookie to a <code>Principal</code> (materializing the identity in <code>registry.users</code> exactly as TrustedHeaderAuth does); plus <code>/auth/login</code> (redirect to IdP), <code>/auth/callback</code> (code exchange → set session), <code>/auth/logout</code>. Config: <code>TRIAGE_OIDC_ISSUER</code>, <code>TRIAGE_OIDC_CLIENT_ID</code>, <code>TRIAGE_OIDC_CLIENT_SECRET</code> — all fail-fast, all via env per the house credential rule.</li>
+        <li><code class="status">[x]</code> <code>dashboard/auth.py</code>'s backend registry: <code>TRIAGE_AUTH=oidc</code> → <code>OidcAuth</code>; unknown values keep failing loud (existing behavior, ADR-0024). Admin mapping stays <code>TRIAGE_ADMIN_EMAILS</code>.</li>
+        <li><code class="status">[x]</code> Unauthenticated API requests under OIDC → 401 with a <code>login_url</code> field (SPA-friendly), not a 302 (API and browser flows kept distinct).</li>
+      </ul>
+
+      <h4>3. Frontend</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>api/client.ts</code>: on 401-with-<code>login_url</code>, redirect to it; <code>IdentityChip</code> gains a logout action when the backend reports OIDC mode (extend <code>GET /api/me</code> with <code>auth_mode</code>).</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <p>No live IdP in the suite: a stubbed OIDC provider (respx/httpx-mock for discovery + token endpoints, or authlib's test utilities) exercises the callback exchange; session-cookie tests run the full FastAPI TestClient path. TrustedHeaderAuth tests must remain untouched-green, proving the seam held.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/dashboard_tests/test_oidc.py -v</code> — login redirect carries state+nonce; callback exchanges code and sets the session; tampered cookie → 401; missing env vars fail naming the variable</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/dashboard_tests/ -v</code> — all existing auth/write tests still green under the default TrustedHeaderAuth</li>
+        <li><code class="status">[x]</code> <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — SPA clean</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 5 ================= -->
+    <div class="phase gated">
+      <h3><code class="status">[x]</code> Phase 5: Cloud Track — Terraform Authored, Apply GATED <em style="font-weight:400">(non-gated work complete; the four live-validation items stay [f]-gated)</em></h3>
+      <p>Author the complete AWS footprint (Terraform + runbook) and the Batch status backfill so the cloud profile is <em>one command from live</em> — but <code>terraform apply</code> and the live E2E run only when the maintainer opens the gate (account ready, cost accepted). Everything else in this phase is fully verifiable offline.</p>
+
+      <figure>
+        <!-- {{PHASE_IMAGE: AWS architecture — Batch job container connecting to RDS via IAM token and S3 via task role, Terraform icon at the base, amber "gated" padlock on the apply arrow, under 10 words}} -->
+        <figcaption>The full footprint is authored; only the apply is gated.</figcaption>
+      </figure>
+
+      <h4>1. Terraform (<code>infra/terraform/</code>)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>rds.tf</code>: single RDS PostgreSQL instance (smallest viable class, <code>iam_database_authentication_enabled = true</code>, private subnet, deletion protection) — plain RDS over Aurora for cost/simplicity at current scale (see Questionables); databases-per-project created by <code>triage project create</code>, not Terraform.</li>
+        <li><code class="status">[x]</code> <code>s3.tf</code>: versioned artifact bucket (matrices/models/config staging) with a lifecycle rule only on the <code>staging/</code> prefix.</li>
+        <li><code class="status">[x]</code> <code>batch.tf</code>: Fargate compute environment + job queue + job definition (image from ECR, entrypoint <code>triage run --profile cloud --config &lt;s3-uri&gt;</code>, vCPU/memory sized for the serial grid per ADR-0020); <code>ecr.tf</code>: the image repository.</li>
+        <li><code class="status">[x]</code> <code>iam.tf</code>: the Batch <strong>task role</strong> — <code>rds-db:connect</code> scoped to per-project DB users + S3 RW scoped to the bucket — exactly the ADR-0004/0005 no-passed-credentials model; execution role for image pull/logs.</li>
+        <li><code class="status">[x]</code> <code>variables.tf</code>/<code>outputs.tf</code>: outputs emit precisely the §5 env-var values (<code>TRIAGE_RDS_HOST</code>, <code>TRIAGE_S3_BUCKET</code>, <code>TRIAGE_BATCH_QUEUE</code>, <code>TRIAGE_BATCH_JOB_DEF</code>, …) so wiring the environment is copy-paste; remote state config documented but not hardcoded.</li>
+      </ul>
+
+      <h4>2. Runbook + image</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>docs/cloud-runbook.md</code>: apply → bootstrap PG roles (<code>CREATE USER … ; GRANT rds_iam</code> per project — the ADR-0004 per-project scoping) → registry DB creation → build/push the image → set env from outputs → <code>triage run --profile cloud</code> → observe via <code>triage runs status</code> + dashboard. Include teardown.</li>
+        <li><code class="status">[x]</code> Resolve the <strong>featurizer git+ssh dependency</strong> for the ECR image build: the Dockerfile installs featurizer via <code>git+ssh</code> (deploy key). Document the build-time <code>--ssh default</code> path for local builds pushed to ECR; note the alternative (private PyPI/CodeArtifact) as future work. This is a real blocker for any CI-built image — called out, not hidden.</li>
+      </ul>
+
+      <h4>3. Batch status backfill (<code>cloud-profile-spec.md</code> §7 follow-on)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>profiles/execution.py</code>: <code>BatchExecution.job_status(job_id)</code> via <code>batch.describe_jobs</code>; CLI <code>triage runs status [--run-id | --all-pending]</code> polls and writes terminal state (<code>SUCCEEDED/FAILED</code> + stoppedAt) onto <code>triage.runs</code> (the <code>batch_job_id</code> columns already exist on both <code>triage.runs</code> and <code>registry.submissions</code> — verified).</li>
+        <li><code class="status">[x]</code> Dashboard submissions list surfaces the Batch state for cloud submissions (read-only column; poll happens CLI-side or on-request, no background thread).</li>
+      </ul>
+
+      <h4>4. <span class="tag gated">gated</span> Live validation (execute when the gate opens)</h4>
+      <ul class="checklist">
+        <li><code class="status">[f]</code> <code>terraform apply</code> against the real account; bootstrap roles per the runbook <em>(GATED 2026-07-03 — awaiting the maintainer's AWS go; the module validates offline)</em></li>
+        <li><code class="status">[f]</code> Push the image to ECR; <code>triage project create</code> against RDS; load the chi311 dataset <em>(GATED 2026-07-03)</em></li>
+        <li><code class="status">[f]</code> <code>triage run --profile cloud example/chicago311/greenfield.yaml</code> — one Batch job end-to-end <em>(GATED 2026-07-03)</em>: IAM token connect, S3 matrices/models, predictions + evaluations in RDS, <code>triage runs status</code> reports SUCCEEDED</li>
+        <li><code class="status">[f]</code> Dashboard pointed at RDS (dbname-swap routing, ADR-0025) renders the experiment <em>(GATED 2026-07-03)</em>; append ADR-0004/0005 status lines: <em>exercised on live AWS</em></li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>Offline: terraform validate/fmt prove the IaC parses and conforms; moto covers <code>describe_jobs</code> exactly as it covers <code>submit_job</code> today. The live E2E is the gated proof — if the gate stays closed at build time, mark those boxes <code>[f]</code> with a dated note rather than faking them.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>terraform -chdir=infra/terraform init -backend=false &amp;&amp; terraform -chdir=infra/terraform validate</code> — configuration is valid</li>
+        <li><code class="status">[x]</code> <code>terraform -chdir=infra/terraform fmt -check -recursive</code> — canonical formatting</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_profiles.py -v</code> — existing 12 mocked-AWS tests + new <code>job_status</code>/backfill tests green (moto Batch)</li>
+        <li><code class="status">[x]</code> <code>just test</code> — full suite green (415 passed, 9 skipped)</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every non-gated box above is checked.</strong>
+        Gated tasks execute only on the maintainer's go; if still gated when this plan is built, mark them <code>[f]</code> with the date and reason.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 6 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 6: Production Monitoring — the ADR-0006 Payoff</h3>
+      <p>Build the monitoring story the append-only predictions table was designed for: scheduled forward scoring, drift/health SQL views, and a dashboard panel. New <strong>ADR-0027</strong> records the architecture — in particular that there is <em>no new daemon</em>: scheduling is the operator's scheduler (cron locally, EventBridge→Batch in cloud) invoking the existing CLI, keeping the headless-complete ethos (ADR-0012) intact.</p>
+
+      <figure>
+        <!-- {{PHASE_IMAGE: timeline of append-only prediction batches flowing into drift charts — score distribution shifting over scored_at, minimal palette, under 10 words}} -->
+        <figcaption>Append-only scoring runs become drift curves by scored_at.</figcaption>
+      </figure>
+
+      <h4>1. ADR-0027 — monitoring architecture</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Write <code>docs/adr/0027-monitoring-architecture.md</code>: (a) scheduling = external scheduler → <code>triage score</code> CLI (rejecting: a triage daemon, pg_cron — forward scoring needs Python/featurizer, outside the in-database-housekeeping carve-out); (b) drift metrics = PSI + KS between a scoring window and a pinned reference window, computed in SQL over <code>triage.predictions</code> (ADR-0007 consistency); (c) reference-window choice recorded per deployed model group.</li>
+      </ul>
+
+      <h4>2. Forward-scoring entrypoint hardening</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Verify <code>adapters/forward.py</code> + its CLI surface fit the recurring use: idempotent per <code>(model, prediction_date)</code> re-invocation (append-only makes re-runs safe; <code>runs.purpose='forward_score'</code> + <code>prediction_date</code> from ADR-0018 already record provenance); document the cron line in <code>docs/monitoring.md</code>.</li>
+        <li><code class="status">[x]</code> Cloud variant: an EventBridge Scheduler rule template in <code>infra/terraform/monitoring.tf</code> submitting the Batch job with <code>triage score</code> parameters (authored with Phase 5's gating).</li>
+      </ul>
+
+      <h4>3. Monitoring SQL layer (migration 0011/0012)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Views/functions over <code>triage.predictions</code> by <code>scored_at</code>: <code>monitoring_score_drift</code> (PSI + KS vs the reference window, per model group), <code>monitoring_volume</code> (rows + distinct entities per scoring run), <code>monitoring_outcome_tracking</code> (labels arriving later joined back to past scores — realized precision@k over time, honoring the "a score is not the latest score" rule), <code>monitoring_calibration</code> (score-decile vs realized-outcome rate over time).</li>
+        <li><code class="status">[x]</code> Deterministic + windowed: every view keyed <code>(model_group_id, scored_at window)</code>; quarterly partitions (ADR-0006) keep the scans bounded; alembic downgrade drops all views cleanly.</li>
+      </ul>
+
+      <h4>4. Dashboard monitoring panel</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Read routes for the four views + a <code>MonitoringView</code> page: score-drift chart over <code>scored_at</code>, volume bars, realized-vs-expected precision line, calibration strip — per model group, project-switcher-aware like every other panel.</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>The invariant under test: two forward-scoring runs at different <code>scored_at</code> against the same model produce distinguishable, append-only history that the views aggregate correctly. Drift math validated against scipy references (PSI hand-computed fixture; KS vs <code>scipy.stats.ks_2samp</code>).</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_monitoring_views.py -v</code> — two-scoring-runs fixture: drift/volume/outcome views populated and window-correct; PSI/KS match reference values; append-only preserved (first run's rows byte-identical after the second)</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -k migration -v</code> — 0011/0012 upgrade/downgrade roundtrip green</li>
+        <li><code class="status">[x]</code> <code>just chi311-up</code> then two <code>triage score</code> invocations with distinct prediction dates — live smoke: MonitoringView renders both runs' drift points</li>
+        <li><code class="status">[x]</code> <code>just test &amp;&amp; cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — everything green (421 passed, 9 skipped)</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 7 ================= -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 7: Release Verification &amp; Docs Sweep <em style="font-weight:400">(complete except the tag, blocked on the commit decision)</em></h3>
+      <p>Prove the whole is releasable, sweep every document the plan touched, and cut the tag. The version story: tag <code>v1.0.0-rc1</code> when Phases 1–6's non-gated work is green; promote to <code>v1.0.0</code> after the gated cloud E2E passes (see Questionables).</p>
+
+      <h4>1. Documentation closure</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>docs/README.md</code> index: add quickstart, cloud-runbook, monitoring, adr-conformance; ADR count 25→28.</li>
+        <li><code class="status">[x]</code> <code>CONTEXT.md</code>: add/confirm glossary terms this plan introduced — <em>Submission</em>, <em>Principal</em>, <em>Forward score</em>, <em>Reference window</em>, <em>C-index</em> (definitions + Avoid lines per the house format).</li>
+        <li><code class="status">[x]</code> <code>TODO.org</code>: close the two UI/UX :discuss: items and the optional regression/survival lines; record what stays deferred (Monaco editor, context-driven switch refresh, grid parallelism per ADR-0020, interpretability companion per ADR-0011).</li>
+        <li><code class="status">[x]</code> <code>CLAUDE.md</code> "Status &amp; Direction": update phase description (durable instructions only — no session narrative).</li>
+      </ul>
+
+      <h4>2. Release gates + tag</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Run the full validation battery (below) on a clean checkout; fix anything that only worked in a warm tree. <em>(Ran on the full working tree — a literal clean checkout needs the work committed first, which awaits the maintainer's go.)</em></li>
+        <li><code class="status">[x]</code> <code>DOCKER_BUILDKIT=1 docker build --ssh default .</code> — the greenfield image still builds (the cloud image path depends on it).</li>
+        <li><code class="status">[f]</code> Tag <code>v1.0.0-rc1</code> on <code>main</code>, push with the release notes summarizing the 28-ADR architecture; leave the <code>v1.0.0</code> promotion checklist item gated with Phase 5. <em>(BLOCKED 2026-07-03 — the tree is uncommitted; committing/pushing/tagging happens only on the maintainer's explicit ask, per the house rule.)</em></li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>The global battery is the strategy: every gate the project already enforces, run in sequence on the final tree — plus the three live docker-backed smokes (one per tutorial dataset) as the teaching-readiness proof.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code> — full suite green (421 passed, 9 skipped)</li>
+        <li><code class="status">[f]</code> <code>uv run ruff check src/ &amp;&amp; just typecheck</code> — ruff clean; typecheck [f] pre-existing (basedpyright fails at old HEAD too; net −4 errors from this work)</li>
+        <li><code class="status">[x]</code> <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — SPA strict + clean</li>
+        <li><code class="status">[x]</code> <code>just dirtyduck-up-and-run || (just tutorial-up &amp;&amp; uv run triage run example/dirtyduck/greenfield.yaml)</code> — dataset smoke 1: 20 models / 268,860 predictions / 120 evaluations; problem hash <code>b9e38fd8</code> unchanged (ADR-0022 held)</li>
+        <li><code class="status">[x]</code> <code>just donors-up &amp;&amp; uv run triage run example/donorschoose/greenfield.yaml</code> — dataset smoke 2: 20 models / 1,820 predictions</li>
+        <li><code class="status">[x]</code> <code>just chi311-up &amp;&amp; uv run triage run example/chicago311/greenfield.yaml</code> — dataset smoke 3: 20 models / 58,190 predictions</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[x]</code> <code>just test</code> — the full backend suite passes: <strong>421 passed, 9 skipped</strong> (baseline 394+12; −19 retired storage tests, +37 new: lifecycle/validate-config/survival/OIDC/batch-status/monitoring)</li>
+      <li><code class="status">[x]</code> <code>uv run ruff check src/</code> — zero lint findings</li>
+      <li><code class="status">[f]</code> <code>just typecheck</code> — pre-existing failure (501 basedpyright errors at the old HEAD; this work is net −4). Burn-down flagged in TODO.org.</li>
+      <li><code class="status">[x]</code> <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — SPA compiles under strict TS, lint clean</li>
+      <li><code class="status">[x]</code> <code>terraform -chdir=infra/terraform validate &amp;&amp; terraform -chdir=infra/terraform fmt -check -recursive</code> — IaC valid and canonical</li>
+      <li><code class="status">[x]</code> <code>grep -rn "catwalk.storage" src/ | grep -v egg-info | wc -l</code> — outputs 0 (retirement held)</li>
+      <li><code class="status">[x]</code> <code>grep -c '^| 00' docs/adr-conformance.md</code> — 25 rows (conformance table complete)</li>
+      <li><code class="status">[x]</code> <code>ls docs/adr/0026* docs/adr/0027* docs/adr/0028*</code> — the three new ADRs exist</li>
+      <li><code class="status">[f]</code> <code>git tag --list 'v1.0.0*'</code> — BLOCKED with the tag task (the tree is uncommitted; commit/tag on the maintainer's ask)</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+    <p>Scope questions were answered by the maintainer on 2026-07-02 (target = teaching-ready local v1 + monitoring-ready, with the ADR audit; Terraform authored, apply gated; all four extras in). These are the <em>remaining</em> open decisions — each has a recommended default the build will follow unless overridden.</p>
+    <figure>
+      <!-- {{QUESTIONABLES_IMAGE: a signpost with a few forked paths, one path marked as the recommended default, minimal palette, under 10 words}} -->
+      <figcaption>Each open fork carries a recommended default.</figcaption>
+    </figure>
+    <details>
+      <summary>Survival estimator library — scikit-survival (recommended) vs lifelines</summary>
+      <p class="qa-answer">Recommendation: <strong>scikit-survival</strong> as the optional <code>triage[survival]</code> extra. Its estimators are sklearn-compatible (<code>fit(X, y)</code> with a structured array), so <code>adapters/model.py</code>'s existing catwalk seam barely changes; lifelines is DataFrame-first and would re-introduce pandas at the fit seam the project just narrowed. Decided formally in ADR-0026; reversal cost is contained to <code>model.py</code>'s estimator mapping.</p>
+    </details>
+    <details>
+      <summary>C-index locus — PL/pgSQL (recommended) vs Python at scoring time</summary>
+      <p class="qa-answer">Recommendation: <strong>PL/pgSQL</strong>, for ADR-0007 consistency (all evaluation in PG) — Harrell's C over comparable pairs with the deterministic tie policy. Risk: naive pair enumeration is O(n²); acceptable at tutorial/consulting eval sizes (≤10⁵ predictions/split ⇒ manageable with an indexed self-join), and ADR-0026 records the Python escape hatch if a client-scale cohort blows past it. The reference cross-check against <code>sksurv.metrics.concordance_index_censored</code> is mandatory either way.</p>
+    </details>
+    <details>
+      <summary>OIDC in-app (recommended) vs oauth2-proxy in front</summary>
+      <p class="qa-answer">Recommendation: <strong>in-app authlib flow</strong> — self-contained, IdP-agnostic via discovery, and testable in the suite; the proxy pattern remains documented as the zero-code alternative since <code>TrustedHeaderAuth</code> behind a trusted proxy already works today. If the deployment reality is "always behind nginx anyway", flipping to the proxy pattern later costs nothing (the seam is one env var).</p>
+    </details>
+    <details>
+      <summary>RDS instance vs Aurora Serverless v2</summary>
+      <p class="qa-answer">Recommendation: <strong>plain RDS PostgreSQL, smallest viable instance</strong>. ADR-0004 names "RDS/Aurora" without choosing; at teaching/consulting scale a db.t4g instance is dramatically cheaper than Aurora's floor, and nothing in the schema needs Aurora. Terraform keeps the engine choice as a variable so the swap is a plan-time decision, not a rewrite.</p>
+    </details>
+    <details>
+      <summary>Webapp project creation — registry-row-only (recommended) vs full DB provisioning</summary>
+      <p class="qa-answer">Recommendation: the webapp keeps creating <strong>registry rows only</strong>; <code>triage project create</code> (CLI, with maintenance credentials) does the CREATE DATABASE + migrate. Rationale: the webapp deliberately holds least-privilege credentials (ADR-0002/0025 kept the registry credential-free); giving the app CREATEDB power would widen its blast radius for a rare operation. The <code>database_ready</code> flag keeps the UX honest about the two-step reality.</p>
+    </details>
+    <details>
+      <summary>When to tag v1.0.0 — after gated cloud E2E (recommended) vs at local completion</summary>
+      <p class="qa-answer">Recommendation: <code>v1.0.0-rc1</code> when Phases 1–4 + 6 + 7 are green; <strong>promote to v1.0.0 only after the gated Phase-5 live validation passes</strong>, since ADR-0003 declares cloud an always-additive profile but the release claim "two profiles" should not ship with one of them never exercised. If the gate stays closed indefinitely, the maintainer can consciously ship v1.0.0 with a documented "cloud: moto-verified" caveat.</p>
+    </details>
+    <details>
+      <summary>Monitoring reference window — pinned first-quarter (default) vs rolling</summary>
+      <p class="qa-answer">Default: the reference window is <strong>pinned per model group at deployment</strong> (the first stable scoring window), stored so drift is always "vs what we validated". A rolling reference hides slow drift. ADR-0027 records this; the views take the window as a parameter so either policy is queryable.</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>ADR audit findings (pre-computed for Phase 1)</h3>
+    <p>The status below was established by reading all 25 ADRs against the tree on 2026-07-02; Phase 1 formalizes it with per-row evidence.</p>
+    <table>
+      <tr><th>ADRs</th><th>Verdict</th><th>Notes</th></tr>
+      <tr><td>0001, 0003, 0006–0009, 0011, 0013–0019, 0021–0023</td><td class="ok">Fulfilled</td><td>Implemented + verified; status lines current. 0008 scale-validated twice (v0.3.0, v0.4.1).</td></tr>
+      <tr><td>0024, 0025</td><td class="ok">Fulfilled</td><td>Implemented 07-01/07-02; missing the house status-update lines (Phase 1 adds them).</td></tr>
+      <tr><td>0020</td><td class="ok">Holding</td><td>A deliberate deferral, not a gap; re-confirm against the monitoring workload (single-model forward scores ⇒ serial is fine).</td></tr>
+      <tr><td>0012</td><td class="warn">Stale status</td><td>Says write webapp "in progress"; it shipped. Doc fix only.</td></tr>
+      <tr><td>0002</td><td class="warn">Partial</td><td>Registry + routing done (0025); <strong>project lifecycle missing</strong> — no create/drop/migrate command. Phase 2 closes it.</td></tr>
+      <tr><td>0004, 0005</td><td class="warn">Code-complete, unexercised</td><td>moto-tested only; no Terraform, no runbook, no status poll. Phase 5 closes it (apply gated).</td></tr>
+      <tr><td>0010</td><td class="warn">Partial by design</td><td>Survival schema ready, path unbuilt; regression metrics not config-selectable. Phase 3 closes both.</td></tr>
+      <tr><td>0007</td><td class="warn">One loose end</td><td>Bias metrics validated vs sklearn-style references; the ADR's "validate against known Aequitas outputs" consequence needs verification or an explicit waiver (Phase 1).</td></tr>
+    </table>
+    <p>One genuine <strong>contradiction</strong>: <code>docs/cloud-profile-spec.md</code> resolved-decision 3 says the old <code>catwalk/storage.py</code> "is retired", while the same document's implementation note says it was not (out of scope for that seam). Verified today: still imported by <code>cli.py</code> and four test files. Phase 2 retires it and closes the record.</p>
+
+    <h3>Sequencing rationale</h3>
+    <ul>
+      <li><strong>Audit before build</strong> — Phase 1 is cheap, satisfies the explicit "check the ADRs" ask, and hands Phases 2–6 a formal gap list instead of vibes.</li>
+      <li><strong>Local before cloud</strong> — the project lifecycle (Phase 2) is a hard prerequisite for the cloud runbook anyway (per-project DBs on RDS are created by <code>triage project create</code>, not Terraform).</li>
+      <li><strong>Phases 3 and 4 are independent</strong> of each other and of 5/6 — they can reorder or interleave if review turnaround favors it; the written order puts data-science surface before deployment surface because teaching is the nearer use.</li>
+      <li><strong>Monitoring (6) after cloud-authoring (5)</strong> only because its EventBridge template lands in the same Terraform tree; the local monitoring path has no cloud dependency and could run earlier if desired.</li>
+    </ul>
+
+    <h3>Dependencies added (all via <code>uv add</code>, all optional extras)</h3>
+    <pre><code>uv add --optional survival scikit-survival     # Phase 3 — sksurv estimators (guarded import)
+uv add --optional oidc authlib itsdangerous    # Phase 4 — OIDC flow + session signing
+# terraform is a host tool, not a Python dep; moto already covers the new Batch describe_jobs test surface</code></pre>
+    <p>Both extras are import-guarded: the core install stays lean and every failure names the missing extra at config-validation time, per the fail-fast house rule.</p>
+
+    <h3>Risks &amp; mitigations</h3>
+    <table>
+      <tr><th>Risk</th><th>Mitigation</th></tr>
+      <tr><td>PL/pgSQL C-index too slow on large splits (O(n²) pairs)</td><td>Mandatory reference cross-check includes a timing assertion at 10⁵ rows; ADR-0026 pre-records the Python-at-scoring-time escape hatch so a swap is a contained change.</td></tr>
+      <tr><td>featurizer git+ssh dep blocks any CI/ECR image build</td><td>Called out explicitly in the runbook (Phase 5.2); local <code>--ssh default</code> build + push works today; CodeArtifact/private-PyPI is the recorded future fix.</td></tr>
+      <tr><td>CREATE DATABASE needs privileges tests may lack</td><td><code>pytest-postgresql</code> runs its own server as the test user (superuser there), so lifecycle tests run everywhere the suite already runs.</td></tr>
+      <tr><td>Gated Phase-5 tasks block the v1.0.0 tag indefinitely</td><td>The rc1/1.0.0 split (Questionables) keeps local v1 shippable; the gate only holds the final promotion.</td></tr>
+      <tr><td>Scope breadth (7 phases) stalls mid-way</td><td>Every phase lands independently green on <code>main</code> — the plan degrades gracefully to "as far as we got", with the audit and local v1 (highest teaching value) first.</td></tr>
+    </table>
+
+    <h3>Explicitly still deferred (unchanged decisions)</h3>
+    <ul>
+      <li>Deep learning — <code>.out-of-scope/deep-learning.md</code> stands; scikit-survival is not a violation (classical survival analysis).</li>
+      <li>Grid parallelism — ADR-0020 holds until a real throughput need.</li>
+      <li>Interpretability companion (SHAP, error trees) — ADR-0011's separate-project stance unchanged.</li>
+      <li>Monaco/JSON-schema config editor — the validate endpoint + picker deliver most of the value; the editor is a later UX refinement.</li>
+      <li>Context-driven panel refresh on project switch — ADR-0025's deferred refinement; Phase 2's navigate-then-reload fix removes the 404 without it.</li>
+      <li>Async local submission queue — ADR-0024's deferral stands (cloud submits are already async via Batch).</li>
+    </ul>
+
+    <figure>
+      <!-- {{NOTES_IMAGE: a balance scale weighing "ship local v1 now" against "gate on cloud", tilted toward shipping, minimal palette, under 10 words}} -->
+      <figcaption>The rc1/v1.0.0 split keeps local value shippable while the cloud gate holds.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <!-- Running history of changes made AFTER the plan was first executed. Append-only.
+       Populated by the Update Plan and Update References workflows — never edited during Create. -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <!-- none yet — entries are appended here by the Update Plan / Update References workflows, newest at the bottom -->
+  </section>
+
+</main>
+</body>
+</html>

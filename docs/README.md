@@ -12,6 +12,7 @@ glossary — use those terms exactly).
 
 | Read | For |
 |---|---|
+| [quickstart.md](quickstart.md) | **Zero to a running experiment**: the Chicago 311 tutorial path, the `triage project` lifecycle for your own data, the multi-project dashboard, and webapp submissions. |
 | [`../CONTEXT.md`](../CONTEXT.md) | The glossary: Project, Registry, Profile, as_of_date, Cohort, Matrix, **Experiment**, **Run**, Feature engine, Adapter, Prediction. |
 | [experiment-and-run.md](experiment-and-run.md) | The single most important model: an **Experiment is a problem**, a **Run is one attempt** (ADR-0022/0023). Caching, leaderboards, monitoring all follow from this. |
 | [problem-types.md](problem-types.md) | The score→rank→evaluate **spine** and the `problem_type` switch — classification / regression-as-ranking / pure regression / survival-ready (ADR-0010). |
@@ -43,6 +44,9 @@ Each dataset README has the full end-to-end run recipe (start DB → `alembic up
 | [featurizer-scale.md](featurizer-scale.md) | The scale validation for featurizer (ADR-0008): per-as_of_date cost is constant-to-sub-linear. |
 | [read-dashboard-spec.md](read-dashboard-spec.md) | The read-only dashboard: in-PG views → FastAPI JSON + SSE (ADR-0012/0021). |
 | [cloud-profile-spec.md](cloud-profile-spec.md) | The cloud profile: RDS/IAM auth + S3 storage + AWS Batch execution (ADRs 0003–0005). |
+| [cloud-runbook.md](cloud-runbook.md) | The gated live path: `terraform apply` (`infra/terraform/`) → role bootstrap → image push → a Batch experiment → observe. |
+| [monitoring.md](monitoring.md) | Scheduled forward scoring + drift/health SQL (ADR-0027) over the append-only predictions table. |
+| [adr-conformance.md](adr-conformance.md) | The 2026-07-03 audit: every ADR checked against the code, with evidence, verdicts, and flags. |
 
 ## Architecture Decision Records (ADRs)
 
@@ -72,3 +76,8 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0023](adr/0023-feature-groups-and-strategies.md) Feature groups + mixing strategies
 - [0024](adr/0024-write-webapp-registry-auth-seam.md) Write webapp: POST routes over the registry + a pluggable user-auth seam
 - [0025](adr/0025-per-project-db-routing-project-switcher.md) Per-project database routing — the project switcher
+
+**Problem types, monitoring, auth (the v1-completion pass)**
+- [0026](adr/0026-survival-estimators-and-c-index.md) Survival: scikit-survival estimators, C-index in PL/pgSQL
+- [0027](adr/0027-monitoring-architecture.md) Monitoring: external scheduler → CLI; drift as SQL over append-only predictions
+- [0028](adr/0028-oidc-auth-backend.md) Real webapp auth: in-app OIDC Authorization Code flow

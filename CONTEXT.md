@@ -60,6 +60,26 @@ _Avoid_: snapshot, data hash, freshness stamp
 An artifact's identity — the hash over its complete input closure: own config, parent Derivations, Source pins, and engine versions. Cache reuse, provenance, and GC key off it.
 _Avoid_: cache key (alone), UUID, content hash
 
+**Submission**:
+An append-only Registry record of one experiment submitted through the write webapp — who submitted which config, to which Project, under which Profile (and the Batch job id in cloud). The audit row, never the run itself.
+_Avoid_: job, request, run (the Run lives in the Project database)
+
+**Principal**:
+The resolved caller identity the write webapp's routes see (user id, email, admin flag) — produced by the pluggable auth backend (trusted header locally, OIDC for shared deployments), never a raw header or cookie.
+_Avoid_: user object, session, account
+
+**Forward score**:
+A scoring-only invocation of a trained model at a prediction date (`triage score`) — no labels, no evaluation at scoring time; appends Predictions under run purpose `forward_score`. The recurring unit of monitoring.
+_Avoid_: predictlist (the inherited alias), inference job, retrain
+
+**Reference window**:
+The pinned `scored_at` window a deployed model group's score distribution is compared against for drift — by convention its validation period; pinned, never rolling, so drift is always "versus what we validated".
+_Avoid_: baseline (ambiguous), training window, rolling average
+
+**C-index**:
+Harrell's concordance index — the survival ranking metric (of two comparable entities, how often the earlier-failing one carries the higher risk score); computed in PostgreSQL (`triage.c_index`) on the same spine as precision@k/AUC.
+_Avoid_: concordance (alone), survival AUC, accuracy
+
 ## Relationships
 
 - A **Registry** tracks many **Projects**; each **Project** is one database with many collaborating users.
@@ -67,6 +87,8 @@ _Avoid_: cache key (alone), UUID, content hash
 - An **Experiment** builds **Matrices** keyed by (**Cohort** entity × **as_of_date**); the **Feature engine** generates the features and an **Adapter** assembles the **Matrix**.
 - A trained model produces append-only **Predictions**; evaluation, leaderboards, and bias metrics run in PostgreSQL over the **Predictions** table.
 - An **Experiment** freezes the current **Source version** of every declared **Source** at plan time; every artifact's **Derivation** embeds those pins plus its parents' Derivations (Merkle DAG).
+- A **Submission** records that a **Principal** asked a **Project** to run an **Experiment**; the resulting Run and **Predictions** live in the **Project** database — the **Registry** keeps only the audit row.
+- **Forward scores** append **Predictions** over time; monitoring compares each scoring window against the model group's **Reference window** (drift) and re-evaluates once labels arrive (realized outcomes). Survival experiments are evaluated by **C-index** on the same ranking spine.
 
 ## Flagged ambiguities
 
