@@ -949,12 +949,14 @@ export interface ProjectDerivationResponse {
 export type MemberRole = 'owner' | 'contributor' | 'viewer'
 export type Profile = 'local' | 'cloud'
 
-/** GET /api/me — the resolved caller identity (the auth seam). */
+/** GET /api/me — the resolved caller identity (the auth seam). `auth_mode` tells the SPA
+ *  which backend resolved it: logout only exists under 'oidc' (ADR-0028). */
 export interface Principal {
   user_id: string
   email: string
   display_name: string | null
   is_admin: boolean
+  auth_mode?: 'trusted' | 'oidc'
 }
 
 /** A registry.projects row. `database_ready` is present on POST /api/projects responses only:

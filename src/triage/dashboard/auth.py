@@ -55,11 +55,15 @@ class Principal:
 class AuthBackend(Protocol):
     """Resolve a request + the registry pool into a :class:`Principal`, or raise 401."""
 
-    def authenticate(self, request: Request, registry_pool: ConnectionPool) -> Principal: ...
+    def authenticate(
+        self, request: Request, registry_pool: ConnectionPool
+    ) -> Principal: ...
 
 
 class TrustedHeaderAuth:
     """Local / single-tenant backend: trust the ``X-Triage-User`` email header.
+
+    ``mode`` is surfaced by ``GET /api/me`` so the SPA can adapt (e.g. show logout under oidc).
 
     Resolution order for the caller's email: the ``X-Triage-User`` header, else the
     ``TRIAGE_DEV_USER`` env default (so a laptop dev session Just Works without setting a header).
@@ -73,13 +77,17 @@ class TrustedHeaderAuth:
     any shared/public deployment.
     """
 
+    mode = "trusted"
+
     def __init__(
         self,
         *,
         default_user: Optional[str] = None,
         admin_emails: Optional[frozenset[str]] = None,
     ) -> None:
-        self._default_user = default_user or os.environ.get("TRIAGE_DEV_USER") or "dev@localhost"
+        self._default_user = (
+            default_user or os.environ.get("TRIAGE_DEV_USER") or "dev@localhost"
+        )
         if admin_emails is None:
             raw = os.environ.get("TRIAGE_ADMIN_EMAILS", "")
             admin_emails = frozenset(e.strip() for e in raw.split(",") if e.strip())
@@ -88,11 +96,15 @@ class TrustedHeaderAuth:
         # the box). Configure TRIAGE_ADMIN_EMAILS to lock this down.
         self._admin_emails = admin_emails or frozenset({self._default_user})
 
-    def authenticate(self, request: Request, registry_pool: ConnectionPool) -> Principal:
+    def authenticate(
+        self, request: Request, registry_pool: ConnectionPool
+    ) -> Principal:
         email = (request.headers.get(_USER_HEADER) or self._default_user).strip()
         if not email:
             raise HTTPException(status_code=401, detail="no caller identity")
-        row = registry.get_or_create_user(registry_pool, email=email, is_admin=email in self._admin_emails)
+        row = registry.get_or_create_user(
+            registry_pool, email=email, is_admin=email in self._admin_emails
+        )
         # is_admin is authoritative from config (the header can't self-promote): a user created
         # earlier as non-admin still gets admin here if now listed, and vice-versa.
         return Principal(
@@ -112,9 +124,18 @@ def resolve_auth_backend(name: Optional[str] = None) -> AuthBackend:
     name = (name or os.environ.get("TRIAGE_AUTH") or "trusted").strip().lower()
     if name == "trusted":
         return TrustedHeaderAuth()
+    if name == "oidc":
+        try:
+            from triage.dashboard.oidc import OidcAuth
+        except ImportError as exc:  # the extra's deps are lazy-imported inside OidcAuth
+            raise ValueError(
+                "TRIAGE_AUTH=oidc requires the oidc extra — install with"
+                " `uv sync --extra oidc` (authlib + itsdangerous + httpx, ADR-0028)"
+            ) from exc
+        return OidcAuth()
     raise ValueError(
-        f"unknown TRIAGE_AUTH backend {name!r} — v1 supports 'trusted'"
-        " (real IdP-backed auth is the documented drop-in extension, ADR-0024)"
+        f"unknown TRIAGE_AUTH backend {name!r} — supported: 'trusted', 'oidc'"
+        " (ADR-0024/0028); a misconfigured mode must never degrade to trust-everything"
     )
 
 

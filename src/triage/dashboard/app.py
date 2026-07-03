@@ -32,6 +32,7 @@ from starlette.responses import Response
 
 from triage.cli import resolve_db_url
 from triage.dashboard.auth import AuthBackend, resolve_auth_backend
+from triage.dashboard.oidc import auth_router
 from triage.dashboard.routes import router
 from triage.dashboard.write_routes import default_experiment_runner, write_router
 from triage.logging import get_logger
@@ -188,6 +189,9 @@ def create_app(
     # /api/* path keeps its 404 {"detail": "Not Found"} rather than being served index.html).
     app.include_router(router, prefix="/api")
     app.include_router(write_router, prefix="/api")
+    # Browser auth endpoints (/auth/login|callback|logout, ADR-0028). Mounted always —
+    # they 404 unless the resolved backend is OidcAuth, so trusted-mode apps are unchanged.
+    app.include_router(auth_router)
 
     if _STATIC_DIR.is_dir():
         app.mount(

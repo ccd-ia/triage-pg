@@ -188,13 +188,15 @@ def _examples_dir() -> Optional[pathlib.Path]:
 
 
 @write_router.get("/me")
-def whoami(principal: Principal = Depends(current_principal)) -> dict:
+def whoami(request: Request, principal: Principal = Depends(current_principal)) -> dict:
     """The resolved caller identity (a sanity check on the auth seam)."""
     return {
         "user_id": principal.user_id,
         "email": principal.email,
         "display_name": principal.display_name,
         "is_admin": principal.is_admin,
+        # 'trusted' | 'oidc' — the SPA adapts (logout link only exists under oidc, ADR-0028).
+        "auth_mode": getattr(request.app.state.auth_backend, "mode", "trusted"),
     }
 
 

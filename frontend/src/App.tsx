@@ -43,6 +43,12 @@ function IdentityChip() {
     <span className="idchip" title={me.data.email}>
       {me.data.email}
       {me.data.is_admin ? <em className="adm">admin</em> : null}
+      {me.data.auth_mode === 'oidc' ? (
+        // logout only exists under real auth (ADR-0028); TrustedHeaderAuth has no session
+        <a href="/auth/logout" style={{ marginLeft: 6 }} title="Sign out">
+          ⎋
+        </a>
+      ) : null}
     </span>
   )
 }

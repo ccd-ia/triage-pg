@@ -74,14 +74,24 @@ export class ApiError extends Error {
   }
 }
 
-async function _detail(res: Response): Promise<string> {
+async function _fail(res: Response): Promise<never> {
+  let detail = `${res.status} ${res.statusText}`
   try {
     const body = (await res.json()) as { detail?: unknown }
-    if (body && typeof body.detail === 'string') return body.detail
+    const d = body?.detail
+    if (typeof d === 'string') {
+      detail = d
+    } else if (d && typeof d === 'object') {
+      const obj = d as { message?: string; login_url?: string }
+      if (obj.message) detail = obj.message
+      // Real auth (ADR-0028): an unauthenticated API call carries the login flow's URL —
+      // hand the browser to it (the OIDC round-trip is a navigation, not a fetch).
+      if (res.status === 401 && obj.login_url) window.location.assign(obj.login_url)
+    }
   } catch {
-    // non-JSON body — fall through to the status line
+    // non-JSON body — keep the status line
   }
-  return `${res.status} ${res.statusText}`
+  throw new ApiError(res.status, detail)
 }
 
 // The active project (ADR-0025 switcher) is stored in localStorage and sent as X-Triage-Project on
@@ -116,7 +126,7 @@ async function get<T>(path: string): Promise<T> {
     headers: withProject({ Accept: 'application/json' }),
   })
   if (!res.ok) {
-    throw new ApiError(res.status, await _detail(res))
+    await _fail(res)
   }
   return (await res.json()) as T
 }
@@ -128,7 +138,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    throw new ApiError(res.status, await _detail(res))
+    await _fail(res)
   }
   return (await res.json()) as T
 }
