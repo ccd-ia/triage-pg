@@ -30,6 +30,21 @@ import { ExperimentDetail } from './pages/ExperimentDetail'
 import { OntologyView } from './pages/OntologyView'
 import { TriageStatusView } from './pages/TriageStatusView'
 import { ProjectDerivationView } from './pages/ProjectDerivationView'
+import { ProjectsView } from './pages/ProjectsView'
+import { SubmissionsView } from './pages/SubmissionsView'
+
+/** The current caller (write surface, ADR-0024). Silent when no registry is configured
+ *  (the /me route 503s) — identity is a write-surface concept, not a read-dashboard one. */
+function IdentityChip() {
+  const me = useAsync(() => api.me(), [])
+  if (!me.data) return null
+  return (
+    <span className="idchip" title={me.data.email}>
+      {me.data.email}
+      {me.data.is_admin ? <em className="adm">admin</em> : null}
+    </span>
+  )
+}
 
 function TopBar() {
   return (
@@ -42,7 +57,10 @@ function TopBar() {
           </span>
         ) : null}
       </span>
-      <ThemeToggle />
+      <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <IdentityChip />
+        <ThemeToggle />
+      </span>
     </header>
   )
 }
@@ -168,6 +186,8 @@ function RoutedContent() {
         <Route path="/ontology" element={<Shell><OntologyView /></Shell>} />
         <Route path="/status" element={<Shell><TriageStatusView /></Shell>} />
         <Route path="/derivation" element={<Shell><ProjectDerivationView /></Shell>} />
+        <Route path="/projects" element={<Shell><ProjectsView /></Shell>} />
+        <Route path="/submissions" element={<Shell><SubmissionsView /></Shell>} />
         <Route path="*" element={<Navigate to="/experiments" replace />} />
       </Routes>
     </ErrorBoundary>

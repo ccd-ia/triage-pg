@@ -18,6 +18,7 @@ import type {
   ExpSelectedModelResponse,
   ExperimentDetailResponse,
   ExperimentSummary,
+  Member,
   MetricsResponse,
   ModelCardResponse,
   ModelCurveResponse,
@@ -26,11 +27,15 @@ import type {
   ModelHistogramResponse,
   ModelPredictionsResponse,
   OntologyResponse,
+  Principal,
   ProgressResponse,
+  Project,
   ProjectDerivationResponse,
   RunListItem,
   SourcePinsResponse,
   StatusResponse,
+  Submission,
+  SubmissionResult,
   SummaryResponse,
 } from './types'
 import * as fixture from '../fixtures'
@@ -54,12 +59,47 @@ function fake<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), 120))
 }
 
+/** An HTTP error that carries the status + parsed `detail`, so pages can special-case (e.g. a
+ *  503 = "registry not configured" for the write surface) instead of showing a raw message. */
+export class ApiError extends Error {
+  status: number
+  detail: string
+  constructor(status: number, detail: string) {
+    super(detail)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
+async function _detail(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { detail?: unknown }
+    if (body && typeof body.detail === 'string') return body.detail
+  } catch {
+    // non-JSON body — fall through to the status line
+  }
+  return `${res.status} ${res.statusText}`
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) {
-    throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`)
+    throw new ApiError(res.status, await _detail(res))
+  }
+  return (await res.json()) as T
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new ApiError(res.status, await _detail(res))
   }
   return (await res.json()) as T
 }
@@ -236,5 +276,65 @@ export const api = {
   projectDerivation(): Promise<ProjectDerivationResponse> {
     if (USE_FIXTURE) return fake(fixture.projectDerivation)
     return get<ProjectDerivationResponse>('/derivation')
+  },
+
+  /* ------------------------ write surface (ADR-0024) --------------------- */
+
+  me(): Promise<Principal> {
+    if (USE_FIXTURE) return fake(fixture.principal)
+    return get<Principal>('/me')
+  },
+
+  listProjects(): Promise<Project[]> {
+    if (USE_FIXTURE) return fake([...fixture.projectsStore])
+    return get<Project[]>('/projects')
+  },
+
+  createProject(body: {
+    slug: string
+    display_name: string
+    database_name?: string
+  }): Promise<Project> {
+    if (USE_FIXTURE) return fake(fixture.fxCreateProject(body.slug, body.display_name, body.database_name))
+    return post<Project>('/projects', body)
+  },
+
+  projectMembers(slug: string): Promise<Member[]> {
+    if (USE_FIXTURE) return fake([...(fixture.membersStore[slug] ?? [])])
+    return get<Member[]>(`/projects/${encodeURIComponent(slug)}/members`)
+  },
+
+  listSubmissions(projectSlug?: string): Promise<Submission[]> {
+    if (USE_FIXTURE) {
+      const all = [...fixture.submissionsStore]
+      return fake(projectSlug ? all.filter((s) => s.project_slug === projectSlug) : all)
+    }
+    const q = projectSlug ? `?project_slug=${encodeURIComponent(projectSlug)}` : ''
+    return get<Submission[]>(`/submissions${q}`)
+  },
+
+  createSubmission(body: {
+    project_slug: string
+    config: Record<string, unknown>
+    profile: 'local' | 'cloud'
+  }): Promise<SubmissionResult> {
+    if (USE_FIXTURE) {
+      const sub = fixture.fxCreateSubmission(body.project_slug, body.profile)
+      return fake({
+        submission: sub,
+        result:
+          body.profile === 'cloud'
+            ? { batch_job_id: sub.batch_job_id, status: 'submitted' }
+            : {
+                experiment_hash: sub.experiment_hash ?? undefined,
+                problem_type: 'classification',
+                num_runs: 1,
+                num_models: 0,
+                num_predictions: 0,
+                num_evaluations: 0,
+              },
+      })
+    }
+    return post<SubmissionResult>('/submissions', body)
   },
 }

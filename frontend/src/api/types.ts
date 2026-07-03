@@ -941,3 +941,68 @@ export interface ProjectDerivationResponse {
   nodes: ProjectDerivationNode[]
   edges: ProjectDerivationEdge[]
 }
+
+/* -------------------------- write surface (ADR-0024) ---------------------- */
+// Shapes mirror src/triage/dashboard/write_routes.py + triage/registry.py. The write routes
+// return raw registry rows; UUID/timestamp fields arrive as strings over JSON.
+
+export type MemberRole = 'owner' | 'contributor' | 'viewer'
+export type Profile = 'local' | 'cloud'
+
+/** GET /api/me — the resolved caller identity (the auth seam). */
+export interface Principal {
+  user_id: string
+  email: string
+  display_name: string | null
+  is_admin: boolean
+}
+
+/** A registry.projects row. */
+export interface Project {
+  project_id: string
+  slug: string
+  display_name: string
+  database_name: string
+  status: 'active' | 'archived'
+  created_at: string
+  archived_at: string | null
+}
+
+/** A registry.project_members row joined to the user. */
+export interface Member {
+  project_id: string
+  user_id: string
+  role: MemberRole
+  added_at: string
+  email: string
+  display_name: string | null
+}
+
+/** A registry.submissions row (the append-only audit trail), joined to project + user. */
+export interface Submission {
+  submission_id: string
+  project_id: string
+  project_slug: string
+  submitted_by: string | null
+  submitted_by_email: string | null
+  experiment_hash: string | null
+  profile: Profile
+  batch_job_id: string | null
+  submitted_at: string
+}
+
+/** POST /api/submissions response: the audit row + a run/Batch summary. */
+export interface SubmissionResult {
+  submission: Submission
+  result: {
+    experiment_hash?: string
+    problem_type?: string
+    num_runs?: number
+    num_models?: number
+    num_predictions?: number
+    num_evaluations?: number
+    batch_job_id?: string | null
+    config_uri?: string | null
+    status?: string
+  }
+}

@@ -1603,3 +1603,133 @@ tr.winner td {
   margin: 0 6px;
   vertical-align: middle;
 }
+
+/* ---------------------- write surface (ADR-0024): forms + identity ------- */
+
+/* top-bar identity chip */
+.idchip {
+  font-size: 11px;
+  color: var(--mut);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.idchip .adm {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--acc2);
+  background: var(--acc2-bg);
+  border: 1px solid var(--acc2-border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* forms (a .card with inputs) */
+.form .formrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.field > span {
+  font-size: 11px;
+  color: var(--mut);
+}
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--txt, inherit);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.field textarea {
+  resize: vertical;
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--acc);
+}
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--mut);
+  opacity: 0.6;
+}
+
+.formactions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--txt, inherit);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: var(--acc);
+}
+.btn.primary {
+  color: #fff;
+  background: var(--acc);
+  border-color: var(--acc);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.primary:disabled {
+  color: #fff;
+}
+
+.formmsg {
+  font-size: 11.5px;
+}
+.formmsg.ok {
+  color: var(--ok);
+}
+.formmsg.err {
+  color: var(--bad);
+}
+
+/* member role chip on the projects page */
+.rolechip {
+  font-size: 11px;
+  color: var(--mut);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.rolechip em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--acc);
+  margin-left: 4px;
+}

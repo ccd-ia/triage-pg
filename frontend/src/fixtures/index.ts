@@ -924,3 +924,102 @@ export const projectDerivation: ProjectDerivationResponse = {
     { parent_id: 'mx-af', artifact_id: 'models-af' },
   ],
 }
+
+/* -------------------------- write surface (ADR-0024) ---------------------- */
+// A tiny in-memory control plane so the write pages work in `npm run dev` (fixture mode):
+// lists read these arrays, create/submit mutate them. Not persisted across reloads.
+import type { Member, Principal, Project, Submission } from '../api/types'
+
+export const principal: Principal = {
+  user_id: '00000000-0000-0000-0000-000000000001',
+  email: 'dev@localhost',
+  display_name: 'Dev User',
+  is_admin: true,
+}
+
+export const projectsStore: Project[] = [
+  {
+    project_id: '00000000-0000-0000-0000-0000000000a1',
+    slug: 'food',
+    display_name: 'Food Inspections',
+    database_name: 'food',
+    status: 'active',
+    created_at: '2026-06-20T12:00:00Z',
+    archived_at: null,
+  },
+]
+
+export const membersStore: Record<string, Member[]> = {
+  food: [
+    {
+      project_id: '00000000-0000-0000-0000-0000000000a1',
+      user_id: principal.user_id,
+      role: 'owner',
+      added_at: '2026-06-20T12:00:00Z',
+      email: principal.email,
+      display_name: principal.display_name,
+    },
+  ],
+}
+
+export const submissionsStore: Submission[] = [
+  {
+    submission_id: '00000000-0000-0000-0000-0000000000b1',
+    project_id: '00000000-0000-0000-0000-0000000000a1',
+    project_slug: 'food',
+    submitted_by: principal.user_id,
+    submitted_by_email: principal.email,
+    experiment_hash: 'b9e38fd8f366aa22e8e3f761b446eb3a',
+    profile: 'local',
+    batch_job_id: null,
+    submitted_at: '2026-06-20T12:05:00Z',
+  },
+]
+
+let _seq = 2
+function _uuid(tag: string): string {
+  return `00000000-0000-0000-0000-0000000000${tag}${(_seq++).toString(16).padStart(1, '0')}`
+}
+
+/** Append a project + make `principal` its owner (fixture-mode create). */
+export function fxCreateProject(slug: string, displayName: string, dbName?: string): Project {
+  const p: Project = {
+    project_id: _uuid('a'),
+    slug,
+    display_name: displayName,
+    database_name: dbName || slug,
+    status: 'active',
+    created_at: new Date().toISOString(),
+    archived_at: null,
+  }
+  projectsStore.unshift(p)
+  membersStore[slug] = [
+    {
+      project_id: p.project_id,
+      user_id: principal.user_id,
+      role: 'owner',
+      added_at: p.created_at,
+      email: principal.email,
+      display_name: principal.display_name,
+    },
+  ]
+  return p
+}
+
+/** Append a submission row (fixture-mode submit). */
+export function fxCreateSubmission(projectSlug: string, profile: 'local' | 'cloud'): Submission {
+  const project = projectsStore.find((p) => p.slug === projectSlug)
+  const s: Submission = {
+    submission_id: _uuid('b'),
+    project_id: project?.project_id ?? _uuid('a'),
+    project_slug: projectSlug,
+    submitted_by: principal.user_id,
+    submitted_by_email: principal.email,
+    experiment_hash: profile === 'cloud' ? null : `fixturehash${_seq.toString(16)}`.padEnd(32, '0'),
+    profile,
+    batch_job_id: profile === 'cloud' ? `job-${_seq}` : null,
+    submitted_at: new Date().toISOString(),
+  }
+  submissionsStore.unshift(s)
+  return s
+}

@@ -34,6 +34,17 @@ export function GlobalNav() {
         <span className="ico">⌗</span>
         Derivation
       </NavLink>
+
+      {/* Registry / write surface (ADR-0024) — control plane, distinct from the read views. */}
+      <div className="sep" />
+      <NavLink to="/projects" className={({ isActive }) => (isActive ? 'on' : undefined)}>
+        <span className="ico">▣</span>
+        Projects
+      </NavLink>
+      <NavLink to="/submissions" className={({ isActive }) => (isActive ? 'on' : undefined)}>
+        <span className="ico">➦</span>
+        Submissions
+      </NavLink>
     </nav>
   )
 }
