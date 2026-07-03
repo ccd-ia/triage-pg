@@ -82,9 +82,36 @@ async function _detail(res: Response): Promise<string> {
   return `${res.status} ${res.statusText}`
 }
 
+// The active project (ADR-0025 switcher) is stored in localStorage and sent as X-Triage-Project on
+// every request, so the whole dashboard follows the switcher. Absent ⇒ the app's bound project.
+const ACTIVE_PROJECT_KEY = 'triage.activeProject'
+
+export function getActiveProject(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_PROJECT_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setActiveProject(slug: string | null): void {
+  try {
+    if (slug) localStorage.setItem(ACTIVE_PROJECT_KEY, slug)
+    else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+  } catch {
+    // localStorage unavailable (private mode / SSR) — routing just falls back to the default project
+  }
+}
+
+/** Merge the active-project header into a request's headers. */
+function withProject(headers: Record<string, string>): Record<string, string> {
+  const slug = getActiveProject()
+  return slug ? { ...headers, 'X-Triage-Project': slug } : headers
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { Accept: 'application/json' },
+    headers: withProject({ Accept: 'application/json' }),
   })
   if (!res.ok) {
     throw new ApiError(res.status, await _detail(res))
@@ -95,7 +122,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: withProject({ Accept: 'application/json', 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
   if (!res.ok) {

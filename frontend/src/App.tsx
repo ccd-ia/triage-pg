@@ -32,6 +32,7 @@ import { TriageStatusView } from './pages/TriageStatusView'
 import { ProjectDerivationView } from './pages/ProjectDerivationView'
 import { ProjectsView } from './pages/ProjectsView'
 import { SubmissionsView } from './pages/SubmissionsView'
+import { ProjectSwitcher } from './components/ProjectSwitcher'
 
 /** The current caller (write surface, ADR-0024). Silent when no registry is configured
  *  (the /me route 503s) — identity is a write-surface concept, not a read-dashboard one. */
@@ -58,6 +59,7 @@ function TopBar() {
         ) : null}
       </span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <ProjectSwitcher />
         <IdentityChip />
         <ThemeToggle />
       </span>

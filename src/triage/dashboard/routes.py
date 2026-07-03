@@ -53,13 +53,16 @@ _AUDITION_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
 
 
 def _pool(request: Request) -> ConnectionPool:
-    """Request-pool dependency (avoids an import cycle with ``app.get_pool``)."""
-    pool = getattr(request.app.state, "pool", None)
-    if pool is None:
-        raise RuntimeError(
-            "dashboard request pool is not initialized — the app lifespan did not run."
-        )
-    return pool
+    """Request-pool dependency — resolves the ACTIVE project (ADR-0025 project switcher).
+
+    Reads the ``X-Triage-Project`` header and routes to that project's database pool when a
+    registry is configured; falls back to the app's bound pool otherwise (single-project use is
+    unchanged). Kept as a thin delegate so every read handler picks up project routing through this
+    one ``Depends(_pool)`` seam.
+    """
+    from triage.dashboard.project_routing import resolve_active_pool
+
+    return resolve_active_pool(request)
 
 
 def _rows(pool: ConnectionPool, sql: str, params: Optional[dict] = None) -> list[dict]:

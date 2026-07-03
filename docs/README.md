@@ -71,3 +71,4 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0022](adr/0022-experiment-is-the-problem-runs-are-attempts.md) An Experiment is the problem; runs are attempts
 - [0023](adr/0023-feature-groups-and-strategies.md) Feature groups + mixing strategies
 - [0024](adr/0024-write-webapp-registry-auth-seam.md) Write webapp: POST routes over the registry + a pluggable user-auth seam
+- [0025](adr/0025-per-project-db-routing-project-switcher.md) Per-project database routing — the project switcher

@@ -1733,3 +1733,30 @@ tr.winner td {
   color: var(--acc);
   margin-left: 4px;
 }
+
+/* top-bar project switcher (ADR-0025) */
+.projswitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--mut);
+}
+.projswitch .ico {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.projswitch select {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--txt, inherit);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  max-width: 220px;
+}
+.projswitch select:hover {
+  border-color: var(--acc);
+}

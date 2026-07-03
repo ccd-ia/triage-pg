@@ -33,6 +33,7 @@ from triage.dashboard.auth import (
     current_principal,
     require_admin,
 )
+from triage.dashboard.project_routing import pool_for_slug
 from triage.logging import get_logger
 from triage.profiles.execution import RunHandle
 
@@ -56,32 +57,29 @@ _REQUIRED_CONFIG_KEYS = (
 
 
 class ProjectCreate(BaseModel):
-    slug: str = Field(..., description="url-safe id; also names the per-project database (ADR-0002)")
+    slug: str = Field(
+        ..., description="url-safe id; also names the per-project database (ADR-0002)"
+    )
     display_name: str
-    database_name: Optional[str] = Field(None, description="target DB in the cluster; defaults to the slug")
+    database_name: Optional[str] = Field(
+        None, description="target DB in the cluster; defaults to the slug"
+    )
 
 
 class SubmissionCreate(BaseModel):
     project_slug: str
     config: dict[str, Any] = Field(..., description="the greenfield experiment_config")
-    profile: str = Field("local", description="'local' (in-process) or 'cloud' (AWS Batch)")
+    profile: str = Field(
+        "local", description="'local' (in-process) or 'cloud' (AWS Batch)"
+    )
 
 
 # --------------------------------------------------------------------------- helpers
 
 
-def _project_pool(request: Request) -> ConnectionPool:
-    """The bound project (results) pool an experiment runs against, or 503 if the app has none."""
-    pool = getattr(request.app.state, "pool", None)
-    if pool is None:
-        raise HTTPException(
-            status_code=503,
-            detail="no project database bound to this app instance (app.state.pool is None)",
-        )
-    return pool
-
-
-def default_experiment_runner(pool: ConnectionPool, config: dict[str, Any], *, profile: str = "local") -> RunHandle:
+def default_experiment_runner(
+    pool: ConnectionPool, config: dict[str, Any], *, profile: str = "local"
+) -> RunHandle:
     """Run/submit an experiment via the profile seam (the same path as ``triage run``).
 
     Local: build local FS storage + in-process execution and run synchronously (this blocks the
@@ -113,7 +111,9 @@ def default_experiment_runner(pool: ConnectionPool, config: dict[str, Any], *, p
             profile="cloud",
             cache_policy="exact",
         )
-    raise HTTPException(status_code=400, detail=f"unknown profile {profile!r} (use local/cloud)")
+    raise HTTPException(
+        status_code=400, detail=f"unknown profile {profile!r} (use local/cloud)"
+    )
 
 
 def _validate_config(config: dict[str, Any]) -> None:
@@ -148,7 +148,9 @@ def get_projects(
     include_archived: bool = False,
     principal: Principal = Depends(current_principal),
 ) -> list[dict]:
-    return registry.list_projects(_registry_pool(request), include_archived=include_archived)
+    return registry.list_projects(
+        _registry_pool(request), include_archived=include_archived
+    )
 
 
 @write_router.post("/projects", status_code=201)
@@ -168,12 +170,16 @@ def post_project(
         )
     except ValueError as exc:  # bad slug — a client error, surfaced verbatim
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    registry.add_member(reg, project_id=project["project_id"], user_id=principal.user_id, role="owner")
+    registry.add_member(
+        reg, project_id=project["project_id"], user_id=principal.user_id, role="owner"
+    )
     return project
 
 
 @write_router.get("/projects/{slug}/members")
-def get_members(slug: str, request: Request, principal: Principal = Depends(current_principal)) -> list[dict]:
+def get_members(
+    slug: str, request: Request, principal: Principal = Depends(current_principal)
+) -> list[dict]:
     reg = _registry_pool(request)
     project = registry.get_project(reg, slug)
     if project is None:
@@ -218,7 +224,9 @@ def post_submission(
         raise HTTPException(status_code=404, detail=f"no project {body.project_slug!r}")
 
     # authz: admins may submit anywhere; otherwise the caller must be an owner/contributor.
-    role = registry.member_role(reg, project_id=project["project_id"], user_id=principal.user_id)
+    role = registry.member_role(
+        reg, project_id=project["project_id"], user_id=principal.user_id
+    )
     if not principal.is_admin and role not in ("owner", "contributor"):
         raise HTTPException(
             status_code=403,
@@ -227,8 +235,11 @@ def post_submission(
 
     _validate_config(body.config)
 
+    # Run against the TARGET project's database (ADR-0025 routing), not just the bound pool — so a
+    # submission lands in the project it names. Falls back to the bound pool for the same database.
+    target_pool = pool_for_slug(request, project["slug"], project["database_name"])
     runner = getattr(request.app.state, "experiment_runner", default_experiment_runner)
-    handle: RunHandle = runner(_project_pool(request), body.config, profile=body.profile)
+    handle: RunHandle = runner(target_pool, body.config, profile=body.profile)
 
     result = handle.run_result
     experiment_hash = result.experiment_hash if result is not None else None

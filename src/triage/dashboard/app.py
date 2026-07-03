@@ -46,7 +46,10 @@ _REGISTRY_URL_ENV = "TRIAGE_REGISTRY_URL"
 # Static dir for the built SPA bundle. Defaults to the packaged static/ dir; override with
 # TRIAGE_DASHBOARD_STATIC (the Docker dashboard image + the native preview point it at the
 # Vite build output, spec §6).
-_STATIC_DIR = pathlib.Path(os.environ.get("TRIAGE_DASHBOARD_STATIC") or (pathlib.Path(__file__).parent / "static"))
+_STATIC_DIR = pathlib.Path(
+    os.environ.get("TRIAGE_DASHBOARD_STATIC")
+    or (pathlib.Path(__file__).parent / "static")
+)
 
 
 class _SpaStaticFiles(StaticFiles):
@@ -82,16 +85,17 @@ class _SpaStaticFiles(StaticFiles):
             raise
 
 
-def _open_project_pool() -> ConnectionPool:
-    """Open the request pool over the project DB.
+def _open_project_pool() -> tuple[ConnectionPool, str]:
+    """Open the request pool over the project DB; return ``(pool, base_url)``.
 
     Reuses the inherited resolution (``--dbfile`` / ``database.yaml`` / ``DATABASE_URL`` /
     ``PG*`` / ``.env``); fails loud with the same guidance if no config is present. Never
-    hardcodes credentials (project DB hard rule).
+    hardcodes credentials (project DB hard rule). The URL is retained as the *base* the project
+    switcher swaps the database name onto (ADR-0025, project_routing).
     """
     dburl = resolve_db_url(None)  # password-bearing postgresql+psycopg:// string
     logger.info("dashboard: opening project DB pool")
-    return connection_pool(dburl)
+    return connection_pool(dburl), dburl
 
 
 def _open_registry_pool() -> Optional[ConnectionPool]:
@@ -104,7 +108,9 @@ def _open_registry_pool() -> Optional[ConnectionPool]:
     url = os.environ.get(_REGISTRY_URL_ENV)
     if not url:
         return None
-    logger.info("dashboard: opening registry control-plane pool (write surface enabled)")
+    logger.info(
+        "dashboard: opening registry control-plane pool (write surface enabled)"
+    )
     return connection_pool(url)
 
 
@@ -135,8 +141,14 @@ def create_app(
     async def lifespan(app: FastAPI):
         owns_pool = pool is None
         owns_registry = registry_pool is None
-        app.state.pool = pool if pool is not None else _open_project_pool()
-        app.state.registry_pool = registry_pool if registry_pool is not None else _open_registry_pool()
+        if pool is not None:
+            app.state.pool = pool
+            app.state.base_project_url = getattr(pool, "conninfo", None)
+        else:
+            app.state.pool, app.state.base_project_url = _open_project_pool()
+        app.state.registry_pool = (
+            registry_pool if registry_pool is not None else _open_registry_pool()
+        )
         try:
             yield
         finally:
@@ -144,6 +156,10 @@ def create_app(
                 app.state.pool.close()
             if owns_registry and app.state.registry_pool is not None:
                 app.state.registry_pool.close()
+            # Close every project pool the switcher opened on demand (ADR-0025).
+            for proj_pool in app.state.project_pools.values():
+                proj_pool.close()
+            app.state.project_pools = {}
 
     app = FastAPI(
         title="triage-pg dashboard API",
@@ -155,9 +171,18 @@ def create_app(
     # (rare) still resolves them; the lifespan re-affirms the pools.
     if pool is not None:
         app.state.pool = pool
+        app.state.base_project_url = getattr(pool, "conninfo", None)
     app.state.registry_pool = registry_pool
-    app.state.auth_backend = auth_backend if auth_backend is not None else resolve_auth_backend()
-    app.state.experiment_runner = experiment_runner if experiment_runner is not None else default_experiment_runner
+    # The project switcher's per-project pool cache (ADR-0025), opened on demand + closed on shutdown.
+    app.state.project_pools = {}
+    app.state.auth_backend = (
+        auth_backend if auth_backend is not None else resolve_auth_backend()
+    )
+    app.state.experiment_runner = (
+        experiment_runner
+        if experiment_runner is not None
+        else default_experiment_runner
+    )
 
     # /api first so the SPA static fallback below never shadows the JSON API (an unknown
     # /api/* path keeps its 404 {"detail": "Not Found"} rather than being served index.html).
@@ -165,7 +190,9 @@ def create_app(
     app.include_router(write_router, prefix="/api")
 
     if _STATIC_DIR.is_dir():
-        app.mount("/", _SpaStaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
+        app.mount(
+            "/", _SpaStaticFiles(directory=str(_STATIC_DIR), html=True), name="static"
+        )
 
     return app
 

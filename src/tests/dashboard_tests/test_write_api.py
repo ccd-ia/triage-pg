@@ -12,6 +12,8 @@ a fixed admin so the tests don't depend on ambient ``TRIAGE_*`` env.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,7 +37,9 @@ class _StubRunner:
     def __call__(self, pool, config, *, profile="local"):
         self.calls.append({"pool": pool, "config": config, "profile": profile})
         if self._cloud:
-            return RunHandle(batch_job_id="job-123", config_uri="s3://bucket/config.json")
+            return RunHandle(
+                batch_job_id="job-123", config_uri="s3://bucket/config.json"
+            )
         result = ExperimentResult(
             experiment_hash="exp-stub",
             problem_type="classification",
@@ -72,7 +76,10 @@ def _make_client(db_url, db_pool_greenfield, *, cloud=False):
 
 
 @pytest.fixture
-def write_client(db_url, db_pool_greenfield):
+def write_client(db_url, db_pool_greenfield, monkeypatch):
+    # Route the 'food' project (the submit tests' target) to the SAME test DB, so pool_for_slug
+    # (ADR-0025) resolves to the bound database and reuses the default pool — no second DB needed.
+    monkeypatch.setenv("TRIAGE_PROJECT_DB_MAP", json.dumps({"food": db_url}))
     app, runner = _make_client(db_url, db_pool_greenfield)
     with TestClient(app) as c:
         yield c, runner
@@ -183,7 +190,9 @@ def test_submit_experiment_runs_and_records(write_client):
     assert body["submission"]["profile"] == "local"
 
     # it shows up in the audit trail (scoped to the project)
-    subs = client.get("/api/submissions?project_slug=food", headers=_ADMIN_HEADERS).json()
+    subs = client.get(
+        "/api/submissions?project_slug=food", headers=_ADMIN_HEADERS
+    ).json()
     assert len(subs) == 1
     assert subs[0]["experiment_hash"] == "exp-stub"
     assert subs[0]["submitted_by_email"] == ADMIN
@@ -227,7 +236,8 @@ def test_submit_non_member_forbidden(write_client):
     assert runner.calls == []
 
 
-def test_cloud_submission_records_batch_job(db_url, db_pool_greenfield):
+def test_cloud_submission_records_batch_job(db_url, db_pool_greenfield, monkeypatch):
+    monkeypatch.setenv("TRIAGE_PROJECT_DB_MAP", json.dumps({"food": db_url}))
     app, runner = _make_client(db_url, db_pool_greenfield, cloud=True)
     with TestClient(app) as client:
         _create_project(client)
@@ -241,7 +251,9 @@ def test_cloud_submission_records_batch_job(db_url, db_pool_greenfield):
         assert body["result"]["batch_job_id"] == "job-123"
         assert body["result"]["status"] == "submitted"
         assert body["submission"]["batch_job_id"] == "job-123"
-        assert body["submission"]["experiment_hash"] is None  # not known until the job runs
+        assert (
+            body["submission"]["experiment_hash"] is None
+        )  # not known until the job runs
 
 
 # --------------------------------------------------------------------------- registry not configured
