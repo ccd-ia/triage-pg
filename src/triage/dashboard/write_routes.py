@@ -20,20 +20,23 @@ without a real training run; the default runs in-process locally / submits a Bat
 from __future__ import annotations
 
 import os
+import pathlib
 from typing import Any, Optional
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
-from triage import registry
+from triage import project_lifecycle, registry
+from triage.adapters.run import validate_experiment_config
 from triage.dashboard.auth import (
     Principal,
     _registry_pool,
     current_principal,
     require_admin,
 )
-from triage.dashboard.project_routing import pool_for_slug
+from triage.dashboard.project_routing import pool_for_slug, project_dburl
 from triage.logging import get_logger
 from triage.profiles.execution import RunHandle
 
@@ -68,10 +71,24 @@ class ProjectCreate(BaseModel):
 
 class SubmissionCreate(BaseModel):
     project_slug: str
-    config: dict[str, Any] = Field(..., description="the greenfield experiment_config")
+    config: Optional[dict[str, Any]] = Field(
+        None, description="the greenfield experiment_config (JSON object)"
+    )
+    config_text: Optional[str] = Field(
+        None,
+        description="the config as raw YAML/JSON text — exactly what `triage run` consumes;"
+        " provide this OR `config`, not both",
+    )
     profile: str = Field(
         "local", description="'local' (in-process) or 'cloud' (AWS Batch)"
     )
+
+
+class ConfigPayload(BaseModel):
+    """A config either as a parsed object or as raw YAML/JSON text (exactly one)."""
+
+    config: Optional[dict[str, Any]] = None
+    config_text: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- helpers
@@ -125,6 +142,48 @@ def _validate_config(config: dict[str, Any]) -> None:
         )
 
 
+def _resolve_config(
+    config: Optional[dict[str, Any]], config_text: Optional[str]
+) -> dict[str, Any]:
+    """Resolve the exactly-one-of (parsed object | raw YAML/JSON text) config payload.
+
+    YAML is a superset of JSON, so one ``yaml.safe_load`` handles both text forms — users can
+    paste/upload exactly the ``greenfield.yaml`` that ``triage run`` consumes. Errors are 400s
+    with the parser's message (a client mistake, not a server fault)."""
+    if (config is None) == (config_text is None):
+        raise HTTPException(
+            status_code=400,
+            detail="provide exactly one of 'config' (object) or 'config_text' (YAML/JSON text)",
+        )
+    if config is not None:
+        return config
+    try:
+        parsed = yaml.safe_load(config_text)  # type: ignore[arg-type]
+    except yaml.YAMLError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"config_text is not valid YAML/JSON: {exc}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="config_text must parse to a mapping (the experiment config object)",
+        )
+    return parsed
+
+
+_EXAMPLES_DIR_ENV = "TRIAGE_EXAMPLES_DIR"
+
+
+def _examples_dir() -> Optional[pathlib.Path]:
+    """The committed example-config directory (env override, else the repo checkout)."""
+    override = os.environ.get(_EXAMPLES_DIR_ENV)
+    if override:
+        path = pathlib.Path(override)
+        return path if path.is_dir() else None
+    candidate = pathlib.Path(__file__).resolve().parents[3] / "example"
+    return candidate if candidate.is_dir() else None
+
+
 # --------------------------------------------------------------------------- identity
 
 
@@ -173,6 +232,16 @@ def post_project(
     registry.add_member(
         reg, project_id=project["project_id"], user_id=principal.user_id, role="owner"
     )
+    # The webapp creates the registry ROW only; database provisioning is CLI-only
+    # ('triage project create' — least privilege, the app holds no CREATEDB credentials).
+    # database_ready keeps the UI honest about that two-step reality.
+    project = dict(project)
+    base_url = getattr(request.app.state, "base_project_url", None)
+    try:
+        url = project_dburl(project["slug"], project["database_name"], base_url)
+        project["database_ready"] = project_lifecycle.database_ready(url)
+    except ValueError:
+        project["database_ready"] = False
     return project
 
 
@@ -185,6 +254,83 @@ def get_members(
     if project is None:
         raise HTTPException(status_code=404, detail=f"no project {slug!r}")
     return registry.list_members(reg, project_id=project["project_id"])
+
+
+# --------------------------------------------------------------------------- config tooling
+
+
+@write_router.post("/validate-config")
+def post_validate_config(
+    body: ConfigPayload,
+    principal: Principal = Depends(current_principal),
+) -> dict:
+    """Dry-run validation of an experiment config — nothing persisted, nothing run.
+
+    Accepts the config as a JSON object (``config``) or raw YAML/JSON text (``config_text``,
+    exactly what ``triage run`` consumes). Returns the core's structured verdict: the derived
+    ADR-0022 ``experiment_hash``, split/grid counts, and path-addressed errors. YAML parse
+    failures come back as a verdict too (``valid: false``) so the UI renders them inline
+    rather than as a transport error.
+    """
+    if (body.config is None) == (body.config_text is None):
+        raise HTTPException(
+            status_code=400,
+            detail="provide exactly one of 'config' (object) or 'config_text' (YAML/JSON text)",
+        )
+    if body.config is not None:
+        config = body.config
+    else:
+        try:
+            config = yaml.safe_load(body.config_text)  # type: ignore[arg-type]
+            if not isinstance(config, dict):
+                raise ValueError("config_text must parse to a mapping")
+        except (yaml.YAMLError, ValueError) as exc:
+            return {
+                "valid": False,
+                "experiment_hash": None,
+                "problem_type": None,
+                "n_splits": None,
+                "n_models": None,
+                "n_feature_groups": None,
+                "errors": [{"path": "$", "message": f"not valid YAML/JSON: {exc}"}],
+                "warnings": [],
+            }
+    return validate_experiment_config(config)
+
+
+@write_router.get("/example-configs")
+def get_example_configs(
+    principal: Principal = Depends(current_principal),
+) -> list[dict]:
+    """The committed ``example/*/greenfield*.yaml`` configs, for the submit-form picker.
+
+    Served by the backend so the SPA needs no filesystem access; an instance without an
+    example checkout (or ``TRIAGE_EXAMPLES_DIR``) just returns an empty list.
+    """
+    root = _examples_dir()
+    if root is None:
+        return []
+    entries: list[dict] = []
+    for path in sorted(root.glob("*/greenfield*.yaml")):
+        content = path.read_text(encoding="utf-8")
+        description = next(
+            (
+                line.lstrip("# ").strip()
+                for line in content.splitlines()
+                if line.startswith("#") and line.lstrip("# ").strip()
+            ),
+            "",
+        )
+        entries.append(
+            {
+                "name": f"{path.parent.name}/{path.name}",
+                "dataset": path.parent.name,
+                "filename": path.name,
+                "description": description,
+                "content": content,
+            }
+        )
+    return entries
 
 
 # --------------------------------------------------------------------------- submissions
@@ -233,13 +379,14 @@ def post_submission(
             detail=f"not authorized to submit to {body.project_slug!r} (role={role})",
         )
 
-    _validate_config(body.config)
+    config = _resolve_config(body.config, body.config_text)
+    _validate_config(config)
 
     # Run against the TARGET project's database (ADR-0025 routing), not just the bound pool — so a
     # submission lands in the project it names. Falls back to the bound pool for the same database.
     target_pool = pool_for_slug(request, project["slug"], project["database_name"])
     runner = getattr(request.app.state, "experiment_runner", default_experiment_runner)
-    handle: RunHandle = runner(target_pool, body.config, profile=body.profile)
+    handle: RunHandle = runner(target_pool, config, profile=body.profile)
 
     result = handle.run_result
     experiment_hash = result.experiment_hash if result is not None else None

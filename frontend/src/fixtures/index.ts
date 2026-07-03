@@ -1023,3 +1023,52 @@ export function fxCreateSubmission(projectSlug: string, profile: 'local' | 'clou
   submissionsStore.unshift(s)
   return s
 }
+
+import type {
+  ExampleConfig,
+  ValidateConfigResult,
+} from '../api/types'
+
+export const exampleConfigs: ExampleConfig[] = [
+  {
+    name: 'chicago311/greenfield.yaml',
+    dataset: 'chicago311',
+    filename: 'greenfield.yaml',
+    description: 'Chicago 311 EWS — will a request stay unresolved past 14 days?',
+    content:
+      'problem_type: classification\ncohort_config:\n  query: |\n    select entity_id from ontology.entities where created_date < {as_of_date}\n',
+  },
+  {
+    name: 'dirtyduck/greenfield.yaml',
+    dataset: 'dirtyduck',
+    filename: 'greenfield.yaml',
+    description: 'DirtyDuck food inspections — the classic tutorial problem.',
+    content: 'problem_type: classification\n',
+  },
+]
+
+/** Fixture-mode dry-run verdict: crude but exercises both the clean and error renderings. */
+export function fxValidateConfig(configText?: string): ValidateConfigResult {
+  const ok = !!configText && configText.includes('problem_type')
+  return ok
+    ? {
+        valid: true,
+        experiment_hash: 'f1de51e5f1de51e5f1de51e5f1de51e5f1de51e5f1de51e5f1de51e5f1de51e5',
+        problem_type: 'classification',
+        n_splits: 4,
+        n_models: 5,
+        n_feature_groups: null,
+        errors: [],
+        warnings: ['no sources declared — every derivation is volatile (ADR-0014)'],
+      }
+    : {
+        valid: false,
+        experiment_hash: null,
+        problem_type: null,
+        n_splits: null,
+        n_models: null,
+        n_feature_groups: null,
+        errors: [{ path: 'problem_type', message: 'required key is missing' }],
+        warnings: [],
+      }
+}

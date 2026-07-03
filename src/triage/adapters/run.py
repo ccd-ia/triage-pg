@@ -53,6 +53,7 @@ from datetime import date, datetime
 from typing import Any
 
 from psycopg_pool import ConnectionPool
+from pydantic import ValidationError
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.feature_groups import (
@@ -86,6 +87,7 @@ __all__ = [
     "RunResult",
     "SplitResult",
     "experiment_hash_for",
+    "validate_experiment_config",
 ]
 
 
@@ -187,6 +189,158 @@ def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
     return hashlib.sha256(
         canonical_json(_problem_identity(experiment_config)).encode("ascii")
     ).hexdigest()
+
+
+# The triage.problem_type enum values (migration 0001, ADR-0010).
+_PROBLEM_TYPES = ("classification", "regression_ranking", "regression", "survival")
+
+
+def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
+    """Dry-run config validation: structured errors + derived identity, nothing persisted.
+
+    Mirrors the checks :func:`run_experiment` would fail on — required keys, the
+    ``problem_type`` enum, query placeholders, the typed temporal/imputation configs, grid
+    expansion — WITHOUT touching a database or building anything. The write webapp's
+    ``POST /api/validate-config`` is a thin wrapper over this (ADR-0012: validation is core
+    logic, not UI logic). Returns::
+
+        {valid, experiment_hash, problem_type, n_splits, n_models, n_feature_groups,
+         errors: [{path, message}], warnings: [str]}
+
+    ``experiment_hash`` is the ADR-0022 problem identity — derivable whenever the four problem
+    keys are present, even if deeper checks fail (presence fixes identity). ``n_models`` is the
+    grid size per split; ``n_feature_groups`` is only known pre-run for explicit
+    ``definitions`` (``group_by`` partitions are discovered from featurizer's columns at
+    run time).
+    """
+    errors: list[dict[str, str]] = []
+    warnings: list[str] = []
+
+    def _err(path: str, message: str) -> None:
+        errors.append({"path": path, "message": message})
+
+    required = (
+        "problem_type",
+        "cohort_config",
+        "label_config",
+        "temporal_config",
+        "feature_config",
+        "grid_config",
+    )
+    for key in required:
+        if key not in experiment_config:
+            _err(key, "required key is missing")
+
+    problem_type = experiment_config.get("problem_type")
+    if problem_type is not None and problem_type not in _PROBLEM_TYPES:
+        _err(
+            "problem_type",
+            f"unknown problem_type {problem_type!r} — expected one of {list(_PROBLEM_TYPES)}",
+        )
+    if problem_type == "survival":
+        import importlib.util
+
+        if importlib.util.find_spec("sksurv") is None:
+            _err(
+                "problem_type",
+                "problem_type 'survival' requires the survival extra (scikit-survival) —"
+                " install with `uv sync --extra survival` (ADR-0026)",
+            )
+
+    cohort_config = experiment_config.get("cohort_config")
+    if cohort_config is not None:
+        if not isinstance(cohort_config, Mapping) or not cohort_config.get("query"):
+            _err("cohort_config.query", "cohort_config needs a 'query'")
+        elif "{as_of_date}" not in cohort_config["query"]:
+            _err(
+                "cohort_config.query",
+                "the cohort query must contain the {as_of_date} placeholder",
+            )
+
+    label_config = experiment_config.get("label_config")
+    if label_config is not None:
+        if not isinstance(label_config, Mapping) or not label_config.get("query"):
+            _err("label_config.query", "label_config needs a 'query'")
+        else:
+            for placeholder in ("{as_of_date}", "{label_timespan}"):
+                if placeholder not in label_config["query"]:
+                    _err(
+                        "label_config.query",
+                        f"the label query must contain the {placeholder} placeholder",
+                    )
+
+    n_splits: int | None = None
+    raw_temporal = experiment_config.get("temporal_config")
+    if raw_temporal is not None:
+        try:
+            temporal = TemporalConfig.model_validate(raw_temporal)
+            n_splits = len(_generate_splits(temporal))
+        except ValidationError as exc:
+            for e in exc.errors():
+                loc = ".".join(str(part) for part in e["loc"])
+                _err(f"temporal_config.{loc}" if loc else "temporal_config", e["msg"])
+        except ValueError as exc:
+            _err("temporal_config", str(exc))
+
+    try:
+        ImputationPolicy.model_validate(
+            experiment_config.get("imputation_config", {"all": {"type": "zero"}})
+        )
+    except ValidationError as exc:
+        for e in exc.errors():
+            loc = ".".join(str(part) for part in e["loc"])
+            _err(f"imputation_config.{loc}" if loc else "imputation_config", e["msg"])
+
+    n_models: int | None = None
+    grid_config = experiment_config.get("grid_config")
+    if grid_config is not None:
+        if not isinstance(grid_config, Mapping):
+            _err(
+                "grid_config",
+                "grid_config must be a mapping {class_path: {hyperparam: [values]}}",
+            )
+        else:
+            try:
+                n_models = len(_grid_specs(grid_config))
+            except ValueError as exc:
+                _err("grid_config", str(exc))
+
+    n_feature_groups: int | None = None
+    feature_config = experiment_config.get("feature_config")
+    if feature_config is not None:
+        if not isinstance(feature_config, Mapping) or not feature_config:
+            _err(
+                "feature_config",
+                "feature_config must be a non-empty mapping (the featurizer ER-graph config)",
+            )
+        else:
+            groups = feature_config.get("feature_groups")
+            if isinstance(groups, Mapping) and isinstance(
+                groups.get("definitions"), Mapping
+            ):
+                n_feature_groups = len(groups["definitions"])
+
+    if not experiment_config.get("sources"):
+        warnings.append(
+            "no sources declared — every derivation is volatile (never a cache hit)"
+            " and inputs are unpinned (ADR-0014)"
+        )
+
+    experiment_hash = (
+        experiment_hash_for(experiment_config)
+        if all(k in experiment_config for k in _PROBLEM_KEYS)
+        else None
+    )
+    return {
+        "valid": not errors,
+        "experiment_hash": experiment_hash,
+        "problem_type": problem_type if problem_type in _PROBLEM_TYPES else None,
+        "n_splits": n_splits,
+        "n_models": n_models,
+        "n_feature_groups": n_feature_groups,
+        "errors": errors,
+        "warnings": warnings,
+    }
 
 
 def _as_dates(values: Sequence[Any]) -> list[date]:

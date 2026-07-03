@@ -7,6 +7,8 @@
  * then runs in single-project mode against its bound database, exactly as before. A full reload on
  * switch is deliberate for v1: the panels are many independent reads, so reloading is the simplest
  * way to guarantee they all follow the switch (a shared active-project context is a later refinement).
+ * The reload lands on the project-neutral /experiments list, never the current route: a deep-link
+ * like /experiments/<hash> from project A doesn't exist in project B and would 404.
  */
 import { api, getActiveProject, setActiveProject } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
@@ -26,7 +28,9 @@ export function ProjectSwitcher() {
         value={active}
         onChange={(e) => {
           setActiveProject(e.target.value || null)
-          window.location.reload()
+          // Full-page navigation to a project-neutral route (not reload-in-place): a stale
+          // experiment/run/model deep-link from the previous project can't 404 under the new one.
+          window.location.assign('/experiments')
         }}
       >
         <option value="">default project</option>

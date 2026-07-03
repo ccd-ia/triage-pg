@@ -11,6 +11,7 @@
 import type {
   DerivationResponse,
   EntityProfileResponse,
+  ExampleConfig,
   ExpAuditionResponse,
   ExpBiasResponse,
   ExpEvaluationsResponse,
@@ -37,6 +38,7 @@ import type {
   Submission,
   SubmissionResult,
   SummaryResponse,
+  ValidateConfigResult,
 } from './types'
 import * as fixture from '../fixtures'
 
@@ -340,9 +342,25 @@ export const api = {
     return get<Submission[]>(`/submissions${q}`)
   },
 
+  /** Dry-run validation of a config (as raw YAML/JSON text or a parsed object). */
+  validateConfig(body: {
+    config?: Record<string, unknown>
+    config_text?: string
+  }): Promise<ValidateConfigResult> {
+    if (USE_FIXTURE) return fake(fixture.fxValidateConfig(body.config_text))
+    return post<ValidateConfigResult>('/validate-config', body)
+  },
+
+  /** The committed example configs, for the submit-form picker. */
+  listExampleConfigs(): Promise<ExampleConfig[]> {
+    if (USE_FIXTURE) return fake([...fixture.exampleConfigs])
+    return get<ExampleConfig[]>('/example-configs')
+  },
+
   createSubmission(body: {
     project_slug: string
-    config: Record<string, unknown>
+    config?: Record<string, unknown>
+    config_text?: string
     profile: 'local' | 'cloud'
   }): Promise<SubmissionResult> {
     if (USE_FIXTURE) {

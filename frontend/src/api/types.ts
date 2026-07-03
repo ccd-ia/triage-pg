@@ -957,15 +957,17 @@ export interface Principal {
   is_admin: boolean
 }
 
-/** A registry.projects row. */
+/** A registry.projects row. `database_ready` is present on POST /api/projects responses only:
+ *  the webapp creates the registry ROW; database provisioning is `triage project create` (CLI). */
 export interface Project {
   project_id: string
   slug: string
   display_name: string
   database_name: string
-  status: 'active' | 'archived'
+  status: 'active' | 'archived' | 'dropped'
   created_at: string
   archived_at: string | null
+  database_ready?: boolean
 }
 
 /** A registry.project_members row joined to the user. */
@@ -989,6 +991,27 @@ export interface Submission {
   profile: Profile
   batch_job_id: string | null
   submitted_at: string
+}
+
+/** POST /api/validate-config — the core's dry-run verdict (nothing persisted, nothing run). */
+export interface ValidateConfigResult {
+  valid: boolean
+  experiment_hash: string | null
+  problem_type: string | null
+  n_splits: number | null
+  n_models: number | null
+  n_feature_groups: number | null
+  errors: { path: string; message: string }[]
+  warnings: string[]
+}
+
+/** GET /api/example-configs — a committed example greenfield config, for the picker. */
+export interface ExampleConfig {
+  name: string
+  dataset: string
+  filename: string
+  description: string
+  content: string
 }
 
 /** POST /api/submissions response: the audit row + a run/Batch summary. */
