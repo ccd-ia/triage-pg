@@ -161,6 +161,13 @@ scheme. It replaces both the plain-`Path` writes in the builders **and** GC's
 `_delete_output_file`, giving one storage seam. The inherited `catwalk/storage.py`
 `Store`/`FSStore`/`S3Store`/`ProjectStorage` (CSV-era, tmp-download read path) is retired.
 
+> **Status note (2026-07-03).** The retirement stated above lagged the seam by two weeks
+> (the implementation note at the top recorded it as out of scope; flagged as the one
+> contradiction in `docs/adr-conformance.md`) and is now **done**: `cli.py`'s config
+> loading reads through `profiles.storage.storage_for_root` (keeping the cloud
+> `s3://…` config-URI path on this same seam), `catwalk/storage.py` + `util/pandas.py`
+> and their tests are deleted, and `grep -rn "catwalk.storage" src/` returns nothing.
+
 - **Local** (`scheme in ('', 'file')`): `pyarrow.fs.LocalFileSystem`; `delete` = today's
   `Path.unlink` branch.
 - **S3** (`scheme == 's3'`): `pyarrow.fs.S3FileSystem` (or `s3fs`); credentials resolve via

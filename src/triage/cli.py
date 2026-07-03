@@ -31,7 +31,6 @@ from triage.artifacts import (
 )
 from triage.component.audition import AuditionRunner
 from triage.component.catwalk.grid import flatten_grid_config
-from triage.component.catwalk.storage import Store
 from triage.component.results_schema import (
     db_history,
     downgrade_db,
@@ -107,9 +106,17 @@ def parse_date(value: str | datetime) -> datetime:
 
 
 def load_file_from_store(path: str) -> str:
-    store = Store.factory(path)
-    with store.open("r") as fd:
-        return fd.read()
+    """Read a config file's text through the profile storage seam (cloud-profile-spec §3).
+
+    Dispatches by URI scheme, so a local path AND the ``s3://…`` config URI the cloud Batch
+    container reads (``triage run --profile cloud --config s3://…``) share one code path.
+    Replaces the retired inherited ``Store.factory`` (cloud-profile-spec §3).
+    """
+    from triage.profiles.storage import storage_for_root
+
+    storage = storage_for_root(path)
+    with storage.open_input(path) as fd:
+        return fd.read().decode("utf-8")
 
 
 def load_yaml_from_store(path: str) -> Dict[str, Any]:
@@ -283,9 +290,7 @@ def describe_sql_block(block: Dict[str, Any]) -> str:
 
 
 def load_experiment_config(config_path: str) -> Dict[str, Any]:
-    store = Store.factory(config_path)
-    with store.open("r") as fd:
-        return yaml.full_load(fd) or {}
+    return load_yaml_from_store(config_path)
 
 
 @app.callback()

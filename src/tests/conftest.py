@@ -1,9 +1,5 @@
-import tempfile
-
 import pytest
 from pytest_postgresql import factories
-
-from triage.component.catwalk.storage import ProjectStorage
 
 # Create postgresql process fixture (session-scoped, starts PostgreSQL once)
 postgresql_proc = factories.postgresql_proc(port=None)
@@ -50,32 +46,6 @@ def db_pool_greenfield(db_url, db_pool):
 
     upgrade_db(dburl=db_url, revision="head")
     yield db_pool
-
-
-@pytest.fixture(scope="function")
-def project_path():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        yield temp_dir
-
-
-@pytest.fixture(scope="function")
-def project_storage(project_path):
-    """Set up a temporary project storage engine on the filesystem
-
-    Yields (catwalk.storage.ProjectStorage)
-    """
-    yield ProjectStorage(project_path)
-
-
-@pytest.fixture(scope="module")
-def shared_project_storage():
-    """Set up a temporary project storage engine on the filesystem at module scope
-
-    Yields (catwalk.storage.ProjectStorage)
-    """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_storage = ProjectStorage(temp_dir)
-        yield project_storage
 
 
 @pytest.fixture(scope="module")
