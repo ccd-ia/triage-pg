@@ -55,6 +55,11 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from triage.adapters.bias import (
+    INTERVENTION_PRIMARY_METRIC,
+    ingest_protected_groups,
+    validate_bias_config,
+)
 from triage.adapters.cohort import build_cohort
 from triage.adapters.feature_groups import (
     DEFAULT_ALL_COMBINATIONS_MAX_GROUPS,
@@ -66,6 +71,7 @@ from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
+from triage.adapters.subsets import register_subsets, validate_subsets_config
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import _notify_run_progress, record_use
 from triage.component.timechop import Timechop
@@ -319,6 +325,87 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 groups.get("definitions"), Mapping
             ):
                 n_feature_groups = len(groups["definitions"])
+
+    bias_config = experiment_config.get("bias_config")
+    if bias_config is not None:
+        if not isinstance(bias_config, Mapping):
+            _err("bias_config", "bias_config must be a mapping")
+        else:
+            # mirror validate_bias_config's fail-fast checks as path-addressed errors
+            if not bias_config.get("query"):
+                _err(
+                    "bias_config.query",
+                    "bias_config needs a 'query' returning entity_id + one column per"
+                    " protected attribute",
+                )
+            elif "{as_of_date}" not in bias_config["query"]:
+                _err(
+                    "bias_config.query",
+                    "the bias query must contain the {as_of_date} placeholder",
+                )
+            if not bias_config.get("parameter"):
+                _err(
+                    "bias_config.parameter",
+                    "bias_config needs 'parameter' — the top-k cut the audit runs at"
+                    " (e.g. '100_abs' or '10_pct')",
+                )
+            tau = bias_config.get("tau", 0.8)
+            if (
+                not isinstance(tau, (int, float))
+                or isinstance(tau, bool)
+                or not 0 < tau <= 1
+            ):
+                _err(
+                    "bias_config.tau",
+                    f"tau must be a number in (0, 1], got {tau!r}"
+                    " (0.8 is the four-fifths rule)",
+                )
+            intervention = bias_config.get("intervention")
+            if (
+                intervention is not None
+                and intervention not in INTERVENTION_PRIMARY_METRIC
+            ):
+                _err(
+                    "bias_config.intervention",
+                    f"unknown intervention {intervention!r} — expected one of"
+                    f" {sorted(INTERVENTION_PRIMARY_METRIC)}",
+                )
+            ref_groups = bias_config.get("ref_groups")
+            if ref_groups is not None and not isinstance(ref_groups, Mapping):
+                _err(
+                    "bias_config.ref_groups",
+                    "ref_groups must be a mapping {attribute: reference_value}",
+                )
+
+    subsets = (experiment_config.get("evaluation") or {}).get("subsets")
+    if subsets is not None:
+        if not isinstance(subsets, (list, tuple)):
+            _err(
+                "evaluation.subsets",
+                "subsets must be a list of {name, query} mappings",
+            )
+        else:
+            seen_names: set[str] = set()
+            for i, subset in enumerate(subsets):
+                path = f"evaluation.subsets[{i}]"
+                if not isinstance(subset, Mapping):
+                    _err(path, "each subset must be a mapping with 'name' and 'query'")
+                    continue
+                name = subset.get("name")
+                if not name:
+                    _err(f"{path}.name", "subset needs a 'name'")
+                elif name in seen_names:
+                    _err(f"{path}.name", f"duplicate subset name {name!r}")
+                else:
+                    seen_names.add(name)
+                query = subset.get("query")
+                if not query:
+                    _err(f"{path}.query", "subset needs a 'query' returning entity_id")
+                elif "{as_of_date}" not in query:
+                    _err(
+                        f"{path}.query",
+                        "the subset query must contain the {as_of_date} placeholder",
+                    )
 
     if not experiment_config.get("sources"):
         warnings.append(
@@ -841,6 +928,16 @@ def run_experiment(
     metric_config = _resolve_metric_config(
         experiment_config, problem_type, metric_config
     )
+    # bias_config is identity-neutral (observes the problem, does not define it — it is
+    # NOT in _PROBLEM_KEYS); validate it before anything is built (fail fast).
+    bias_config = experiment_config.get("bias_config")
+    if bias_config is not None:
+        validate_bias_config(bias_config)
+    # evaluation.subsets: identity-neutral cohort slices, evaluated alongside the full
+    # cohort (migration 0015 re-ranks within each subset). Validate before building.
+    subsets_config = (experiment_config.get("evaluation") or {}).get("subsets") or []
+    if subsets_config:
+        validate_subsets_config(subsets_config)
 
     temporal_config = TemporalConfig.model_validate(
         _require(experiment_config, "temporal_config")
@@ -884,6 +981,10 @@ def run_experiment(
             source_pins=frozen_pins,
             policy=cache_policy,
         )
+        if bias_config is not None:
+            # Populate protected_groups from the config's templated query so the SQL
+            # bias audit runs end-to-end (ADR-0007) — idempotent upsert per date.
+            ingest_protected_groups(db_engine, bias_config["query"], all_as_of_dates)
         labels_artifact_id = build_labels(
             db_engine,
             first_run_id,
@@ -896,6 +997,16 @@ def run_experiment(
             source_pins=frozen_pins,
             policy=cache_policy,
         )
+        # evaluation.subsets → subset_members over the union grid; every model then
+        # evaluates once per (date × subset) alongside the full cohort (0015).
+        subset_hashes: list[str] = [
+            s["subset_hash"]
+            for s in (
+                register_subsets(db_engine, subsets_config, all_as_of_dates)
+                if subsets_config
+                else []
+            )
+        ]
 
         grid = _grid_specs(grid_config)
 
@@ -1020,6 +1131,11 @@ def run_experiment(
                         as_of_date=None,
                         label_timespan=test_timespan,
                         metric_config=metric_config,
+                        subset_hashes=subset_hashes,
+                        compute_bias=bias_config is not None,
+                        bias_parameter=(bias_config or {}).get("parameter"),
+                        bias_ref_groups=(bias_config or {}).get("ref_groups"),
+                        bias_tau=(bias_config or {}).get("tau", 0.8),
                     )
                     split_model_ids.append(model.model_id)
                     split_model_artifact_ids.append(model.model_artifact_id)
@@ -1129,7 +1245,14 @@ def _resolve_metric_config(
         return dict(override)
     block = experiment_config.get("evaluation")
     if block:
-        return dict(block)
+        resolved = dict(block)
+        # subsets ride the evaluation block for config ergonomics but are NOT part of
+        # the jsonb metric config evaluate_model consumes (they are materialized +
+        # looped by the orchestrator — see register_subsets / score_and_evaluate).
+        resolved.pop("subsets", None)
+        if resolved:
+            return resolved
+        # a subsets-only evaluation block still gets the problem-type metric default
     if problem_type in ("regression", "regression_ranking"):
         return dict(DEFAULT_REGRESSION_CONFIG)
     if problem_type == "survival":

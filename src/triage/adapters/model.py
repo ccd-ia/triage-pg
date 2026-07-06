@@ -48,6 +48,7 @@ metrics. Predictions are never overwritten — re-scoring appends rows with a la
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -267,22 +268,41 @@ def build_model(
     group_hash = _model_group_hash(class_path, canonical_hp, feature_list)
 
     # ---- cache: an already-built model is reused wholesale (estimator reloaded from disk).
+    # status='built' alone is NOT proof of presence (ADR-0017: outputs are deletable —
+    # GC, or an OS tmp purge, observed live): verify the joblib exists, else refit.
     hit = cache_hit(db_engine, model_derivation, policy=policy)
     if hit is not None:
-        logger.info(
-            f"Model {model_derivation.id[:12]}… already built — reusing (cache hit)"
-        )
-        record_use(db_engine, run_id, [model_derivation.id])
         existing = _existing_model_row(db_engine, model_derivation.id)
-        return ModelResult(
-            model_artifact_id=model_derivation.id,
-            model_id=existing["model_id"],
-            model_group_id=existing["model_group_id"],
-            model_group_hash=group_hash,
-            artifact_uri=existing["artifact_uri"],
-            feature_names=feature_list,
-            estimator=_load_estimator(existing["artifact_uri"], storage),
-            cache_hit=True,
+        artifact_uri = (existing or {}).get("artifact_uri")
+        uri_storage = storage
+        if uri_storage is None and artifact_uri:
+            from triage.profiles.storage import storage_for_root
+
+            uri_storage = storage_for_root(artifact_uri)
+        if (
+            existing is not None
+            and artifact_uri
+            and uri_storage is not None
+            and uri_storage.exists(artifact_uri)
+        ):
+            logger.info(
+                f"Model {model_derivation.id[:12]}… already built — reusing (cache hit)"
+            )
+            record_use(db_engine, run_id, [model_derivation.id])
+            return ModelResult(
+                model_artifact_id=model_derivation.id,
+                model_id=existing["model_id"],
+                model_group_id=existing["model_group_id"],
+                model_group_hash=group_hash,
+                artifact_uri=existing["artifact_uri"],
+                feature_names=feature_list,
+                estimator=_load_estimator(existing["artifact_uri"], storage),
+                cache_hit=True,
+            )
+        logger.warning(
+            f"Model {model_derivation.id[:12]}… is marked built but its artifact is"
+            f" missing ({artifact_uri or 'no models row'}) — refitting under the same"
+            " identity"
         )
 
     begin_artifact(
@@ -297,9 +317,13 @@ def build_model(
     )
 
     try:
+        fit_started = time.perf_counter()
         estimator, x_columns = _fit_estimator(
             train_matrix_result, class_path, hyperparameters, random_seed, storage
         )
+        # wall-clock fit time (0016): the one per-model cost number a group's members
+        # can be contrasted on. Includes the matrix load — the honest train cost.
+        train_duration_ms = int((time.perf_counter() - fit_started) * 1000)
         artifact_uri, model_size_bytes = _serialize_estimator(
             estimator, storage, storage_root, model_derivation.id
         )
@@ -322,6 +346,7 @@ def build_model(
             artifact_uri=artifact_uri,
             model_size_bytes=model_size_bytes,
             random_seed=random_seed,
+            train_duration_ms=train_duration_ms,
         )
         _persist_feature_importances(db_engine, model_id, estimator, x_columns)
         mark_built(
@@ -600,6 +625,7 @@ def _insert_model_row(
     artifact_uri: str,
     model_size_bytes: int,
     random_seed: int,
+    train_duration_ms: int | None = None,
 ) -> int:
     """INSERT (or reclaim) the ``triage.models`` row; return its ``model_id``.
 
@@ -615,15 +641,16 @@ def _insert_model_row(
             "insert into triage.models"
             + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
             + "  train_end_time, training_label_timespan, artifact_uri,"
-            + "  artifact_format, model_size_bytes, random_seed)"
+            + "  artifact_format, model_size_bytes, random_seed, train_duration_ms)"
             + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
             + "  cast(%(train_end_time)s as date),"
             + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
-            + "  'joblib', %(model_size_bytes)s, %(random_seed)s)"
+            + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s)"
             + " on conflict (model_hash) do update set"
             + "  run_id = excluded.run_id,"
             + "  artifact_uri = excluded.artifact_uri,"
-            + "  model_size_bytes = excluded.model_size_bytes"
+            + "  model_size_bytes = excluded.model_size_bytes,"
+            + "  train_duration_ms = excluded.train_duration_ms"
             + " returning model_id",
             {
                 "model_group_id": model_group_id,
@@ -635,6 +662,7 @@ def _insert_model_row(
                 "artifact_uri": artifact_uri,
                 "model_size_bytes": model_size_bytes,
                 "random_seed": random_seed,
+                "train_duration_ms": train_duration_ms,
             },
         ).fetchone()["model_id"]
     return model_id
@@ -806,9 +834,11 @@ def score_and_evaluate(
     split_kind: str = "test",
     metric_config: Mapping[str, Any] | None = None,
     subset_hash: str = "",
+    subset_hashes: Sequence[str] = (),
     compute_bias: bool = False,
     bias_parameter: str | None = None,
     bias_ref_groups: Mapping[str, str] | None = None,
+    bias_tau: float = 0.8,
 ) -> ScoreEvaluateResult:
     """Score a test matrix (append-only) and evaluate the model in-Postgres.
 
@@ -835,11 +865,19 @@ def score_and_evaluate(
         split_kind: ``triage.split_kind`` for the prediction rows (default ``'test'``).
         metric_config: ``triage.evaluate_model`` metric config; defaults to the classification
             set (precision@/recall@ + auc_roc + average_precision).
-        subset_hash: subset discriminator recorded on the evaluation rows (filtering deferred).
+        subset_hash: subset discriminator for THIS evaluation pass — since migration
+            0015 it both filters (ranks recomputed within the subset population) and
+            stamps the rows. ``''`` = the full labeled cohort.
+        subset_hashes: additional subsets to evaluate AFTER the ``subset_hash`` pass —
+            one extra evaluation row-set per (eval date × subset), same append-only
+            shape (the ``evaluation.subsets`` config, materialized by
+            :func:`triage.adapters.subsets.register_subsets`).
         compute_bias: if True, also call :func:`~.compute_bias_in_db` (needs
             ``bias_parameter``).
         bias_parameter: top-k threshold for the bias group-by (e.g. ``'10_pct'``).
         bias_ref_groups: optional ``{attribute: value}`` reference-group pins for bias.
+        bias_tau: fairness threshold — a disparity passes in [tau, 1/tau]
+            (migration 0014; 0.8 is the four-fifths rule).
 
     Returns:
         A :class:`ScoreEvaluateResult` with the prediction / evaluation / bias row counts.
@@ -891,6 +929,16 @@ def score_and_evaluate(
                 metric_config=cfg,
                 subset_hash=subset_hash,
             )
+            for extra_subset in subset_hashes:
+                num_evaluations += evaluate_in_db(
+                    db_engine,
+                    model_id,
+                    eval_date,
+                    label_timespan,
+                    split_kind=split_kind,
+                    metric_config=cfg,
+                    subset_hash=extra_subset,
+                )
             if compute_bias:
                 num_bias += compute_bias_in_db(
                     db_engine,
@@ -900,6 +948,7 @@ def score_and_evaluate(
                     bias_parameter,
                     split_kind=split_kind,
                     ref_groups=dict(bias_ref_groups or {}),
+                    tau=bias_tau,
                 )
     except Exception:
         logger.error(

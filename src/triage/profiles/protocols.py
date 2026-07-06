@@ -39,6 +39,8 @@ class StorageAdapter(Protocol):
 
     def delete(self, uri: str) -> bool: ...
 
+    def exists(self, uri: str) -> bool: ...
+
 
 @runtime_checkable
 class ExecutionAdapter(Protocol):

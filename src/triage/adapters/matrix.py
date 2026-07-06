@@ -662,23 +662,31 @@ def build_matrix(
     )
 
     # ---- cache: an already-built matrix is reused wholesale (its feature group too).
+    # status='built' alone is NOT proof of presence (ADR-0017: outputs are deletable —
+    # GC, or an OS tmp purge, observed live): verify the Parquet exists, else rebuild.
     hit = cache_hit(db_engine, matrix_derivation, policy=policy)
     if hit is not None:
-        logger.info(
-            f"Matrix {matrix_derivation.id[:12]}… ({matrix_kind}) already built — reusing"
-        )
-        record_use(db_engine, run_id, [fg_derivation.id, matrix_derivation.id])
         existing = _existing_matrix_row(db_engine, matrix_derivation.id)
-        return MatrixResult(
-            matrix_artifact_id=matrix_derivation.id,
-            feature_group_artifact_id=fg_derivation.id,
-            storage_uri=existing["storage_uri"],
-            num_entities=existing["num_entities"],
-            num_features=existing["num_features"],
-            feature_names=list(existing["feature_names"] or []),
-            fit_based_stats=(existing["metadata"] or {}).get(_FIT_STATS_KEY, {}),
-            cat_encodings=(existing["metadata"] or {}).get(_CAT_ENC_KEY, {}),
-            cache_hit=True,
+        if existing is not None and storage.exists(existing["storage_uri"]):
+            logger.info(
+                f"Matrix {matrix_derivation.id[:12]}… ({matrix_kind}) already built — reusing"
+            )
+            record_use(db_engine, run_id, [fg_derivation.id, matrix_derivation.id])
+            return MatrixResult(
+                matrix_artifact_id=matrix_derivation.id,
+                feature_group_artifact_id=fg_derivation.id,
+                storage_uri=existing["storage_uri"],
+                num_entities=existing["num_entities"],
+                num_features=existing["num_features"],
+                feature_names=list(existing["feature_names"] or []),
+                fit_based_stats=(existing["metadata"] or {}).get(_FIT_STATS_KEY, {}),
+                cat_encodings=(existing["metadata"] or {}).get(_CAT_ENC_KEY, {}),
+                cache_hit=True,
+            )
+        logger.warning(
+            f"Matrix {matrix_derivation.id[:12]}… is marked built but its Parquet is"
+            f" missing ({(existing or {}).get('storage_uri', '?')}) — rebuilding under"
+            " the same identity"
         )
 
     # ---- feature group artifact (built first; the matrix lists it as a parent).

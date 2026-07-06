@@ -385,6 +385,74 @@ def test_bias_metrics_explicit_reference_group(greenfield_engine):
         assert row["ref_group_value"] == "B"
 
 
+def test_bias_metrics_full_confusion_set_and_tau(greenfield_engine):
+    """Migration 0014: fnr / for / npv match hand computation, the zero-reference
+    disparity guard holds, and the SQL fairness verdict follows τ.
+
+    k=5 cut over SCORES: selected = e1..e5. Group A = e1..e6, B = e7..e10.
+      A: fn=1 (e6), tn=0, pos=4, not-selected=1 -> fnr=1/4, for=1/1, npv=0/1
+      B: fn=1 (e9), tn=3, pos=1, not-selected=4 -> fnr=1/1, for=1/4, npv=3/4
+    Reference = A (largest): fnr disparity B = 4.0; for disparity B = 0.25;
+    npv reference value is 0.0 -> npv disparity is NULL for every group (guard).
+    """
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+    groups = ["A", "A", "A", "A", "A", "A", "B", "B", "B", "B"]
+    _seed_protected_groups(engine, ENTITY_IDS, groups)
+
+    compute_bias_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs")
+
+    def _rows(metric):
+        with engine.connection() as conn:
+            rows = conn.execute(
+                "select attribute_value, value, disparity, tau, passes_fairness "
+                "from triage.bias_metrics "
+                "where model_id = %(m)s and metric = %(metric)s "
+                "and attribute_name = 'race' order by attribute_value",
+                {"m": model_id, "metric": metric},
+            ).fetchall()
+        return {r["attribute_value"]: r for r in rows}
+
+    fnr = _rows("fnr")
+    assert fnr["A"]["value"] == pytest.approx(0.25)
+    assert fnr["B"]["value"] == pytest.approx(1.0)
+    assert fnr["B"]["disparity"] == pytest.approx(4.0)
+    assert fnr["A"]["passes_fairness"] is True  # disparity 1.0 vs itself
+    assert fnr["B"]["passes_fairness"] is False  # 4.0 outside [0.8, 1.25]
+    assert fnr["B"]["tau"] == pytest.approx(0.8)
+
+    for_rate = _rows("for")
+    assert for_rate["A"]["value"] == pytest.approx(1.0)
+    assert for_rate["B"]["value"] == pytest.approx(0.25)
+    assert for_rate["B"]["disparity"] == pytest.approx(0.25)
+    assert for_rate["B"]["passes_fairness"] is False
+
+    npv = _rows("npv")
+    assert npv["A"]["value"] == pytest.approx(0.0)
+    assert npv["B"]["value"] == pytest.approx(0.75)
+    # reference (A) npv is 0.0 -> disparity undefined for the whole attribute
+    assert npv["A"]["disparity"] is None
+    assert npv["B"]["disparity"] is None
+    assert npv["B"]["passes_fairness"] is None  # no verdict without a disparity
+
+    # counts carry neither τ nor a verdict
+    gsize = _rows("group_size")
+    assert gsize["A"]["tau"] is None
+    assert gsize["A"]["passes_fairness"] is None
+
+    # τ is config, not constant: at τ=0.2 the band is [0.2, 5.0] — B's 'for'
+    # disparity (0.25) now passes, and the idempotent upsert updates the verdict.
+    compute_bias_in_db(
+        engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, parameter="5_abs", tau=0.2
+    )
+    for_rate = _rows("for")
+    assert for_rate["B"]["tau"] == pytest.approx(0.2)
+    assert for_rate["B"]["passes_fairness"] is True
+    fnr = _rows("fnr")
+    assert fnr["B"]["passes_fairness"] is True  # 4.0 sits inside [0.2, 5.0]
+
+
 # ------------------------------------------------------------------ idempotency
 
 

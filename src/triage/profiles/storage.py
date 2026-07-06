@@ -83,6 +83,9 @@ class LocalStorage:
         path.unlink()
         return True
 
+    def exists(self, uri: str) -> bool:
+        return self._local_path(uri).exists()
+
 
 class S3Storage:
     """S3 storage over ``pyarrow.fs.S3FileSystem`` + ``s3fs`` (scheme ``s3``).
@@ -140,6 +143,9 @@ class S3Storage:
             return False
         fs.rm(uri)
         return True
+
+    def exists(self, uri: str) -> bool:
+        return bool(self._fs().exists(uri))
 
 
 def storage_for_root(storage_root: str, *, region: str | None = None):
