@@ -655,8 +655,8 @@ wheels = [
 
 [[package]]
 name = "featurizer"
-version = "0.4.2"
-source = { git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.4.2#7c05ae69ccf3d168b597dd12639f25f70803e84a" }
+version = "0.5.0"
+source = { git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.5.0#50a68da7ae06c77029b389c4bf9ca0a3935486c5" }
 dependencies = [
     { name = "icecream" },
     { name = "loguru" },
@@ -2858,7 +2858,7 @@ requires-dist = [
     { name = "dickens", specifier = ">=2.1.1" },
     { name = "factory-boy", marker = "extra == 'dev'", specifier = "==3.2.1" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = ">=0.115" },
-    { name = "featurizer", extras = ["parquet"], git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.4.2" },
+    { name = "featurizer", extras = ["parquet"], git = "ssh://git@github.com/nanounanue/featurizer.git?rev=v0.5.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "httpx", marker = "extra == 'dashboard'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.28.1" },
