@@ -273,7 +273,9 @@ def test_migration_0012_roundtrip(db_url, db_pool_greenfield):
         assert _has_view(conn, "triage.monitoring_volume")
         assert _has_view(conn, "triage.monitoring_outcome_tracking")
 
-    downgrade_db(dburl=db_url, revision="-1")
+    # explicit target (not "-1"): head moves as migrations land; the intent is
+    # "below 0012" regardless of what sits above it.
+    downgrade_db(dburl=db_url, revision="0011_survival_c_index")
     with db_pool_greenfield.connection() as conn:
         assert not _has_view(conn, "triage.monitoring_volume")
         assert not _has_view(conn, "triage.monitoring_outcome_tracking")

@@ -47,12 +47,8 @@ def test_cli_show_timechop():
                 viz_mock.assert_called_once_with("chopper", save_target=context_handle)
 
 
-def test_cli_audition():
-    with patch("triage.cli.AuditionRunner", autospec=True) as runner_mock:
-        runner_instance = runner_mock.return_value
-        invoke("audition", "--config", "example/config/audition.yaml")
-        runner_instance.validate.assert_called_once()
-        runner_instance.run.assert_called_once()
+# (test_cli_audition removed 2026-07-05: component/audition is retired — the live
+# `triage audition` / `triage leaderboard` coverage is src/tests/test_audition_views.py)
 
 
 def test_featuretest():

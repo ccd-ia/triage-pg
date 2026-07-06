@@ -316,22 +316,25 @@ def test_migration_0011_roundtrip(db_url, db_pool_greenfield):
             "select to_regprocedure(%(sig)s) is not null as f", {"sig": signature}
         ).fetchone()["f"]
 
-    c_index_sig = "triage.c_index(bigint, triage.split_kind, date, interval)"
+    # at head, c_index carries the 0015 subset parameter; below 0011 NO arity exists.
+    c_index_head_sig = "triage.c_index(bigint, triage.split_kind, date, interval, text)"
+    c_index_0011_sig = "triage.c_index(bigint, triage.split_kind, date, interval)"
     eval_sig = (
         "triage.evaluate_model(bigint, triage.split_kind, date, interval, jsonb, text)"
     )
     with db_pool_greenfield.connection() as conn:
-        assert _has(conn, c_index_sig)
+        assert _has(conn, c_index_head_sig)
 
     # below 0011 explicitly (head keeps moving — "-1" would only undo the newest migration)
     downgrade_db(dburl=db_url, revision="0010_windowed_evaluations")
     with db_pool_greenfield.connection() as conn:
-        assert not _has(conn, c_index_sig)
+        assert not _has(conn, c_index_head_sig)
+        assert not _has(conn, c_index_0011_sig)
         assert _has(conn, eval_sig)  # the 0002 dispatcher body is restored, not dropped
 
     upgrade_db(dburl=db_url, revision="head")
     with db_pool_greenfield.connection() as conn:
-        assert _has(conn, c_index_sig)
+        assert _has(conn, c_index_head_sig)
 
 
 def test_validator_flags_survival_without_the_extra(monkeypatch):

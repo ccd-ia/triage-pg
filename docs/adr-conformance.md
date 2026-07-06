@@ -18,7 +18,7 @@ unexercised** (built + mock-tested, never run against the real environment).
 | 0004 | Cloud auth = RDS IAM tokens | **code-complete, unexercised** | `profiles/auth.py` `CloudAuth` (`generate_db_auth_token`, per-connection token, `verify-full`); moto/stub-tested only — never run against live RDS → plan Phase 5 (gated) |
 | 0005 | Execution = one AWS Batch job per experiment | **code-complete, unexercised** | `profiles/execution.py` `BatchExecution`; rq/multicore removed (grep: no `multiprocessing` under `adapters/`); no live Batch run, no `describe_jobs` status poll → plan Phase 5 (gated) |
 | 0006 | Append-only, timestamped, partitioned predictions | fulfilled | Migration 0001: `partition by range (scored_at)` (line 230, quarterly); append-only asserted by `adapter_tests/test_run_orchestration.py:353`. Monitoring *features* still deferred → plan Phase 6 |
-| 0007 | Evaluation + leaderboards + bias in PostgreSQL | fulfilled (with recorded waiver) | Migration 0002 PL/pgSQL metrics validated vs sklearn (`catwalk_tests/test_in_pg_metrics.py`); bias group-bys + disparity vs reference validated on hand-computed fixtures matching Aequitas' definitions (`test_bias_metrics_group_by_and_disparity`, `test_bias_metrics_explicit_reference_group`). Direct Aequitas-output parity **waived** — Aequitas is pandas-2-incompatible and cannot run to produce references (the very reason it was dropped); waiver recorded on the ADR. Flag: Python `component/audition` survives as a CLI thin client (see Flags) |
+| 0007 | Evaluation + leaderboards + bias in PostgreSQL | fulfilled (with recorded waiver) | Migration 0002 PL/pgSQL metrics validated vs sklearn (`catwalk_tests/test_in_pg_metrics.py`); bias group-bys + disparity vs reference validated on hand-computed fixtures matching Aequitas' definitions (`test_bias_metrics_group_by_and_disparity`, `test_bias_metrics_explicit_reference_group`). Direct Aequitas-output parity **waived** — Aequitas is pandas-2-incompatible and cannot run to produce references (the very reason it was dropped); waiver recorded on the ADR. Flag #1 (audition dual surface) closed 2026-07-05: `component/audition` retired, SQL+CLI parity via migration 0013 (see Flags). Update 2026-07-06 (v1-release plan P2–P5): the bias metric set is COMPLETE (fnr/for/npv + τ verdicts, migration 0014; `bias_config` ingestion end-to-end) and subset evaluation FILTERS (migration 0015 — the schema-design §8.6 recorded-only deferral is resolved; the subset is the population, `test_subsets.py` hand-computed parity) |
 | 0008 | featurizer replaces Collate | fulfilled | Pin `pyproject.toml:31` = `featurizer[parquet] @ …@v0.4.1`; `component/collate` gone; scale validated (`docs/featurizer-scale.md`, `benchmarks/featurizer_scale.py`), re-validated on v0.4.1 (2026-06-28) |
 | 0009 | Imputation split: fit-free vs fit-based (train-only) | fulfilled | `adapters/imputation.py` (+ `adapter_tests/test_imputation.py`); train-only stats persisted to `matrices.metadata`, reused by test via the train-matrix parent edge (`adapter_tests/test_matrix_assembler.py` property tests); categorical-encoding extension implemented (`cat_encodings`) |
 | 0010 | problem_type ranking spine; survival-ready labels | **partial (by design)** | Discriminator + spine implemented; `labels.duration`/`event_observed` in migration 0001 (lines 203–204). **Gaps:** no survival train/eval path, no `c_index` anywhere (grep-verified); `metric_config` reaches `in_pg_evaluation.py` (incl. an unused `DEFAULT_REGRESSION_CONFIG`) but is not selectable from the experiment YAML → plan Phase 3 |
@@ -58,14 +58,16 @@ this exclusion.
 
 ## Flags for the maintainer (decisions, not defects)
 
-1. **Audition dual surface.** ADR-0007 moved evaluation/leaderboards/audition
-   in-PG; the dashboard's audition reads the SQL catalog views (migrations
-   0004/0005). But the inherited Python `component/audition/` (AuditionRunner,
-   ~15 modules incl. `plotting.py` and a notebook) survives, repointed to
-   greenfield tables, serving the `triage audition` CLI command. This is a thin
-   client over PG data — not a violation of the letter — but it is a second
-   audition surface to maintain. Options: accept as the CLI convenience (do
-   nothing), or retire post-v1 in favor of SQL-view parity. **Needs a call.**
+1. **Audition dual surface.** ~~Needs a call.~~ **CLOSED 2026-07-05 — retired**
+   (maintainer decision, v1-release plan P1). `component/audition/` and
+   `audition_tests/` are deleted; migration 0013 brings the SQL surface to full
+   parity (`dist_from_best_case_next_time` + `avg/max_regret_next_time`, DSSG
+   semantics) and `triage audition` / `triage leaderboard` are Rich-table CLI
+   reads over the same views the dashboard uses (ADR-0012 headless parity; the
+   8-rule catalog lives once in `in_pg_evaluation.AUDITION_RULES`). The original
+   flag text: the inherited Python module (AuditionRunner, ~15 modules incl.
+   `plotting.py` and a notebook) survived as a second audition surface,
+   repointed at greenfield tables — accept-or-retire was the open question.
 2. **Stale `component/postmodeling/__pycache__/`** on disk (gitignored, no
    sources). Deleting it is a one-liner left to the maintainer.
 3. **ADR-0020 re-confirmed** for the monitoring track (serial is correct for

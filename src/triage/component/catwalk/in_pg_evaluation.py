@@ -33,6 +33,23 @@ DEFAULT_SURVIVAL_CONFIG = {
     "survival_metrics": ["c_index"],
 }
 
+# The eight standard audition selection rules with their default params — the single
+# catalog over migration 0005's ``triage.audition_pick()``, shared by the dashboard's
+# strategy panel and ``triage audition`` (ADR-0007: audition is in-PG evaluation; the
+# Python ``component/audition`` module is retired). ``best_average_two_metrics`` needs a
+# second metric — callers fill ``metric2``/``parameter2`` from ``triage.metric_catalog``
+# when one exists, else skip that rule.
+AUDITION_RULES: tuple[tuple[str, dict], ...] = (
+    ("best_current_value", {}),
+    ("best_average_value", {}),
+    ("lowest_metric_variance", {}),
+    ("most_frequent_best_dist", {"dist_window": 0.05}),
+    ("best_avg_var_penalized", {"stdev_penalty": 1.0}),
+    ("best_avg_recency_weight", {"curr_weight": 2.0, "decay_type": "linear"}),
+    ("best_average_two_metrics", {}),  # metric2/metric1_weight filled in per-request
+    ("random_model_group", {"seed": "0"}),
+)
+
 
 def evaluate_in_db(
     db_engine,
@@ -57,8 +74,9 @@ def evaluate_in_db(
             (``'train' | 'test' | 'validation' | 'production'``).
         metric_config (dict | None): ``{"metrics": [...], "thresholds": [...],
             "regression_metrics": [...]}``. Defaults to the classification set.
-        subset_hash (str): subset discriminator recorded on the rows (filtering
-            deferred, schema-design §8.6).
+        subset_hash (str): subset discriminator — since migration 0015 it FILTERS
+            (metrics treat the subset as the population, ranks recomputed within it)
+            and stamps the rows. ``''`` = the full labeled cohort.
 
     Returns:
         int: number of evaluation rows written.
@@ -113,13 +131,15 @@ def compute_bias_in_db(
     parameter,
     split_kind="test",
     ref_groups=None,
+    tau=0.8,
 ):
     """Compute SQL bias/disparity metrics for one model at a top-k threshold.
 
     Calls ``triage.compute_bias_metrics``, which upserts long-format rows into
     ``triage.bias_metrics`` (group_size, selection_rate, precision, tpr, fpr,
-    fdr and their disparity vs the reference group). Replaces the Aequitas dump
-    (ADR-0007).
+    fdr, fnr, for, npv and their disparity vs the reference group, plus the
+    per-row ``passes_fairness`` verdict at ``tau`` — migration 0014). Replaces
+    the Aequitas dump (ADR-0007).
 
     Args:
         db_engine (psycopg_pool.ConnectionPool): pool for the project DB.
@@ -130,6 +150,8 @@ def compute_bias_in_db(
         split_kind (str): ``triage.split_kind`` enum value.
         ref_groups (dict | None): ``{"race": "White"}`` to pin the reference
             group per attribute; otherwise the largest group is used.
+        tau (float): fairness threshold — a row passes when its disparity lies
+            in [tau, 1/tau] (0.8 is the four-fifths rule).
 
     Returns:
         int: number of bias-metric rows written.
@@ -142,7 +164,7 @@ def compute_bias_in_db(
             "select triage.compute_bias_metrics("
             "%(model_id)s, cast(%(split_kind)s as triage.split_kind), "
             "cast(%(as_of_date)s as date), cast(%(label_timespan)s as interval), "
-            "%(parameter)s, cast(%(ref_groups)s as jsonb)) as written",
+            "%(parameter)s, cast(%(ref_groups)s as jsonb), %(tau)s) as written",
             {
                 "model_id": model_id,
                 "split_kind": split_kind,
@@ -150,6 +172,7 @@ def compute_bias_in_db(
                 "label_timespan": label_timespan,
                 "parameter": parameter,
                 "ref_groups": json.dumps(ref_groups),
+                "tau": tau,
             },
         )
         written = result.fetchone()["written"]
