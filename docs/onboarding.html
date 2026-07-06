@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>triage-pg — onboarding one-pager</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #0f172a; --muted: #64748b; --line: #e2e8f0;
+  --pg: #336791;           /* PostgreSQL blue */
+  --accent: #0f766e;       /* teal */
+  --chip: #eef6f5; --code-bg: #f1f5f9;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 15px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+main { max-width: 900px; margin: 0 auto; padding: 36px 28px 80px; }
+h1 { font-size: 1.9rem; margin: 0; letter-spacing: -0.02em; }
+h1 .pg { color: var(--pg); }
+.tagline { color: var(--muted); margin: 6px 0 0; font-size: 1.02rem; }
+h2 { font-size: 1.12rem; margin: 34px 0 10px; padding-bottom: 4px;
+     border-bottom: 2px solid var(--pg); }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--code-bg);
+       border-radius: 4px; padding: 1px 5px; }
+pre { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px 16px;
+      overflow-x: auto; font-size: 0.83em; line-height: 1.55; }
+pre code { background: none; padding: 0; color: inherit; }
+pre .c { color: #7dd3c8; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin: 10px 0; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 26px; }
+.gloss dt { font-weight: 700; margin-top: 8px; }
+.gloss dd { margin: 0 0 2px; color: #334155; font-size: 0.92em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip { background: var(--chip); border: 1px solid var(--accent); color: var(--accent);
+        border-radius: 999px; padding: 2px 11px; font-size: 0.82em; font-weight: 600; }
+figure { margin: 18px 0; text-align: center; }
+figcaption { color: var(--muted); font-size: 0.83em; margin-top: 6px; }
+img.shot { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+a { color: var(--pg); }
+.foot { color: var(--muted); font-size: 0.82em; margin-top: 30px;
+        border-top: 1px solid var(--line); padding-top: 10px; }
+@media print {
+  body { font-size: 11.5px; }
+  pre { background: #f1f5f9; color: #0f172a; border: 1px solid var(--line); }
+  pre .c { color: #0f766e; }
+  a { color: inherit; text-decoration: none; }
+  img.shot { max-height: 260px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>triage<span class="pg">-pg</span></h1>
+    <p class="tagline">Temporal ML for public-policy decisions, with PostgreSQL as the whole
+    substrate — a deliberately simplified fork of DSSG's
+    <a href="https://github.com/dssg/triage">triage</a>.</p>
+    <div class="chips">
+      <span class="chip">early-warning systems</span>
+      <span class="chip">resource prioritization</span>
+      <span class="chip">4 problem types incl. survival</span>
+      <span class="chip">in-database evaluation</span>
+      <span class="chip">fairness + audition + monitoring</span>
+    </div>
+  </header>
+
+  <h2>The pipeline — one pass, every artifact content-addressed</h2>
+  <figure>
+    <svg viewBox="0 0 860 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="triage-pg pipeline">
+      <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
+      <rect x="8" y="48" width="92" height="52" rx="8" fill="#eef6f5" stroke="#336791" stroke-width="1.4"/>
+      <text x="54" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#336791" font-family="sans-serif">your tables</text>
+      <text x="54" y="87" text-anchor="middle" font-size="10.5" fill="#336791" font-family="monospace">ontology.*</text>
+      <line x1="100" y1="74" x2="122" y2="74" stroke="#64748b" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="126" y="48" width="118" height="52" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.4"/>
+      <text x="185" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#0f766e" font-family="sans-serif">cohort + labels</text>
+      <text x="185" y="87" text-anchor="middle" font-size="10.5" fill="#64748b" font-family="sans-serif">templated SQL</text>
+      <line x1="244" y1="74" x2="266" y2="74" stroke="#64748b" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="270" y="48" width="112" height="52" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.4"/>
+      <text x="326" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#0f766e" font-family="sans-serif">featurizer</text>
+      <text x="326" y="87" text-anchor="middle" font-size="10.5" fill="#64748b" font-family="sans-serif">DFS · as-of joins</text>
+      <line x1="382" y1="74" x2="404" y2="74" stroke="#64748b" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="408" y="48" width="104" height="52" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.4"/>
+      <text x="460" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#0f766e" font-family="sans-serif">train</text>
+      <text x="460" y="87" text-anchor="middle" font-size="10.5" fill="#64748b" font-family="sans-serif">grid × splits</text>
+      <line x1="512" y1="74" x2="534" y2="74" stroke="#64748b" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="538" y="48" width="128" height="52" rx="8" fill="#eef6f5" stroke="#336791" stroke-width="1.4"/>
+      <text x="602" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#336791" font-family="sans-serif">predictions</text>
+      <text x="602" y="87" text-anchor="middle" font-size="10.5" fill="#336791" font-family="sans-serif">append-only</text>
+      <line x1="666" y1="74" x2="688" y2="74" stroke="#64748b" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="692" y="16" width="160" height="52" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.4"/>
+      <text x="772" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="#0f766e" font-family="sans-serif">in-PG evaluation</text>
+      <text x="772" y="55" text-anchor="middle" font-size="10.5" fill="#64748b" font-family="sans-serif">metrics · bias · audition</text>
+      <rect x="692" y="82" width="160" height="52" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.4"/>
+      <text x="772" y="104" text-anchor="middle" font-size="12" font-weight="700" fill="#0f766e" font-family="sans-serif">monitoring</text>
+      <text x="772" y="121" text-anchor="middle" font-size="10.5" fill="#64748b" font-family="sans-serif">drift · volume · outcomes</text>
+    </svg>
+    <figcaption>Matrices live in Parquet; everything that needs only (entity, score, label) runs
+    as PL/pgSQL inside your project's database.</figcaption>
+  </figure>
+
+  <h2>The mental model — three ideas carry everything</h2>
+  <table>
+    <tr><th>An <b>Experiment is a problem</b></th>
+        <td>Its hash covers exactly {problem_type, cohort, labels, temporal grid}. Runs are
+        <em>attempts</em> at it; fairness audits, subsets, and metric choices are
+        identity-neutral — adding them never changes what problem it is.</td></tr>
+    <tr><th>Artifacts are <b>content-addressed</b></th>
+        <td>Every cohort, label set, matrix, and model is identified by a hash over its complete
+        input closure (Guix-style). Caching, provenance, and GC all follow — re-running is cheap
+        and reproducible by construction.</td></tr>
+    <tr><th><b>Point-in-time correctness</b> is the cardinal rule</th>
+        <td>Features for an <code>as_of_date</code> may use only what was knowable strictly
+        before it. The featurizer's as-of joins and the fit-free/fit-based imputation split
+        exist to protect that boundary.</td></tr>
+  </table>
+
+  <h2>Five minutes to a running experiment</h2>
+  <pre><code><span class="c"># prerequisites: uv, Docker, just</span>
+uv sync --extra dev --extra dashboard
+just chi311-up                                <span class="c"># real Chicago 311 data, dockerized PG</span>
+<span class="c"># point triage at it + create the schema (docs/quickstart.md, 2 commands)</span>
+uv run triage --dbfile chicago311-database.yaml run \
+  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+
+<span class="c"># inspect — same views everywhere (headless-complete, ADR-0012)</span>
+uv run triage leaderboard &lt;hash&gt;      <span class="c"># or psql, or the dashboard (just serve)</span>
+uv run triage audition &lt;hash&gt;         <span class="c"># 8 selection rules + divergence</span>
+uv run triage postmodel error-tree &lt;model-id&gt;   <span class="c"># where does it fail?</span></code></pre>
+
+  <figure>
+    <img class="shot" src="images/experiment-overview.png"
+         alt="The dashboard: experiments, model-group × split heatmap, live run rail">
+    <figcaption>The read dashboard: model groups × temporal splits, audition, bias,
+    monitoring — every panel is a thin view over SQL.</figcaption>
+  </figure>
+
+  <h2>What you get out of the box</h2>
+  <div class="cols">
+    <div>
+      <b>Model selection</b> — in-PG audition: distance-from-best, max regret,
+      regret-next-time, all 8 DSSG selection rules.<br><br>
+      <b>Fairness</b> — 8 per-group metrics with disparity + τ verdicts, config-driven
+      ingestion, and the Aequitas fairness tree as a guidance wizard.<br><br>
+      <b>Diagnostics</b> — crosstabs, error trees, calibration, list overlap, per-entity
+      contributions: CLI computes once, PostgreSQL persists, dashboard reads.
+    </div>
+    <div>
+      <b>Monitoring</b> — scheduled <code>triage score</code> + drift (PSI/KS), volume,
+      calibration, realized outcomes. No daemon: a cron line and four SQL objects.<br><br>
+      <b>Multi-tenancy</b> — one database per project + a registry;
+      <code>triage project create/drop</code>; a project switcher in the dashboard.<br><br>
+      <b>Two profiles</b> — local (any standalone PostgreSQL) and cloud
+      (RDS IAM + S3 + AWS Batch) behind one seam.
+    </div>
+  </div>
+
+  <h2>Ten words you'll keep using <span style="font-weight:400;color:var(--muted)">(full glossary: CONTEXT.md)</span></h2>
+  <dl class="gloss cols">
+    <div>
+      <dt>Project</dt><dd>one isolated PostgreSQL database + a registry row.</dd>
+      <dt>Experiment</dt><dd>the problem (hash over the four problem keys).</dd>
+      <dt>Run</dt><dd>one attempt at an experiment; runs cache-share artifacts.</dd>
+      <dt>as_of_date</dt><dd>the decision moment features must not see past.</dd>
+      <dt>Cohort</dt><dd>who is scored at an as_of_date (templated SQL).</dd>
+    </div>
+    <div>
+      <dt>Matrix</dt><dd>entities × features Parquet, per split.</dd>
+      <dt>Model group</dt><dd>algorithm + hyperparameters + feature list, across splits.</dd>
+      <dt>Prediction</dt><dd>append-only, timestamped score — never overwritten.</dd>
+      <dt>Subset</dt><dd>a named cohort slice evaluated as its own population.</dd>
+      <dt>Forward score</dt><dd>a scheduled scoring run; monitoring's heartbeat.</dd>
+    </div>
+  </dl>
+
+  <h2>Where to go next</h2>
+  <table>
+    <tr><td><code>docs/quickstart.md</code></td><td>zero → running experiment → dashboard → diagnostics</td></tr>
+    <tr><td><code>dirtyduck/</code> · <code>chicago311/</code> · <code>donorschoose/</code></td><td>three self-contained tutorial datasets (dockerized, real data)</td></tr>
+    <tr><td><code>docs/fairness.md</code> · <code>docs/postmodeling.md</code> · <code>docs/monitoring.md</code></td><td>the three operator guides</td></tr>
+    <tr><td><code>docs/adr/</code> (28 records) · <code>CONTEXT.md</code></td><td>every hard decision, and the vocabulary</td></tr>
+    <tr><td><code>docs/triage-pg-vs-dssg-triage.html</code></td><td>coming from DSSG triage? the honest side-by-side</td></tr>
+  </table>
+
+  <p class="foot">triage-pg is MIT-licensed and stands on DSSG/DSaPP's triage — temporal
+  cross-validation, leakage-safe features, model governance, and the fairness tree are their
+  ideas. This page is self-contained (inline CSS/SVG; images from <code>docs/images/</code>)
+  and prints to ≤2 pages as the classroom handout.</p>
+</main>
+</body>
+</html>

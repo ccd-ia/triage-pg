@@ -96,3 +96,22 @@ A successful run reports something like *1 run, 20 models, 58,190 predictions, 1
 across 4 quarterly splits; ~28 features/matrix (request one-hot + numeric attributes + area/type
 backlog counts). Test AUC averages ≈ 0.87 — high because `sr_type` carries most of the signal, and
 honest because resolution timing is never fed in as a feature.
+
+## Inspect + diagnose (after the run)
+
+```bash
+export DATABASE_URL=postgresql://chi311_user:some_password@127.0.0.1:5438/chi311
+uv run triage leaderboard <experiment-hash>       # the leaderboard, headless (ADR-0012)
+uv run triage models <experiment-hash>            # groups: avg ± σ, max regret, fit time
+uv run triage audition <experiment-hash>          # 8 selection rules + divergence
+uv run triage model show <model-id>               # card + calibration deciles
+uv run triage postmodel crosstabs <model-id> -p 300_abs    # what characterizes the top-k
+uv run triage postmodel error-tree <model-id> -p 300_abs   # where the model fails
+just serve 8014                                   # → the dashboard
+```
+
+Fairness by geography (the honest protected-attribute proxy here — `docs/fairness.md`)
+and per-area subset evaluations are one config block each; both worked examples live in
+`docs/fairness.md` and `docs/quickstart.md`. A survival variant of this problem
+(time-to-resolution, `problem_type: survival`) ships as
+`example/chicago311/greenfield-survival.yaml`.

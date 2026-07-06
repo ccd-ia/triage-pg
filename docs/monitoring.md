@@ -1,5 +1,7 @@
 # Monitoring — scheduled forward scoring + drift over append-only predictions
 
+![The Monitoring view: score-volume heartbeat, PSI/KS drift chips vs the pinned reference, realized outcomes](images/monitoring-view.png)
+
 ADR-0006 made every scoring run an append-only, `scored_at`-timestamped insert precisely so
 production monitoring would be "a GROUP BY later". ADR-0027 lands that later: **no daemon** —
 the operator's scheduler invokes the existing CLI, and drift/health are SQL (migration 0012).

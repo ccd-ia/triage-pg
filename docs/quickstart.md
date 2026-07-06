@@ -39,16 +39,40 @@ uv run triage --dbfile chicago311-database.yaml run \
 The run prints its experiment hash and per-run model/prediction/evaluation counts. Inspect it:
 
 ```bash
-# headless (ADR-0012): everything is SQL over the in-PG views
+# headless (ADR-0012): everything is SQL over the in-PG views…
 just chi311-shell   # then e.g.:  select * from triage.leaderboard;
 
+# …or the same views as Rich tables, straight from the CLI:
+export DATABASE_URL=postgresql://chi311_user:some_password@127.0.0.1:5438/chi311
+uv run triage leaderboard <experiment-hash>       # the leaderboard matview
+uv run triage models <experiment-hash>            # groups: avg ± σ, max regret, fit time
+uv run triage audition <experiment-hash>          # all 8 selection rules + divergence
+uv run triage model show <model-id>               # one model's card + calibration
+
 # or the dashboard
-DATABASE_URL=postgresql://chi311_user:some_password@127.0.0.1:5438/chi311 just serve 8014
+just serve 8014
 # → http://127.0.0.1:8014/
 ```
 
+![The experiments list](images/experiments-list.png)
+
+Diagnose a model (computed from its matrix once, persisted, then visible on the
+dashboard's model card too — `docs/postmodeling.md`):
+
+```bash
+uv run triage postmodel crosstabs <model-id> -p 100_abs    # what characterizes the top-k
+uv run triage postmodel error-tree <model-id> -p 100_abs   # where the model fails (fp/fn rules)
+uv run triage postmodel compare <model-a> <model-b>        # do two models flag the same entities?
+```
+
+Fairness auditing (`docs/fairness.md`) and cohort-slice evaluations are one config block
+each — `bias_config:` populates `triage.protected_groups` and writes per-group
+disparities + τ verdicts; `evaluation.subsets:` evaluates every metric on named cohort
+slices (the subset is the population). Both are identity-neutral: adding them does not
+change the experiment hash.
+
 The other two tutorial datasets work identically: `just tutorial-up` (DirtyDuck food
-inspections, port 5435) and `just donors-up` (DonorsChoose KDD Cup 2014, port 5437), each
+inspections, default port 5434 — override with DIRTYDUCK_PG_PORT) and `just donors-up` (DonorsChoose KDD Cup 2014, port 5436), each
 with an `example/<dataset>/greenfield.yaml` and a README describing its problem.
 
 ## Path B — your own project (the ADR-0002 lifecycle)
@@ -83,7 +107,7 @@ One dashboard instance serves every registry project via the top-bar **project s
 ```bash
 export TRIAGE_REGISTRY_URL=<registry-db-url>
 # only needed when projects live in separate clusters/containers (the tutorial dockers do):
-export TRIAGE_PROJECT_DB_MAP='{"chi311": "postgresql://…:5438/chi311", "food": "postgresql://…:5435/food"}'
+export TRIAGE_PROJECT_DB_MAP='{"chi311": "postgresql://…:5438/chi311", "food": "postgresql://…:5434/food"}'
 just serve 8014
 ```
 

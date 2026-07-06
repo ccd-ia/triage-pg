@@ -26,7 +26,7 @@ geographic/type backlog).
 
 | Dataset | Problem | Featurizer ER-graph | Run it |
 |---|---|---|---|
-| **DirtyDuck** (`dirtyduck/`, `example/dirtyduck/greenfield.yaml`) | Will a food facility fail its next inspection within 6 months? | facility attrs + inspection-history child | `just tutorial-up` |
+| **DirtyDuck** ([`../dirtyduck/README.md`](../dirtyduck/README.md), `example/dirtyduck/greenfield.yaml`) | Will a food facility fail its next inspection within 6 months? (+ regression/survival/deep-grid variants) | facility attrs + inspection-history child | `just tutorial-up` |
 | **DonorsChoose** ([`../donorschoose/README.md`](../donorschoose/README.md), `example/donorschoose/greenfield.yaml`) | Will a posted project fail to be funded within 4 months? | project attrs + resources child + **self-referential teacher/school history** | `just donors-up` |
 | **Chicago 311** ([`../chicago311/README.md`](../chicago311/README.md), `example/chicago311/greenfield.yaml`) | Will a filed service request miss the 14-day resolution SLA? | request attrs + **area/type backlog** as-of children | `just chi311-up` |
 
@@ -46,7 +46,9 @@ Each dataset README has the full end-to-end run recipe (start DB → `alembic up
 | [cloud-profile-spec.md](cloud-profile-spec.md) | The cloud profile: RDS/IAM auth + S3 storage + AWS Batch execution (ADRs 0003–0005). |
 | [cloud-runbook.md](cloud-runbook.md) | The gated live path: `terraform apply` (`infra/terraform/`) → role bootstrap → image push → a Batch experiment → observe. |
 | [monitoring.md](monitoring.md) | Scheduled forward scoring + drift/health SQL (ADR-0027) over the append-only predictions table. |
-| [adr-conformance.md](adr-conformance.md) | The 2026-07-03 audit: every ADR checked against the code, with evidence, verdicts, and flags. |
+| [fairness.md](fairness.md) | Fairness auditing: the metric formulas, `bias_config`, τ verdicts, and the Aequitas fairness tree as a guidance wizard (migration 0014). |
+| [postmodeling.md](postmodeling.md) | The diagnostics map: crosstabs, error trees, calibration, list overlap, model↔group contrast — CLI computes, PG persists, dashboard reads (ADR-0011). |
+| [adr-conformance.md](adr-conformance.md) | The 2026-07-03 audit: every ADR checked against the code, with evidence, verdicts, and flags (flag #1 closed 2026-07-05: audition is single-surface). |
 
 ## Architecture Decision Records (ADRs)
 

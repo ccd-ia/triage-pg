@@ -94,3 +94,20 @@ teacher/school prior-posting history** (an as-of self-join on `teacher_acctid` /
 the baked subset the signal is modest (test AUC ≈ 0.58, average-precision ≈ 0.42 over a ~0.32
 base rate); the teacher/school history features carry far more weight on the full KDD data, where
 43.5% of teachers and 76% of schools have repeat projects.
+
+## Inspect + diagnose (after the run)
+
+```bash
+export DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5436/donors
+uv run triage leaderboard <experiment-hash>
+uv run triage models <experiment-hash>            # groups: avg ± σ, max regret, fit time
+uv run triage audition <experiment-hash>
+uv run triage model show <model-id>
+uv run triage postmodel crosstabs <model-id> -p 100_abs
+uv run triage postmodel error-tree <model-id> -p 100_abs
+just serve 8014
+```
+
+See `docs/postmodeling.md` for what each diagnostic answers, and `docs/fairness.md` for
+the `bias_config:` block (e.g. audit by `poverty_level` — an assistive intervention, so
+the fairness tree routes attention to FNR/FOR parity).

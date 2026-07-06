@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>triage-pg vs DSSG triage — the honest side-by-side</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #0f172a; --muted: #64748b; --line: #e2e8f0;
+  --pg: #336791; --accent: #0f766e; --code-bg: #f1f5f9;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 15px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+main { max-width: 1020px; margin: 0 auto; padding: 36px 28px 80px; }
+h1 { font-size: 1.7rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+h2 { font-size: 1.15rem; margin: 34px 0 10px; padding-bottom: 4px; border-bottom: 2px solid var(--pg); }
+p.lede { color: var(--muted); margin: 4px 0 0; }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--code-bg); border-radius: 4px; padding: 1px 5px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.88em; margin: 12px 0; }
+th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+td.dim { font-weight: 700; white-space: nowrap; }
+.src { color: var(--muted); font-size: 0.85em; }
+.note { background: #fffbeb; border-left: 4px solid #b45309; border-radius: 0 8px 8px 0;
+        padding: 10px 14px; margin: 12px 0; font-size: 0.92em; }
+a { color: var(--pg); }
+.foot { color: var(--muted); font-size: 0.82em; margin-top: 30px; border-top: 1px solid var(--line); padding-top: 10px; }
+sup { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>triage-pg vs <a href="https://github.com/dssg/triage">DSSG triage</a></h1>
+  <p class="lede">A dimension-by-dimension, honest comparison. triage-pg is an opinionated,
+  intentionally breaking fork — this page says exactly what that buys and what it costs.
+  If you want the original, full-featured, battle-tested toolkit, use
+  <a href="https://github.com/dssg/triage">dssg/triage</a>.</p>
+
+  <h2>Dimension by dimension</h2>
+  <table>
+    <tr><th style="width:15%">Dimension</th><th style="width:44%">triage-pg</th><th>DSSG triage</th></tr>
+    <tr><td class="dim">Problem types</td>
+        <td>Four, behind one <code>problem_type</code> switch: classification,
+            regression-as-ranking, pure regression, and <b>fully runnable survival</b>
+            (scikit-survival estimators; C-index in PL/pgSQL matching
+            <code>concordance_index_censored</code> to 1e-9). <span class="src">ADR-0010/0026</span></td>
+        <td>Binary classification (the early-warning problem), deeply refined.</td></tr>
+    <tr><td class="dim">Feature engine</td>
+        <td><a href="https://github.com/nanounanue/featurizer">featurizer</a>: PostgreSQL-native
+            Deep Feature Synthesis over an entity-relationship graph; point-in-time-correct via
+            as-of joins; per-as_of_date cost measured constant-to-sub-linear.
+            <span class="src">ADR-0008, docs/featurizer-scale.md</span></td>
+        <td>Collate: SQL aggregation generation (intervals × functions × groups) — proven, more
+            manual, no relationship graph.</td></tr>
+    <tr><td class="dim">Evaluation substrate</td>
+        <td>PL/pgSQL over the predictions table — metrics need only (entity, score, label), so
+            nothing leaves the database; dashboards read views directly. Per-prediction-date rows
+            + windowed rollups. <span class="src">ADR-0007</span></td>
+        <td>pandas/sklearn in Python workers, persisted to the results schema.</td></tr>
+    <tr><td class="dim">Subset evaluations</td>
+        <td>Parity: named cohort slices, the subset re-ranked as its own population.
+            <span class="src">migration 0015</span></td>
+        <td>Yes (subset queries + subset_hash) — the feature triage-pg re-implemented.</td></tr>
+    <tr><td class="dim">Fairness</td>
+        <td>SQL group-bys over <code>protected_groups</code>: selection_rate, precision, TPR,
+            FPR, FDR, FNR, FOR, NPV — each with disparity vs a reference group and a per-row
+            τ verdict; config-driven ingestion; the <b>Aequitas fairness tree as an interactive
+            wizard</b>. No Aequitas dependency. <span class="src">migration 0014, docs/fairness.md</span></td>
+        <td>The Aequitas library itself: the full metric catalog plus significance testing and
+            the fairness-determination report (pandas&lt;2 environments).</td></tr>
+    <tr><td class="dim">Model selection (audition)</td>
+        <td>In-database: distance-from-best, max regret, <b>regret-next-time</b>, and all 8
+            selection rules as <code>audition_pick()</code> — dashboard tab +
+            <code>triage audition</code>/<code>leaderboard</code> CLI. The Python module is
+            retired. <span class="src">migrations 0005/0013</span></td>
+        <td><code>Auditioner</code>: the same concepts with matplotlib plots and an iterative
+            thresholding workflow in notebooks.</td></tr>
+    <tr><td class="dim">Postmodeling</td>
+        <td>Dissolved, not dropped: crosstabs + error trees computed once from the matrix
+            (<code>triage postmodel</code>), persisted to PG, read by the model card + CLI;
+            calibration deciles; top-k list overlap (Jaccard/Spearman); per-entity β·x
+            contributions for linear models. <span class="src">ADR-0011, migrations 0016/0017,
+            docs/postmodeling.md</span></td>
+        <td>A standalone ~8.8k-LOC module: crosstabs, error analysis, plus SHAP-style and
+            prototype tooling triage-pg deliberately defers.</td></tr>
+    <tr><td class="dim">Predictions</td>
+        <td><b>Append-only</b>, timestamped, quarterly-partitioned — prediction history from day
+            one; "current" = latest <code>scored_at</code>. <span class="src">ADR-0006</span></td>
+        <td>Upserted per (model, entity, date); history requires care.</td></tr>
+    <tr><td class="dim">Production monitoring</td>
+        <td>First-class: scheduled <code>triage score</code> + drift (PSI/KS at scipy parity),
+            volume, calibration, realized-outcome tracking — SQL over the append-only table, no
+            daemon; a Monitoring dashboard view. <span class="src">ADR-0027, migration 0012</span></td>
+        <td>Not built in (predict-forward exists; monitoring is external).</td></tr>
+    <tr><td class="dim">Caching &amp; provenance</td>
+        <td>Guix-style derivation DAG: every artifact hashed over its complete input closure
+            (source pins + engine versions + parents); cache-hits verify the artifact file still
+            exists; GC by reachability. <span class="src">ADRs 0013–0017</span></td>
+        <td><code>replace=True</code>-style flags + experiment hashes; provenance partly implicit.</td></tr>
+    <tr><td class="dim">Matrices</td>
+        <td>Parquet (Polars/pyarrow), local FS or S3 through one storage seam.</td>
+        <td>CSV(.gz) / HDF5 via a Store hierarchy.</td></tr>
+    <tr><td class="dim">Orchestration</td>
+        <td>In-process locally; one AWS Batch job per experiment in cloud. No rq / multiprocess
+            grid (deliberate). <span class="src">ADR-0005/0020</span></td>
+        <td>SingleThreaded / MultiCore / rq-based distributed experiments.</td></tr>
+    <tr><td class="dim">Multi-tenancy</td>
+        <td>One database per project + a registry control plane; per-project routing + a project
+            switcher; <code>triage project create/drop</code>. <span class="src">ADR-0002/0025</span></td>
+        <td>One results schema per database; multi-project is by convention.</td></tr>
+    <tr><td class="dim">UIs</td>
+        <td>A read dashboard (experiments ▸ groups ▸ models, live SSE run rail) + a write webapp
+            (validated submissions) + OIDC auth — all thin, no business logic.
+            <span class="src">ADR-0012/0024/0028</span></td>
+        <td>None bundled (notebooks are the surface).</td></tr>
+    <tr><td class="dim">Tooling &amp; stack</td>
+        <td>Python 3.12, uv, ruff, psycopg3, SQLAlchemy 2 (alembic only), pydantic v2, typer,
+            loguru; tests spin their own PostgreSQL.</td>
+        <td>Older, broader dependency surface; the ecosystem many deployments already run.</td></tr>
+  </table>
+
+  <h2>What DSSG triage has that triage-pg deliberately doesn't</h2>
+  <table>
+    <tr><td class="dim">Battle testing</td><td>Years of production use across real agencies, an
+        active maintainer team at CMU, and a community. triage-pg is young and single-maintainer.</td></tr>
+    <tr><td class="dim">Aequitas in full</td><td>The complete bias-metric catalog, statistical
+        significance testing, and the fairness-determination report. triage-pg reimplements the
+        operational core (8 metrics + disparities + τ + the tree) and stops there — deliberately.
+        <span class="src">recorded waiver on ADR-0007: Aequitas is pandas-2-incompatible, so
+        triage-pg's SQL is validated against hand-computed fixtures instead</span></td></tr>
+    <tr><td class="dim">Deep interpretability</td><td>SHAP-style explanations, prototype/nearest-neighbor
+        identification. Deferred to a companion effort — not in v1. <span class="src">ADR-0011</span></td></tr>
+    <tr><td class="dim">Distributed grids</td><td>rq/multicore parallel training for very large
+        model grids. triage-pg keeps the grid×split loop serial per experiment and scales by
+        running experiments as separate Batch jobs. <span class="src">ADR-0020</span></td></tr>
+    <tr><td class="dim">Matrix format options</td><td>CSV/HDF5 matrices and the associated tooling;
+        triage-pg is Parquet-only.</td></tr>
+    <tr><td class="dim">In-place upgrades</td><td>DSSG triage migrates old results schemas forward.
+        triage-pg is greenfield-only: no migration path from existing triage databases.
+        <span class="src">ADR-0001</span></td></tr>
+  </table>
+
+  <h2>Migration notes for DSSG users</h2>
+  <div class="note"><b>There is no automated migration.</b> triage-pg starts fresh
+  (ADR-0001): new repo, new schema, no upstream PRs. What follows is a translation guide,
+  not a converter.</div>
+  <table>
+    <tr><th>You knew…</th><th>In triage-pg…</th></tr>
+    <tr><td>experiment config v8 (<code>experiment.yaml</code>)</td>
+        <td><code>greenfield.yaml</code>: same spirit (cohort/label queries with
+            <code>{as_of_date}</code>/<code>{label_timespan}</code>, temporal_config, grid),
+            but <code>feature_aggregations</code> (Collate) becomes a featurizer
+            entity-relationship graph under <code>feature_config</code>, sources must be declared
+            (<code>sources:</code>, ADR-0014), and <code>problem_type</code> is explicit.</td></tr>
+    <tr><td><code>triage experiment config.yaml</code></td>
+        <td><code>triage run greenfield.yaml --project-path …</code>; inspect with
+            <code>triage leaderboard/models/audition/model show</code> or the dashboard.</td></tr>
+    <tr><td><code>audition_config.yaml</code> + Auditioner plots</td>
+        <td>Gone — <code>triage audition &lt;experiment-hash&gt;</code> prints the ranking, all
+            8 rule picks, and the audition-vs-leaderboard divergence from the SQL views the
+            dashboard also renders.</td></tr>
+    <tr><td><code>bias_audit_config</code> / Aequitas</td>
+        <td><code>bias_config:</code> (query + parameter + ref_groups + τ + intervention) —
+            ingestion and metrics run inside the pipeline; the fairness tree drives the reading.
+            <span class="src">docs/fairness.md</span></td></tr>
+    <tr><td>postmodeling notebooks (crosstabs, error analysis)</td>
+        <td><code>triage postmodel crosstabs|error-tree|compare</code> — persisted, then read
+            from the model card or SQL. <span class="src">docs/postmodeling.md</span></td></tr>
+    <tr><td><code>predict_forward</code></td>
+        <td><code>triage score &lt;model_id&gt; [date]</code> (defaults to today, cron-ready) —
+            plus the monitoring views over the append-only history.</td></tr>
+  </table>
+
+  <p class="foot">Claims trace to the ADRs (<code>docs/adr/</code>), the conformance audit
+  (<code>docs/adr-conformance.md</code>), and the measured featurizer scaling notes
+  (<code>docs/featurizer-scale.md</code>). triage-pg preserves triage's MIT license and
+  copyright; the ideas at its heart — temporal CV, leakage discipline, model governance, the
+  fairness tree — are DSSG/DSaPP's. Self-contained page: inline CSS only.</p>
+</main>
+</body>
+</html>

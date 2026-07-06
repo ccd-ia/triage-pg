@@ -199,3 +199,8 @@ select = [
     "F823",  # undefined-local
 ]
 ignore = []
+
+[dependency-groups]
+dev = [
+    "playwright>=1.61.0",
+]

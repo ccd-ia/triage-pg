@@ -2,9 +2,64 @@
 
 **A PostgreSQL-native, deliberately simplified fork of [`triage`](https://github.com/dssg/triage) for temporal machine learning on tabular public-policy data.**
 
-triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching and consulting.
+triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching, consulting, and production monitoring.
 
-> **Status: early.** The architecture and database schema are designed (see [`docs/adr/`](docs/adr/) and [`docs/schema-design.md`](docs/schema-design.md)); the first runnable slice is under construction. Not yet released or installable.
+> **Status: local v1 complete.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival), with in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is authored and offline-validated; its live validation is the gate between `v1.0.0-rc1` and `v1.0.0`. All 28 architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
+
+**New here?** Open [`docs/onboarding.html`](docs/onboarding.html) (the one-pager) · **Coming from DSSG triage?** Read [`docs/triage-pg-vs-dssg-triage.html`](docs/triage-pg-vs-dssg-triage.html) — the honest side-by-side.
+
+## The pipeline
+
+```mermaid
+flowchart LR
+    S[(ontology.*\nyour tables)] --> C[cohort]
+    C --> L[labels]
+    S --> F[featurizer\nDFS, as-of joins]
+    C --> F
+    F --> M[matrices\nParquet]
+    L --> M
+    M --> T[train\ngrid × splits]
+    T --> P[(predictions\nappend-only)]
+    P --> E[in-PG evaluation\nmetrics · bias · audition]
+    E --> D[dashboard + CLI]
+    P --> MO[monitoring\ndrift · volume · outcomes]
+```
+
+Every artifact along the way (cohort, labels, matrices, models) is content-addressed over its **complete input closure** — caching, provenance, and GC come from one derivation DAG ([`docs/derivation-dag.md`](docs/derivation-dag.md)).
+
+## What you get
+
+| Capability | The triage-pg shape |
+|---|---|
+| **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch (ADR-0010/0026) |
+| **Features** | [`featurizer`](https://github.com/nanounanue/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins (ADR-0008) |
+| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices (ADR-0007) |
+| **Fairness** | SQL group-bys over `protected_groups`: 8 per-group metrics with disparity + τ verdicts, config-driven ingestion, and the Aequitas **fairness tree** as a guidance wizard ([`docs/fairness.md`](docs/fairness.md)) |
+| **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
+| **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)) |
+| **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon (ADR-0027, [`docs/monitoring.md`](docs/monitoring.md)) |
+| **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` (ADR-0002/0025) |
+| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth — all business-logic-free (ADR-0012/0024/0028) |
+| **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam (ADR-0003–0005) |
+
+| ![Experiment overview — model groups × splits heatmap](docs/images/experiment-overview.png) | ![Model card — curves, calibration, diagnostics](docs/images/model-sheet.png) | ![Production monitoring — drift, volume, outcomes](docs/images/monitoring-view.png) |
+|---|---|---|
+| the experiment overview | one model's card | production monitoring |
+
+## Five minutes to a running experiment
+
+```bash
+uv sync --extra dev --extra dashboard
+just chi311-up                                   # real Chicago 311 data in a docker Postgres
+# …point triage at it and run (full steps: docs/quickstart.md)
+uv run triage --dbfile chicago311-database.yaml run \
+  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+uv run triage leaderboard <experiment-hash>      # or `just serve` for the dashboard
+```
+
+The complete walkthrough — including your-own-data projects, the multi-project dashboard, webapp submissions, fairness auditing, and diagnostics — is [`docs/quickstart.md`](docs/quickstart.md). Three tutorial datasets ship as self-contained dockers: **DirtyDuck** food inspections ([`dirtyduck/`](dirtyduck/README.md)), **DonorsChoose** KDD Cup 2014 ([`donorschoose/`](donorschoose/README.md)), and **Chicago 311** ([`chicago311/`](chicago311/README.md)).
+
+Installation reality: not on PyPI — clone and `uv sync`. Needs PostgreSQL 11+ (plain, no extensions). Optional extras: `dashboard` (FastAPI + SPA), `survival` (scikit-survival), `oidc` (real webapp auth).
 
 ## Acknowledgment — built on DSSG's triage
 
@@ -12,19 +67,19 @@ triage-pg is a fork of **[triage](https://github.com/dssg/triage)**, created by 
 
 triage-pg stands on that work, **preserves its MIT license and copyright**, and keeps the full git history for attribution. Thank you to the triage authors and community.
 
-If you want the original, full-featured, battle-tested toolkit, use **[dssg/triage](https://github.com/dssg/triage)** — it is actively maintained and supports a great deal that triage-pg deliberately drops.
+If you want the original, full-featured, battle-tested toolkit, use **[dssg/triage](https://github.com/dssg/triage)** — it is actively maintained and supports a great deal that triage-pg deliberately drops. The dimension-by-dimension comparison lives in [`docs/triage-pg-vs-dssg-triage.html`](docs/triage-pg-vs-dssg-triage.html).
 
 ## Why a separate project?
 
 An effort to modernize triage *in place* (PR #994 on dssg/triage) accumulated too much friction against the existing test suite, dependency surface, and backward-compatibility constraints to be worth continuing. Rather than keep fighting that, triage-pg starts from triage's modernized core and takes a different, **opinionated and intentionally breaking** direction — one that does not belong upstream because it removes and reshapes things the original supports:
 
-- **PostgreSQL as the whole substrate.** Evaluation, leaderboards, and bias metrics run *in the database* (PL/pgSQL over a predictions table), not in pandas. No Aequitas dependency — fairness metrics are SQL group-bys.
+- **PostgreSQL as the whole substrate.** Evaluation, leaderboards, audition, and bias metrics run *in the database* (PL/pgSQL over a predictions table), not in pandas. No Aequitas dependency — fairness metrics are SQL group-bys, guided by the Aequitas fairness tree.
 - **A modern feature engine.** Feature generation moves from Collate to [`featurizer`](https://github.com/nanounanue/featurizer), a PostgreSQL-native Deep Feature Synthesis engine that is point-in-time-correct via as-of joins.
-- **More problem types.** Beyond binary classification: regression-as-ranking, pure regression, and a survival-ready label schema, selected by a `problem_type` switch.
-- **Append-only, monitoring-ready predictions** — timestamped and partitioned, so prediction history is captured from day one.
+- **More problem types.** Beyond binary classification: regression-as-ranking, pure regression, and fully runnable survival analysis, selected by a `problem_type` switch.
+- **Append-only, monitoring-ready predictions** — timestamped and partitioned, so prediction history is captured from day one; production monitoring is a config block and a cron line, not a service.
 - **Guix-style artifact derivation DAG.** Every built artifact (cohort, labels, feature groups, matrices, models) is identified by a hash over its *complete input closure*, with explicit dependency edges recorded in the project database. Caching is by derivation (no manual `replace=True` vigilance), provenance is queryable in SQL, and garbage collection works by reachability from live roots. See [`docs/derivation-dag.md`](docs/derivation-dag.md) and ADRs 0013–0017.
 - **Multi-tenant by database.** One PostgreSQL database per project plus a registry control plane, with two deployment profiles: a **local** profile (standalone PostgreSQL — laptops, teaching, tests) and a **cloud** profile (RDS/Aurora + IAM auth + S3 + AWS Batch).
-- **Smaller surface.** No standalone postmodeling module (it dissolves into SQL views + a dashboard); `rq` and multicore orchestration removed; modern tooling throughout (uv, ruff, loguru, typer, psycopg3, Python 3.12).
+- **Smaller surface.** No standalone postmodeling module (it dissolved into persisted diagnostics + SQL views + dashboard panels); `rq` and multicore orchestration removed; modern tooling throughout (uv, ruff, loguru, typer, psycopg3, Python 3.12).
 
 The full rationale — decision by decision — lives in the Architecture Decision Records under [`docs/adr/`](docs/adr/), with the domain glossary in [`CONTEXT.md`](CONTEXT.md) and the results-database design in [`docs/schema-design.md`](docs/schema-design.md).
 
@@ -39,7 +94,7 @@ just test                    # run the test suite
 just alembic upgrade head    # apply the results-schema migration (needs a PostgreSQL)
 ```
 
-Database connection comes from `DATABASE_URL` or the standard `PG*` environment variables (e.g. loaded via direnv) — there are no hardcoded credentials.
+Database connection comes from `DATABASE_URL` or the standard `PG*` environment variables (e.g. loaded via direnv) — there are no hardcoded credentials. Tests spin up their own throwaway PostgreSQL via `pytest-postgresql`.
 
 ## License
 

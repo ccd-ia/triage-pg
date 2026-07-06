@@ -10,7 +10,8 @@ docs:
 
 # Serve the dashboard app — read views + write surface (set TRIAGE_REGISTRY_URL to enable POST routes)
 serve PORT="8000":
-    uv run uvicorn triage.dashboard.app:app --host 127.0.0.1 --port {{PORT}}
+    TRIAGE_DASHBOARD_STATIC="${TRIAGE_DASHBOARD_STATIC:-{{justfile_directory()}}/frontend/dist}" \
+        uv run uvicorn triage.dashboard.app:app --host 127.0.0.1 --port {{PORT}}
 
 # Run alembic commands (e.g., just alembic upgrade head)
 alembic *ARGS:

@@ -80,6 +80,26 @@ _Avoid_: baseline (ambiguous), training window, rolling average
 Harrell's concordance index — the survival ranking metric (of two comparable entities, how often the earlier-failing one carries the higher risk score); computed in PostgreSQL (`triage.c_index`) on the same spine as precision@k/AUC.
 _Avoid_: concordance (alone), survival AUC, accuracy
 
+**Protected group**:
+A row in `triage.protected_groups`: one entity's value for one protected attribute at one as_of_date (long format — an entity carries several attributes). Populated by the `bias_config` query; the SQL bias metrics group by it.
+_Avoid_: demographic table, sensitive column (a protected attribute is the column; the group is a value)
+
+**Fairness tree**:
+The Aequitas decision tree routing an intervention to the disparity metric that carries its harm (punitive → FPR/FDR, assistive → FNR/FOR, representation → selection rate). In triage-pg it is a guidance wizard + `bias_config.intervention` preselect — it highlights, never hides.
+_Avoid_: fairness score, bias threshold (τ is separate)
+
+**Subset**:
+A named cohort slice (`evaluation.subsets` query → `triage.subset_members`) that is treated as the POPULATION for its own evaluation rows: ranks are recomputed within it, so precision@k on a subset is the top-k of the subset's own ranking. Identity-neutral; full-cohort rows keep `subset_hash = ''`.
+_Avoid_: filter (reads as post-hoc), segment, cohort (the subset slices the cohort)
+
+**Crosstab**:
+The persisted selected-vs-rest feature comparison (`triage.crosstabs`): per feature, the mean/std/nonzero-rate among the top-k versus the rest, plus their ratio — "what characterizes the list". Computed from the matrix by `triage postmodel crosstabs`.
+_Avoid_: contingency table (this is a stat comparison, not counts), feature drift
+
+**Error tree**:
+The "predict on the errors" diagnostic: a shallow decision tree fitted on the model's mistakes at the top-k cut, whose leaf paths become human-readable rules with support and error rate (`triage.error_analysis`). Strictly diagnostic — never a score modifier.
+_Avoid_: error model (implies stacking), boosting, residual model
+
 ## Relationships
 
 - A **Registry** tracks many **Projects**; each **Project** is one database with many collaborating users.
@@ -89,6 +109,7 @@ _Avoid_: concordance (alone), survival AUC, accuracy
 - An **Experiment** freezes the current **Source version** of every declared **Source** at plan time; every artifact's **Derivation** embeds those pins plus its parents' Derivations (Merkle DAG).
 - A **Submission** records that a **Principal** asked a **Project** to run an **Experiment**; the resulting Run and **Predictions** live in the **Project** database — the **Registry** keeps only the audit row.
 - **Forward scores** append **Predictions** over time; monitoring compares each scoring window against the model group's **Reference window** (drift) and re-evaluates once labels arrive (realized outcomes). Survival experiments are evaluated by **C-index** on the same ranking spine.
+- Fairness reads **Predictions** grouped by **Protected group** (with τ verdicts); the **Fairness tree** routes attention to the disparity that matters for the intervention. A **Subset** re-runs every metric with the slice as the population. **Crosstabs** and **Error trees** are persisted diagnostics computed once from the Matrix (`triage postmodel`), read by CLI and dashboard alike.
 
 ## Flagged ambiguities
 
