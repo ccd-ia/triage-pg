@@ -14,6 +14,10 @@ import { useAsync } from '../hooks/useAsync'
 import { prettyFeature } from '../api/transforms'
 import { useExperiment } from '../hooks/useExperiment'
 import { isEmpty, type FeatureImportanceRow } from '../api/types'
+import { CalibrationChart } from './CalibrationChart'
+import { CrosstabsPanel } from './CrosstabsPanel'
+import { ErrorRulesPanel } from './ErrorRulesPanel'
+import { ModelCompareModal } from './ModelCompareModal'
 import { ScoreDistributionChart } from './ScoreDistributionChart'
 import { RayidCurveChart } from './RayidCurveChart'
 import { PredictedList } from './PredictedList'
@@ -48,6 +52,7 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   const [entityId, setEntityId] = useState<number | null>(null)
   const [showAllPreds, setShowAllPreds] = useState(false)
   const [showAllFeats, setShowAllFeats] = useState(false)
+  const [compareWith, setCompareWith] = useState<number | null>(null)
 
   const group = useAsync(
     () =>
@@ -59,6 +64,9 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   const card = useAsync(() => api.model(activeId), [activeId])
   const histo = useAsync(() => api.modelHistogram(activeId), [activeId])
   const curve = useAsync(() => api.modelCurve(activeId), [activeId])
+  const calibration = useAsync(() => api.modelCalibration(activeId), [activeId])
+  const crosstabs = useAsync(() => api.modelCrosstabs(activeId), [activeId])
+  const errorRules = useAsync(() => api.modelErrorRules(activeId), [activeId])
   const preds = useAsync(() => api.modelPredictions(activeId, { limit: INLINE }), [activeId])
 
   const features = useMemo(() => card.data?.feature_importances ?? [], [card.data])
@@ -67,6 +75,23 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
 
   const models = group.data?.models ?? []
   const activeModel = models.find((m) => m.model_id === activeId)
+
+  // "vs group" delta (plan P6): this model's windowed mean vs its group's avg ± σ at
+  // the current metric — both served (evaluations_windowed / triage.audition); the
+  // z-score is presentation arithmetic on those two numbers.
+  const groupAgg = (group.data?.audition ?? []).find(
+    (a) => a.metric === choice.metric && a.parameter === choice.parameter,
+  )
+  const myWindow = (card.data?.windowed ?? []).find(
+    (w) => w.metric === choice.metric && w.parameter === choice.parameter,
+  )
+  const zScore =
+    groupAgg?.avg_value != null &&
+    groupAgg?.stddev_value != null &&
+    groupAgg.stddev_value > 0 &&
+    myWindow?.value_mean != null
+      ? (myWindow.value_mean - groupAgg.avg_value) / groupAgg.stddev_value
+      : null
 
   // Dynamic header: the group name + the ACTIVE model's test period, so it stays correct
   // when you change splits (the static `label` is only the originally-opened split).
@@ -94,6 +119,57 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
           <button type="button" className="close" onClick={onClose} aria-label="close">×</button>
         </div>
 
+        {/* vs-group delta (plan P6): outlier badge beyond |1σ| */}
+        {zScore != null ? (
+          <div style={{ margin: '6px 0 2px' }}>
+            <span
+              className={`badge ${Math.abs(zScore) > 1 ? 'b-aud' : 'b-run'}`}
+              title={`window mean ${myWindow?.value_mean?.toFixed(4)} vs group avg ${groupAgg?.avg_value?.toFixed(4)} ± ${groupAgg?.stddev_value?.toFixed(4)}`}
+            >
+              vs group: {zScore >= 0 ? '+' : ''}
+              {zScore.toFixed(1)}σ{Math.abs(zScore) > 1 ? ' · outlier in its group' : ''}
+            </span>
+            {models.length > 1 ? (
+              <select
+                className="splitsel"
+                style={{ width: 'auto', marginLeft: 8 }}
+                value=""
+                onChange={(e) => e.target.value && setCompareWith(Number(e.target.value))}
+              >
+                <option value="">compare with…</option>
+                {models
+                  .filter((m) => m.model_id !== activeId)
+                  .map((m) => (
+                    <option key={m.model_id} value={m.model_id}>
+                      m{m.model_id}
+                      {m.train_end_time ? ` (train ≤ ${m.train_end_time})` : ''}
+                    </option>
+                  ))}
+              </select>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* windowed rollup chips (evaluations_windowed, migration 0010 — lit up in P4):
+            the model's mean ± spread over its whole test window, per metric. */}
+        {(card.data?.windowed?.length ?? 0) > 0 ? (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0 2px' }}>
+            {card.data!.windowed.map((w) => (
+              <span
+                key={`${w.metric}${w.parameter}`}
+                className="badge b-run"
+                title={`${w.n_as_of_dates} test date(s), ${w.window_start} → ${w.window_end}`}
+              >
+                {w.metric}
+                {w.parameter} window: {w.value_mean?.toFixed(3) ?? '—'}
+                {w.value_min != null && w.value_max != null
+                  ? ` [${w.value_min.toFixed(3)}–${w.value_max.toFixed(3)}]`
+                  : ''}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         {models.length > 1 ? (
           <section>
             <h4>split (model group · {models.length} models)</h4>
@@ -118,6 +194,9 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
                 {activeModel.training_label_timespan ? (
                   <> · label window {activeModel.training_label_timespan}</>
                 ) : null}
+                {activeModel.train_duration_ms != null ? (
+                  <> · fit {(activeModel.train_duration_ms / 1000).toFixed(1)}s</>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -131,6 +210,26 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
         <section>
           <h4>Rayid curve · k-slider</h4>
           {curve.data ? <RayidCurveChart curve={curve.data} initialPct={k} /> : <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>}
+        </section>
+
+        <section>
+          <h4>calibration · score deciles vs realized rate</h4>
+          {calibration.error ? (
+            <div className="muted" style={{ fontSize: 11 }}>
+              calibration unavailable: {calibration.error.message}
+            </div>
+          ) : calibration.data == null ? (
+            <div className="muted" style={{ fontSize: 11 }}>loading calibration…</div>
+          ) : isEmpty(calibration.data) ? (
+            <div className="muted" style={{ fontSize: 11 }}>{calibration.data.reason}</div>
+          ) : (
+            <>
+              <CalibrationChart deciles={calibration.data.deciles} />
+              <div className="muted" style={{ fontSize: 10.5 }}>
+                at {calibration.data.as_of_date} — dots on bars = well calibrated
+              </div>
+            </>
+          )}
         </section>
 
         <section>
@@ -183,6 +282,24 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
         </section>
 
         <section>
+          <h4>crosstabs · what characterizes the list</h4>
+          {crosstabs.data ? (
+            <CrosstabsPanel data={crosstabs.data} />
+          ) : (
+            <div className="muted" style={{ fontSize: 11 }}>loading crosstabs…</div>
+          )}
+        </section>
+
+        <section>
+          <h4>error rules · where the model fails</h4>
+          {errorRules.data ? (
+            <ErrorRulesPanel data={errorRules.data} />
+          ) : (
+            <div className="muted" style={{ fontSize: 11 }}>loading error rules…</div>
+          )}
+        </section>
+
+        <section>
           <h4>top predictions</h4>
           {preds.data ? (
             <PredictedList
@@ -227,6 +344,15 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             )
           }}
           onClose={() => setShowAllFeats(false)}
+        />
+      ) : null}
+
+      {compareWith != null ? (
+        <ModelCompareModal
+          modelA={activeId}
+          modelB={compareWith}
+          parameter={choice.parameter || undefined}
+          onClose={() => setCompareWith(null)}
         />
       ) : null}
 

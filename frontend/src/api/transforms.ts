@@ -266,14 +266,20 @@ export function leaderboardMetricKeys(entries: LeaderboardEntry[]): string[] {
 export interface BiasGroupRow {
   attribute_name: string
   attribute_value: string
-  /** metric name -> value (e.g. tpr/fpr/ppv/fdr...). */
+  /** metric name -> value (selection_rate/precision/tpr/fpr/fnr/fdr/for/npv + counts). */
   metrics: Record<string, number>
-  /** disparity vs the reference group, if any metric row carries it. */
+  /** metric name -> disparity vs the reference group (per-metric, migration 0014). */
+  disparities: Record<string, number | null>
+  /** metric name -> SQL fairness verdict at τ (null = no verdict for that metric). */
+  passes: Record<string, boolean | null>
+  /** the τ the verdicts used (null on pre-0014 rows). */
+  tau: number | null
+  /** representative disparity: selection_rate's when present, else the first seen. */
   disparity: number | null
   ref_group_value: string | null
 }
 
-/** Group long-format bias rows into one row per (attribute, value) with a metric map. */
+/** Group long-format bias rows into one row per (attribute, value) with metric maps. */
 export function groupBias(rows: BiasMetricRow[]): BiasGroupRow[] {
   const byGroup = new Map<string, BiasGroupRow>()
   for (const r of rows) {
@@ -284,15 +290,79 @@ export function groupBias(rows: BiasMetricRow[]): BiasGroupRow[] {
         attribute_name: r.attribute_name,
         attribute_value: r.attribute_value,
         metrics: {},
+        disparities: {},
+        passes: {},
+        tau: null,
         disparity: null,
         ref_group_value: r.ref_group_value,
       }
       byGroup.set(key, g)
     }
     if (r.value != null) g.metrics[r.metric] = r.value
-    if (r.disparity != null) g.disparity = r.disparity
+    g.disparities[r.metric] = r.disparity
+    g.passes[r.metric] = r.passes_fairness ?? null
+    if (r.tau != null) g.tau = r.tau
+    if (r.disparity != null && (g.disparity == null || r.metric === 'selection_rate')) {
+      g.disparity = r.disparity
+    }
   }
   return [...byGroup.values()]
+}
+
+/* ----------------------- the fairness tree (plan P2) --------------------- */
+
+export type Intervention = 'punitive' | 'assistive' | 'representation'
+
+export interface FairnessFocus {
+  /** the metric the tree says matters most (highlighted + drives views 2/3). */
+  primary: string
+  /** the metric family worth reading together (primary first). */
+  family: string[]
+  rationale: string
+}
+
+/**
+ * The Aequitas Fairness Tree, operationalized (docs/fairness.md): which disparity
+ * family matters for which intervention type. Pure routing — it never hides metrics.
+ * Credit: https://datasciencepublicpolicy.org/our-work/tools-guides/aequitas/
+ */
+export function fairnessFocus(intervention: Intervention, capped: boolean): FairnessFocus {
+  if (intervention === 'representation') {
+    return {
+      primary: 'selection_rate',
+      family: ['selection_rate'],
+      rationale:
+        'Representation: the question is who gets picked at all — compare each group’s selection rate (demographic parity).',
+    }
+  }
+  if (intervention === 'punitive') {
+    return capped
+      ? {
+          primary: 'fdr',
+          family: ['fdr', 'fpr'],
+          rationale:
+            'Punitive + capped list: the harm is a WRONG flag among those acted on — compare false discovery rates (FDR parity).',
+        }
+      : {
+          primary: 'fpr',
+          family: ['fpr', 'fdr'],
+          rationale:
+            'Punitive, acting broadly: the harm is wrongly flagging the innocent — compare false positive rates (FPR parity).',
+        }
+  }
+  return capped
+    ? {
+        primary: 'fnr',
+        family: ['fnr', 'for'],
+        rationale:
+          'Assistive + capped list: the harm is MISSING someone in need — compare false negative rates (FNR parity).',
+      }
+    : {
+        primary: 'for',
+        family: ['for', 'fnr'],
+        rationale:
+          'Assistive, acting broadly: the harm concentrates among those passed over — compare false omission rates (FOR parity).',
+      }
 }
 
 /* ----------------------- model evals -> per-split ----------------------- */

@@ -20,6 +20,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, DEFAULT_RULE } from '../api/client'
 import type {
+  BiasConfigEcho,
   ExpEvaluationRow,
   ModelGroupSummaryRow,
   ProgressDelta,
@@ -76,7 +77,13 @@ export function ExperimentDetail({ hash }: { hash: string }) {
   const experiment = useAsync(() => api.experiment(hash), [hash])
   const metricsCat = useAsync(() => api.metrics(), [])
   const modelGroups = useAsync(() => api.expModelGroups(hash), [hash])
-  const evaluations = useAsync(() => api.expEvaluations(hash), [hash])
+  // Subset selector (migration 0015): '' = the full cohort; the heatmap re-reads on change.
+  const [subsetHash, setSubsetHash] = useState('')
+  const subsets = useAsync(() => api.expSubsets(hash), [hash])
+  const evaluations = useAsync(
+    () => api.expEvaluations(hash, undefined, subsetHash || undefined),
+    [hash, subsetHash],
+  )
   const leaderboard = useAsync(() => api.expLeaderboard(hash), [hash])
 
   /* ---------- metric/rule selection (experiment analysis) ---------- */
@@ -305,15 +312,32 @@ export function ExperimentDetail({ hash }: { hash: string }) {
 
         <section className="panel">
           {tab === 'overview' && (
-            <ModelGroupGrid
-              rows={evalRows}
-              metric={effectiveMetric.metric}
-              parameter={effectiveMetric.parameter}
-              higherIsBetter={higherIsBetter}
-              labelFor={groupLabelOf}
-              selectedGroupId={selection.modelGroupId}
-              onPickCell={onPickCell}
-            />
+            <>
+              {(subsets.data?.length ?? 0) > 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                  <label className="field" style={{ margin: 0 }}>
+                    <span>population</span>
+                    <select value={subsetHash} onChange={(e) => setSubsetHash(e.target.value)}>
+                      <option value="">full cohort</option>
+                      {subsets.data?.map((s) => (
+                        <option key={s.subset_hash} value={s.subset_hash}>
+                          subset: {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+              <ModelGroupGrid
+                rows={evalRows}
+                metric={effectiveMetric.metric}
+                parameter={effectiveMetric.parameter}
+                higherIsBetter={higherIsBetter}
+                labelFor={groupLabelOf}
+                selectedGroupId={selection.modelGroupId}
+                onPickCell={onPickCell}
+              />
+            </>
           )}
           {tab === 'pipeline' &&
             (progress.data ? (
@@ -337,7 +361,16 @@ export function ExperimentDetail({ hash }: { hash: string }) {
             ) : (
               <Loading what="audition" />
             ))}
-          {tab === 'bias' && <BiasPanel hash={hash} modelId={selection.modelId} label={modelLabelForBar ?? '—'} />}
+          {tab === 'bias' && (
+            <BiasPanel
+              hash={hash}
+              modelId={selection.modelId}
+              label={modelLabelForBar ?? '—'}
+              biasConfig={
+                (experiment.data?.config?.bias_config as BiasConfigEcho | undefined) ?? null
+              }
+            />
+          )}
           {tab === 'groups' &&
             (modelGroups.data ? (
               <ModelGroupsTable
@@ -345,6 +378,10 @@ export function ExperimentDetail({ hash }: { hash: string }) {
                 selectedGroupId={selection.modelGroupId}
                 onPickGroup={onPickGroup}
                 onOpenGroupPanel={(g) => setGroupPanel(g.model_group_id)}
+                ranking={
+                  audition.data && !isEmpty(audition.data) ? audition.data.ranking : undefined
+                }
+                metricLabel={`${effectiveMetric.metric}${effectiveMetric.parameter}`}
               />
             ) : (
               <Loading what="model groups" />
@@ -421,13 +458,23 @@ export function ExperimentDetail({ hash }: { hash: string }) {
 }
 
 /** Bias panel — its own read because it depends on the selected model_id. */
-function BiasPanel({ hash, modelId, label }: { hash: string; modelId: number | null; label: string }) {
+function BiasPanel({
+  hash,
+  modelId,
+  label,
+  biasConfig,
+}: {
+  hash: string
+  modelId: number | null
+  label: string
+  biasConfig?: BiasConfigEcho | null
+}) {
   const bias = useAsync(
     () => (modelId ? api.expBias(hash, modelId) : api.expBias(hash)),
     [hash, modelId],
   )
   if (!bias.data) return <Loading what="bias" />
-  return <ExperimentBiasTab data={bias.data} modelLabel={label} />
+  return <ExperimentBiasTab data={bias.data} modelLabel={label} biasConfig={biasConfig} />
 }
 
 function TabBtn({

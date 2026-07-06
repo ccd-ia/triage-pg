@@ -2,13 +2,15 @@
  * ModelGroupsTable — the sortable model-groups table (Model Groups sub-tab),
  * from /experiments/{hash}/model-groups. A row click opens the group's
  * best/representative model in the ModelSheet. Columns: group, algorithm,
- * hyperparameters, #features, #models, train-end span.
+ * hyperparameters, #features, #models, train-end span — and, when the page
+ * passes the audition ranking (plan P6), avg ± σ + max regret for the
+ * effective metric, so the table stops being metric-blind.
  */
 import { useMemo, useState } from 'react'
-import type { ModelGroupSummaryRow } from '../api/types'
+import type { ExpAuditionRankRow, ModelGroupSummaryRow } from '../api/types'
 import { abbrevAlgo } from '../api/transforms'
 
-type SortKey = 'model_group_id' | 'model_type' | 'n_models' | 'last_train_end'
+type SortKey = 'model_group_id' | 'model_type' | 'n_models' | 'last_train_end' | 'avg'
 
 const shortType = abbrevAlgo
 
@@ -26,23 +28,42 @@ interface Props {
   onPickGroup: (group: ModelGroupSummaryRow) => void
   /** Open the group's own detail panel (vs. a row click, which opens its model). */
   onOpenGroupPanel?: (group: ModelGroupSummaryRow) => void
+  /** Audition ranking rows at the effective metric (adds avg ± σ / regret columns). */
+  ranking?: ExpAuditionRankRow[]
+  /** The metric the ranking columns describe (header label). */
+  metricLabel?: string
 }
 
-export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup, onOpenGroupPanel }: Props) {
+export function ModelGroupsTable({
+  groups,
+  selectedGroupId,
+  onPickGroup,
+  onOpenGroupPanel,
+  ranking,
+  metricLabel,
+}: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'model_group_id', dir: 1 })
+  const aggOf = useMemo(() => {
+    const map = new Map<number, ExpAuditionRankRow>()
+    for (const r of ranking ?? []) map.set(r.model_group_id, r)
+    return map
+  }, [ranking])
+  const hasAgg = aggOf.size > 0
 
   const sorted = useMemo(() => {
     const arr = [...groups]
     arr.sort((a, b) => {
-      const av = a[sort.key]
-      const bv = b[sort.key]
+      const av =
+        sort.key === 'avg' ? (aggOf.get(a.model_group_id)?.avg_value ?? null) : a[sort.key]
+      const bv =
+        sort.key === 'avg' ? (aggOf.get(b.model_group_id)?.avg_value ?? null) : b[sort.key]
       if (av == null) return 1
       if (bv == null) return -1
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sort.dir
       return String(av).localeCompare(String(bv)) * sort.dir
     })
     return arr
-  }, [groups, sort])
+  }, [groups, sort, aggOf])
 
   const toggle = (key: SortKey) =>
     setSort((prev) => (prev.key === key ? { key, dir: (prev.dir * -1) as 1 | -1 } : { key, dir: 1 }))
@@ -67,6 +88,14 @@ export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup, onOpenG
           <th className="clickrow" onClick={() => toggle('last_train_end')}>
             train-end span{arrow('last_train_end')}
           </th>
+          {hasAgg ? (
+            <>
+              <th className="num clickrow" onClick={() => toggle('avg')}>
+                {metricLabel ?? 'metric'} avg ± σ{arrow('avg')}
+              </th>
+              <th className="num">max regret</th>
+            </>
+          ) : null}
           {onOpenGroupPanel ? <th /> : null}
         </tr>
       </thead>
@@ -86,6 +115,17 @@ export function ModelGroupsTable({ groups, selectedGroupId, onPickGroup, onOpenG
             <td className="mono">
               {g.first_train_end?.slice(0, 7) ?? '—'} → {g.last_train_end?.slice(0, 7) ?? '—'}
             </td>
+            {hasAgg ? (
+              <>
+                <td className="num">
+                  {aggOf.get(g.model_group_id)?.avg_value?.toFixed(3) ?? '—'} ±{' '}
+                  {aggOf.get(g.model_group_id)?.stddev_value?.toFixed(3) ?? '—'}
+                </td>
+                <td className="num">
+                  {aggOf.get(g.model_group_id)?.max_regret?.toFixed(3) ?? '—'}
+                </td>
+              </>
+            ) : null}
             {onOpenGroupPanel ? (
               <td>
                 <button

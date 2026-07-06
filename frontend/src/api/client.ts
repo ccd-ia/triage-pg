@@ -9,9 +9,13 @@
  * FastAPI static mount.
  */
 import type {
+  CalibrationResponse,
+  CrosstabsResponse,
   DerivationResponse,
   EntityProfileResponse,
+  ErrorRulesResponse,
   ExampleConfig,
+  ListOverlapRow,
   ExpAuditionResponse,
   ExpBiasResponse,
   ExpEvaluationsResponse,
@@ -224,10 +228,23 @@ export const api = {
     return get<ExpLeaderboardResponse>(`/experiments/${hash}/leaderboard`)
   },
 
-  expEvaluations(hash: string, metric?: string): Promise<ExpEvaluationsResponse> {
+  expEvaluations(
+    hash: string,
+    metric?: string,
+    subsetHash?: string,
+  ): Promise<ExpEvaluationsResponse> {
     if (USE_FIXTURE) return fake(fixture.expEvaluationsFor(hash))
-    const q = metric ? `?metric=${encodeURIComponent(metric)}` : ''
-    return get<ExpEvaluationsResponse>(`/experiments/${hash}/evaluations${q}`)
+    const q = new URLSearchParams()
+    if (metric) q.set('metric', metric)
+    if (subsetHash) q.set('subset_hash', subsetHash)
+    const qs = q.toString()
+    return get<ExpEvaluationsResponse>(`/experiments/${hash}/evaluations${qs ? `?${qs}` : ''}`)
+  },
+
+  /** The subsets this experiment has evaluations for (migration 0015); [] = full-cohort only. */
+  expSubsets(hash: string): Promise<{ subset_hash: string; name: string }[]> {
+    if (USE_FIXTURE) return fake([])
+    return get<{ subset_hash: string; name: string }[]>(`/experiments/${hash}/subsets`)
   },
 
   expModelGroups(hash: string): Promise<ModelGroupsResponse> {
@@ -283,6 +300,31 @@ export const api = {
     if (USE_FIXTURE) return fake(fixture.modelHistogram(id))
     const q = bins ? `?bins=${bins}` : ''
     return get<ModelHistogramResponse>(`/models/${id}/histogram${q}`)
+  },
+
+  /** Reliability deciles at the model's latest evaluated test date (migration 0012). */
+  modelCalibration(id: number): Promise<CalibrationResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCalibration(id))
+    return get<CalibrationResponse>(`/models/${id}/calibration`)
+  },
+
+  /** Top distinguishing features (persisted by `triage postmodel crosstabs`). */
+  modelCrosstabs(id: number): Promise<CrosstabsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCrosstabs(id))
+    return get<CrosstabsResponse>(`/models/${id}/crosstabs`)
+  },
+
+  /** Error-tree rules (persisted by `triage postmodel error-tree`). */
+  modelErrorRules(id: number): Promise<ErrorRulesResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelErrorRules(id))
+    return get<ErrorRulesResponse>(`/models/${id}/error-rules`)
+  },
+
+  /** Top-k list overlap between two models (migration 0016). */
+  modelOverlap(a: number, b: number, parameter?: string): Promise<ListOverlapRow[]> {
+    if (USE_FIXTURE) return fake(fixture.modelOverlap(a, b))
+    const q = parameter ? `?parameter=${encodeURIComponent(parameter)}` : ''
+    return get<ListOverlapRow[]>(`/models/${a}/overlap/${b}${q}`)
   },
 
   modelPredictions(

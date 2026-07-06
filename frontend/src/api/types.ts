@@ -280,6 +280,18 @@ export interface BiasMetricRow {
   value: number | null
   ref_group_value: string | null
   disparity: number | null
+  /** fairness threshold the SQL verdict used (migration 0014; null on pre-0014 rows). */
+  tau: number | null
+  /** disparity ∈ [tau, 1/tau] (null: count rows / no disparity / pre-0014 rows). */
+  passes_fairness: boolean | null
+}
+
+/** The experiment config's bias_config block, echoed to the bias tab (wizard preseed). */
+export interface BiasConfigEcho {
+  intervention?: 'punitive' | 'assistive' | 'representation'
+  tau?: number
+  ref_groups?: Record<string, string>
+  parameter?: string
 }
 
 /** GET /bias returns a bare array of long-format rows, OR the empty envelope. */
@@ -664,6 +676,21 @@ export interface ModelGroupModelRow {
   training_label_timespan: string | null
   /** test/evaluation period (min test as_of_date) — the period the model is scored on. */
   test_as_of: string | null
+  /** wall-clock fit time (migration 0016); null on pre-0016 / cache-reclaimed models. */
+  train_duration_ms: number | null
+}
+
+/** triage.audition aggregates for one group (migration 0013) — experiment-scoped. */
+export interface GroupAuditionRow {
+  metric: string
+  parameter: string
+  n_splits_evaluated: number
+  avg_value: number | null
+  stddev_value: number | null
+  avg_distance_from_best: number | null
+  max_regret: number | null
+  avg_regret_next_time: number | null
+  max_regret_next_time: number | null
 }
 
 export interface ModelGroupDetailResponse {
@@ -673,17 +700,80 @@ export interface ModelGroupDetailResponse {
   metric_over_time: ExpEvaluationRow[]
   /** same shape as the experiment evaluations table (test split). */
   per_split: ExpEvaluationRow[]
+  /** group-level avg ± σ / regret per metric (empty without an experiment scope). */
+  audition: GroupAuditionRow[]
 }
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/models/{id} — feature importances + evals (+ model_group_id)        */
 /* -------------------------------------------------------------------------- */
 
+/** triage.evaluations_windowed (migration 0010) — one rollup row per metric. */
+export interface WindowedEvalRow {
+  metric: string
+  parameter: string
+  n_as_of_dates: number
+  window_start: string
+  window_end: string
+  value_mean: number | null
+  value_min: number | null
+  value_max: number | null
+  value_stddev: number | null
+  num_labeled_total: number | null
+}
+
 export interface ModelCardResponse {
   model_id: number
   model_group_id: number | null
   feature_importances: FeatureImportanceRow[]
   evaluations: ModelEvaluationRow[]
+  /** per-metric rollup over the model's test window (evaluations_windowed). */
+  windowed: WindowedEvalRow[]
+}
+
+/** GET /api/models/{id}/calibration — reliability deciles (migration 0012's function). */
+export interface CalibrationDecile {
+  decile: number
+  n: number
+  avg_score: number | null
+  realized_rate: number | null
+}
+export type CalibrationResponse =
+  | { as_of_date: string; deciles: CalibrationDecile[] }
+  | EmptyState
+
+/** GET /api/models/{id}/crosstabs — top distinguishing features (triage postmodel). */
+export interface CrosstabRow {
+  as_of_date: string
+  parameter: string
+  feature: string
+  selected_value: number | null
+  rest_value: number | null
+  ratio: number | null
+}
+export type CrosstabsResponse = CrosstabRow[] | EmptyState
+
+/** GET /api/models/{id}/error-rules — the error-tree rules (triage postmodel). */
+export interface ErrorRuleRow {
+  as_of_date: string
+  parameter: string
+  error_kind: 'fp' | 'fn'
+  rule: string
+  n_matched: number
+  n_errors: number
+  error_rate: number
+  depth: number
+}
+export type ErrorRulesResponse = ErrorRuleRow[] | EmptyState
+
+/** GET /api/models/{a}/overlap/{b} — top-k list overlap (migration 0016). */
+export interface ListOverlapRow {
+  as_of_date: string
+  k_a: number
+  k_b: number
+  n_intersection: number
+  jaccard: number | null
+  rank_corr: number | null
 }
 
 /* -------------------------------------------------------------------------- */

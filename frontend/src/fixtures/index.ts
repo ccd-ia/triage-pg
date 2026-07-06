@@ -17,7 +17,13 @@
  */
 import type {
   ArtifactStatusRow,
+  BiasMetricRow,
+  CalibrationResponse,
+  CrosstabRow,
+  CrosstabsResponse,
   EntityProfileResponse,
+  ErrorRulesResponse,
+  ListOverlapRow,
   EntityScorePoint,
   PredictionRow,
   CohortProfilePoint,
@@ -634,16 +640,48 @@ export function expSelectedModelFor(
 /* Bias — experiment-scoped, 3-view source (group/disparity/fairness)          */
 /* ========================================================================== */
 
+// Metric names + τ verdict follow migration 0014 (the SQL emits 'precision', not 'ppv').
+function biasRow(
+  group: string,
+  metric: string,
+  value: number,
+  disparity: number | null,
+): BiasMetricRow {
+  return {
+    model_id: 27,
+    split_kind: 'test',
+    as_of_date: SPLITS[2],
+    parameter: '10_pct',
+    attribute_name: 'facility_type',
+    attribute_value: group,
+    metric,
+    value,
+    ref_group_value: 'restaurant',
+    disparity,
+    tau: disparity == null ? null : 0.8,
+    passes_fairness: disparity == null ? null : disparity >= 0.8 && disparity <= 1.25,
+  }
+}
+
 const BIAS_ROWS: ExpBiasResponse = [
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'restaurant', metric: 'tpr', value: 0.41, ref_group_value: 'restaurant', disparity: 1.0 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'restaurant', metric: 'fpr', value: 0.18, ref_group_value: 'restaurant', disparity: 1.0 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'restaurant', metric: 'ppv', value: 0.34, ref_group_value: 'restaurant', disparity: 1.0 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'grocery store', metric: 'tpr', value: 0.33, ref_group_value: 'restaurant', disparity: 0.80 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'grocery store', metric: 'fpr', value: 0.15, ref_group_value: 'restaurant', disparity: 0.83 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'grocery store', metric: 'ppv', value: 0.3, ref_group_value: 'restaurant', disparity: 0.88 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'school', metric: 'tpr', value: 0.29, ref_group_value: 'restaurant', disparity: 0.71 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'school', metric: 'fpr', value: 0.11, ref_group_value: 'restaurant', disparity: 0.61 },
-  { model_id: 27, split_kind: 'test', as_of_date: SPLITS[2], parameter: '10_pct', attribute_name: 'facility_type', attribute_value: 'school', metric: 'ppv', value: 0.27, ref_group_value: 'restaurant', disparity: 0.79 },
+  biasRow('restaurant', 'selection_rate', 0.12, 1.0),
+  biasRow('restaurant', 'precision', 0.34, 1.0),
+  biasRow('restaurant', 'tpr', 0.41, 1.0),
+  biasRow('restaurant', 'fpr', 0.18, 1.0),
+  biasRow('restaurant', 'fnr', 0.59, 1.0),
+  biasRow('restaurant', 'fdr', 0.66, 1.0),
+  biasRow('grocery store', 'selection_rate', 0.1, 0.83),
+  biasRow('grocery store', 'precision', 0.3, 0.88),
+  biasRow('grocery store', 'tpr', 0.33, 0.8),
+  biasRow('grocery store', 'fpr', 0.15, 0.83),
+  biasRow('grocery store', 'fnr', 0.67, 1.14),
+  biasRow('grocery store', 'fdr', 0.7, 1.06),
+  biasRow('school', 'selection_rate', 0.07, 0.58),
+  biasRow('school', 'precision', 0.27, 0.79),
+  biasRow('school', 'tpr', 0.29, 0.71),
+  biasRow('school', 'fpr', 0.11, 0.61),
+  biasRow('school', 'fnr', 0.71, 1.2),
+  biasRow('school', 'fdr', 0.73, 1.11),
 ]
 
 export function expBiasFor(hash: string, modelId?: number): ExpBiasResponse {
@@ -670,9 +708,34 @@ export function modelGroupDetail(id: number): ModelGroupDetailResponse {
       run_id: FIXTURE_RUN_ID,
       training_label_timespan: '6 mons',
       test_as_of: SPLITS[Math.min(i + 1, SPLITS.length - 1)],
+      train_duration_ms: 1800 + i * 350,
     })),
     metric_over_time: allEvals,
     per_split: allEvals,
+    audition: [
+      {
+        metric: 'precision@',
+        parameter: '10_pct',
+        n_splits_evaluated: SPLITS.length,
+        avg_value: 0.31,
+        stddev_value: 0.024,
+        avg_distance_from_best: 0.018,
+        max_regret: 0.052,
+        avg_regret_next_time: 0.021,
+        max_regret_next_time: 0.049,
+      },
+      {
+        metric: 'auc_roc',
+        parameter: '',
+        n_splits_evaluated: SPLITS.length,
+        avg_value: 0.71,
+        stddev_value: 0.013,
+        avg_distance_from_best: 0.01,
+        max_regret: 0.03,
+        avg_regret_next_time: 0.012,
+        max_regret_next_time: 0.028,
+      },
+    ],
   }
 }
 
@@ -710,7 +773,103 @@ export function modelCard(id: number): ModelCardResponse {
       value: auc[i], value_expected: auc[i] - 0.003, value_std: 0.01, num_labeled: 1995 + i * 100, num_positive: 480,
     })
   })
-  return { model_id: id, model_group_id: gid, feature_importances: importances.map((f) => ({ ...f, model_id: id })), evaluations }
+  const windowed = ['precision@', 'auc_roc'].map((metric) => {
+    const vals = evaluations.filter((e) => e.metric === metric).map((e) => e.value ?? 0)
+    const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1)
+    return {
+      metric,
+      parameter: metric === 'precision@' ? '10_pct' : '',
+      n_as_of_dates: vals.length,
+      window_start: SPLITS[0],
+      window_end: SPLITS[SPLITS.length - 1],
+      value_mean: mean,
+      value_min: Math.min(...vals),
+      value_max: Math.max(...vals),
+      value_stddev: 0.02,
+      num_labeled_total: 2000 * vals.length,
+    }
+  })
+  return {
+    model_id: id,
+    model_group_id: gid,
+    feature_importances: importances.map((f) => ({ ...f, model_id: id })),
+    evaluations,
+    windowed,
+  }
+}
+
+/** Reliability deciles: a mildly over-confident model (top deciles under the diagonal). */
+export function modelCalibration(id: number): CalibrationResponse {
+  void id
+  return {
+    as_of_date: SPLITS[SPLITS.length - 1],
+    deciles: [...Array(10).keys()].map((i) => ({
+      decile: i + 1,
+      n: 200,
+      avg_score: 0.95 - i * 0.09,
+      realized_rate: Math.max(0.02, 0.82 - i * 0.085),
+    })),
+  }
+}
+
+/** A handful of list-characterizing features (fixture: inspection-history flavored). */
+export function modelCrosstabs(id: number): CrosstabsResponse {
+  void id
+  const mk = (feature: string, sel: number, rest: number): CrosstabRow => ({
+    as_of_date: SPLITS[SPLITS.length - 1],
+    parameter: '10_pct',
+    feature,
+    selected_value: sel,
+    rest_value: rest,
+    ratio: rest === 0 ? null : sel / rest,
+  })
+  return [
+    mk('inspections__entity_id__count_none__all', 6.1, 2.2),
+    mk('inspections__failed__sum_none__1y', 1.9, 0.4),
+    mk('facility__age__identity_none__all', 3.1, 7.8),
+    mk('inspections__days_since__min_none__all', 44, 210),
+  ]
+}
+
+/** Two planted failure modes (fixture). */
+export function modelErrorRules(id: number): ErrorRulesResponse {
+  void id
+  return [
+    {
+      as_of_date: SPLITS[SPLITS.length - 1],
+      parameter: '10_pct',
+      error_kind: 'fp',
+      rule: 'inspections__entity_id__count_none__all <= 1.5 AND facility__age__identity_none__all <= 2.5',
+      n_matched: 64,
+      n_errors: 51,
+      error_rate: 0.797,
+      depth: 2,
+    },
+    {
+      as_of_date: SPLITS[SPLITS.length - 1],
+      parameter: '10_pct',
+      error_kind: 'fn',
+      rule: 'inspections__failed__sum_none__1y > 0.5',
+      n_matched: 38,
+      n_errors: 22,
+      error_rate: 0.579,
+      depth: 1,
+    },
+  ]
+}
+
+/** Two fixture models share most of their top list. */
+export function modelOverlap(a: number, b: number): ListOverlapRow[] {
+  void a
+  void b
+  return SPLITS.slice(1).map((d) => ({
+    as_of_date: d,
+    k_a: 200,
+    k_b: 200,
+    n_intersection: 154,
+    jaccard: 154 / (200 + 200 - 154),
+    rank_corr: 0.87,
+  }))
 }
 
 /** A monotone Rayid threshold curve (cumulative TP/FP by rank) over 20 points. */

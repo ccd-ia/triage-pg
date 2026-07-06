@@ -5,7 +5,17 @@
  * its per-split models (each opens the model sheet), and its metric-over-time line.
  */
 import { useMemo, useState } from 'react'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceArea,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
 import { tooltipFormatter } from '../api/format'
@@ -53,6 +63,11 @@ export function ModelGroupSheet({
   )
   const s = group.data?.summary
   const models = group.data?.models ?? []
+  // group aggregates (triage.audition, migration 0013) for the selected metric —
+  // the avg ± σ band the trajectory is judged against (plan P6).
+  const agg = (group.data?.audition ?? []).find(
+    (a) => a.metric === sel.metric && a.parameter === sel.parameter,
+  )
 
   // metric_over_time → recharts rows keyed by as_of (one value series).
   const chartData = useMemo(() => {
@@ -106,6 +121,23 @@ export function ModelGroupSheet({
                   {s.first_train_end?.slice(0, 7) ?? '—'} → {s.last_train_end?.slice(0, 7) ?? '—'}
                 </span>
               </div>
+              {agg ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  <span className="badge b-run" title={`${agg.n_splits_evaluated} split(s)`}>
+                    {sel.metric}
+                    {sel.parameter} avg {agg.avg_value?.toFixed(3) ?? '—'} ±{' '}
+                    {agg.stddev_value?.toFixed(3) ?? '—'}
+                  </span>
+                  <span className="badge b-aud" title="worst distance-from-best across splits">
+                    max regret {agg.max_regret?.toFixed(3) ?? '—'}
+                  </span>
+                  {agg.max_regret_next_time != null ? (
+                    <span className="badge b-aud" title="regret realized at the NEXT split (DSSG)">
+                      next-time {agg.max_regret_next_time.toFixed(3)}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
 
             <section>
@@ -113,7 +145,7 @@ export function ModelGroupSheet({
               {models.length ? (
                 <table>
                   <thead>
-                    <tr><th>train ≤</th><th>test</th><th className="num">model</th></tr>
+                    <tr><th>train ≤</th><th>test</th><th className="num">fit</th><th className="num">model</th></tr>
                   </thead>
                   <tbody>
                     {models.map((m) => (
@@ -124,6 +156,9 @@ export function ModelGroupSheet({
                       >
                         <td className="mono">{m.train_end_time ?? '—'}</td>
                         <td className="mono muted">{m.test_as_of ?? '—'}</td>
+                        <td className="num mono muted">
+                          {m.train_duration_ms != null ? `${(m.train_duration_ms / 1000).toFixed(1)}s` : '—'}
+                        </td>
                         <td className="num mono">m{m.model_id}</td>
                       </tr>
                     ))}
@@ -166,7 +201,25 @@ export function ModelGroupSheet({
                         contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', fontSize: 11 }}
                         formatter={tooltipFormatter(4)}
                       />
-                      <Line type="monotone" dataKey="value" stroke="var(--acc)" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+                      {/* the group's own avg ± σ band — a split outside it is the outlier
+                          the model sheet's z-chip flags (plan P6) */}
+                      {agg?.avg_value != null && agg?.stddev_value != null ? (
+                        <ReferenceArea
+                          y1={agg.avg_value - agg.stddev_value}
+                          y2={agg.avg_value + agg.stddev_value}
+                          fill="var(--acc)"
+                          fillOpacity={0.08}
+                        />
+                      ) : null}
+                      {agg?.avg_value != null ? (
+                        <ReferenceLine
+                          y={agg.avg_value}
+                          stroke="var(--acc)"
+                          strokeDasharray="4 4"
+                          strokeOpacity={0.6}
+                        />
+                      ) : null}
+                      <Line type="monotone" dataKey="value" stroke="var(--acc)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
