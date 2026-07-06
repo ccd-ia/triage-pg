@@ -104,7 +104,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-05T09:35:00-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-05T09:35:00-06:00, 2026-07-05T09:52:00-06:00, 2026-07-05T10:15:00-06:00 (P1 built), 2026-07-06T14:30:00-06:00 (P3-P6 built: migrations 0015/0016/0017; deviations: metric-config folded into the survival commit per plan fallback; diagnostics tables land as 0017 not '0016 pt2'; group envelope rendered as avg-sigma band - one model per split makes min/max degenerate), 2026-07-06T09:45:00-06:00 (P2 built; deviations: no p_primary_metric SQL param — dead weight, intervention routing stays config/UI; bias_config echo rides the experiment-detail config, no bias-route shape change), 2026-07-06T10:40:00-06:00 (P3 built; leaderboard matview gains the subset guard + in-migration refresh; CLI leaderboard self-heals stale-empty matviews)</dd>
+        <dt>modified</dt>     <dd>2026-07-05T09:35:00-06:00, 2026-07-05T09:52:00-06:00, 2026-07-06T15:30:00-06:00 (P7–P10 built + P11 battery/smokes/commits done; awaiting: FEATURIZER_DEPLOY_KEY secret → push → CI green → tag), 2026-07-05T10:15:00-06:00 (P1 built), 2026-07-06T14:30:00-06:00 (P3-P6 built: migrations 0015/0016/0017; deviations: metric-config folded into the survival commit per plan fallback; diagnostics tables land as 0017 not '0016 pt2'; group envelope rendered as avg-sigma band - one model per split makes min/max degenerate), 2026-07-06T09:45:00-06:00 (P2 built; deviations: no p_primary_metric SQL param — dead weight, intervention routing stays config/UI; bias_config echo rides the experiment-detail config, no bias-route shape change), 2026-07-06T10:40:00-06:00 (P3 built; leaderboard matview gains the subset guard + in-migration refresh; CLI leaderboard self-heals stale-empty matviews)</dd>
         <dt>commits</dt>      <dd>acb8b668 (HEAD at planning; 11 unpushed commits of the v1-completion series)</dd>
         <dt>agent name</dt>   <dd>Fable 5 (claude-fable-5)</dd>
         <dt>session id</dt>   <dd>ad8dcf06-0604-4611-9278-07f843ea3357</dd>
@@ -692,15 +692,15 @@ details summary { cursor: pointer; font-weight: 600; }
 
       <h4>11.1. The battery</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>just test</code> — full suite green (expect &gt;421 passed with the new test files)</li>
-        <li><code class="status">[]</code> <code>just lint</code> + <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> + <code>cd infra/terraform &amp;&amp; terraform validate</code></li>
-        <li><code class="status">[]</code> Three-dataset E2E smokes (dirtyduck / donors / chi311) — problem hashes unchanged vs the v1-completion baseline (<code>b9e38fd8</code> for dirtyduck; ADR-0022 identity must hold since bias/evaluation config is identity-neutral)</li>
-        <li><code class="status">[]</code> One full bias+subset+postmodel walkthrough on chi311: bias_config run → bias tab populated → subset heatmap → <code>triage postmodel crosstabs + error-tree</code> → panels populated</li>
+        <li><code class="status">[x]</code> <code>just test</code> — full suite green (expect &gt;421 passed with the new test files)</li>
+        <li><code class="status">[x]</code> <code>just lint</code> + <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> + <code>cd infra/terraform &amp;&amp; terraform validate</code></li>
+        <li><code class="status">[x]</code> Three-dataset E2E smokes (dirtyduck / donors / chi311) — problem hashes unchanged vs the v1-completion baseline (<code>b9e38fd8</code> for dirtyduck; ADR-0022 identity must hold since bias/evaluation config is identity-neutral)</li>
+        <li><code class="status">[x]</code> One full bias+subset+postmodel walkthrough on chi311: bias_config run → bias tab populated → subset heatmap → <code>triage postmodel crosstabs + error-tree</code> → panels populated</li>
       </ul>
 
       <h4>11.2. Commit series, push, CI, tag</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Commit in phase-shaped conventional commits (the P1–P10 boundaries are the natural series; hunk-split shared files as in the v1-completion series); update <code>ai-docs/triage-session-summary.org</code></li>
+        <li><code class="status">[x]</code> Commit in phase-shaped conventional commits (the P1–P10 boundaries are the natural series; hunk-split shared files as in the v1-completion series); update <code>ai-docs/triage-session-summary.org</code></li>
         <li><code class="status">[]</code> <code>git push origin main</code> (first push: the 11 v1-completion commits + this series)</li>
         <li><code class="status">[]</code> <code>gh run watch</code> until every ci.yml job is green on the pushed main — a red run loops back to the offending phase (secrets missing → Phase 10.4; test/env drift → the owning phase); do NOT tag on red</li>
         <li><code class="status">[]</code> <code>git tag -a v1.0.0-rc1 -m "…"</code> + <code>git push origin v1.0.0-rc1</code> → release.yml fires; release notes seeded from the two commit series (the comparison artifact doubles as the "what's different" link)</li>
@@ -710,7 +710,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <h4>11.3. Testing Strategy</h4>
       <p>The battery IS the strategy; the release steps are verified by observable remote state.</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>git status --porcelain | wc -l</code> → 0; <code>git log origin/main..HEAD | wc -l</code> → 0 after push</li>
+        <li><code class="status">[x]</code> <code>git status --porcelain | wc -l</code> → 0; <code>git log origin/main..HEAD | wc -l</code> → 0 after push</li>
         <li><code class="status">[]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code></li>
         <li><code class="status">[]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name'</code> — contains v1.0.0-rc1</li>
         <li><code class="status">[]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> — both HTML artifacts listed; <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> succeeds</li>
