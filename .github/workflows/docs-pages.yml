@@ -1,0 +1,44 @@
+# OPTIONAL, GATED (v1-release plan P10): publishes the two self-contained HTML artifacts
+# + screenshots to GitHub Pages so the onboarding one-pager gets a shareable URL.
+# Fires only after the maintainer enables Pages (Settings → Pages → Source: GitHub Actions);
+# until then, runs of this workflow fail at deploy with a clear Pages-not-enabled error,
+# so it ships trigger-gated to manual dispatch + docs pushes on main.
+
+name: docs-pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "docs/*.html"
+      - "docs/images/**"
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the static bundle
+        run: |
+          mkdir -p _site/images
+          cp docs/onboarding.html _site/index.html
+          cp docs/triage-pg-vs-dssg-triage.html _site/
+          cp docs/images/*.png _site/images/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

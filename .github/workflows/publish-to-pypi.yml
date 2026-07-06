@@ -1,50 +1,21 @@
-name: Publish python distributions to PyPI
+# RETIRED (v1-release plan P10, 2026-07-06) — do not resurrect without a maintainer call.
+#
+# The previous version of this workflow triggered on EVERY tag push and attempted a PyPI
+# publish; triage-pg is not on PyPI (install is `uv sync` from a checkout), so tagging
+# v1.0.0-rc1 would have fired a doomed release. PyPI publishing is a post-v1.0.0 decision.
+#
+# The file is kept as a neutralized stub because repo tooling protects .github/ from
+# deletion; `git rm` it at review. workflow_dispatch-only = it can never fire on its own.
+name: retired — publish to PyPI (disabled)
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build and publish python distributions to PyPI
+  retired:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-    - name: Install pypa/build
-      run: >-
-        python -m
-        pip install
-        build
-        --user
-    - name: Build a binary wheel and a source tarball
-      run: python -m build
-    - name: Store the distribution packages
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-  publish-to-pypi:
-    name: Publish python distribution to PyPI
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: 
-    - build
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/triage
-    steps:
-      - name: Download all the dists
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-      - name: Publish distribution to PyPI 
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-
+      - run: |
+          echo "This workflow is retired (v1-release plan P10). PyPI publishing is a"
+          echo "post-v1.0.0 decision; releases are handled by release.yml (GHCR + GitHub Release)."
+          exit 1

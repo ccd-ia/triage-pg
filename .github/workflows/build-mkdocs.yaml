@@ -1,32 +1,15 @@
-name: Build Docs and Serve to Github Pages
+# RETIRED (v1-release plan P10, 2026-07-06) — the mkdocs docs tree was removed in WS3;
+# there is no mkdocs.yml. Docs are plain Markdown rendered on GitHub (docs/README.md is
+# the index) plus two self-contained HTML artifacts (docs/onboarding.html,
+# docs/triage-pg-vs-dssg-triage.html). Kept as a neutralized stub because repo tooling
+# protects .github/ from deletion; `git rm` it at review.
+name: retired — mkdocs (disabled)
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'docs/**'
-  
+  workflow_dispatch:
+
 jobs:
-  docs:
-    name: Build Docs and Serve to Github Pages
+  retired:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.9
-      
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip && pip install -r requirement/dev.txt
-          pip install git+https://github.com/dssg/triage.git@master
-          git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
-      
-      - name: Publish docs
-        run: mkdocs gh-deploy -f "$(pwd)/docs/mkdocs.yml"
+      - run: echo "retired — see docs/README.md" && exit 1
