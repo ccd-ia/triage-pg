@@ -46,7 +46,7 @@ then `docker compose down -v && docker compose up -d` (the `-v` lets init re-run
 - **Features (featurizer / ADR-0008)**: the project's own attributes (one-hot categoricals +
   numerics) + featurizer aggregates over the resources child stream + a self-referential as-of
   join for the teacher's/school's prior-project history (43.5% of teachers, 76% of schools have
-  repeat projects). See `example/donorschoose/greenfield.yaml` (the triage experiment config).
+  repeat projects). See `example/donorschoose/experiment.yaml` (the triage experiment config).
 
 ## Recipes
 
@@ -83,12 +83,12 @@ DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5436/donors \
 
 # 4. run cohort → labels → matrices → train → predict → evaluate
 uv run triage --dbfile donorschoose-database.yaml run \
-  example/donorschoose/greenfield.yaml --project-path /tmp/donors-run
+  example/donorschoose/experiment.yaml --project-path /tmp/donors-run
 ```
 
 A successful run reports something like *1 run, 20 models, 1820 predictions, 120 evaluations*
 across 4 temporal splits (6-month retrain cadence over 2012–2013). The featurizer ER-graph
-(`example/donorschoose/greenfield.yaml`) synthesizes ~175 features per matrix: the project's own
+(`example/donorschoose/experiment.yaml`) synthesizes ~175 features per matrix: the project's own
 one-hot attributes + numeric ask, resource-line-item aggregations, and the **self-referential
 teacher/school prior-posting history** (an as-of self-join on `teacher_acctid` / `schoolid`). On
 the baked subset the signal is modest (test AUC ≈ 0.58, average-precision ≈ 0.42 over a ~0.32

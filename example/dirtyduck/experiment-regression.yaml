@@ -1,5 +1,5 @@
 # DirtyDuck Greenfield — REGRESSION (regression-as-ranking, ADR-0010)
-# Reuses the SAME food inspections DB as greenfield.yaml; only the target + grid change.
+# Reuses the SAME food inspections DB as experiment.yaml; only the target + grid change.
 #
 # Problem: HOW MANY violations will a facility accumulate over the next 6 months?
 #   The target is a continuous count (mean ≈ 5, range 1–64 on real 2014-2017 data).

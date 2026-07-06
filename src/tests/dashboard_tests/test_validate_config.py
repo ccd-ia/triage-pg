@@ -28,7 +28,7 @@ HEADERS = {"X-Triage-User": ADMIN}
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 EXAMPLE_DIR = REPO_ROOT / "example"
-CHI311_YAML = EXAMPLE_DIR / "chicago311" / "greenfield.yaml"
+CHI311_YAML = EXAMPLE_DIR / "chicago311" / "experiment.yaml"
 
 
 class _StubRunner:
@@ -149,7 +149,7 @@ def test_example_configs_serves_the_committed_examples(client, monkeypatch):
     assert r.status_code == 200
     entries = r.json()
     names = {e["name"] for e in entries}
-    assert "chicago311/greenfield.yaml" in names
+    assert "chicago311/experiment.yaml" in names
     for entry in entries:
         assert isinstance(yaml.safe_load(entry["content"]), dict)
         assert entry["dataset"] and entry["filename"]

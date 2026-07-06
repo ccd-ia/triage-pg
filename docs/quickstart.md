@@ -33,7 +33,7 @@ DATABASE_URL=postgresql://chi311_user:some_password@127.0.0.1:5438/chi311 \
 
 # 4. run the experiment: cohort → labels → features → matrices → train → evaluate
 uv run triage --dbfile chicago311-database.yaml run \
-  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+  example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 ```
 
 The run prints its experiment hash and per-run model/prediction/evaluation counts. Inspect it:
@@ -73,7 +73,7 @@ change the experiment hash.
 
 The other two tutorial datasets work identically: `just tutorial-up` (DirtyDuck food
 inspections, default port 5434 — override with DIRTYDUCK_PG_PORT) and `just donors-up` (DonorsChoose KDD Cup 2014, port 5436), each
-with an `example/<dataset>/greenfield.yaml` and a README describing its problem.
+with an `example/<dataset>/experiment.yaml` and a README describing its problem.
 
 ## Path B — your own project (the ADR-0002 lifecycle)
 
@@ -98,7 +98,7 @@ uv run triage project drop myproject --confirm myproject   # teardown = DROP DAT
 
 Load your source data into the new database (`raw` → `clean` → `ontology` schemas — see the
 tutorial `*_db/` dockers for the pattern), declare it under `sources:` in your config
-(ADR-0014 pinning), then `triage run your-greenfield.yaml`.
+(ADR-0014 pinning), then `triage run your-experiment.yaml`.
 
 ## The dashboard across many projects (ADR-0025)
 

@@ -92,7 +92,7 @@ export AWS_REGION=… TRIAGE_RDS_HOST=… TRIAGE_RDS_PORT=5432 \
        TRIAGE_RDS_DB=myproject TRIAGE_RDS_USER=triage_myproject \
        TRIAGE_S3_BUCKET=… TRIAGE_BATCH_QUEUE=… TRIAGE_BATCH_JOB_DEF=…
 
-uv run triage run my-greenfield.yaml --profile cloud
+uv run triage run my-experiment.yaml --profile cloud
 # → "Submitted AWS Batch job <id> (config staged to s3://…/staging/…)" — async by design
 ```
 

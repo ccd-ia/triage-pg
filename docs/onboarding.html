@@ -124,7 +124,7 @@ uv sync --extra dev --extra dashboard
 just chi311-up                                <span class="c"># real Chicago 311 data, dockerized PG</span>
 <span class="c"># point triage at it + create the schema (docs/quickstart.md, 2 commands)</span>
 uv run triage --dbfile chicago311-database.yaml run \
-  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+  example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 
 <span class="c"># inspect — same views everywhere (headless-complete, ADR-0012)</span>
 uv run triage leaderboard &lt;hash&gt;      <span class="c"># or psql, or the dashboard (just serve)</span>

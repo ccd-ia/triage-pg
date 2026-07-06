@@ -1,5 +1,5 @@
 # Chicago 311 — SURVIVAL (time-to-resolution, ADR-0010/0026)
-# Reuses the SAME chicago311 DB as greenfield.yaml; only problem_type, the label, the horizon,
+# Reuses the SAME chicago311 DB as experiment.yaml; only problem_type, the label, the horizon,
 # and the grid change. The EWS asked "will this request MISS the 14-day SLA?" (binary); this asks
 # the finer question the schema was designed to carry: HOW LONG until it resolves, with natural
 # right-censoring — a request still open at the end of the observation window is censored, its
@@ -59,7 +59,7 @@ label_config:
     where e.created_date >= {as_of_date}::date - interval '1 month'
       and e.created_date <  {as_of_date}::date
 
-# Identical featurizer ER-graph to greenfield.yaml (the features don't change with the problem
+# Identical featurizer ER-graph to experiment.yaml (the features don't change with the problem
 # type — only y does): request attributes + area_backlog + type_demand as-of children.
 feature_config:
   target: requests

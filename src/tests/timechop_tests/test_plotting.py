@@ -1,24 +1,34 @@
-from unittest.mock import patch
 from unittest import TestCase
-import yaml
+from unittest.mock import patch
+
 import matplotlib
 
 matplotlib.use("Agg")
-from triage.component.timechop import Timechop # noqa
-from triage.component.timechop.plotting import visualize_chops # noqa
+from triage.component.timechop import Timechop  # noqa
+from triage.component.timechop.plotting import visualize_chops  # noqa
+
+# A known-good temporal_config in the exact Timechop constructor shape (the greenfield
+# adapter's TemporalConfig.to_timechop_kwargs() emits this same set of keys). Inlined so the
+# plotting smoke test carries no dependency on any example config file.
+TEMPORAL_CONFIG = {
+    "feature_start_time": "2014-01-01",
+    "feature_end_time": "2017-07-01",
+    "label_start_time": "2015-01-01",
+    "label_end_time": "2017-07-01",
+    "model_update_frequency": "6month",
+    "training_as_of_date_frequencies": "6month",
+    "max_training_histories": "5year",
+    "training_label_timespans": ["6month"],
+    "test_as_of_date_frequencies": "6month",
+    "test_durations": "0day",
+    "test_label_timespans": ["6month"],
+}
 
 
 class VisualizeChopTest(TestCase):
     @property
     def chopper(self):
-        # create a valid Timechop chopper
-        # least brittle current way of doing this is by loading the
-        # example_experiment_config.yaml file, because that is a
-        # diligently updated file. If Timechop config changes, the
-        # example config should change too
-        with open("example/config/experiment.yaml") as fd:
-            experiment_config = yaml.full_load(fd)
-        return Timechop(**(experiment_config["temporal_config"]))
+        return Timechop(**TEMPORAL_CONFIG)
 
     # hard to make many assertions, but we can make sure it gets to the end
     # and shows the contents.

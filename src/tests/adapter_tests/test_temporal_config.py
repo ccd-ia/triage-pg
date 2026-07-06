@@ -11,7 +11,7 @@ from triage.component.timechop.timechop import Timechop
 from triage.derivation import canonical_json
 from triage.util.conf import convert_str_to_relativedelta
 
-# Mirrors example/config/experiment.yaml's temporal_config block.
+# A representative temporal_config block in the Timechop constructor shape.
 EXAMPLE = {
     "feature_start_time": "1995-01-01",
     "feature_end_time": "2015-01-01",
@@ -27,7 +27,7 @@ EXAMPLE = {
 }
 
 _EXAMPLE_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "example" / "config" / "experiment.yaml"
+    Path(__file__).resolve().parents[3] / "example" / "dirtyduck" / "experiment.yaml"
 )
 
 

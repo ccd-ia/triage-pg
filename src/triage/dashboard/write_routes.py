@@ -148,7 +148,7 @@ def _resolve_config(
     """Resolve the exactly-one-of (parsed object | raw YAML/JSON text) config payload.
 
     YAML is a superset of JSON, so one ``yaml.safe_load`` handles both text forms — users can
-    paste/upload exactly the ``greenfield.yaml`` that ``triage run`` consumes. Errors are 400s
+    paste/upload exactly the ``experiment.yaml`` that ``triage run`` consumes. Errors are 400s
     with the parser's message (a client mistake, not a server fault)."""
     if (config is None) == (config_text is None):
         raise HTTPException(
@@ -304,7 +304,7 @@ def post_validate_config(
 def get_example_configs(
     principal: Principal = Depends(current_principal),
 ) -> list[dict]:
-    """The committed ``example/*/greenfield*.yaml`` configs, for the submit-form picker.
+    """The committed ``example/*/experiment*.yaml`` configs, for the submit-form picker.
 
     Served by the backend so the SPA needs no filesystem access; an instance without an
     example checkout (or ``TRIAGE_EXAMPLES_DIR``) just returns an empty list.
@@ -313,7 +313,7 @@ def get_example_configs(
     if root is None:
         return []
     entries: list[dict] = []
-    for path in sorted(root.glob("*/greenfield*.yaml")):
+    for path in sorted(root.glob("*/experiment*.yaml")):
         content = path.read_text(encoding="utf-8")
         description = next(
             (

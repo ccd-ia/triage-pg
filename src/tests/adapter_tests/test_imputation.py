@@ -1,34 +1,10 @@
 """Tests for triage.adapters imputation policy (docs/adapter-spec.md §3, ADR-0009)."""
 
-from pathlib import Path
-
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from triage.adapters import ImputationPolicy, ImputationRule
 from triage.derivation import canonical_json
-
-_EXAMPLE_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "example" / "config" / "experiment.yaml"
-)
-
-
-def _find_key(obj, key):
-    """Depth-first search for the first value under ``key`` in a nested dict/list."""
-    if isinstance(obj, dict):
-        if key in obj:
-            return obj[key]
-        for value in obj.values():
-            found = _find_key(value, key)
-            if found is not None:
-                return found
-    elif isinstance(obj, list):
-        for item in obj:
-            found = _find_key(item, key)
-            if found is not None:
-                return found
-    return None
 
 
 def test_fit_free_rules_classified():
@@ -122,14 +98,13 @@ def test_canonical_is_deterministic_across_key_order():
     assert a["max"] == {"type": "mean"}
 
 
-def test_parses_inherited_example_block():
-    with open(_EXAMPLE_CONFIG_PATH) as handle:
-        config = yaml.safe_load(handle)
-    block = _find_key(config, "aggregates_imputation")
-    assert (
-        block is not None
-    ), "example config should contain an aggregates_imputation block"
+def test_parses_inherited_aggregates_block():
+    # The inherited DSSG-style aggregates_imputation shape: 'all' is constant:0 (fit-free),
+    # 'max' is mean (fit-based) → a mixed policy. ImputationPolicy must still parse it.
+    block = {
+        "all": {"type": "constant", "value": 0},
+        "max": {"type": "mean"},
+    }
     policy = ImputationPolicy.model_validate(block)
-    # the example's 'all' is constant:0, 'max' is mean → mixed fit-free/fit-based
     assert policy.resolve("max").kind == "fit_based"
     assert policy.requires_fit() is True

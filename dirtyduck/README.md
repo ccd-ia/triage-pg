@@ -25,7 +25,7 @@ DATABASE_URL=postgresql://food_user:some_password@127.0.0.1:5434/food \
 
 # the full pipeline: cohort → labels → featurizer → matrices → train → evaluate
 uv run triage --dbfile dirtyduck-database.yaml run \
-  example/dirtyduck/greenfield.yaml --project-path /tmp/dirtyduck-run
+  example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run
 ```
 
 Inspect the results — headless or in the browser (ADR-0012):
@@ -63,10 +63,10 @@ committed config against the same food DB:
 
 | Config | `problem_type` | Target |
 |---|---|---|
-| [`example/dirtyduck/greenfield.yaml`](../example/dirtyduck/greenfield.yaml) | `classification` | fails an inspection within 6 months |
-| [`example/dirtyduck/greenfield-regression.yaml`](../example/dirtyduck/greenfield-regression.yaml) | `regression_ranking` | violation COUNT over the label window, ranked (config-selectable metrics via the `evaluation:` block) |
-| [`example/dirtyduck/greenfield-survival.yaml`](../example/dirtyduck/greenfield-survival.yaml) | `survival` | time-to-failure `(duration, event_observed)`; C-index in PL/pgSQL |
-| [`example/dirtyduck/greenfield-deepgrid.yaml`](../example/dirtyduck/greenfield-deepgrid.yaml) | `classification` | a wider hyperparameter grid (+ a no-categoricals ablation twin) |
+| [`example/dirtyduck/experiment.yaml`](../example/dirtyduck/experiment.yaml) | `classification` | fails an inspection within 6 months |
+| [`example/dirtyduck/experiment-regression.yaml`](../example/dirtyduck/experiment-regression.yaml) | `regression_ranking` | violation COUNT over the label window, ranked (config-selectable metrics via the `evaluation:` block) |
+| [`example/dirtyduck/experiment-survival.yaml`](../example/dirtyduck/experiment-survival.yaml) | `survival` | time-to-failure `(duration, event_observed)`; C-index in PL/pgSQL |
+| [`example/dirtyduck/experiment-deepgrid.yaml`](../example/dirtyduck/experiment-deepgrid.yaml) | `classification` | a wider hyperparameter grid (+ a no-categoricals ablation twin) |
 
 Run any of them exactly like the base config — only the YAML path changes.
 

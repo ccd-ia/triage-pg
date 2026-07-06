@@ -149,13 +149,13 @@ sup { color: var(--muted); }
   <table>
     <tr><th>You knew…</th><th>In triage-pg…</th></tr>
     <tr><td>experiment config v8 (<code>experiment.yaml</code>)</td>
-        <td><code>greenfield.yaml</code>: same spirit (cohort/label queries with
+        <td><code>experiment.yaml</code>: same spirit (cohort/label queries with
             <code>{as_of_date}</code>/<code>{label_timespan}</code>, temporal_config, grid),
             but <code>feature_aggregations</code> (Collate) becomes a featurizer
             entity-relationship graph under <code>feature_config</code>, sources must be declared
             (<code>sources:</code>, ADR-0014), and <code>problem_type</code> is explicit.</td></tr>
     <tr><td><code>triage experiment config.yaml</code></td>
-        <td><code>triage run greenfield.yaml --project-path …</code>; inspect with
+        <td><code>triage run experiment.yaml --project-path …</code>; inspect with
             <code>triage leaderboard/models/audition/model show</code> or the dashboard.</td></tr>
     <tr><td><code>audition_config.yaml</code> + Auditioner plots</td>
         <td>Gone — <code>triage audition &lt;experiment-hash&gt;</code> prints the ranking, all

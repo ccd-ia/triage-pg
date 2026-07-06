@@ -53,7 +53,7 @@ uv sync --extra dev --extra dashboard
 just chi311-up                                   # real Chicago 311 data in a docker Postgres
 # …point triage at it and run (full steps: docs/quickstart.md)
 uv run triage --dbfile chicago311-database.yaml run \
-  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+  example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 uv run triage leaderboard <experiment-hash>      # or `just serve` for the dashboard
 ```
 

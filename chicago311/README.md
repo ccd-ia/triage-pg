@@ -50,7 +50,7 @@ re-run). `chi311_db/real/` is gitignored.
 - **Features (featurizer / ADR-0008)**: the request's own attributes (one-hot `sr_type` /
   `owner_department` / `origin`, numeric `ward` / time-of-filing) + as-of **backlog** aggregations —
   recent request volume in the same community area (`area_backlog`) and recent demand for the same
-  service type (`type_demand`). See `example/chicago311/greenfield.yaml`.
+  service type (`type_demand`). See `example/chicago311/experiment.yaml`.
 - **Why it's a good teaching contrast**: most of the signal lives in one categorical — `sr_type`
   structurally determines resolution speed (Pothole ~73% slow / median 37 days vs Graffiti ~0.4% /
   same-day), so an honest model reaches AUC ≈ 0.87 with **no leakage** (resolution is never a
@@ -89,7 +89,7 @@ DATABASE_URL=postgresql://chi311_user:some_password@127.0.0.1:5438/chi311 \
 
 # 4. run cohort → labels → matrices → train → predict → evaluate
 uv run triage --dbfile chicago311-database.yaml run \
-  example/chicago311/greenfield.yaml --project-path /tmp/chi311-run
+  example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 ```
 
 A successful run reports something like *1 run, 20 models, 58,190 predictions, 120 evaluations*
@@ -114,4 +114,4 @@ Fairness by geography (the honest protected-attribute proxy here — `docs/fairn
 and per-area subset evaluations are one config block each; both worked examples live in
 `docs/fairness.md` and `docs/quickstart.md`. A survival variant of this problem
 (time-to-resolution, `problem_type: survival`) ships as
-`example/chicago311/greenfield-survival.yaml`.
+`example/chicago311/experiment-survival.yaml`.

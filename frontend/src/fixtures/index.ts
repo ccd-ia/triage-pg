@@ -1226,17 +1226,17 @@ export const monitoringOutcomes: MonitoringOutcomeRow[] = [1, 2, 3].map((i) => (
 
 export const exampleConfigs: ExampleConfig[] = [
   {
-    name: 'chicago311/greenfield.yaml',
+    name: 'chicago311/experiment.yaml',
     dataset: 'chicago311',
-    filename: 'greenfield.yaml',
+    filename: 'experiment.yaml',
     description: 'Chicago 311 EWS — will a request stay unresolved past 14 days?',
     content:
       'problem_type: classification\ncohort_config:\n  query: |\n    select entity_id from ontology.entities where created_date < {as_of_date}\n',
   },
   {
-    name: 'dirtyduck/greenfield.yaml',
+    name: 'dirtyduck/experiment.yaml',
     dataset: 'dirtyduck',
-    filename: 'greenfield.yaml',
+    filename: 'experiment.yaml',
     description: 'DirtyDuck food inspections — the classic tutorial problem.',
     content: 'problem_type: classification\n',
   },

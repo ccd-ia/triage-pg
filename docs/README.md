@@ -15,7 +15,7 @@ glossary — use those terms exactly).
 | [quickstart.md](quickstart.md) | **Zero to a running experiment**: the Chicago 311 tutorial path, the `triage project` lifecycle for your own data, the multi-project dashboard, and webapp submissions. |
 | [`../CONTEXT.md`](../CONTEXT.md) | The glossary: Project, Registry, Profile, as_of_date, Cohort, Matrix, **Experiment**, **Run**, Feature engine, Adapter, Prediction. |
 | [experiment-and-run.md](experiment-and-run.md) | The single most important model: an **Experiment is a problem**, a **Run is one attempt** (ADR-0022/0023). Caching, leaderboards, monitoring all follow from this. |
-| [problem-types.md](problem-types.md) | The score→rank→evaluate **spine** and the `problem_type` switch — classification / regression-as-ranking / pure regression / survival-ready (ADR-0010). |
+| [problem-types.md](problem-types.md) | The score→rank→evaluate **spine** and the `problem_type` switch — classification / regression-as-ranking / pure regression / survival (ADR-0010). |
 
 ## Tutorials — three runnable datasets
 
@@ -26,9 +26,9 @@ geographic/type backlog).
 
 | Dataset | Problem | Featurizer ER-graph | Run it |
 |---|---|---|---|
-| **DirtyDuck** ([`../dirtyduck/README.md`](../dirtyduck/README.md), `example/dirtyduck/greenfield.yaml`) | Will a food facility fail its next inspection within 6 months? (+ regression/survival/deep-grid variants) | facility attrs + inspection-history child | `just tutorial-up` |
-| **DonorsChoose** ([`../donorschoose/README.md`](../donorschoose/README.md), `example/donorschoose/greenfield.yaml`) | Will a posted project fail to be funded within 4 months? | project attrs + resources child + **self-referential teacher/school history** | `just donors-up` |
-| **Chicago 311** ([`../chicago311/README.md`](../chicago311/README.md), `example/chicago311/greenfield.yaml`) | Will a filed service request miss the 14-day resolution SLA? | request attrs + **area/type backlog** as-of children | `just chi311-up` |
+| **DirtyDuck** ([`../dirtyduck/README.md`](../dirtyduck/README.md), `example/dirtyduck/experiment.yaml`) | Will a food facility fail its next inspection within 6 months? (+ regression/survival/deep-grid variants) | facility attrs + inspection-history child | `just tutorial-up` |
+| **DonorsChoose** ([`../donorschoose/README.md`](../donorschoose/README.md), `example/donorschoose/experiment.yaml`) | Will a posted project fail to be funded within 4 months? | project attrs + resources child + **self-referential teacher/school history** | `just donors-up` |
+| **Chicago 311** ([`../chicago311/README.md`](../chicago311/README.md), `example/chicago311/experiment.yaml`) | Will a filed service request miss the 14-day resolution SLA? | request attrs + **area/type backlog** as-of children | `just chi311-up` |
 
 Each dataset README has the full end-to-end run recipe (start DB → `alembic upgrade head` into it →
 `triage run`).

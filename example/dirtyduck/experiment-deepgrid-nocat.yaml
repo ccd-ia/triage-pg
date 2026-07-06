@@ -58,10 +58,10 @@ feature_config:
       # ontology.entities is not a time-series table (no temporal_ix needed for the target
       # entity itself; featurizer only requires temporal_ix on child event entities).
       # NOCAT VARIANT: the facility_type + zip_code categoricals (present in
-      # greenfield.yaml / greenfield-deepgrid.yaml) are deleted on purpose here.
+      # experiment.yaml / experiment-deepgrid.yaml) are deleted on purpose here.
       # Only the identifier remains, so featurizer emits inspection-aggregation
       # features only — no target-entity one-hot columns. This is the A/B partner of
-      # greenfield-deepgrid.yaml that isolates whether the categoricals help or hurt.
+      # experiment-deepgrid.yaml that isolates whether the categoricals help or hurt.
       variables:
         facility:
           type: text
@@ -90,7 +90,7 @@ feature_config:
       temporal:
         mode: as_of
 
-# Deep grid: same grid as greenfield-deepgrid.yaml, but this variant DROPS the
+# Deep grid: same grid as experiment-deepgrid.yaml, but this variant DROPS the
 # facility_type + zip_code categoricals (only inspection-aggregation features
 # remain) — the A/B that isolates whether the categoricals help, hurt, or are neutral.
 grid_config:
@@ -104,7 +104,7 @@ grid_config:
   'sklearn.ensemble.ExtraTreesClassifier':
     n_estimators: [100, 500]
     max_depth: [10, 50]
-  # GB + LogReg are enabled (same as greenfield-deepgrid.yaml): the adapter-side
+  # GB + LogReg are enabled (same as experiment-deepgrid.yaml): the adapter-side
   # fit-free imputation fix (a9b83aa8) zero-fills RECENCY/TENURE under `all: zero`,
   # so these NaN-intolerant estimators run clean. Kept symmetric with the +cat grid
   # so the cat-vs-nocat A/B compares the same specs.

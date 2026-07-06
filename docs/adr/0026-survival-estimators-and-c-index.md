@@ -7,8 +7,8 @@
   survival fit branch in `adapters/model.py` (`Surv.from_arrays` on the `(duration, event_observed)`
   pair); `triage.survival_ranks` + `triage.c_index` + `survival_metrics` dispatch (migration 0011),
   validated against `sksurv.metrics.concordance_index_censored` to 1e-9 on randomized tied/censored
-  fixtures (`src/tests/test_survival.py`); runnable configs `example/dirtyduck/greenfield-survival.yaml`
-  and `example/chicago311/greenfield-survival.yaml`.
+  fixtures (`src/tests/test_survival.py`); runnable configs `example/dirtyduck/experiment-survival.yaml`
+  and `example/chicago311/experiment-survival.yaml`.
 
 ADR-0010 made the label schema survival-ready and deferred the implementation. This ADR records
 the implementation's two hard-to-reverse choices. (Three-criteria check: *hard to reverse* — the

@@ -50,7 +50,7 @@ accept a single interval **or** a list of them.
 `label_timespans` key instead; it expands to both `training_label_timespans` and
 `test_label_timespans` (mirrors `triage.experiments.defaults`). Unknown keys are rejected.
 
-A representative block (`example/config/experiment.yaml`):
+A representative `temporal_config` block:
 
 ```yaml
 temporal_config:
@@ -298,8 +298,7 @@ fit-based — in **one SQL pass over `Featurizer.query`** (SQL → Parquet, no p
 ### 3.2 Where the policy lives, and its vocabulary
 
 Imputation rules live in triage-pg's **feature config**, never in the featurizer config —
-triage concepts must not leak into featurizer (ADR-0008). Keep the inherited shape
-(`src/triage/component/architect/feature_generators.py`, `example/config/experiment.yaml`):
+triage concepts must not leak into featurizer (ADR-0008). Keep the inherited shape:
 a top-level `aggregates_imputation` / `categoricals_imputation` block (with an `all`
 fallback) plus per-feature `imputation:` blocks; precedence **feature-level > `all`**.
 

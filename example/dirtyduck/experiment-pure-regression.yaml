@@ -1,0 +1,167 @@
+# DirtyDuck Greenfield — PURE REGRESSION (problem_type: regression, ADR-0010)
+#
+# This file is the point-estimate sibling of `experiment-regression.yaml`. It is IDENTICAL to
+# that config except for two things:
+#   1. problem_type: regression   (not regression_ranking)
+#   2. the evaluation block selects rmse/mae/r2 — the point-estimate metrics.
+# See experiment-regression.yaml for the fully-annotated version of every other block.
+#
+# WHEN to use `regression` vs `regression_ranking` (ADR-0010, docs/problem-types.md):
+#   * regression_ranking — the decision is "act on the top k" (rank facilities to inspect). You
+#     get precision@k on the continuous target PLUS the error metrics. Prefer it for prioritization.
+#   * regression (this file) — you genuinely care about the POINT ESTIMATE, not an ordering
+#     (forecast the expected violation count). Ranking is incidental; RMSE/MAE/R² are the metrics.
+#
+# Problem: how many violations will a facility accumulate over the next 6 months? (continuous count).
+# Reuses the SAME food inspections DB as experiment.yaml — nothing else changes.
+
+problem_type: regression
+
+temporal_config:
+  feature_start_time: '2014-01-01'
+  feature_end_time: '2017-07-01'
+  label_start_time: '2015-01-01'
+  label_end_time: '2017-07-01'
+  model_update_frequency: '6month'
+  training_as_of_date_frequencies: '6month'
+  training_label_timespans: ['6month']
+  test_as_of_date_frequencies: '6month'
+  test_durations: '0day'
+  test_label_timespans: ['6month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: active_facilities
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.activity_period @> {as_of_date}::date
+
+label_config:
+  name: violation_count
+  query: |
+    select
+      entity_id,
+      sum(coalesce(jsonb_array_length(violations), 0))::double precision as outcome
+    from ontology.events
+    where {as_of_date}::date <= date
+      and date < {as_of_date}::date + {label_timespan}
+    group by entity_id
+
+# Point-estimate metrics: R² joins rmse/mae because for pure regression you care about how well the
+# predicted value fits, not about a top-k ranking. Delete this block to get the regression-family
+# default (rmse/mae/r2).
+evaluation:
+  regression_metrics:
+    - rmse
+    - mae
+    - r2
+
+feature_config:
+  target: facilities
+  max_depth: 2
+  intervals:
+    - P1M
+    - P3M
+    - P6M
+
+  entities:
+    - alias: facilities
+      id: entity_id
+      table: ontology.entities
+      variables:
+        facility:
+          type: text
+          role: identifier
+        facility_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "restaurant"
+            - "grocery store"
+            - "school"
+            - "unknown"
+            - "children's services facility"
+            - "bakery"
+            - "daycare (2 - 6 years)"
+            - "daycare above and under 2 years"
+            - "liquor"
+            - "long term care"
+            - "catering"
+            - "mobile food preparer"
+            - "mobile food dispenser"
+            - "daycare combo 1586"
+            - "hospital"
+        zip_code:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "60647"
+            - "60657"
+            - "60614"
+            - "60611"
+            - "60608"
+            - "60618"
+            - "60622"
+            - "60607"
+            - "60639"
+            - "60625"
+            - "60623"
+            - "60640"
+
+    - alias: inspections
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables:
+        result:
+          type: categorical
+        risk:
+          type: categorical
+        type:
+          type: categorical
+
+  relationships:
+    - parent:
+        entity: facilities
+        key: entity_id
+      child:
+        entity: inspections
+        key: entity_id
+      temporal:
+        mode: as_of
+
+# REGRESSORS (continuous target). .predict() returns the point estimate.
+grid_config:
+  'sklearn.tree.DecisionTreeRegressor':
+    max_depth: [3, 5]
+    min_samples_split: [50]
+  'sklearn.ensemble.RandomForestRegressor':
+    n_estimators: [10]
+    max_depth: [3]
+    min_samples_split: [50]
+  'sklearn.linear_model.Ridge':
+    alpha: [0.1, 1.0]
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: start_time
+    version_label: 'dirtyduck-v1'
+    role: entity
+    type_column: facility_type
+    description: Active food-service facilities (DirtyDuck tutorial)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'dirtyduck-v1'
+    role: event
+    type_column: type
+    description: Food inspection events with result and violations (DirtyDuck tutorial)
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero
