@@ -337,10 +337,24 @@ def test_model_group_detail(client, seeded):
     resp = client.get(f"/api/model-groups/{gid}", params={"metric": "auc_roc"})
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"summary", "models", "metric_over_time", "per_split"}
+    assert set(body) == {
+        "summary",
+        "models",
+        "metric_over_time",
+        "per_split",
+        "audition",
+    }
     assert body["summary"]["model_group_id"] == gid
     assert {m["model_id"] for m in body["models"]} == set(seeded.all_models["mg1"])
     assert all("run_id" in m and "train_end_time" in m for m in body["models"])
+    # audition aggregates only come with an experiment scope
+    assert body["audition"] == []
+    scoped = client.get(
+        f"/api/model-groups/{gid}",
+        params={"metric": "auc_roc", "experiment_hash": seeded.experiment_hash},
+    ).json()
+    assert any(a["metric"] == "auc_roc" for a in scoped["audition"])
+    assert {"avg_value", "stddev_value", "max_regret"} <= set(scoped["audition"][0])
     # metric-over-time: one row per split for the chosen metric
     assert len(body["metric_over_time"]) == 3
     assert body["per_split"]
@@ -380,11 +394,16 @@ def test_model_detail(client, seeded):
         "model_group_id",
         "feature_importances",
         "evaluations",
+        "windowed",
     }
     assert body["model_group_id"] == seeded.group_ids["mg1"]
     assert {fi["feature"] for fi in body["feature_importances"]} == {"f1", "f2"}
     assert body["evaluations"]
     assert all(e["model_id"] == model_id for e in body["evaluations"])
+    # evaluations_windowed (0010) finally has a consumer: one rollup per metric
+    assert body["windowed"], "windowed rollup should carry the seeded metrics"
+    w = body["windowed"][0]
+    assert {"metric", "value_mean", "value_min", "value_max", "n_as_of_dates"} <= set(w)
 
 
 def test_model_detail_404(client, seeded):

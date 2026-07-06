@@ -31,25 +31,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from psycopg_pool import ConnectionPool
 
+from triage.component.catwalk.in_pg_evaluation import AUDITION_RULES as _AUDITION_RULES
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-# The eight standard audition selection rules, each with its default params (the SPA renders a
-# pick per rule; migration 0005's audition_pick implements all of them). best_average_two_metrics
-# needs a second metric — supplied by the endpoint only when one is available, else skipped.
-_AUDITION_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
-    ("best_current_value", {}),
-    ("best_average_value", {}),
-    ("lowest_metric_variance", {}),
-    ("most_frequent_best_dist", {"dist_window": 0.05}),
-    ("best_avg_var_penalized", {"stdev_penalty": 1.0}),
-    ("best_avg_recency_weight", {"curr_weight": 2.0, "decay_type": "linear"}),
-    ("best_average_two_metrics", {}),  # metric2/metric1_weight filled in per-request
-    ("random_model_group", {"seed": "0"}),
-)
 
 
 def _pool(request: Request) -> ConnectionPool:
@@ -463,7 +450,7 @@ def bias(
     sql = (
         "select b.model_id, b.split_kind, b.as_of_date, b.parameter,"
         "       b.attribute_name, b.attribute_value, b.metric, b.value,"
-        "       b.ref_group_value, b.disparity"
+        "       b.ref_group_value, b.disparity, b.tau, b.passes_fairness"
         " from triage.bias_metrics b"
         " join triage.models m on m.model_id = b.model_id"
         " join triage.runs r on r.run_id = m.run_id"
@@ -493,13 +480,37 @@ def leaderboard(
     )
 
 
+@router.get("/experiments/{experiment_hash}/subsets")
+def experiment_subsets(
+    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
+) -> list[dict]:
+    """The subsets this experiment's models have evaluations for (migration 0015) —
+    feeds the heatmap's subset selector. Empty list = full-cohort only."""
+    return _rows(
+        pool,
+        "select distinct s.subset_hash, s.config->>'name' as name"
+        " from triage.subsets s"
+        " join triage.evaluations e on e.subset_hash = s.subset_hash"
+        " join triage.models m on m.model_id = e.model_id"
+        " join triage.runs r on r.run_id = m.run_id"
+        " where r.experiment_hash = %(hash)s"
+        " order by name",
+        {"hash": experiment_hash},
+    )
+
+
 @router.get("/experiments/{experiment_hash}/evaluations")
 def evaluations(
     experiment_hash: str,
     metric: Optional[str] = None,
+    subset_hash: str = "",
     pool: ConnectionPool = Depends(_pool),
 ) -> list[dict]:
-    """Metric-over-time card: raw evaluations (test split), scoped via evaluations ⋈ models ⋈ runs."""
+    """Metric-over-time card: raw evaluations (test split), scoped via evaluations ⋈ models ⋈ runs.
+
+    ``subset_hash`` selects a cohort slice's evaluations (migration 0015); the default
+    ``''`` is the full cohort — subset rows never leak into the default view.
+    """
     sql = (
         "select r.experiment_hash, e.model_id, m.model_group_id, e.split_kind, e.as_of_date,"
         "       e.metric, e.parameter, e.value, e.num_labeled, e.num_positive"
@@ -507,8 +518,9 @@ def evaluations(
         " join triage.models m on m.model_id = e.model_id"
         " join triage.runs r on r.run_id = m.run_id"
         " where r.experiment_hash = %(hash)s and e.split_kind = 'test'"
+        "   and e.subset_hash = %(subset)s"
     )
-    params: dict[str, Any] = {"hash": experiment_hash}
+    params: dict[str, Any] = {"hash": experiment_hash, "subset": subset_hash}
     if metric is not None:
         sql += " and e.metric = %(metric)s"
         params["metric"] = metric
@@ -598,9 +610,10 @@ def model_group_detail(
     models = _rows(
         pool,
         "select m.model_id, m.train_end_time, m.run_id,"
-        "       m.training_label_timespan,"
+        "       m.training_label_timespan, m.train_duration_ms,"
         "       (select min(e.as_of_date) from triage.evaluations e"
-        "          where e.model_id = m.model_id and e.split_kind = 'test') as test_as_of"
+        "          where e.model_id = m.model_id and e.split_kind = 'test'"
+        "            and e.subset_hash = '') as test_as_of"
         " from triage.models m"
         " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s"
@@ -616,6 +629,7 @@ def model_group_detail(
         " join triage.models m on m.model_id = e.model_id"
         " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s and e.split_kind = 'test'"
+        "   and e.subset_hash = ''"
         "   and e.metric = %(metric)s and e.parameter = %(parameter)s"
         "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
         " order by e.as_of_date",
@@ -630,15 +644,34 @@ def model_group_detail(
         " join triage.models m on m.model_id = e.model_id"
         " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s and e.split_kind = 'test'"
+        "   and e.subset_hash = ''"
         "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
         " order by e.metric, e.parameter, e.as_of_date",
         params,
+    )
+    # group-level aggregates (triage.audition, migration 0013): avg ± σ across the
+    # group's splits + regret figures — the "how does this group behave" header chips
+    # (plan P6). Experiment-scoped; empty when no experiment_hash was given.
+    audition_rows = (
+        _rows(
+            pool,
+            "select metric, parameter, n_splits_evaluated, avg_value, stddev_value,"
+            "       avg_distance_from_best, max_regret,"
+            "       avg_regret_next_time, max_regret_next_time"
+            " from triage.audition"
+            " where experiment_hash = %(exp)s and model_group_id = %(g)s"
+            " order by metric, parameter",
+            params,
+        )
+        if experiment_hash
+        else []
     )
     return {
         "summary": summary,
         "models": models,
         "metric_over_time": metric_over_time,
         "per_split": per_split,
+        "audition": audition_rows,
     }
 
 
@@ -665,7 +698,19 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
         "select model_id, split_kind, as_of_date, metric, parameter, value,"
         "       value_expected, value_std, num_labeled, num_positive"
         " from triage.evaluations where model_id = %(model_id)s"
+        "   and subset_hash = ''"
         " order by metric, parameter, as_of_date",
+        {"model_id": model_id},
+    )
+    # evaluations_windowed (migration 0010): per-metric rollup over the model's test
+    # window — mean/min/max/stddev chips on the model-sheet header.
+    windowed = _rows(
+        pool,
+        "select metric, parameter, n_as_of_dates, window_start, window_end,"
+        "       value_mean, value_min, value_max, value_stddev, num_labeled_total"
+        " from triage.evaluations_windowed"
+        " where model_id = %(model_id)s and split_kind = 'test' and subset_hash = ''"
+        " order by metric, parameter",
         {"model_id": model_id},
     )
     return {
@@ -673,6 +718,7 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
         "model_group_id": (model or {}).get("model_group_id"),
         "feature_importances": importances,
         "evaluations": evals,
+        "windowed": windowed,
     }
 
 
@@ -698,6 +744,161 @@ def model_histogram(
         " from triage.model_score_histogram(%(model_id)s, %(bins)s) order by bin",
         {"model_id": model_id, "bins": bins},
     )
+
+
+@router.get("/models/{model_id}/calibration")
+def model_calibration(
+    model_id: int,
+    split_kind: str = "test",
+    as_of_date: Optional[str] = None,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """Reliability deciles for the model card (migration 0012's function is model-generic
+    despite its ``monitoring_`` name): decile mean score vs realized outcome rate.
+
+    Defaults: the model's LATEST evaluated test date and its training label timespan —
+    exactly the slice the per-split evaluations describe.
+    """
+    ctx = _one(
+        pool,
+        "select m.training_label_timespan,"
+        "       coalesce(cast(%(date)s as date),"
+        "                (select max(e.as_of_date) from triage.evaluations e"
+        "                  where e.model_id = m.model_id"
+        "                    and e.split_kind = cast(%(split)s as triage.split_kind)"
+        "                    and e.subset_hash = '')) as as_of_date"
+        " from triage.models m where m.model_id = %(model_id)s",
+        {"model_id": model_id, "split": split_kind, "date": as_of_date},
+    )
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    if ctx["as_of_date"] is None or ctx["training_label_timespan"] is None:
+        return _empty(
+            "no evaluated date / label timespan for this model",
+            "calibration needs labeled predictions — run an evaluation first.",
+        )
+    return {
+        "as_of_date": ctx["as_of_date"],
+        "deciles": _rows(
+            pool,
+            "select decile, n, avg_score, realized_rate"
+            " from triage.monitoring_calibration(%(model_id)s,"
+            "        cast(%(split)s as triage.split_kind),"
+            "        cast(%(date)s as date), %(timespan)s)"
+            " order by decile",
+            {
+                "model_id": model_id,
+                "split": split_kind,
+                "date": str(ctx["as_of_date"]),
+                "timespan": ctx["training_label_timespan"],
+            },
+        ),
+    }
+
+
+@router.get("/models/{model_id}/overlap/{other_model_id}")
+def model_overlap(
+    model_id: int,
+    other_model_id: int,
+    parameter: str = "100_abs",
+    split_kind: str = "test",
+    pool: ConnectionPool = Depends(_pool),
+) -> list[dict]:
+    """Top-k list overlap between two models (migration 0016): per shared prediction
+    date — intersection, Jaccard over the union of the two lists, Spearman rank corr."""
+    return _rows(
+        pool,
+        "select as_of_date, k_a, k_b, n_intersection, jaccard, rank_corr"
+        " from triage.list_overlap(%(a)s, %(b)s, %(p)s,"
+        "        cast(%(split)s as triage.split_kind), null)"
+        " order by as_of_date",
+        {"a": model_id, "b": other_model_id, "p": parameter, "split": split_kind},
+    )
+
+
+@router.get("/models/{model_id}/entities/{entity_id}/importances")
+def model_entity_importances(
+    model_id: int,
+    entity_id: int,
+    limit: int = 5,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """Per-entity feature contributions ('why this entity'), when a diagnostics pass has
+    written ``individual_importances`` (``triage postmodel``, plan P5)."""
+    rows = _rows(
+        pool,
+        "select feature, feature_value, importance_score, method"
+        " from triage.individual_importances"
+        " where model_id = %(model_id)s and entity_id = %(entity_id)s"
+        " order by abs(importance_score) desc nulls last limit %(limit)s",
+        {"model_id": model_id, "entity_id": entity_id, "limit": limit},
+    )
+    if not rows:
+        return _empty(
+            "no per-entity importances for this model",
+            "run `triage postmodel error-tree <model_id>` — linear models get per-entity"
+            " β·x contributions persisted alongside the diagnostics.",
+        )
+    return rows
+
+
+@router.get("/models/{model_id}/crosstabs")
+def model_crosstabs(
+    model_id: int,
+    parameter: Optional[str] = None,
+    limit: int = 20,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """Top distinguishing features (mean among selected vs rest, by |log ratio|) —
+    thin read over ``triage.crosstabs`` (persisted by ``triage postmodel crosstabs``).
+    """
+    sql = (
+        "select as_of_date, parameter, feature, selected_value, rest_value, ratio"
+        " from triage.crosstabs"
+        " where model_id = %(m)s and stat = 'mean' and ratio is not null and ratio > 0"
+    )
+    params: dict[str, Any] = {"m": model_id, "limit": limit}
+    if parameter is not None:
+        sql += " and parameter = %(p)s"
+        params["p"] = parameter
+    sql += " order by abs(ln(ratio)) desc limit %(limit)s"
+    rows = _rows(pool, sql, params)
+    if not rows:
+        return _empty(
+            "no crosstabs persisted for this model",
+            "run `triage postmodel crosstabs <model_id>` — the CLI computes from the"
+            " matrix and persists here (ADR-0011).",
+        )
+    return rows
+
+
+@router.get("/models/{model_id}/error-rules")
+def model_error_rules(
+    model_id: int,
+    error_kind: Optional[str] = None,
+    limit: int = 20,
+    pool: ConnectionPool = Depends(_pool),
+) -> Any:
+    """The error-tree rules (where does this model fail?) — thin read over
+    ``triage.error_analysis`` (persisted by ``triage postmodel error-tree``)."""
+    sql = (
+        "select as_of_date, parameter, error_kind, rule, n_matched, n_errors,"
+        "       error_rate, depth"
+        " from triage.error_analysis where model_id = %(m)s"
+    )
+    params: dict[str, Any] = {"m": model_id, "limit": limit}
+    if error_kind is not None:
+        sql += " and error_kind = %(k)s"
+        params["k"] = error_kind
+    sql += " order by error_rate desc, n_matched desc limit %(limit)s"
+    rows = _rows(pool, sql, params)
+    if not rows:
+        return _empty(
+            "no error analysis persisted for this model",
+            "run `triage postmodel error-tree <model_id>` — the CLI fits the error"
+            " tree from the matrix and persists the rules here (ADR-0011).",
+        )
+    return rows
 
 
 @router.get("/models/{model_id}/predictions")
