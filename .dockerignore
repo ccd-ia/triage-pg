@@ -3,15 +3,12 @@
 docker
 docs
 example
-develop
 .git
 .hypothesis
 .local
 .pytest_cache
 tox.ini
-.travis.yml
 tutorial.sh
-.pyup.yml
 .python-version
 .python-version.current
 *.rst

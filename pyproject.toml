@@ -132,9 +132,7 @@ packages = ["src/triage"]
 include = [
   "AUTHORS.rst",
   "CONTRIBUTING.md",
-  "HISTORY.rst",
   "LICENSE",
-  "MANIFEST.in",
   "README.md",
   "docs",
   "dirtyduck",
