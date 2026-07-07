@@ -1,11 +1,13 @@
 # triage-pg — Results-Schema ERD
 
-Entity-relationship diagram of the per-project `triage` schema, as defined in the
-greenfield Alembic baseline
-[`src/triage/component/results_schema/alembic/versions/0001_initial_triage_schema.py`](../src/triage/component/results_schema/alembic/versions/0001_initial_triage_schema.py).
-This is the single source of DDL truth (ADRs 0014–0017 were folded into the baseline; there
-are no separate migrations yet). The **registry** control-plane database (ADR-0002,
-`docs/schema-design.md` §3) is intentionally deferred and is *not* shown here.
+Entity-relationship diagram of the per-project `triage` schema. The baseline is the greenfield
+Alembic migration
+[`0001_initial_triage_schema.py`](../src/triage/component/results_schema/alembic/versions/0001_initial_triage_schema.py),
+extended by migrations **0002–0017** (metric functions, dashboard views, survival C-index,
+monitoring, audition, bias completeness, subset evaluation, diagnostics). The **registry**
+control-plane database (ADR-0002, `docs/schema-design.md` §3) is a *separate* schema and is not
+shown here. The diagram below is the core backbone; a few tables added by later migrations
+(`subset_members`, the crosstabs / error-tree diagnostics tables) are omitted for readability.
 
 ## Diagram
 
@@ -34,7 +36,8 @@ erDiagram
 ```
 
 Standalone tables (no foreign keys): `protected_groups` (keyed by `entity_id, as_of_date,
-attribute_name`) and `subsets` (schema present; the subset evaluation feature is deferred).
+attribute_name`) and `subsets` / `subset_members` (named cohort slices for subset-filtered
+evaluation, migration 0015).
 
 ## Table clusters
 

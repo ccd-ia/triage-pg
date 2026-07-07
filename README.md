@@ -27,6 +27,38 @@ flowchart LR
 
 Every artifact along the way (cohort, labels, matrices, models) is content-addressed over its **complete input closure** — caching, provenance, and GC come from one derivation DAG ([`docs/derivation-dag.md`](docs/derivation-dag.md)).
 
+## The database schema
+
+triage-pg is **two-tier** (ADR-0002): a small **registry** control-plane database (projects, users, submissions) routes to **one project database per Project**, each holding a `triage` schema. Only predictions and evaluation live in Postgres — matrices are Parquet on local FS / S3. Every built artifact (cohort, labels, matrices, models) is a **content-addressed node** in the derivation DAG, so caching, provenance, and garbage collection all fall out of the schema below (this is the per-project `triage` backbone; the derivation/GC and importance edges are elided — see the full ERD).
+
+```mermaid
+erDiagram
+    experiments ||--o{ runs : "attempts"
+    runs ||--o{ artifacts : "builds"
+    sources ||--o{ source_versions : "pinned per run"
+    artifacts ||--o{ cohorts : ""
+    artifacts ||--o{ labels : ""
+    artifacts ||--o{ matrices : ""
+    artifacts ||--|| models : ""
+    matrices ||--o{ models : "trains"
+    models ||--o{ predictions : "append-only"
+    models ||--o{ evaluations : "in-PG metrics"
+    models ||--o{ bias_metrics : "fairness"
+```
+
+| Cluster | Tables |
+|---|---|
+| Lineage / run metadata | `experiments`, `runs`, `model_groups` |
+| Artifact derivation DAG | `artifacts`, `artifact_inputs`, `run_artifacts` |
+| Source registry & pinning | `sources`, `source_versions`, `run_source_pins` |
+| Cohorts & labels | `cohorts`, `labels`, `protected_groups` |
+| Matrices & models | `matrices`, `models` |
+| Predictions | `predictions` — append-only, range-partitioned on `scored_at` (ADR-0006) |
+| Evaluation & bias | `evaluations`, `bias_metrics`, `subsets` / `subset_members` |
+| Postmodeling & importances | `feature_importances`, `individual_importances`, crosstabs / error-tree tables |
+
+`problem_type` (`classification` · `regression_ranking` · `regression` · `survival`) and `artifact_kind` (`cohort` · `labels` · `feature_group` · `matrix` · `model`) are Postgres enums. The full ERD — every foreign-key edge with its `ON DELETE` behavior (CASCADE / RESTRICT to enforce append-only history / SET NULL) — is in [`docs/erd.md`](docs/erd.md); the design rationale (registry + per-project split, resolved decisions) is in [`docs/schema-design.md`](docs/schema-design.md).
+
 ## What you get
 
 | Capability | The triage-pg shape |
