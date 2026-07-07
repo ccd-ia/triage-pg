@@ -65,10 +65,12 @@ create index entities_full_key_ix on ontology.entities (license_num, facility, f
 
 drop table if exists ontology.events cascade;
 
--- NOTE (DB-audit #5): events carry facility_type / zip_code / location — the entity's attributes
--- *at event time*. This is deliberate point-in-time state capture (the "state" of entity-state-
--- event): a facility's type/zip can change, and an inspection records the value when it happened,
--- which is more point-in-time-correct than joining the entity's current value. Not redundancy.
+-- Events carry ONLY event-specific columns (type / date / risk / result / violations). Entity
+-- attributes (facility_type / zip_code / location) live on ontology.entities and are NOT copied
+-- here (Option A, 2026-07-06): facility_type + address are part of the entity DISTINCT ON identity,
+-- so they are constant within an entity and were provably redundant on events (0 within-entity
+-- variation over 18,909 entities; 0/74,191 event↔entity mismatch). A feature needing them joins
+-- ontology.entities on entity_id — the value is constant, so the join is exact and leakage-free.
 create table ontology.events as (
 
         with entities as (
@@ -79,7 +81,7 @@ create table ontology.events as (
         select
             i.inspection, i.type, i.date, i.risk, i.result,
             i.license_num, i.facility, i.facility_aka,
-            i.facility_type, i.address, i.zip_code, i.location,
+            i.facility_type, i.address,
             jsonb_agg(
                 jsonb_build_object(
                     'code', v.code,
@@ -96,20 +98,19 @@ create table ontology.events as (
             on i.inspection = v.inspection
         group by
             i.inspection, i.type, i.license_num, i.facility,
-            i.facility_aka, i.facility_type, i.address, i.zip_code, i.location,
+            i.facility_aka, i.facility_type, i.address,
             i.date, i.risk, i.result
             )
 
     select
         i.inspection as event_id,
         e.entity_id, i.type, i.date, i.risk, i.result,
-        e.facility_type, e.zip_code, e.location,
         i.violations
     from
         entities as e
         inner join
         inspections as i
-        using (license_num, facility, facility_aka, facility_type, address, zip_code)
+        using (license_num, facility, facility_aka, facility_type, address)
         );
 
 -- Add some indices
@@ -117,14 +118,9 @@ create index events_entity_ix on ontology.events (entity_id asc nulls last);
 create index events_event_ix on ontology.events (event_id asc nulls last);
 create index events_type_ix on ontology.events (type);
 create index events_date_ix on ontology.events(date asc nulls last);
-create index events_facility_type_ix on ontology.events  (facility_type);
-create index events_zip_code_ix on ontology.events  (zip_code);
-
--- Spatial index
-create index events_location_gix on ontology.events using gist (location);
 
 -- JSONB indices
 create index events_violations on ontology.events using gin(violations);
 create index events_violations_json_path on ontology.events using gin(violations jsonb_path_ops);
 
-create index events_event_entity_zip_code_date on ontology.events (event_id asc nulls last, entity_id asc nulls last, zip_code, date desc nulls last);
+create index events_event_entity_date on ontology.events (event_id asc nulls last, entity_id asc nulls last, date desc nulls last);
