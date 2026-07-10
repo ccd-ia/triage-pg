@@ -13,9 +13,9 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
-      # host port is overridable to avoid local collisions (e.g. another PG on 5434);
-      # set DIRTYDUCK_PG_PORT in your env / .envrc. Default keeps the historic 5434.
-      - "${DIRTYDUCK_PG_PORT:-5434}:5432"
+      # host port is overridable via DIRTYDUCK_PG_PORT. Default 5440 is chosen to be
+      # collision-free: 5434 clashes with meio-sim, 5435 (old quickstart value) with fosas.
+      - "${DIRTYDUCK_PG_PORT:-5440}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U food_user -d food"]
       interval: 5s
@@ -27,11 +27,8 @@ services:
       context: ..
       dockerfile: Dockerfile
       target: base
-      # featurizer is a private git+ssh dependency (ADR-0008/0016); the image's
-      # `uv sync` clones it over SSH. Forward the host SSH agent into the build.
-      # The host must have the featurizer deploy key loaded (`ssh-add -l`).
-      ssh:
-        - default
+      # featurizer is a public git+https pin on ccd-ia/featurizer (ADR-0008/0016);
+      # the image's `uv sync` clones it anonymously — no ssh forwarding needed.
     image: dsapp/triage:dev
     # bind-mounts host paths (../example/dirtyduck, ../dirtyduck-output) — run as the
     # host user so files written inside (run outputs) aren't root-owned (Docker hard rule).

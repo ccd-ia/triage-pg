@@ -11,10 +11,9 @@ step is idempotent-or-explicit; nothing here writes a credential into a file or 
 - An AWS account + credentials with rights to create RDS/S3/ECR/Batch/IAM (operator-side only;
   the app never holds them).
 - A VPC with **two+ private subnets** (the module brings its own security groups, not a VPC).
-- Docker with BuildKit, and the **featurizer deploy key in your SSH agent** — the image build
-  needs `--ssh default` (the featurizer dependency is a private `git+ssh` pin, ADR-0016).
-  ⚠ This is the known blocker for CI-built images; until featurizer moves to
-  CodeArtifact/private-PyPI, images are built and pushed from an operator machine.
+- Docker. The featurizer dependency is a **public git+https pin** on ccd-ia/featurizer
+  (v0.7.0+, ADR-0016) — no deploy key or ssh forwarding; CI builds the image too
+  (the former operator-side-only blocker is gone).
 - Terraform ≥ 1.6.
 
 ## 1. Provision (GATED — costs real money)
@@ -77,7 +76,7 @@ source register/bump` the pins (ADR-0014).
 ```bash
 aws ecr get-login-password --region $AWS_REGION \
   | docker login --username AWS --password-stdin $(terraform output -raw ecr_repository_url | cut -d/ -f1)
-DOCKER_BUILDKIT=1 docker build --ssh default -t $(terraform output -raw ecr_repository_url):latest .
+docker build -t $(terraform output -raw ecr_repository_url):latest .
 docker push $(terraform output -raw ecr_repository_url):latest
 ```
 
@@ -125,8 +124,8 @@ terraform destroy    # deletion_protection on the DB must be lifted explicitly f
 
 ## Known limits (recorded, not hidden)
 
-- **Image builds are operator-side** until the featurizer git+ssh pin moves to
-  CodeArtifact/private PyPI (the `--ssh default` requirement can't cross most CI runners).
+- ~~Image builds are operator-side~~ resolved 2026-07-10: featurizer is public
+  (ccd-ia/featurizer, git+https) — CI and operators build identically, no keys.
 - The grid runs **serial** inside a job (ADR-0020) — size `job_vcpus`/`job_memory_mib` for one
   worker, split big grids across experiments.
 - Per-project GRANTs (step 2) are manual master-user SQL by design: Terraform owns the

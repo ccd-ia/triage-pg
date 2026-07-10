@@ -2,16 +2,10 @@
 #
 # triage-pg image — greenfield architecture (ADR-0001/0003/0005/0008).
 #
-# Build (BuildKit + SSH forwarding required: the `featurizer` dependency is a
-# private git+ssh dependency, ADR-0008/0016 — pinned at
-# pyproject.toml as `featurizer[parquet] @ git+ssh://git@github.com/.../featurizer.git@vX`):
+# Build (no secrets: the `featurizer` dependency is a public git+https pin on
+# ccd-ia/featurizer, ADR-0008/0016 — see pyproject.toml):
 #
-#     DOCKER_BUILDKIT=1 docker build --ssh default -t triage-pg:dev .
-#
-# `--ssh default` forwards the host SSH agent into the `RUN --mount=type=ssh`
-# steps so `uv sync` can clone the private featurizer repo. The host must have
-# the featurizer deploy key loaded in its agent first (`ssh-add <key>`); verify
-# with `ssh-add -l`. No key is ever copied into the image or a layer.
+#     docker build -t triage-pg:dev .
 #
 # Stages:
 #   base        — runtime image: package + `triage` CLI + shell, non-root user.
@@ -29,13 +23,12 @@ LABEL org.opencontainers.image.title="triage-pg" \
       triage.stage="base"
 
 # Runtime deps: libpq for psycopg, postgresql-client for psql in the bastion,
-# git + openssh-client so uv can fetch the private featurizer git+ssh dependency.
+# git so uv can fetch the featurizer git+https dependency.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
         libpq5 \
-        openssh-client \
         postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
@@ -71,15 +64,8 @@ COPY --chown=triage:triage src/ src/
 USER triage
 
 # Install the locked dependency closure (no dev extras for the runtime image).
-# --mount=type=ssh forwards the host agent; uid/gid=1000 makes the forwarded
-# agent socket readable by the non-root `triage` user (uv's git fetch runs as
-# that user — without this the clone fails "Permission denied (publickey)").
-# ssh-keyscan seeds github.com so the git+ssh clone doesn't fail host-key
-# verification. Errors are NOT swallowed.
-RUN --mount=type=ssh,uid=1000,gid=1000 \
-    mkdir -p -m 0700 /home/triage/.ssh && \
-    ssh-keyscan -t rsa,ed25519 github.com >> /home/triage/.ssh/known_hosts && \
-    uv sync --frozen --no-dev --no-editable
+# The featurizer pin clones over public https — no agent forwarding, no keys.
+RUN uv sync --frozen --no-dev --no-editable
 
 # No ENTRYPOINT: the bastion (dirtyduck/docker-compose.yml, target: base) needs a
 # plain command surface so `triage …`, `psql …`, and an interactive shell all
@@ -100,10 +86,7 @@ USER triage
 WORKDIR /opt/triage
 
 # Re-sync including the dev extra; editable so a bind-mounted src/ is live.
-# uid/gid=1000 so the forwarded agent socket is readable by the triage user
-# (see the base stage's uv sync note).
-RUN --mount=type=ssh,uid=1000,gid=1000 \
-    uv sync --frozen --extra dev
+RUN uv sync --frozen --extra dev
 
 # Like base: no ENTRYPOINT so any argv (triage …, pytest …, bash) runs as-is.
 # A shell is the natural default for an interactive dev container.
@@ -126,7 +109,7 @@ RUN npm run build      # -> /frontend/dist
 # ---------------------------------------------------------------------------
 # dashboard — read-only dashboard runtime: base + the `dashboard` extra
 # (fastapi/uvicorn) + the built SPA bundle, served by uvicorn (ADR-0012/0021).
-# Build:  DOCKER_BUILDKIT=1 docker build --ssh default --target dashboard -t triage-pg:dashboard .
+# Build:  docker build --target dashboard -t triage-pg:dashboard .
 # Run:    docker run --rm -p 8000:8000 -e PGHOST=… -e PGPORT=… -e PGUSER=… \
 #                -e PGPASSWORD=… -e PGDATABASE=… triage-pg:dashboard
 # ---------------------------------------------------------------------------
@@ -137,10 +120,9 @@ LABEL triage.stage="dashboard"
 USER triage
 WORKDIR /opt/triage
 
-# Add the web deps on top of base's runtime closure (featurizer already installed; the ssh
-# mount only covers a possible git re-resolution). fastapi/uvicorn/httpx are PyPI.
-RUN --mount=type=ssh,uid=1000,gid=1000 \
-    uv sync --frozen --no-dev --no-editable --extra dashboard
+# Add the web deps on top of base's runtime closure (featurizer already installed).
+# fastapi/uvicorn/httpx are PyPI.
+RUN uv sync --frozen --no-dev --no-editable --extra dashboard
 
 # Drop the Vite bundle at a fixed path and point the app at it via TRIAGE_DASHBOARD_STATIC,
 # so static serving does not depend on the (--no-editable) package install layout.

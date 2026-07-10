@@ -28,7 +28,7 @@ dependencies = [
     "alembic>=1.17.0",
     "boto3>=1.22.4",
     "dickens>=2.1.1",
-    "featurizer[parquet] @ git+ssh://git@github.com/nanounanue/featurizer.git@v0.5.0",
+    "featurizer[parquet] @ git+https://github.com/ccd-ia/featurizer.git@v0.7.0",
     "graphviz>=0.21",
     "icecream>=2.1.8",
     "loguru>=0.7.3",
@@ -104,8 +104,9 @@ Documentation = "https://github.com/ccd-ia/triage-pg/tree/main/docs"
 triage = "triage.cli:execute"
 
 # featurizer is the PostgreSQL-native DFS engine (ADR-0008). It is not published
-# to PyPI; pinned to a reproducible git tag (ADR-0016 wants the engine version that
-# enters artifact identity to be a real release, not an editable working tree).
+# to PyPI; pinned to a reproducible git tag on the public ccd-ia/featurizer repo
+# (ADR-0016 wants the engine version that enters artifact identity to be a real
+# release, not an editable working tree).
 [tool.flake8]
 exclude = ["docs"]
 max-line-length = 88
@@ -114,7 +115,7 @@ max-line-length = 88
 max-line-length = 88
 statistics = true
 
-# featurizer is pinned as a direct git reference (git+ssh tag, ADR-0016); hatchling
+# featurizer is pinned as a direct git reference (git+https tag, ADR-0016); hatchling
 # rejects direct references in project.dependencies unless this is opted in.
 [tool.hatch.metadata]
 allow-direct-references = true
