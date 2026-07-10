@@ -907,11 +907,15 @@ export interface EntityScorePoint {
   train_end_time: string | null
 }
 
-/** triage.entity_label_history — outcome over time for the entity. */
+/** triage.entity_label_history — outcome over time for the entity (scoped to the
+ * opened experiment when one is passed; migration 0018). Survival labels carry
+ * duration/event_observed with a NULL outcome (ADR-0010). */
 export interface EntityLabelPoint {
   as_of_date: string
   label_timespan: string
   outcome: number | null
+  duration?: number | null
+  event_observed?: boolean | null
 }
 
 /** GET /entities/{id} — the entity-grain attributes + label + score histories. */

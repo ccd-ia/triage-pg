@@ -94,6 +94,23 @@ function AttrValue({ v }: { v: unknown }) {
   return <span className="v2 mono">{fmtVal(v)}</span>
 }
 
+/** A plain numeric latitude/longitude column pair (no PostGIS geometry — e.g. chi311)
+ * still deserves the map link the {kind:'geo'} path gets. */
+function latLonPair(attrs: Record<string, unknown> | null): GeoVal | null {
+  if (!attrs) return null
+  const num = (...keys: string[]): number | null => {
+    for (const k of keys) {
+      const v = attrs[k]
+      if (typeof v === 'number' && Number.isFinite(v)) return v
+    }
+    return null
+  }
+  const lat = num('latitude', 'lat')
+  const lon = num('longitude', 'lon', 'lng')
+  if (lat == null || lon == null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null
+  return { kind: 'geo', lat, lon }
+}
+
 type Field = 'score' | 'rank_pct'
 
 export function EntityDrawer({
@@ -178,6 +195,15 @@ export function EntityDrawer({
               <h4>attributes</h4>
               {attrs ? (
                 <div className="kv">
+                  {(() => {
+                    const pair = latLonPair(attrs)
+                    return pair ? (
+                      <span style={{ display: 'contents' }}>
+                        <span className="k2">location</span>
+                        <GeoValue geo={pair} />
+                      </span>
+                    ) : null
+                  })()}
                   {Object.entries(attrs).map(([k, v]) => (
                     <span key={k} style={{ display: 'contents' }}>
                       <span className="k2">{k}</span>
@@ -203,12 +229,25 @@ export function EntityDrawer({
                         <td className="mono">{l.as_of_date}</td>
                         <td className="muted">{l.label_timespan}</td>
                         <td>
-                          {l.outcome == null ? (
-                            <span className="muted" title="no matured label at this as_of (not in cohort window / no event)">—</span>
-                          ) : l.outcome > 0 ? (
-                            <span style={{ color: 'var(--ok)' }}>1</span>
+                          {l.outcome != null ? (
+                            l.outcome > 0 ? (
+                              <span style={{ color: 'var(--ok)' }}>1</span>
+                            ) : (
+                              <span className="muted">0</span>
+                            )
+                          ) : l.duration != null ? (
+                            // Survival label (ADR-0010): duration + whether the event was
+                            // observed or the entity left the window censored.
+                            <span className="mono" title="survival label: duration, event_observed">
+                              {Number(l.duration.toFixed(2))}{' '}
+                              {l.event_observed ? (
+                                <span style={{ color: 'var(--ok)' }}>event</span>
+                              ) : (
+                                <span className="muted">censored</span>
+                              )}
+                            </span>
                           ) : (
-                            <span className="muted">0</span>
+                            <span className="muted" title="no matured label at this as_of (not in cohort window / no event)">—</span>
                           )}
                         </td>
                       </tr>

@@ -72,12 +72,22 @@ export function MonitoringView() {
   )
   const [metricKey, setMetricKey] = useState<string | null>(null)
   const activeMetric = metricKey ?? metrics[0] ?? null
-  const outcomeSeries = useMemo(
-    () =>
-      (outcomes.data ?? [])
-        .filter((o) => `${o.metric}${o.parameter}` === activeMetric && o.value != null)
-        .map((o) => ({ as_of_date: o.as_of_date, value: o.value, purpose: o.purpose })),
-    [outcomes.data, activeMetric],
+  // One point per as_of_date: several models of the group can share a date (e.g. a
+  // re-run's twin models) — the latest computed_at row is the current knowledge.
+  // Rows arrive ordered by (as_of_date, computed_at), so last-write-wins per date.
+  const outcomeSeries = useMemo(() => {
+    const byDate = new Map<string, { as_of_date: string; value: number | null; purpose: string | null }>()
+    for (const o of outcomes.data ?? []) {
+      if (`${o.metric}${o.parameter}` !== activeMetric || o.value == null) continue
+      byDate.set(o.as_of_date, { as_of_date: o.as_of_date, value: o.value, purpose: o.purpose })
+    }
+    return [...byDate.values()]
+  }, [outcomes.data, activeMetric])
+  // Provenance: purpose=experiment rows are backtest evaluations; forward_score /
+  // retrain rows are the production-shaped scoring history (ADR-0018/0027).
+  const purposes = useMemo(
+    () => Array.from(new Set((outcomes.data ?? []).map((o) => o.purpose).filter(Boolean))) as string[],
+    [outcomes.data],
   )
 
   const volumeSeries = useMemo(
@@ -164,6 +174,15 @@ export function MonitoringView() {
         <div className="ch">
           <b>Realized outcomes over time</b>
           <span className="src">triage.monitoring_outcome_tracking</span>
+          {purposes.length ? (
+            <span
+              className="src"
+              title="run purpose of the evaluations shown: 'experiment' = backtest history; 'forward_score'/'retrain' = live scoring (ADR-0018/0027)"
+            >
+              purpose: {purposes.join(' · ')}
+              {purposes.length === 1 && purposes[0] === 'experiment' ? ' (backtest, not production)' : ''}
+            </span>
+          ) : null}
           {metrics.length > 1 ? (
             <select
               value={activeMetric ?? ''}

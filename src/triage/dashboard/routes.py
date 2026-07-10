@@ -1031,9 +1031,10 @@ def entity_profile(
     ).get("attributes")
     label_history = _rows(
         pool,
-        "select as_of_date, label_timespan, outcome"
-        " from triage.entity_label_history(%(e)s) order by as_of_date, label_timespan",
-        {"e": entity_id},
+        "select as_of_date, label_timespan, outcome, duration, event_observed"
+        " from triage.entity_label_history(%(e)s, %(hash)s)"
+        " order by as_of_date, label_timespan",
+        {"e": entity_id, "hash": experiment_hash},
     )
     score_history = _rows(
         pool,
@@ -1304,10 +1305,14 @@ def monitoring_outcomes(
     metric: Optional[str] = None,
     pool: ConnectionPool = Depends(_pool),
 ) -> list[dict]:
-    """Realized metrics over time (evaluations upserts sequenced per model group)."""
+    """Realized metrics over time (evaluations upserts sequenced per model group).
+
+    Full-cohort rows only (``subset_hash = ''``, migration 0018): monitoring is the
+    cohort-level ops surface — subset-filtered evaluations would silently mix scales.
+    """
     sql = (
         "select * from triage.monitoring_outcome_tracking"
-        " where model_group_id = %(g)s"
+        " where model_group_id = %(g)s and subset_hash = ''"
     )
     params: dict = {"g": model_group_id}
     if metric:
