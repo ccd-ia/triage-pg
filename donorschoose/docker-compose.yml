@@ -19,8 +19,9 @@ services:
       # needed — just remove the db-data volume so init re-runs:
       # - ./donors_db/real:/data:ro
     ports:
-      # host port overridable to avoid collisions (DirtyDuck uses 5434/5435).
-      - "${DONORS_PG_PORT:-5436}:5432"
+      # host port overridable via DONORS_PG_PORT. Default 5441 is collision-free
+      # (old default 5436 clashed with tmec's postgres).
+      - "${DONORS_PG_PORT:-5441}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U donors_user -d donors"]
       interval: 5s
