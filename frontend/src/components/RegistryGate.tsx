@@ -6,6 +6,7 @@
  */
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
+import { EmptyPanel } from './EmptyPanel'
 
 export function RegistryGate({
   error,
@@ -19,11 +20,13 @@ export function RegistryGate({
   if (loading) return <div className="banner">Loading…</div>
 
   if (error instanceof ApiError && error.status === 503) {
+    // No registry is a supported read-only deployment (ADR-0024), not a failure —
+    // render the same neutral empty state the read views use, hint carried by the API.
     return (
-      <div className="banner err">
-        <b>Registry not configured.</b>
-        <div style={{ marginTop: 6, fontWeight: 400 }}>{error.detail}</div>
-      </div>
+      <EmptyPanel
+        reason="Registry not configured — this is a read-only deployment."
+        hint={error.detail || 'Set TRIAGE_REGISTRY_URL and run `just alembic-registry upgrade head` to enable the write surface (ADR-0002).'}
+      />
     )
   }
   if (error) {
