@@ -702,18 +702,18 @@ details summary { cursor: pointer; font-weight: 600; }
       <ul class="checklist">
         <li><code class="status">[x]</code> Commit in phase-shaped conventional commits (the P1–P10 boundaries are the natural series; hunk-split shared files as in the v1-completion series); update <code>ai-docs/triage-session-summary.org</code></li>
         <li><code class="status">[x]</code> <code>git push origin main</code> (first push: the 11 v1-completion commits + this series — DONE 2026-07-06, <code>76eb46fc..929f224f</code> + follow-ups through <code>ae3721e0</code>)</li>
-        <li><code class="status">[]</code> <code>gh run watch</code> until every ci.yml job is green on the pushed main — a red run loops back to the offending phase (secrets missing → Phase 10.4; test/env drift → the owning phase); do NOT tag on red</li>
-        <li><code class="status">[]</code> <code>git tag -a v1.0.0-rc1 -m "…"</code> + <code>git push origin v1.0.0-rc1</code> → release.yml fires; release notes seeded from the two commit series (the comparison artifact doubles as the "what's different" link)</li>
-        <li><code class="status">[]</code> Verify CD landed: the GitHub Release exists (prerelease, both HTML assets attached) and <code>ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> is pullable</li>
+        <li><code class="status">[x]</code> <code>gh run watch</code> until every ci.yml job is green on the pushed main — a red run loops back to the offending phase (secrets missing → Phase 10.4; test/env drift → the owning phase); do NOT tag on red</li>
+        <li><code class="status">[x]</code> <code>git tag -a v1.0.0-rc1 -m "…"</code> + <code>git push origin v1.0.0-rc1</code> → release.yml fires; release notes seeded from the two commit series (the comparison artifact doubles as the "what's different" link)</li>
+        <li><code class="status">[wip]</code> Verify CD landed: the GitHub Release exists (prerelease, both HTML assets attached — VERIFIED 2026-07-10) and the green release run pushed <code>ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code>; the local pull check is blocked (GHCR package default-private + gh token lacks read:packages) — maintainer: flip the package visibility, then <code>docker pull</code></li>
       </ul>
 
       <h4>11.3. Testing Strategy</h4>
       <p>The battery IS the strategy; the release steps are verified by observable remote state.</p>
       <ul class="checklist">
         <li><code class="status">[x]</code> <code>git status --porcelain | wc -l</code> → 0; <code>git log origin/main..HEAD | wc -l</code> → 0 after push</li>
-        <li><code class="status">[]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code></li>
-        <li><code class="status">[]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name'</code> — contains v1.0.0-rc1</li>
-        <li><code class="status">[]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> — both HTML artifacts listed; <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> succeeds</li>
+        <li><code class="status">[x]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code></li>
+        <li><code class="status">[x]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name'</code> — contains v1.0.0-rc1</li>
+        <li><code class="status">[wip]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> — both HTML artifacts listed ✓; <code>docker pull</code> pending the package-visibility flip (see 11.2)</li>
       </ul>
       <div class="loop">
         🔁 <strong>Do not exit this phase until every box above is checked.</strong>
@@ -797,9 +797,9 @@ details summary { cursor: pointer; font-weight: 600; }
       <li><code class="status">[]</code> <code>uv run python scripts/capture_screenshots.py --check</code> — the 12-image set exists and every doc image ref resolves</li>
       <li><code class="status">[]</code> <code>open docs/onboarding.html docs/triage-pg-vs-dssg-triage.html</code> — both artifacts render self-contained</li>
       <li><code class="status">[]</code> <code>uvx --from actionlint-py actionlint .github/workflows/*.yml</code> — workflows statically clean; the three stale workflows are gone from <code>git ls-files .github/workflows/</code></li>
-      <li><code class="status">[]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code> — CI green on the pushed main</li>
-      <li><code class="status">[]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name' | grep v1.0.0-rc1</code> — the tag exists on the remote</li>
-      <li><code class="status">[]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> + <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> — CD delivered the release + image</li>
+      <li><code class="status">[x]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code> — CI green on the pushed main (run 29123730033, all 5 jobs, zero secrets)</li>
+      <li><code class="status">[x]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name' | grep v1.0.0-rc1</code> — the tag exists on the remote</li>
+      <li><code class="status">[wip]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> ✓ (both assets) + <code>docker pull</code> pending the GHCR package-visibility flip — CD delivered the release; image pushed by the green release run</li>
     </ul>
     <div class="loop">
       🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
