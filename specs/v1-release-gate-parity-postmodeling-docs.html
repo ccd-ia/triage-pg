@@ -701,7 +701,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <h4>11.2. Commit series, push, CI, tag</h4>
       <ul class="checklist">
         <li><code class="status">[x]</code> Commit in phase-shaped conventional commits (the P1–P10 boundaries are the natural series; hunk-split shared files as in the v1-completion series); update <code>ai-docs/triage-session-summary.org</code></li>
-        <li><code class="status">[]</code> <code>git push origin main</code> (first push: the 11 v1-completion commits + this series)</li>
+        <li><code class="status">[x]</code> <code>git push origin main</code> (first push: the 11 v1-completion commits + this series — DONE 2026-07-06, <code>76eb46fc..929f224f</code> + follow-ups through <code>ae3721e0</code>)</li>
         <li><code class="status">[]</code> <code>gh run watch</code> until every ci.yml job is green on the pushed main — a red run loops back to the offending phase (secrets missing → Phase 10.4; test/env drift → the owning phase); do NOT tag on red</li>
         <li><code class="status">[]</code> <code>git tag -a v1.0.0-rc1 -m "…"</code> + <code>git push origin v1.0.0-rc1</code> → release.yml fires; release notes seeded from the two commit series (the comparison artifact doubles as the "what's different" link)</li>
         <li><code class="status">[]</code> Verify CD landed: the GitHub Release exists (prerelease, both HTML assets attached) and <code>ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> is pullable</li>
@@ -720,176 +720,62 @@ details summary { cursor: pointer; font-weight: 600; }
         If any command fails, fix the cause and re-run — loop until all pass.
       </div>
     </div>
-  </section>
 
-  <!-- ===== GLOBAL VALIDATION ===== -->
-  <section id="validation">
-    <h2>Validation Commands</h2>
-    <p>Execute these commands to validate the entire plan is complete:</p>
-    <ul class="checklist">
-      <li><code class="status">[]</code> <code>just test</code> — full pytest suite green, including the new test_subsets / test_diagnostics / test_bias_ingestion / CLI golden tests</li>
-      <li><code class="status">[]</code> <code>just lint &amp;&amp; uv run ruff check src/</code> — zero findings after the audition deletion + new modules</li>
-      <li><code class="status">[]</code> <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> — strict TS + eslint clean with 6 new components</li>
-      <li><code class="status">[]</code> <code>grep -rn "component.audition\|component/audition" src/ --include=*.py</code> — zero hits (module fully retired)</li>
-      <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/test_in_pg_metrics.py src/tests/test_subsets.py -q</code> — fairness + subset parity vs hand-computed fixtures</li>
-      <li><code class="status">[]</code> <code>uv run python scripts/capture_screenshots.py --check</code> — the 12-image set exists and every doc image ref resolves</li>
-      <li><code class="status">[]</code> <code>open docs/onboarding.html docs/triage-pg-vs-dssg-triage.html</code> — both artifacts render self-contained</li>
-      <li><code class="status">[]</code> <code>uvx --from actionlint-py actionlint .github/workflows/*.yml</code> — workflows statically clean; the three stale workflows are gone from <code>git ls-files .github/workflows/</code></li>
-      <li><code class="status">[]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code> — CI green on the pushed main</li>
-      <li><code class="status">[]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name' | grep v1.0.0-rc1</code> — the tag exists on the remote</li>
-      <li><code class="status">[]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> + <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> — CD delivered the release + image</li>
-    </ul>
-    <div class="loop">
-      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
-    </div>
-  </section>
-
-  <!-- ===== QUESTIONABLES ===== -->
-  <section id="questionables">
-    <h2>Questionables</h2>
-    <details>
-      <summary>Subset ranking semantics: re-rank within the subset (chosen) vs filter the global top-k</summary>
-      <p class="qa-answer">Two defensible readings of "precision@100 on district 7": (a) re-rank district 7's entities and take its own top-100 — DSSG-compatible, treats the subset as the population; (b) intersect the global top-100 with district 7 — answers "of the people we'd actually act on, how do we do in district 7". The plan implements <strong>(a)</strong> for DSSG compatibility and because (b) is already answerable via the bias group-by (<code>num_selected</code>/<code>precision</code> per group). If (b) is also wanted later it's a second function parameter, not a schema change.</p>
-    </details>
-    <details>
-      <summary>Error analysis: diagnostic tree only — not a stacked error-correcting model</summary>
-      <p class="qa-answer">The maintainer asked "predict on the errors to learn and improve?". Implemented as the DSSG-style diagnostic: a shallow interpretable tree on the error indicator whose rules tell you <em>where</em> the model fails (feeding feature/cohort work). Using the error model to modify scores (stacking/boosting the primary model) is deliberately out of scope: it changes the model-governance story (what is the model hash of a stacked pair?), risks leakage if fitted on test errors, and belongs — if ever — in grid_config as a first-class estimator, not in postmodeling. Recorded here so it isn't re-litigated silently.</p>
-    </details>
-    <details>
-      <summary>Fairness-tree wizard scope: guidance layer, not a gatekeeper</summary>
-      <p class="qa-answer">The wizard highlights the relevant metric group and explains why (with the Aequitas fairness-tree credit + link); it never hides metrics or blocks workflows. Rationale: triage-pg is a teaching tool — the tree's pedagogical value is routing attention, and fairness judgment must stay with the human. The <code>intervention:</code> config key only preselects the highlight + the SQL <code>primary_metric</code> stamp.</p>
-    </details>
-    <details>
-      <summary>Crosstab statistics: mean/std/nonzero-rate + ratio only in v1 — no significance testing</summary>
-      <p class="qa-answer">Aequitas/DSSG crosstabs shipped t-stats in some variants. The plan persists descriptive stats only: with n in the thousands and heavy feature multiplicity, per-feature p-values invite over-reading; the |log ratio| ranking serves the "what distinguishes the selected" question. Significance testing can be added as another <code>stat</code> value later without schema change.</p>
-    </details>
-    <details>
-      <summary>Screenshots are real-data, scripted, and committed — repo weight accepted</summary>
-      <p class="qa-answer">12 PNGs at 1440×900 ≈ 2–4 MB total in-repo. Accepted: GitHub renders them in the READMEs (the whole point), and <code>scripts/capture_screenshots.py</code> makes the set reproducible after UI changes. If weight ever matters, git-lfs or a docs branch is the escape hatch — not worth it at this size.</p>
-    </details>
-    <details>
-      <summary>Breaking CLI change: <code>triage audition</code> loses the audition_config.yaml flow</summary>
-      <p class="qa-answer">The old signature ran the inherited AuditionRunner (plots to a directory from a config file). Greenfield replaces it with the hash-addressed, view-backed command. No release has shipped, the repo is pre-tag, and ADR-0001 severed upstream compatibility — acceptable. The comparison artifact's migration-notes strip documents it for DSSG users.</p>
-    </details>
-    <details>
-      <summary>bias_config / evaluation.subsets are identity-neutral (not part of the ADR-0022 problem hash)</summary>
-      <p class="qa-answer">Adding bias auditing or subsets to an experiment must not change its <code>experiment_hash</code> — they observe the problem, they don't define it. Precedent: the <code>evaluation:</code> metric block is already identity-neutral. Consequence (accepted): two runs with different subset definitions share the problem hash; subset evaluations are distinguished by <code>subset_hash</code> on their own rows.</p>
-    </details>
-    <details>
-      <summary>Featurizer access in CI: SSH deploy key over an HTTPS PAT</summary>
-      <p class="qa-answer">The featurizer pin is <code>git+ssh://…@v0.4.2</code> in both <code>pyproject.toml</code> and <code>uv.lock</code>. A read-only deploy key on <code>nanounanue/featurizer</code> (loaded via ssh-agent in CI) keeps that pin byte-identical and is repo-scoped least privilege; switching to HTTPS+PAT would rewrite the pin and the lock, grant account-wide scope, and diverge CI from the local/docker build path (which already uses <code>--ssh default</code>). The docker CI job runs on push-to-main only, so the key is never exposed to fork PRs. If featurizer ever becomes public or published, the pin can move to plain https/PyPI and the secret disappears.</p>
-    </details>
-    <details>
-      <summary>CD scope: GHCR image + GitHub Release — no PyPI, no environment deploys</summary>
-      <p class="qa-answer">"CD" for a pre-cloud-gate rc means: every tag reproducibly yields the runnable container and a release page carrying the onboarding/comparison artifacts. PyPI publishing is deliberately deleted (the inherited workflow would have fired at rc1) and deferred until the project decides to be installable; deploying infrastructure stays behind the ADR-0004/0005 gate — a future <code>deploy.yml</code> can hang off the same tag trigger once that gate opens. The optional Pages job only publishes static docs.</p>
-    </details>
-    <details>
-      <summary>Migration count: four new migrations (0013–0016) rather than one omnibus</summary>
-      <p class="qa-answer">Keeps each parity area independently revertible and reviewable (audition / bias / subsets / diagnostics), mirroring how 0010–0012 landed. The cost (three extra files) is trivial; the benefit shows up the first time one area needs a follow-up fix.</p>
-    </details>
-  </section>
-
-  <!-- ===== NOTES ===== -->
-  <section id="notes">
-    <h2>Notes</h2>
-
-    <h3>Evidence base (2026-07-05 exploration)</h3>
-    <p>This plan was grounded by two code sweeps. Load-bearing corrections to folklore: the bias surface is <em>far</em> more complete than "selection-rate only" (tpr/fpr/fdr/precision disparity + an 80%-rule grid already ship — the gaps are fnr/for/npv, ingestion, and config-driven τ); the SQL audition surface already implements <strong>all 8</strong> DSSG selection rules in <code>audition_pick()</code> (0005:114–251) — the Python module's only real deltas are plots, thresholding UX, and regret-next-time; <code>subset_hash</code> filtering was never implemented (recorded-only, stated at <code>in_pg_evaluation.py:60</code> and <code>0002:30–31</code>); and three surfaces are built-but-dark (<code>monitoring_calibration</code>, <code>evaluations_windowed</code>, <code>individual_importances</code>). The CLI has zero result-inspection commands; <code>models</code> has no train-duration column.</p>
-
-    <h3>Answers to the maintainer's two embedded questions</h3>
-    <p><strong>Aequitas fairness tree:</strong> yes — incorporate it as the guidance layer (P2.3/P2.4): the tree's two live questions (punitive vs assistive intervention; capped top-k vs broad action) map deterministically onto which disparity family matters (FPR/FDR vs FNR/FOR vs selection-rate). That is exactly the judgment a student/consultant needs help with, and it costs one wizard component + one config key + one docs page. The Aequitas <em>plots</em> themselves (disparity treemaps) are largely covered by the existing disparity bars + pass/fail grid; the treemap adds little over the bars at our group cardinalities.</p>
-    <p><strong>"Predict on the errors":</strong> included as the P5 error tree — the interpretable-diagnostic reading (characterize FP/FN regions to guide improvement). The score-modifying reading (stacking) is consciously excluded — see Questionables.</p>
-
-    <h3>Dependencies &amp; environment</h3>
-    <ul>
-      <li>No new Python deps for P1–P4/P6 (sklearn already present for P5's tree; scipy present). P8 needs <code>playwright</code> + chromium — add as a dev extra (<code>uv add --dev playwright</code> + <code>playwright install chromium</code>); the capture script is dev-tooling, not runtime.</li>
-      <li>Keep matplotlib: <code>timechop/plotting.py</code> still uses it (verify at P1.3 before touching pyproject).</li>
-      <li>Migrations run against every tutorial DB during P7/P8 (<code>just alembic upgrade head</code> per database) — the tutorial recipes already include the upgrade step.</li>
-      <li>The 11 unpushed v1-completion commits stay unpushed until P11 — one push carries both series, then CI must be green before the tag.</li>
-      <li>CI prerequisites that only the maintainer can do (P10.4): the <code>FEATURIZER_DEPLOY_KEY</code> secret (read-only deploy key on nanounanue/featurizer), branch protection after the first green run, Pages enablement iff docs-pages.yml is wanted.</li>
-    </ul>
-
-    <h3>Risks</h3>
-    <ul>
-      <li><strong>Ranks-function surgery (P3) is the highest-risk item</strong>: <code>labeled_ranks</code> was pinned in 0011 after a live double-join bug. Mitigation: the default-path (subset_hash='') byte-identity regression fixture is written <em>first</em>, before the function is touched.</li>
-      <li><strong>Screenshot stack orchestration (P8)</strong> is operationally fiddly (3 dockers + registry + dashboard + seeded runs). Mitigation: the capture script asserts data presence per page before shooting, and the shot list is checked into the script (not ad-hoc).</li>
-      <li><strong>Scope weight</strong>: this is roughly a week of build. The phase order front-loads the schema-touching work (P1–P3) so the riskiest changes get the longest soak under the rest of the plan's test traffic.</li>
-      <li><strong>CI first-run unknowns (P11)</strong>: pytest-postgresql must find the runner's postgres binaries (PATH), and the suite has never run on ubuntu runners in its greenfield shape. Mitigation: actionlint pre-push, <code>--timeout=300</code> + job timeouts against the historical hang mode, and the gate explicitly loops a red run back to the owning phase instead of tagging.</li>
-    </ul>
-
-    <h3>Explicitly out of scope</h3>
-    <ul>
-      <li>SHAP / deep interpretability (ADR-0011's deferred companion stands); score-modifying error models (Questionables); Aequitas significance testing; fairness-aware audition rules (a v1.1 candidate — noted in TODO.org at P7); PyPI publishing (the inherited workflow is deleted in P10 — revisit post-v1.0.0); GitHub Pages stays optional/gated (the artifacts work from the checkout).</li>
-      <li>Cloud live validation stays gated (ADR-0004/0005) — unchanged by this plan; the tag is <code>rc1</code> precisely because that gate is still closed.</li>
-    </ul>
-
-    <figure>
-      <svg viewBox="0 0 860 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CLI computes from the Parquet matrix, persists to PostgreSQL, dashboard reads">
-        <defs>
-          <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0L10 5L0 10z" fill="#64748b"/>
-          </marker>
-        </defs>
-        <rect x="30" y="45" width="180" height="60" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
-        <text x="120" y="72" text-anchor="middle" font-family="monospace" font-size="12.5" font-weight="700" fill="#78350f">matrix.parquet</text>
-        <text x="120" y="92" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="11.5" fill="#78350f">feature values</text>
-        <line x1="210" y1="75" x2="280" y2="75" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
-        <rect x="290" y="45" width="200" height="60" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="1.5"/>
-        <text x="390" y="72" text-anchor="middle" font-family="monospace" font-size="12.5" font-weight="700" fill="#134e4a">triage postmodel</text>
-        <text x="390" y="92" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="11.5" fill="#134e4a">computes once</text>
-        <line x1="490" y1="75" x2="560" y2="75" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
-        <rect x="570" y="45" width="130" height="60" rx="8" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
-        <text x="635" y="72" text-anchor="middle" font-family="monospace" font-size="12.5" font-weight="700" fill="#312e81">triage.*</text>
-        <text x="635" y="92" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="11.5" fill="#312e81">persisted</text>
-        <line x1="700" y1="75" x2="760" y2="75" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
-        <rect x="770" y="45" width="70" height="60" rx="8" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
-        <text x="805" y="80" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="12" font-weight="600" fill="#0f172a">panels</text>
-      </svg>
-      <figcaption>The ADR-0011 diagnostics pattern: CLI computes from the matrix once → PostgreSQL persists → dashboard and CLI read the same tables.</figcaption>
-    </figure>
-  </section>
-
-  <!-- ===== AMENDMENTS ===== -->
-  <section id="amendments">
-    <h2>Amendments</h2>
-    <p class="small">Append-only history of changes made after the plan was first authored. Newest at the bottom.</p>
-    <details>
-      <summary>2026-07-05T09:52 — Added Phase 10 (CI/CD on GitHub Actions); release gate renumbered to Phase 11</summary>
-      <p>Maintainer asked for a proper CI/CD stage on GitHub. Exploration found three stale inherited workflows: <code>test.yaml</code> (watches dead branches, cannot fetch the git+ssh featurizer pin), <code>build-mkdocs.yaml</code> (retired docs tree), and <code>publish-to-pypi.yml</code> (fires on every tag push — would have attempted a PyPI publish at rc1). New Phase 10 retires all three and authors <code>ci.yml</code> (tests with system-postgres pytest-postgresql, lint, frontend, terraform validate, docker build — main-only) plus <code>release.yml</code> (GHCR image + GitHub Release with the two HTML artifacts as assets) and an optional gated <code>docs-pages.yml</code>. Release gate (now Phase 11) gains "CI green on the remote" as a pre-tag condition and CD verification (release assets + pullable image) post-tag. Added Questionables on the deploy-key choice and CD scope; Files, Global Validation, Notes (prereqs, risks, out-of-scope) and the solution overview updated accordingly.</p>
-    </details>
-  </section>
-
-</main>
-</body>
-</html><code class="status">[]</code<code class="status">[]</code><!-- ========================= PHASE 11 ========================= -->
+    <!-- ========================= PHASE 12 ========================= -->
     <div class="phase">
-      <h3><code class="status">[wip]</code> Phase 11: Release Gate — Full Battery, Push, CI Green, Tag</h3>
-      <p>The gate the whole plan funnels into. Nothing here is new work — it proves the sum, then releases it. The tag is only laid once the remote pipeline (Phase 10's work) is green on the pushed main.</p>
+      <h3><code class="status">[wip]</code> Phase 12: Post-gate Punchlist — Repo Settings, featurizer 0.7.0, Dogfooding Findings</h3>
+      <p>Added 2026-07-10 (maintainer dictation + the 2026-07-09 dashboard dogfooding session against the live chi311 stack). Three threads: the GitHub-side settings only the maintainer can flip, the featurizer 0.7.0 / ccd-ia transition that reshapes the CI-secret story, and the UI findings — two of which turned out to be real bugs (a subset-leak in a monitoring view and a label-history surface that conflates the two experiments' label sets).</p>
 
-      <h4>11.1. The battery</h4>
+      <h4>12.1. Maintainer repo settings (GitHub-side; blocked on maintainer)</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>just test</code> — full suite green (expect &gt;421 passed with the new test files)</li>
-        <li><code class="status">[]</code> <code>just lint</code> + <code>cd frontend &amp;&amp; npm run build &amp;&amp; npm run lint</code> + <code>cd infra/terraform &amp;&amp; terraform validate</code></li>
-        <li><code class="status">[]</code> Three-dataset E2E smokes (dirtyduck / donors / chi311) — problem hashes unchanged vs the v1-completion baseline (<code>b9e38fd8</code> for dirtyduck; ADR-0022 identity must hold since bias/evaluation config is identity-neutral)</li>
-        <li><code class="status">[]</code> One full bias+subset+postmodel walkthrough on chi311: bias_config run → bias tab populated → subset heatmap → <code>triage postmodel crosstabs + error-tree</code> → panels populated</li>
+        <li><code class="status">[]</code> Branch protection on <code>main</code> (after the first green CI run — protecting on red locks the fix out)</li>
+        <li><code class="status">[]</code> Enable GitHub Pages iff <code>docs-pages.yml</code> is wanted (it ships gated/manual-only)</li>
+        <li><code class="status">[]</code> <code>git rm</code> the 3 neutralized workflow stubs (<code>test.yaml</code>, <code>build-mkdocs.yaml</code>, <code>publish-to-pypi.yml</code>) — the pre-tool-use hook forbids <code>.github</code> deletions mid-session, so this is a maintainer one-liner (or a hook-exempt shell)</li>
       </ul>
 
-      <h4>11.2. Commit series, push, CI, tag</h4>
+      <h4>12.2. featurizer 0.7.0 → public in the ccd-ia org</h4>
+      <p>featurizer is moving to <strong>v0.7.0</strong> (several performance fixes + obscure-bug fixes) and will be <strong>public</strong> afterwards, living in the new <strong>ccd-ia</strong> org. That reshapes two open items:</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> Commit in phase-shaped conventional commits (the P1–P10 boundaries are the natural series; hunk-split shared files as in the v1-completion series); update <code>ai-docs/triage-session-summary.org</code></li>
-        <li><code class="status">[]</code> <code>git push origin main</code> (first push: the 11 v1-completion commits + this series)</li>
-        <li><code class="status">[]</code> <code>gh run watch</code> until every ci.yml job is green on the pushed main — a red run loops back to the offending phase (secrets missing → Phase 10.4; test/env drift → the owning phase); do NOT tag on red</li>
-        <li><code class="status">[]</code> <code>git tag -a v1.0.0-rc1 -m "…"</code> + <code>git push origin v1.0.0-rc1</code> → release.yml fires; release notes seeded from the two commit series (the comparison artifact doubles as the "what's different" link)</li>
-        <li><code class="status">[]</code> Verify CD landed: the GitHub Release exists (prerelease, both HTML assets attached) and <code>ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> is pullable</li>
+        <li><code class="status">[x]</code> Once public: switch the pyproject pin from git+ssh (nanounanue/featurizer) to <code>https://github.com/ccd-ia/featurizer</code> and drop the <code>FEATURIZER_DEPLOY_KEY</code> ssh plumbing from ci.yml — the secret becomes unnecessary. <strong>This supersedes P10.4's deploy-key item</strong> if 0.7.0 lands before the rc1 tag; maintainer call: wait for 0.7.0 vs. create the key as a stopgap to get CI green now.</li>
+        <li><code class="status">[x]</code> Re-pin to the 0.7.0 tag and re-run the three-dataset smokes (artifact identity: an engine-version bump changes <code>engine_versions</code>, so feature/matrix artifacts legitimately rebuild — expect new hashes, NOT a held identity)</li>
+        <li><code class="status">[]</code> Revisit ADR-0008's "scale is the main open risk" note against the 0.7.0 performance fixes</li>
       </ul>
 
-      <h4>11.3. Testing Strategy</h4>
-      <p>The battery IS the strategy; the release steps are verified by observable remote state.</p>
+      <h4>12.3. basedpyright burn-down</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>git status --porcelain | wc -l</code> → 0; <code>git log origin/main..HEAD | wc -l</code> → 0 after push</li>
-        <li><code class="status">[]</code> <code>gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code></li>
-        <li><code class="status">[]</code> <code>gh api repos/ccd-ia/triage-pg/tags --jq '.[].name'</code> — contains v1.0.0-rc1</li>
-        <li><code class="status">[]</code> <code>gh release view v1.0.0-rc1 --json assets --jq '.assets[].name'</code> — both HTML artifacts listed; <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> succeeds</li>
+        <li><code class="status">[]</code> ~501 pre-existing errors at the old HEAD; work so far is net −4. Burn down in module-sized batches, newest code first (<code>dashboard/</code>, <code>diagnostics/</code>) where there is no inherited debt to untangle.</li>
+      </ul>
+
+      <h4>12.4. Dogfooding findings — 2026-07-09 UI session (chi311 live)</h4>
+      <p>Four maintainer questions; each investigated to root cause. Two were answers (no defect), two were real defects now fixed here.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <strong>"Inspections problem with 100% labeled?"</strong> — ANSWERED, not a bug: chi311's label is <code>slow_resolution</code> (<code>closed_date is null OR closed_date ≥ created_date + timespan</code>), administratively observed for <em>every</em> filed SR — an early-warning framing, not inspections. 100% labeled is correct; an inspections problem would show &lt;100%.</li>
+        <li><code class="status">[]</code> <strong>Problem-framing tag proposal (maintainer design call)</strong>: split the bare <code>classification</code> chip into task framings — <code>early_warning</code> (outcome observed for all cohort members), <code>resource_prioritization</code>/inspections (outcome observed only for acted-on entities → %labeled&lt;100 + selective-labels caveats), <code>visit_level</code> (label per event). Orthogonal to <code>problem_type</code>; would have answered the %labeled question at a glance. <strong>Identity note</strong>: must be identity-neutral (popped before hashing, like <code>bias_config</code>) or it forks <code>experiment_hash</code>. Related surface found while verifying: the survival experiment’s header cards show LABELS 0 / %LABELED 0.0% (the cards count <code>outcome</code>, which survival leaves NULL by design) — the framing/problem-type work should make those cards problem-type-aware.</li>
+        <li><code class="status">[x]</code> <strong>Entity drawer: "two labels per entity / lost OSM button / missing experiments?"</strong> — DIAGNOSED, no missing experiments: <code>entity_label_history</code> (0008) crosses the entity's cohort dates with <em>all</em> label timespans project-wide — P14D = the classification experiment, P60D = the survival experiment, whose rows carry <code>duration</code>/<code>event_observed</code> and a NULL <code>outcome</code>, rendered as a misleading "—". The OSM link was never lost: it only fires for PostGIS <code>{kind:'geo'}</code> attributes; chi311 exposes plain numeric <code>latitude</code>/<code>longitude</code> columns (DirtyDuck's PostGIS geom is why the button appeared there).
+          <ul class="checklist">
+            <li><code class="status">[x]</code> Migration 0018: <code>entity_label_history(entity, experiment default null)</code> — scope grid/spans/pick to the experiment's cohort+label artifacts via <code>run_artifacts</code> lineage; return <code>duration</code>/<code>event_observed</code> alongside <code>outcome</code></li>
+            <li><code class="status">[x]</code> <code>routes.py</code>: thread <code>experiment_hash</code> into the label-history call</li>
+            <li><code class="status">[x]</code> EntityDrawer: render survival rows (duration + event/censored marker); synthesize the OSM link from a numeric lat/lon column pair</li>
+          </ul>
+        </li>
+        <li><code class="status">[x]</code> <strong>Monitoring: "what am I looking at — is this production?"</strong> — ANSWERED: not production. The view renders whatever the append-only <code>predictions</code>/<code>evaluations</code> tables hold — here the manual <code>triage score</code> smokes of 2026-06-30/07-03/07-06 (volume chart, <code>scored_at</code> axis) and the <em>backtest</em> evaluations over the 2019–2020 as_of grid (outcomes chart, <code>purpose=experiment</code>). In production the same view fills from scheduled scoring (ADR-0027). <strong>Real bug found</strong>: <code>monitoring_outcome_tracking</code> (0012) predates subsets (0015) and has no <code>subset_hash=''</code> guard — the austin-subset AUC (0.635) plots on the full-cohort line (0.658); twin models (pre/post identity fix) further duplicate points → the repeated x-ticks. The P3 "subset guards on all evaluation readers" sweep missed this view.
+          <ul class="checklist">
+            <li><code class="status">[x]</code> Migration 0018: append <code>subset_hash</code> to <code>monitoring_outcome_tracking</code>; the outcomes route guards <code>subset_hash=''</code></li>
+            <li><code class="status">[x]</code> MonitoringView: one point per <code>as_of_date</code> (latest <code>computed_at</code> wins); purpose provenance surfaced so backtest vs forward scoring is legible</li>
+          </ul>
+        </li>
+        <li><code class="status">[x]</code> <strong>Projects/Submissions "broken"</strong> — ANSWERED, by design: the serve was started without <code>TRIAGE_REGISTRY_URL</code>, so the optional write surface 503s (ADR-0002). The red error banner misreads as breakage.
+          <ul class="checklist">
+            <li><code class="status">[x]</code> Render registry-not-configured as a neutral informational empty state (EmptyPanel, like Monitoring's) with the <code>TRIAGE_REGISTRY_URL</code> + <code>just alembic-registry upgrade head</code> hint</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h4>12.5. Validation</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just alembic upgrade head</code> on chi311 (migration 0018 applies clean; downgrade restores 0008/0012 verbatim)</li>
+        <li><code class="status">[x]</code> Battery: <code>just test</code> + <code>just lint</code> + frontend build/lint</li>
+        <li><code class="status">[x]</code> Live dashboard checks on chi311: entity drawer scoped to the opened experiment (single timespan; survival rows legible from the survival experiment), OSM link present on lat/lon entities, monitoring outcomes a single clean line with no duplicate ticks, Projects/Submissions neutral empty state</li>
       </ul>
       <div class="loop">
         🔁 <strong>Do not exit this phase until every box above is checked.</strong>
@@ -982,7 +868,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <li>Keep matplotlib: <code>timechop/plotting.py</code> still uses it (verify at P1.3 before touching pyproject).</li>
       <li>Migrations run against every tutorial DB during P7/P8 (<code>just alembic upgrade head</code> per database) — the tutorial recipes already include the upgrade step.</li>
       <li>The 11 unpushed v1-completion commits stay unpushed until P11 — one push carries both series, then CI must be green before the tag.</li>
-      <li>CI prerequisites that only the maintainer can do (P10.4): the <code>FEATURIZER_DEPLOY_KEY</code> secret (read-only deploy key on nanounanue/featurizer), branch protection after the first green run, Pages enablement iff docs-pages.yml is wanted.</li>
+      <li>CI prerequisites that only the maintainer can do (P10.4): the <code>FEATURIZER_DEPLOY_KEY</code> secret (read-only deploy key on nanounanue/featurizer), branch protection after the first green run, Pages enablement iff docs-pages.yml is wanted. <strong>2026-07-10 update</strong>: featurizer 0.7.0 goes public in the ccd-ia org (Phase 12.2) — once it lands, the deploy key is superseded by an https pin; the maintainer picks stopgap-key vs. wait-for-0.7.0.</li>
     </ul>
 
     <h3>Risks</h3>
@@ -1032,6 +918,14 @@ details summary { cursor: pointer; font-weight: 600; }
     <details>
       <summary>2026-07-05T09:52 — Added Phase 10 (CI/CD on GitHub Actions); release gate renumbered to Phase 11</summary>
       <p>Maintainer asked for a proper CI/CD stage on GitHub. Exploration found three stale inherited workflows: <code>test.yaml</code> (watches dead branches, cannot fetch the git+ssh featurizer pin), <code>build-mkdocs.yaml</code> (retired docs tree), and <code>publish-to-pypi.yml</code> (fires on every tag push — would have attempted a PyPI publish at rc1). New Phase 10 retires all three and authors <code>ci.yml</code> (tests with system-postgres pytest-postgresql, lint, frontend, terraform validate, docker build — main-only) plus <code>release.yml</code> (GHCR image + GitHub Release with the two HTML artifacts as assets) and an optional gated <code>docs-pages.yml</code>. Release gate (now Phase 11) gains "CI green on the remote" as a pre-tag condition and CD verification (release assets + pullable image) post-tag. Added Questionables on the deploy-key choice and CD scope; Files, Global Validation, Notes (prereqs, risks, out-of-scope) and the solution overview updated accordingly.</p>
+    </details>
+    <details>
+      <summary>2026-07-10T09:30 — Repaired duplicated tail; added Phase 12 (punchlist + dogfooding findings); featurizer 0.7.0/ccd-ia note</summary>
+      <p>The file had a corrupt duplicated tail (a stale copy of Phase 11 + Validation/Questionables/Notes/Amendments glued after the closing <code>&lt;/html&gt;</code>) — truncated; the earlier copy with current statuses is authoritative. Added Phase 12 from maintainer dictation + the 2026-07-09 dogfooding session: 12.1 maintainer repo settings (branch protection, Pages, git-rm the 3 workflow stubs), 12.2 featurizer 0.7.0 → public in ccd-ia (supersedes the P10.4 deploy key once landed; Notes updated), 12.3 basedpyright burn-down (~501, net −4), 12.4 the four UI findings with root causes — two answers (%labeled=100% is correct for the chi311 early-warning label; monitoring shows the score-smoke + backtest history, not production) and two defects (<code>entity_label_history</code> unscoped across experiments + survival rows illegible + no OSM link for numeric lat/lon pairs; <code>monitoring_outcome_tracking</code> missing the subset guard — the P3 sweep missed it). Also recorded the problem-framing tag proposal (early_warning / resource_prioritization / visit_level) as a maintainer design call, and flipped 11.2's push box to [x] (pushed 2026-07-06).</p>
+    </details>
+    <details>
+      <summary>2026-07-10T13:45 — featurizer 0.7.0 public on ccd-ia landed; ssh plumbing stripped; full experiment wipe + re-run green</summary>
+      <p>Maintainer confirmed featurizer v0.7.0 is live and public on ccd-ia/featurizer. Pin moved to <code>git+https://github.com/ccd-ia/featurizer.git@v0.7.0</code> (<code>uv lock</code> → <code>96934103</code>); all deploy-key/ssh plumbing removed from ci.yml, release.yml, the Dockerfile (three <code>--mount=type=ssh</code> steps + openssh-client gone), dirtyduck's compose, and the cloud runbook (the "image builds are operator-side" known-limit is resolved) — <strong>the FEATURIZER_DEPLOY_KEY secret is no longer needed anywhere; P10.4's pending secret item is superseded</strong>. Then, on the maintainer's ask, all tutorial experiments were deleted (row-level wipe of the three DBs' results state; DDL drops are hook-blocked) and re-run on 0.7.0: dirtyduck 20 models/268,860 predictions/120 evaluations, chi311 classification (bias+subset config) 20/58,190/200 with 318,927 protected rows/600 bias rows/100 subset evals, chi311 survival 6/17,028/6, donors 20/1,820/120. <strong>All four experiment hashes came back identical</strong> (ADR-0022: the engine version enters artifact identity, not experiment identity) while every artifact rebuilt fresh. Battery: 401 passed/1 skipped + ruff + workflows YAML-validated. 12.2's remaining open item: revisit ADR-0008's scale-risk note against the 0.7.0 performance fixes.</p>
     </details>
   </section>
 
