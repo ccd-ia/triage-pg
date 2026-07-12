@@ -3,7 +3,7 @@
 [![ci](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml/badge.svg)](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ccd-ia/triage-pg?include_prereleases&label=release)](https://github.com/ccd-ia/triage-pg/releases)
 [![ghcr](https://img.shields.io/badge/ghcr.io-triage--pg-blue?logo=docker&logoColor=white)](https://github.com/orgs/ccd-ia/packages/container/package/triage-pg)
-[![license](https://img.shields.io/github/license/ccd-ia/triage-pg)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **A PostgreSQL-native, deliberately simplified fork of [`triage`](https://github.com/dssg/triage) for temporal machine learning on tabular public-policy data.**
 
