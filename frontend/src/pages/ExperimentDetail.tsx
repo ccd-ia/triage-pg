@@ -283,7 +283,9 @@ export function ExperimentDetail({ hash }: { hash: string }) {
         {summary.data ? (
           <SummaryStrip data={summary.data} actuals={experiment.data?.summary} />
         ) : null}
-        {summary.data ? <OverviewSparklines data={summary.data} /> : null}
+        {summary.data ? (
+          <OverviewSparklines data={summary.data} experiment={experiment.data?.summary} />
+        ) : null}
 
         <SelectedModelContextBar
           experimentName={expName}

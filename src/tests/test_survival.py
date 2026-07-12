@@ -354,3 +354,50 @@ def test_validator_flags_survival_without_the_extra(monkeypatch):
         "survival extra" in e["message"] and e["path"] == "problem_type"
         for e in result["errors"]
     )
+
+
+# ------------------------------------------------------------------ label_base_rate (0019)
+
+
+def test_label_base_rate_counts_survival_labels(db_pool_greenfield):
+    """Migration 0019: survival labels (outcome NULL, duration/event_observed set — ADR-0010)
+    count as LABELED and base_rate falls back to the observed-event rate. Before this fix the
+    experiment header showed LABELS 0 / %LABELED 0.0% for survival experiments (plan P12.4)."""
+    pool = db_pool_greenfield
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            " values ('exp-lbr', '{}'::jsonb, 'survival')"
+        )
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status)"
+            " values ('exp-lbr', 'local', 'completed') returning run_id"
+        ).fetchone()["run_id"]
+        conn.execute(
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config)"
+            " values ('labels-art-lbr', 'labels-log-lbr', 'labels', '{}'::jsonb)"
+        )
+        conn.execute(
+            "insert into triage.run_artifacts (run_id, artifact_id)"
+            " values (%(r)s, 'labels-art-lbr')",
+            {"r": run_id},
+        )
+        for eid, (dur, ev) in enumerate(
+            [(10.0, True), (20.0, False), (30.0, True), (40.0, True)], start=1
+        ):
+            conn.execute(
+                "insert into triage.labels (label_hash, entity_id, as_of_date,"
+                " label_timespan, duration, event_observed)"
+                " values ('labels-art-lbr', %(e)s, %(d)s, cast(%(ts)s as interval),"
+                " %(dur)s, %(ev)s)",
+                {"e": eid, "d": AS_OF_DATE, "ts": LABEL_TIMESPAN, "dur": dur, "ev": ev},
+            )
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select base_rate, n_labeled from triage.label_base_rate"
+            " where run_id = %(r)s",
+            {"r": run_id},
+        ).fetchone()
+    assert row["n_labeled"] == 4  # duration rows ARE labels
+    assert row["base_rate"] == pytest.approx(0.75)  # 3/4 events observed

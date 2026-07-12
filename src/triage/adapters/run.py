@@ -172,6 +172,12 @@ class ExperimentResult:
 # they are deliberately NOT part of identity. Changing cohort/label/temporal is a new problem.
 _PROBLEM_KEYS = ("cohort_config", "label_config", "temporal_config", "problem_type")
 
+# task_framing names the OBSERVATION REGIME (who gets a label and why), orthogonal to
+# problem_type (which drives the scoring machinery). Identity-neutral by construction —
+# the hash covers only _PROBLEM_KEYS — so tagging an existing config never forks it
+# (migration 0019, plan P12.4).
+_TASK_FRAMINGS = ("early_warning", "resource_prioritization", "visit_level")
+
 
 def _problem_identity(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
     """The problem triple (+ problem_type) that identifies an Experiment (ADR-0022).
@@ -325,6 +331,13 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 groups.get("definitions"), Mapping
             ):
                 n_feature_groups = len(groups["definitions"])
+
+    task_framing = experiment_config.get("task_framing")
+    if task_framing is not None and task_framing not in _TASK_FRAMINGS:
+        _err(
+            "task_framing",
+            f"unknown task_framing {task_framing!r} — expected one of {list(_TASK_FRAMINGS)}",
+        )
 
     bias_config = experiment_config.get("bias_config")
     if bias_config is not None:
@@ -564,7 +577,9 @@ def _create_experiment_and_run(
     The cosmetic ``name``/``description`` (from the config) and ``author`` (the OS user) are
     stored on the experiment row but kept OUT of identity: the stored ``config`` is the
     cleaned config (without name/description) and the hash is over that same cleaned config.
-    ``on conflict do nothing`` keeps the first writer's name/description/author for a re-run.
+    The upsert keeps the first writer's name/description/author for a re-run; the
+    identity-neutral ``task_framing`` (migration 0019) instead updates when the config
+    provides one and is never cleared by a config that omits it (coalesce).
     """
     exp_hash = experiment_hash_for(experiment_config)
     name = experiment_config.get("name")
@@ -578,10 +593,16 @@ def _create_experiment_and_run(
     with db_engine.connection() as conn:
         conn.execute(
             "insert into triage.experiments"
-            + " (experiment_hash, config, problem_type, name, description, author)"
+            + " (experiment_hash, config, problem_type, name, description, author,"
+            + " task_framing)"
             + " values (%(h)s, cast(%(config)s as jsonb),"
-            + " cast(%(pt)s as triage.problem_type), %(name)s, %(description)s, %(author)s)"
-            + " on conflict (experiment_hash) do nothing",
+            + " cast(%(pt)s as triage.problem_type), %(name)s, %(description)s, %(author)s,"
+            + " %(framing)s)"
+            # name/description/author keep first-writer semantics; task_framing is
+            # identity-neutral metadata (migration 0019) — a re-run that provides it
+            # updates the tag, a re-run that omits it never clears an existing one.
+            + " on conflict (experiment_hash) do update set task_framing ="
+            + " coalesce(excluded.task_framing, triage.experiments.task_framing)",
             {
                 "h": exp_hash,
                 # The experiment stores its PROBLEM (cohort+label+temporal+problem_type, ADR-0022);
@@ -591,6 +612,7 @@ def _create_experiment_and_run(
                 "name": name,
                 "description": description,
                 "author": author,
+                "framing": experiment_config.get("task_framing"),
             },
         )
         run_id = conn.execute(
@@ -934,6 +956,13 @@ def run_experiment(
     subsets_config = (experiment_config.get("evaluation") or {}).get("subsets") or []
     if subsets_config:
         validate_subsets_config(subsets_config)
+    # task_framing: identity-neutral observation-regime tag (migration 0019); fail fast
+    # on an unknown value before anything is built.
+    task_framing = experiment_config.get("task_framing")
+    if task_framing is not None and task_framing not in _TASK_FRAMINGS:
+        raise ValueError(
+            f"unknown task_framing {task_framing!r} — expected one of {list(_TASK_FRAMINGS)}"
+        )
 
     temporal_config = TemporalConfig.model_validate(
         _require(experiment_config, "temporal_config")

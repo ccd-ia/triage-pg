@@ -144,3 +144,83 @@ def test_rerun_with_more_features_is_same_experiment(db_pool_greenfield):
     assert n_exp == 1  # one experiment row, reused
     assert n_runs == 2  # two runs (attempts) under it
     assert name == "Original name"  # first writer wins (on conflict do nothing)
+
+
+# --------------------------------------------------------- task_framing (migration 0019)
+
+
+def test_hash_ignores_task_framing():
+    """task_framing is the observation regime — identity-neutral by construction (P12.4):
+    tagging or re-tagging an existing config must NOT fork its experiment_hash."""
+    bare = dict(_BASE_CONFIG)
+    tagged = {**_BASE_CONFIG, "task_framing": "early_warning"}
+    retagged = {**_BASE_CONFIG, "task_framing": "resource_prioritization"}
+
+    assert experiment_hash_for(bare) == experiment_hash_for(tagged)
+    assert experiment_hash_for(tagged) == experiment_hash_for(retagged)
+
+
+def test_unknown_task_framing_is_a_path_addressed_error():
+    """The structured validator (webapp's POST /api/validate-config) rejects unknown
+    framings with a path-addressed error; a known framing adds no such error."""
+    from triage.adapters.run import validate_experiment_config
+
+    bad = validate_experiment_config({**_BASE_CONFIG, "task_framing": "sorting_hat"})
+    assert not bad["valid"]
+    assert any(e["path"] == "task_framing" for e in bad["errors"])
+
+    ok = validate_experiment_config({**_BASE_CONFIG, "task_framing": "visit_level"})
+    assert not any(e["path"] == "task_framing" for e in ok["errors"])
+
+
+def test_task_framing_persists_updates_and_never_clears(db_pool_greenfield):
+    """The upsert semantics (migration 0019): a re-run that provides task_framing updates
+    the experiment row (last write wins); a re-run that omits it never clears the tag."""
+    engine = db_pool_greenfield
+
+    def stored(h):
+        with engine.connection() as conn:
+            return conn.execute(
+                "select task_framing from triage.experiments"
+                " where experiment_hash = %(h)s",
+                {"h": h},
+            ).fetchone()["task_framing"]
+
+    h1, _ = _create_experiment_and_run(
+        engine,
+        dict(_BASE_CONFIG),
+        problem_type="classification",
+        profile="local",
+        random_seed=1,
+    )
+    assert stored(h1) is None  # untagged config -> NULL
+
+    h2, _ = _create_experiment_and_run(
+        engine,
+        {**_BASE_CONFIG, "task_framing": "early_warning"},
+        problem_type="classification",
+        profile="local",
+        random_seed=2,
+    )
+    assert h2 == h1  # identity-neutral
+    assert stored(h1) == "early_warning"  # provided -> updated
+
+    h3, _ = _create_experiment_and_run(
+        engine,
+        dict(_BASE_CONFIG),
+        problem_type="classification",
+        profile="local",
+        random_seed=3,
+    )
+    assert h3 == h1
+    assert stored(h1) == "early_warning"  # omitted -> preserved, never cleared
+
+    h4, _ = _create_experiment_and_run(
+        engine,
+        {**_BASE_CONFIG, "task_framing": "visit_level"},
+        problem_type="classification",
+        profile="local",
+        random_seed=4,
+    )
+    assert h4 == h1
+    assert stored(h1) == "visit_level"  # last provided write wins

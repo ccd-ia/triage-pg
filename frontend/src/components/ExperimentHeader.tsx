@@ -7,8 +7,16 @@
  * name/description/author are the cosmetic columns outside the experiment_hash
  * (they must not change identity); the hash is shown as the durable id.
  */
-import type { ExperimentDetailResponse } from '../api/types'
+import type { ExperimentDetailResponse, TaskFraming } from '../api/types'
 import { StatusBadge } from './StatusBadge'
+
+/** task_framing (migration 0019) — the observation regime, orthogonal to problem_type. */
+const FRAMING_TITLE: Record<TaskFraming, string> = {
+  early_warning: 'early warning: the outcome is observed for every cohort member — %labeled should approach 100%',
+  resource_prioritization:
+    'resource prioritization (inspections): outcomes exist only for acted-on entities — %labeled < 100% is expected',
+  visit_level: 'visit-level: the label attaches to an event/visit, not the entity period',
+}
 
 interface Props {
   data: ExperimentDetailResponse
@@ -31,6 +39,11 @@ export function ExperimentHeader({ data, activeRunId, onSelectRun }: Props) {
       <div className="meta">
         <span className="pill mono">{s.experiment_hash.slice(0, 12)}</span>
         <span className="pill">{s.problem_type ?? '—'}</span>
+        {s.task_framing ? (
+          <span className="pill" title={FRAMING_TITLE[s.task_framing]}>
+            {s.task_framing.replace(/_/g, ' ')}
+          </span>
+        ) : null}
         <span className="pill">author · {s.author ?? '—'}</span>
         <span className="pill">{s.n_runs} run{s.n_runs === 1 ? '' : 's'}</span>
         {sh && sharePct >= 0.99 && sh.shared_with_name ? (

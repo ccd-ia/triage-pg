@@ -205,8 +205,8 @@ def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
     """
     return _rows(
         pool,
-        "select experiment_hash, name, description, author, problem_type, created_at,"
-        "       n_runs, last_started_at, last_status, last_plan,"
+        "select experiment_hash, name, description, author, problem_type, task_framing,"
+        "       created_at, n_runs, last_started_at, last_status, last_plan,"
         "       n_model_groups, n_models, n_splits, n_features, base_rate, cohort_size"
         " from triage.experiment_summary"
         " where archived_at is null"
@@ -222,8 +222,8 @@ def experiment_detail(
     params = {"hash": experiment_hash}
     summary = _one(
         pool,
-        "select experiment_hash, name, description, author, problem_type, created_at,"
-        "       n_runs, last_started_at, last_status, last_plan,"
+        "select experiment_hash, name, description, author, problem_type, task_framing,"
+        "       created_at, n_runs, last_started_at, last_status, last_plan,"
         "       n_model_groups, n_models, n_splits, n_features, base_rate, cohort_size"
         " from triage.experiment_summary where experiment_hash = %(hash)s",
         params,

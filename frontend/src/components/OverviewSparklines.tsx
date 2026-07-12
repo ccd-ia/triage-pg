@@ -10,7 +10,7 @@
  *   %labeled = n_labeled / n_entities.
  */
 import { Area, AreaChart, ReferenceArea, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
-import type { SummaryResponse } from '../api/types'
+import type { ExperimentSummary, SummaryResponse } from '../api/types'
 import { tooltipFormatter } from '../api/format'
 
 interface Mini {
@@ -20,9 +20,33 @@ interface Mini {
   points: { i: number; v: number | null; immature: boolean }[]
   domain: [number, number] | undefined
   color: string
+  /** framing-aware context line under the headline (migration 0019). */
+  note?: string
+  noteTone?: 'muted' | 'warn'
 }
 
-function buildMinis(data: SummaryResponse): Mini[] {
+/** The %-labeled card reads differently per observation regime (task_framing): an
+ * inspections problem EXPECTS <100% (only acted-on entities get outcomes), while an
+ * early-warning problem showing <100% deserves a second look. */
+function pctLabeledNote(
+  exp: ExperimentSummary | null | undefined,
+  pct: number | null,
+): { note?: string; noteTone?: 'muted' | 'warn' } {
+  switch (exp?.task_framing) {
+    case 'resource_prioritization':
+      return { note: 'selective labels — <100% expected', noteTone: 'muted' }
+    case 'early_warning':
+      return pct != null && pct < 0.995
+        ? { note: 'early-warning: labels should cover the cohort', noteTone: 'warn' }
+        : { note: 'outcome observed for the full cohort', noteTone: 'muted' }
+    case 'visit_level':
+      return { note: 'label per visit event', noteTone: 'muted' }
+    default:
+      return {}
+  }
+}
+
+function buildMinis(data: SummaryResponse, exp?: ExperimentSummary | null): Mini[] {
   const cohort = data.cohort_profile
   const labels = data.label_base_rate
   const n = Math.max(cohort.length, labels.length)
@@ -58,11 +82,28 @@ function buildMinis(data: SummaryResponse): Mini[] {
   const fmtPct = (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
   const fmtRate = (v: number | null) => (v == null ? '—' : v.toFixed(3))
 
+  // Survival labels carry duration/event_observed (ADR-0010): label_base_rate's
+  // base_rate is then the observed-event rate — title the card accordingly.
+  const survival = exp?.problem_type === 'survival'
   return [
     { title: 'cohort', headline: fmtInt(last(cohortPts)), points: cohortPts, domain: undefined, color: 'var(--acc)' },
     { title: 'labels', headline: fmtInt(last(labelPts)), points: labelPts, domain: undefined, color: 'var(--acc2)' },
-    { title: '% labeled', headline: fmtPct(last(pctPts)), points: pctPts, domain: [0, 1], color: 'var(--ok)' },
-    { title: 'base rate', headline: fmtRate(last(ratePts)), points: ratePts, domain: [0, 1], color: 'var(--warn)' },
+    {
+      title: '% labeled',
+      headline: fmtPct(last(pctPts)),
+      points: pctPts,
+      domain: [0, 1],
+      color: 'var(--ok)',
+      ...pctLabeledNote(exp, last(pctPts)),
+    },
+    {
+      title: survival ? 'event rate' : 'base rate',
+      headline: fmtRate(last(ratePts)),
+      points: ratePts,
+      domain: [0, 1],
+      color: 'var(--warn)',
+      ...(survival ? { note: 'share of labels with the event observed', noteTone: 'muted' as const } : {}),
+    },
   ]
 }
 
@@ -74,6 +115,19 @@ function MiniChart({ mini }: { mini: Mini }) {
     <div className="sk">
       <span className="lbl">{mini.title}</span>
       <span className="big">{mini.headline}</span>
+      {mini.note ? (
+        <span
+          className="muted"
+          style={{
+            display: 'block',
+            fontSize: 9.5,
+            lineHeight: 1.2,
+            color: mini.noteTone === 'warn' ? 'var(--warn)' : undefined,
+          }}
+        >
+          {mini.note}
+        </span>
+      ) : null}
       <div style={{ height: 40, marginTop: 4 }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={mini.points} margin={{ top: 4, right: 2, bottom: 0, left: 0 }}>
@@ -109,8 +163,14 @@ function MiniChart({ mini }: { mini: Mini }) {
   )
 }
 
-export function OverviewSparklines({ data }: { data: SummaryResponse }) {
-  const minis = buildMinis(data)
+export function OverviewSparklines({
+  data,
+  experiment,
+}: {
+  data: SummaryResponse
+  experiment?: ExperimentSummary | null
+}) {
+  const minis = buildMinis(data, experiment)
   return (
     <div className="sparks">
       {minis.map((m) => (
