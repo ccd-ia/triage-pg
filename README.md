@@ -106,7 +106,7 @@ triage-pg is a fork of **[triage](https://github.com/dssg/triage)**, created by 
 
 triage-pg stands on that work, **preserves its MIT license and copyright**, and keeps the full git history for attribution. Thank you to the triage authors and community.
 
-If you want the original, full-featured, battle-tested toolkit, use **[dssg/triage](https://github.com/dssg/triage)** — it is actively maintained and supports a great deal that triage-pg deliberately drops. The dimension-by-dimension comparison lives in [`docs/triage-pg-vs-dssg-triage.html`](docs/triage-pg-vs-dssg-triage.html).
+If you want the original, full-featured, battle-tested toolkit, use **[dssg/triage](https://github.com/dssg/triage)** — it is actively maintained and supports a great deal that triage-pg deliberately drops. The dimension-by-dimension comparison lives at [triage-pg vs DSSG triage](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html) (source: `docs/triage-pg-vs-dssg-triage.html`).
 
 ## Why a separate project?
 
