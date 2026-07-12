@@ -1,17 +1,19 @@
-# DirtyDuck Greenfield End-to-End Run
-# Ported from old-schema configs (dirty-duckling.yaml, inspections_baseline.yaml)
-# to the greenfield experiment_config shape (adapter-spec + run.py docstring).
+# DirtyDuck — the Early Warning System (EIS) twin of experiment.yaml.
+# SAME data, same cohort, same features, same grid; ONE decision differs: what does
+# "no inspection in the window" mean? Here it means outcome = 0 — "this facility will
+# not appear on the failed-inspections register in the next 6 months" is knowable for
+# EVERY active facility (the register is complete), so the label covers the full cohort
+# (%labeled = 100). The base config instead leaves uninspected facilities NULL (their
+# outcome is unknown — the inspections / resource-prioritization regime). Because the
+# label SQL genuinely changes, this is a DIFFERENT experiment (its own hash, ADR-0022).
 #
-# Problem: which facilities are likely to fail a food inspection in the next 6 months?
-# Data: semantic.entities (active facilities), semantic.events (inspections, 2014-2017)
+# Problem: which facilities will appear on the failed-inspections register within 6 months?
 
 problem_type: classification
 
-# Observation regime (identity-neutral, migration 0019): the label below only exists for
-# facilities that WERE inspected in the window (~55% of the cohort) — the outcome of the
-# rest is unknown, not zero. That is the resource-prioritization / inspections regime.
-# The early-warning twin (experiment-eis.yaml) coalesces no-event to 0 instead.
-task_framing: resource_prioritization
+# Observation regime (identity-neutral, migration 0019): every cohort member's outcome
+# is observed — the early-warning regime.
+task_framing: early_warning
 
 temporal_config:
   feature_start_time: '2014-01-01'
@@ -37,15 +39,18 @@ cohort_config:
     where e.activity_period @> {as_of_date}::date
 
 label_config:
-  name: failed_inspections
+  name: on_failed_register
   query: |
     select
-      entity_id,
-      bool_or(result = 'fail')::integer as outcome
-    from ontology.events
-    where {as_of_date}::date <= date
-      and date < {as_of_date}::date + {label_timespan}
-    group by entity_id
+      e.entity_id,
+      coalesce(bool_or(ev.result = 'fail'), false)::integer as outcome
+    from ontology.entities as e
+    left join ontology.events as ev
+      on ev.entity_id = e.entity_id
+     and {as_of_date}::date <= ev.date
+     and ev.date < {as_of_date}::date + {label_timespan}
+    where e.activity_period @> {as_of_date}::date
+    group by e.entity_id
 
 # featurizer ER-graph: facilities are the target entity, inspections are child events.
 # Aggregation windows are ISO-8601 (featurizer format, not timechop format).

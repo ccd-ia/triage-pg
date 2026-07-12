@@ -11,7 +11,7 @@ criterion; if all of them hold, your machine can run everything else on this
 site. It is triage-pg's homage to DSSG triage's
 [Dirty Duckling](https://dssg.github.io/triage/dirtyduck/dirty_duckling/) —
 the fast way to test the waters before the full
-[DirtyDuck case study](/triage-pg/tutorials/) *(lands next in this series)*.
+[DirtyDuck case study](/triage-pg/tutorials/dirtyduck/).
 
 You need: **Docker**, **[uv](https://docs.astral.sh/uv/)**, and a checkout of
 [ccd-ia/triage-pg](https://github.com/ccd-ia/triage-pg). Everything runs from
@@ -182,9 +182,9 @@ Five things worth 60 seconds each:
 
 ## Where next
 
-- The full **DirtyDuck case study** — same data, the whole discussion: early
-  warning vs resource prioritization, leakage, fairness, model selection
-  *(next in this series)*.
+- The full [**DirtyDuck case study**](/triage-pg/tutorials/dirtyduck/) — same
+  data, the whole discussion: early warning vs resource prioritization,
+  leakage, fairness, model selection.
 - The [onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html)
   for the system-at-a-glance view.
 - `just tutorial-down` stops the database; `just tutorial-clean` removes it

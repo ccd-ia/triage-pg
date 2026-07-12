@@ -245,28 +245,28 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 3 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 3: DirtyDuck — the full case study, both framings</h3>
+      <h3><code class="status">[x]</code> Phase 3: DirtyDuck — the full case study, both framings</h3>
       <p>The flagship, mirroring DSSG's chapter graph on the same Chicago food-inspections story: problem description, then the SAME data formulated twice — an Early Warning System (<code>early_warning</code>: will this active facility fail an inspection in the next 6 months?) and Resource Prioritization (<code>resource_prioritization</code>: among facilities we could inspect, which are most likely to be found violating?). This is where migration 0019's framing tag stops being a chip and becomes pedagogy: the two configs differ in cohort/label SQL and framing, and the dashboard's %-labeled card reads differently for each.</p>
-      <h4>3.1. The inspections twin config</h4>
+      <h4>3.1. The framing twin config <span class="small">(DEVIATION 2026-07-12: the plan assumed the base config was EIS-shaped; a fresh-stack check showed the base label is already selective — ~54% labeled, NULL for uninspected — i.e. the base IS the inspections regime. So the twin flipped: the base gained <code>task_framing: resource_prioritization</code> identity-neutrally, and the NEW config is the EIS twin.)</span></h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>example/dirtyduck/experiment-inspections.yaml</code>: cohort = facilities with at least one prior inspection still active; label = failed <em>given inspected in the window</em> (NULL for uninspected — %labeled &lt; 100 by construction); <code>task_framing: resource_prioritization</code>; same feature/grid config as the base for comparability</li>
-        <li><code class="status">[]</code> Run it E2E on the food DB; confirm a DIFFERENT experiment_hash than the base (the problem changed), the framing pill, and a &lt;100% labeled card with the selective-labels note</li>
+        <li><code class="status">[x]</code> <code>example/dirtyduck/experiment-eis.yaml</code>: same cohort/features/grid; the label LEFT JOINs the cohort and coalesces no-event to 0 (register semantics — outcome knowable for all) with <code>task_framing: early_warning</code>; base config tagged <code>resource_prioritization</code> with the hash held at <code>b9e38fd8</code> (identity-neutrality live-proven on the committed example)</li>
+        <li><code class="status">[x]</code> Both run E2E on the fresh food DB: EIS hash <code>c0d16446</code> (new problem), %labeled 100 vs 53.7, base rate 0.116 vs 0.277 (the selective-labels artifact, quantified); cohort + feature artifacts cache-shared across the two experiments</li>
       </ul>
       <h4>3.2. Chapters</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Welcome + who-is-this-for (mirrors DSSG's <code>index.md</code>/<code>who_is_this_tutorial_for.md</code>; sets the two-framings promise)</li>
-        <li><code class="status">[]</code> Infrastructure + data preparation (the docker stack; <code>raw → clean → ontology.*</code> with the entity/event tables and <code>knowledge_date</code> discussion — the "knowledge date, not event date" gotcha gets its DSSG-style treatment)</li>
-        <li><code class="status">[]</code> Problem formulation × 2 (EIS chapter, Inspections chapter): cohort SQL, label SQL, framing, temporal config with a split diagram; the leakage discussion (fit-free vs fit-based imputation, ADR-0009)</li>
-        <li><code class="status">[]</code> Features via featurizer DFS (the ER star, as-of joins, windows — replacing DSSG's collate aggregate walkthrough); grid + run; the derivation DAG as the cache/provenance story (what DSSG never had)</li>
-        <li><code class="status">[]</code> Evaluate: leaderboard, audition rules, bias block (facility_type, punitive intervention → FPR parity) and restaurant subset — reusing the README's identity-neutral blocks; model card tour</li>
-        <li><code class="status">[]</code> Problem-type variants appendix (regression/survival/deepgrid configs table) + "where this differs from DSSG triage" close linking the comparison page</li>
+        <li><code class="status">[x]</code> Welcome + who-is-this-for (mirrors DSSG's <code>index.md</code>/<code>who_is_this_tutorial_for.md</code>; sets the two-framings promise)</li>
+        <li><code class="status">[x]</code> Infrastructure + data preparation (the docker stack; <code>raw → clean → ontology.*</code> with the entity/event tables and <code>knowledge_date</code> discussion — the "knowledge date, not event date" gotcha gets its DSSG-style treatment)</li>
+        <li><code class="status">[x]</code> Problem formulation × 2 (EIS chapter, Inspections chapter): cohort SQL, label SQL, framing, temporal config with a split diagram; the leakage discussion (fit-free vs fit-based imputation, ADR-0009)</li>
+        <li><code class="status">[x]</code> Features via featurizer DFS (the ER star, as-of joins, windows — replacing DSSG's collate aggregate walkthrough); grid + run; the derivation DAG as the cache/provenance story (what DSSG never had)</li>
+        <li><code class="status">[x]</code> Evaluate: leaderboard, audition rules, bias block (facility_type, punitive intervention → FPR parity) and restaurant subset — reusing the README's identity-neutral blocks; model card tour</li>
+        <li><code class="status">[x]</code> Problem-type variants appendix (regression/survival/deepgrid configs table) + "where this differs from DSSG triage" close linking the comparison page</li>
       </ul>
       <h4>3.3. Testing Strategy</h4>
       <p>Same discipline as P2 plus the new config's correctness: both experiments runnable fresh, the framing UI states match the prose, screenshots reproducible.</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> Fresh-stack verbatim pass over both framing paths; quoted hashes/counts match</li>
-        <li><code class="status">[]</code> <code>uv run pytest src/tests/ -q -k "identity or validate"</code> — the new example config validates through <code>validate_experiment_config</code> with zero errors</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
+        <li><code class="status">[x]</code> Fresh-stack verbatim pass over both framing paths; quoted hashes/counts match (incl. the bias+subset add-on run: 17,200 bias rows, 120 subset evaluations, identity held)</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -q -k "identity or validate"</code> — the new example config validates through <code>validate_experiment_config</code> with zero errors</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
