@@ -8,19 +8,19 @@ variants, and the E2E smokes all run against.
 ## Run it
 
 ```bash
-just tutorial-up          # build + start the food DB (PostGIS image; host port $DIRTYDUCK_PG_PORT, default 5434)
+just tutorial-up          # build + start the food DB (PostGIS image; host port $DIRTYDUCK_PG_PORT, default 5440)
 
 # point triage at it (baked tutorial creds; the file is gitignored)
 cat > dirtyduck-database.yaml <<'YAML'
 host: 127.0.0.1
 user: food_user
 pass: some_password
-port: 5434   # match DIRTYDUCK_PG_PORT if you overrode it
+port: 5440   # match DIRTYDUCK_PG_PORT if you overrode it
 db: food
 YAML
 
 # create the triage results schema inside the food DB
-DATABASE_URL=postgresql://food_user:some_password@127.0.0.1:5434/food \
+DATABASE_URL=postgresql://food_user:some_password@127.0.0.1:5440/food \
   just alembic upgrade head
 
 # the full pipeline: cohort → labels → featurizer → matrices → train → evaluate
@@ -31,7 +31,7 @@ uv run triage --dbfile dirtyduck-database.yaml run \
 Inspect the results — headless or in the browser (ADR-0012):
 
 ```bash
-export DATABASE_URL=postgresql://food_user:some_password@127.0.0.1:5434/food
+export DATABASE_URL=postgresql://food_user:some_password@127.0.0.1:5440/food
 uv run triage leaderboard <experiment-hash>
 uv run triage models <experiment-hash>            # groups: avg ± σ, max regret, fit time
 uv run triage audition <experiment-hash>          # 8 selection rules + divergence check

@@ -1,5 +1,10 @@
 # triage-pg
 
+[![ci](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml/badge.svg)](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/ccd-ia/triage-pg?include_prereleases&label=release)](https://github.com/ccd-ia/triage-pg/releases)
+[![ghcr](https://img.shields.io/badge/ghcr.io-triage--pg-blue?logo=docker&logoColor=white)](https://github.com/orgs/ccd-ia/packages/container/package/triage-pg)
+[![license](https://img.shields.io/github/license/ccd-ia/triage-pg)](LICENSE)
+
 **A PostgreSQL-native, deliberately simplified fork of [`triage`](https://github.com/dssg/triage) for temporal machine learning on tabular public-policy data.**
 
 triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching, consulting, and production monitoring.
@@ -64,7 +69,7 @@ erDiagram
 | Capability | The triage-pg shape |
 |---|---|
 | **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch (ADR-0010/0026) |
-| **Features** | [`featurizer`](https://github.com/nanounanue/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins (ADR-0008) |
+| **Features** | [`featurizer`](https://github.com/ccd-ia/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins (ADR-0008) |
 | **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices (ADR-0007) |
 | **Fairness** | SQL group-bys over `protected_groups`: 8 per-group metrics with disparity + τ verdicts, config-driven ingestion, and the Aequitas **fairness tree** as a guidance wizard ([`docs/fairness.md`](docs/fairness.md)) |
 | **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
@@ -93,9 +98,11 @@ The complete walkthrough — including your-own-data projects, the multi-project
 
 Installation reality: not on PyPI — clone and `uv sync`. Needs PostgreSQL 11+ (plain, no extensions). Optional extras: `dashboard` (FastAPI + SPA), `survival` (scikit-survival), `oidc` (real webapp auth).
 
+No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
+
 ## Acknowledgment — built on DSSG's triage
 
-triage-pg is a fork of **[triage](https://github.com/dssg/triage)**, created by the **Center for Data Science and Public Policy (DSaPP) at the University of Chicago** and maintained at **Carnegie Mellon University**. The hard, valuable ideas at the heart of this project are theirs: temporal cross-validation (`timechop`), leakage-safe feature engineering, reproducible model governance and hashing, bias auditing, and the whole "operational design questions → modeling choices" framing. The feature engine triage-pg adopts, [`featurizer`](https://github.com/nanounanue/featurizer), is likewise a DSSG-lineage Deep Feature Synthesis project.
+triage-pg is a fork of **[triage](https://github.com/dssg/triage)**, created by the **Center for Data Science and Public Policy (DSaPP) at the University of Chicago** and maintained at **Carnegie Mellon University**. The hard, valuable ideas at the heart of this project are theirs: temporal cross-validation (`timechop`), leakage-safe feature engineering, reproducible model governance and hashing, bias auditing, and the whole "operational design questions → modeling choices" framing. The feature engine triage-pg adopts, [`featurizer`](https://github.com/ccd-ia/featurizer), is likewise a DSSG-lineage Deep Feature Synthesis project.
 
 triage-pg stands on that work, **preserves its MIT license and copyright**, and keeps the full git history for attribution. Thank you to the triage authors and community.
 
@@ -106,7 +113,7 @@ If you want the original, full-featured, battle-tested toolkit, use **[dssg/tria
 An effort to modernize triage *in place* (PR #994 on dssg/triage) accumulated too much friction against the existing test suite, dependency surface, and backward-compatibility constraints to be worth continuing. Rather than keep fighting that, triage-pg starts from triage's modernized core and takes a different, **opinionated and intentionally breaking** direction — one that does not belong upstream because it removes and reshapes things the original supports:
 
 - **PostgreSQL as the whole substrate.** Evaluation, leaderboards, audition, and bias metrics run *in the database* (PL/pgSQL over a predictions table), not in pandas. No Aequitas dependency — fairness metrics are SQL group-bys, guided by the Aequitas fairness tree.
-- **A modern feature engine.** Feature generation moves from Collate to [`featurizer`](https://github.com/nanounanue/featurizer), a PostgreSQL-native Deep Feature Synthesis engine that is point-in-time-correct via as-of joins.
+- **A modern feature engine.** Feature generation moves from Collate to [`featurizer`](https://github.com/ccd-ia/featurizer), a PostgreSQL-native Deep Feature Synthesis engine that is point-in-time-correct via as-of joins.
 - **More problem types.** Beyond binary classification: regression-as-ranking, pure regression, and fully runnable survival analysis, selected by a `problem_type` switch.
 - **Append-only, monitoring-ready predictions** — timestamped and partitioned, so prediction history is captured from day one; production monitoring is a config block and a cron line, not a service.
 - **Guix-style artifact derivation DAG.** Every built artifact (cohort, labels, feature groups, matrices, models) is identified by a hash over its *complete input closure*, with explicit dependency edges recorded in the project database. Caching is by derivation (no manual `replace=True` vigilance), provenance is queryable in SQL, and garbage collection works by reachability from live roots. See [`docs/derivation-dag.md`](docs/derivation-dag.md) and ADRs 0013–0017.

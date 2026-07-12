@@ -51,7 +51,7 @@ then `docker compose down -v && docker compose up -d` (the `-v` lets init re-run
 ## Recipes
 
 ```bash
-just donors-up        # build + start the DB (port $DONORS_PG_PORT, default 5436)
+just donors-up        # build + start the DB (port $DONORS_PG_PORT, default 5441)
 just donors-shell     # psql into it
 just donors-down      # stop
 just donors-clean     # remove container + image + volume
@@ -64,7 +64,7 @@ predictions, evaluations) into the **same** database that holds the source `onto
 the steps are: start the DB, point triage at it, create the `triage.*` schema, then run.
 
 ```bash
-# 1. start the tutorial DB (default host port 5436; override with DONORS_PG_PORT if taken)
+# 1. start the tutorial DB (default host port 5441; override with DONORS_PG_PORT if taken)
 just donors-up
 
 # 2. a dev DB config for triage (baked tutorial creds; gitignored, recreate as needed)
@@ -72,13 +72,13 @@ cat > donorschoose-database.yaml <<'YAML'
 host: 127.0.0.1
 user: donors_user
 pass: some_password
-port: 5436
+port: 5441
 db: donors
 YAML
 
 # 3. create the triage results schema inside the donors DB (DATABASE_URL overrides the recipe's
 #    default database.yaml target)
-DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5436/donors \
+DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5441/donors \
   just alembic upgrade head
 
 # 4. run cohort → labels → matrices → train → predict → evaluate
@@ -98,7 +98,7 @@ base rate); the teacher/school history features carry far more weight on the ful
 ## Inspect + diagnose (after the run)
 
 ```bash
-export DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5436/donors
+export DATABASE_URL=postgresql://donors_user:some_password@127.0.0.1:5441/donors
 uv run triage leaderboard <experiment-hash>
 uv run triage models <experiment-hash>            # groups: avg ± σ, max regret, fit time
 uv run triage audition <experiment-hash>

@@ -72,7 +72,7 @@ slices (the subset is the population). Both are identity-neutral: adding them do
 change the experiment hash.
 
 The other two tutorial datasets work identically: `just tutorial-up` (DirtyDuck food
-inspections, default port 5434 — override with DIRTYDUCK_PG_PORT) and `just donors-up` (DonorsChoose KDD Cup 2014, port 5436), each
+inspections, default port 5440 — override with DIRTYDUCK_PG_PORT) and `just donors-up` (DonorsChoose KDD Cup 2014, port 5441), each
 with an `example/<dataset>/experiment.yaml` and a README describing its problem.
 
 ## Path B — your own project (the ADR-0002 lifecycle)
@@ -107,7 +107,7 @@ One dashboard instance serves every registry project via the top-bar **project s
 ```bash
 export TRIAGE_REGISTRY_URL=<registry-db-url>
 # only needed when projects live in separate clusters/containers (the tutorial dockers do):
-export TRIAGE_PROJECT_DB_MAP='{"chi311": "postgresql://…:5438/chi311", "food": "postgresql://…:5434/food"}'
+export TRIAGE_PROJECT_DB_MAP='{"chi311": "postgresql://…:5438/chi311", "food": "postgresql://…:5440/food"}'
 just serve 8014
 ```
 
