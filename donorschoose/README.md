@@ -1,5 +1,7 @@
 # DonorsChoose (KDD Cup 2014) — Early-Warning-System tutorial dataset
 
+> This README is the terse runbook. For the narrated case study, read [the DonorsChoose tutorial](https://ccd-ia.github.io/triage-pg/tutorials/donorschoose/).
+
 A second triage-pg tutorial dataset alongside DirtyDuck, for a **binary early-warning
 problem**: *will a newly-posted classroom project FAIL to be fully funded within 4 months?*
 (the positive class is the project that needs help). Same packaging pattern as DirtyDuck —

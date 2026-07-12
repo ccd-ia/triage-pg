@@ -1,5 +1,7 @@
 # triage-pg documentation
 
+> **Tutorials** (DSSG-style case studies) live on the docs site: [tutorials index](https://ccd-ia.github.io/triage-pg/tutorials/) — smoke test · DirtyDuck (both framings) · Chicago 311 · DonorsChoose. Sources: `docs-site/src/content/docs/tutorials/`.
+
 **triage-pg** is a PostgreSQL-native, deliberately simplified fork of DSSG's `triage` for temporal
 ML on tabular public-policy data. It keeps triage's pipeline shape — cohort → features → matrices →
 train → predict → evaluate — on a much smaller surface area built around plain PostgreSQL.

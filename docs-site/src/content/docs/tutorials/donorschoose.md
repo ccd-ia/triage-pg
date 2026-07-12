@@ -127,6 +127,8 @@ runs — the fan-out costs marginal training time, not a pipeline rebuild.
 
 ## Reading a diffuse-signal leaderboard
 
+![A model card: threshold curves, score histogram, calibration, importances](../../../assets/tutorials/model-sheet.png)
+
 Two habits this dataset rewards:
 
 - **Look at stability, not the single best cell.** With weak signal, the

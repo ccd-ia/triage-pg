@@ -1,5 +1,7 @@
 # Chicago 311 Service Requests — Early-Warning-System tutorial dataset
 
+> This README is the terse runbook. For the narrated case study, read [the Chicago 311 tutorial](https://ccd-ia.github.io/triage-pg/tutorials/chicago311/).
+
 A third triage-pg tutorial dataset (alongside DirtyDuck and DonorsChoose), for a **binary
 early-warning problem**: *for a service request that was just filed, will it take LONGER than the
 SLA (14 days) to resolve?* (the positive class is the slow request an operator would escalate).

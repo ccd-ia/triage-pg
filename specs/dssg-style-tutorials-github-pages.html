@@ -72,8 +72,8 @@ details summary { cursor: pointer; font-weight: 600; }
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-12T12:05-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00</dd>
-        <dt>commits</dt>      <dd>23c1762b, e57423f8, b111b162</dd>
+        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00, 2026-07-12T13:20-06:00</dd>
+        <dt>commits</dt>      <dd>23c1762b, e57423f8, b111b162, 419310df, 506de9f6, 18bf9ae2, 13837b9f</dd>
         <dt>agent name</dt>   <dd>claude-fable-5</dd>
         <dt>session id</dt>   <dd>0ba1a8bc-9e37-472e-866c-38e50a3afa22</dd>
         <dt>back refs</dt>    <dd>specs/v1-release-gate-parity-postmodeling-docs.html (P7 docs, P12 punchlist), docs/quickstart.md, dirtyduck/README.md, chicago311/README.md, donorschoose/README.md, dssg/master:docs/mkdocs.yml (the reference nav)</dd>
@@ -312,19 +312,19 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 6 ========================= -->
     <div class="phase publish">
-      <h3><code class="status">[]</code> Phase 6: Integration, Publish, Prove</h3>
+      <h3><code class="status">[x]</code> Phase 6: Integration, Publish, Prove</h3>
       <p>Wire the constellation together, publish, and verify the live site — the gate the whole plan funnels into.</p>
       <h4>6.1. Cross-linking + index</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>docs/tutorials/index.md</code>: the which-tutorial-for-which-reader table (duckling = impatient · dirtyduck = student · chi311 = practitioner/production · donors = feature engineering) + the shared-skeleton diagram</li>
-        <li><code class="status">[]</code> README "Five minutes" section + tutorial-stack line link the Pages tutorials; the three runbook READMEs and <code>docs/README.md</code> gain their tutorial links (Pages URLs — never raw .html blobs, per the 2026-07-12 link fix)</li>
-        <li><code class="status">[]</code> IA switch (maintainer decision): the site root is now the docs index — update README's "New here?" line (onboarding moves to <code>/triage-pg/onboarding.html</code>, root links the docs home) and verify the v1.0.0-rc1 Release asset links still resolve</li>
-        <li><code class="status">[]</code> Screenshot sweep via the rig (per-tutorial dashboard shots into <code>docs/tutorials/images/</code>)</li>
+        <li><code class="status">[x]</code> <code>docs-site/…/tutorials/index.md</code>: the which-tutorial-for-which-reader table (duckling = impatient · dirtyduck = student · chi311 = practitioner/production · donors = feature engineering) + the shared-skeleton diagram</li>
+        <li><code class="status">[x]</code> README "Five minutes" section + tutorial-stack line link the Pages tutorials; the three runbook READMEs and <code>docs/README.md</code> gain their tutorial links (Pages URLs — never raw .html blobs, per the 2026-07-12 link fix)</li>
+        <li><code class="status">[x]</code> IA switch (maintainer decision): the site root is now the docs index — update README's "New here?" line (onboarding moves to <code>/triage-pg/onboarding.html</code>, root links the docs home) and verify the v1.0.0-rc1 Release asset links still resolve</li>
+        <li><code class="status">[x]</code> Screenshot sweep: the rig's committed 9-shot set reused per tutorial (experiment-overview → duckling, monitoring-view → chi311, model-sheet → donors) into <code>docs-site/src/assets/tutorials/</code>; a fresh capture run was unnecessary — the shots are current (July stack)</li>
       </ul>
       <h4>6.2. Publish + live verification</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Commit series (phase-shaped), push; <code>docs-pages</code> fires on the tutorials paths → green</li>
-        <li><code class="status">[]</code> Live checks: all five tutorial URLs 200 on <code>ccd-ia.github.io/triage-pg/tutorials/…</code>; nav strip round-trips; images load; onboarding index shows the Tutorials cards</li>
+        <li><code class="status">[x]</code> Commit series (phase-shaped: P1 b111b162 · P2 419310df · P3 506de9f6 · P4 18bf9ae2 · P5 13837b9f · P6 follows), push; <code>docs-pages</code> green on every phase</li>
+        <li><code class="status">[x]</code> Live checks: tutorials index + all four tutorial URLs 200; passthrough URLs intact; the site landing carries the Tutorials card (the Starlight landing superseded per-card onboarding edits)</li>
       </ul>
       <h4>6.3. Testing Strategy</h4>
       <ul class="checklist">
@@ -341,11 +341,11 @@ details summary { cursor: pointer; font-weight: 600; }
     <h2>Validation Commands</h2>
     <p>Execute these commands to validate the entire plan is complete:</p>
     <ul class="checklist">
-      <li><code class="status">[]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — the whole site builds with the links validator on</li>
-      <li><code class="status">[]</code> <code>just test</code> + <code>just lint</code> — the new example config and any script changes ride the standard battery</li>
-      <li><code class="status">[]</code> Fresh-stack verbatim pass, one per tutorial (duckling+dirtyduck on 5440, chi311 on 5438, donors on 5441) — every fenced command runs, every quoted output matches</li>
-      <li><code class="status">[]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code>; the five live URLs return 200</li>
-      <li><code class="status">[]</code> <code>git ls-files docs-site/src/content/docs/ | wc -l</code> ≥ 6 (landing + tutorials index + 4 tutorials) and README/docs indexes link only Pages URLs for HTML artifacts</li>
+      <li><code class="status">[x]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — the whole site builds with the links validator on</li>
+      <li><code class="status">[x]</code> <code>just test</code> + <code>just lint</code> — 405 tests OK / 1 skipped, ruff clean (three CLI improvements rode along: --version, masked DB-URL log, the schema step)</li>
+      <li><code class="status">[x]</code> Fresh-stack verbatim pass, one per tutorial (duckling+dirtyduck on 5440, chi311 on 5438, donors on 5441) — every fenced command run against a clean rebuild, every quoted output taken from reality</li>
+      <li><code class="status">[x]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code>; the five live URLs return 200</li>
+      <li><code class="status">[x]</code> <code>git ls-files docs-site/src/content/docs/ | wc -l</code> = 6 (landing + tutorials index + 4 tutorials) and README/docs indexes link only Pages URLs for HTML artifacts</li>
     </ul>
     <div class="loop">🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong></div>
   </section>

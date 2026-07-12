@@ -1,5 +1,7 @@
 # DirtyDuck — the canonical triage-pg tutorial dataset
 
+> This README is the terse runbook. For the narrated case study, read [the DirtyDuck case study (and the Dirty Duckling smoke test)](https://ccd-ia.github.io/triage-pg/tutorials/dirtyduck/).
+
 The classic DSSG teaching problem, repackaged for triage-pg: **will a food facility fail
 its next inspection within 6 months?** (Chicago food-inspections data in a self-contained
 Postgres docker.) This is the dataset the quickstart's sibling paths, the problem-type

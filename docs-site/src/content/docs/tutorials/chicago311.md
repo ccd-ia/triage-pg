@@ -182,6 +182,8 @@ scoring) — never overwrites — so day after day the history accumulates and t
 - **realized outcomes**: as labels mature, re-running evaluation upserts the
   realized metrics per as-of date — the "was the model still right?" curve.
 
+![The monitoring view: score drift chips, scoring-volume heartbeat, realized outcomes](../../../assets/tutorials/monitoring-view.png)
+
 Append-only is the design decision that makes all of this cheap (ADR-0006):
 a score is never "the" score, it's a row with a timestamp; "current" is just
 `max(scored_at)`.
