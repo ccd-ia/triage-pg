@@ -15,7 +15,10 @@
  * `<Rows> | EmptyState`.
  */
 
-export type ProblemType = 'classification' | 'regression-as-ranking' | 'pure-regression'
+/** Mirrors the triage.problem_type DB enum (migration 0001, ADR-0010/0026). The previous
+ * union predated survival and misspelled the regression modes — it type-checked only
+ * because the values are rendered as opaque text. */
+export type ProblemType = 'classification' | 'regression_ranking' | 'regression' | 'survival'
 export type RunStatus = 'started' | 'building' | 'completed' | 'failed'
 export type ArtifactStatus = 'building' | 'built' | 'collected' | 'failed'
 
@@ -473,6 +476,10 @@ export interface ProgressDelta {
 /* GET /api/experiments/{hash} — summary + config + runs                      */
 /* -------------------------------------------------------------------------- */
 
+/** The observation regime — who gets a label and why (migration 0019). Orthogonal to
+ * problem_type and identity-neutral (tagging an existing config never forks its hash). */
+export type TaskFraming = 'early_warning' | 'resource_prioritization' | 'visit_level'
+
 /** triage.experiment_summary — one row per experiment (the rail/list shape). */
 export interface ExperimentSummary {
   experiment_hash: string
@@ -480,6 +487,7 @@ export interface ExperimentSummary {
   description: string | null
   author: string | null
   problem_type: ProblemType | null
+  task_framing: TaskFraming | null
   created_at: string | null
   n_runs: number
   last_started_at: string | null
