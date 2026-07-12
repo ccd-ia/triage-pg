@@ -72,8 +72,8 @@ details summary { cursor: pointer; font-weight: 600; }
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-12T12:05-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00</dd>
-        <dt>commits</dt>      <dd>(none yet)</dd>
+        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00</dd>
+        <dt>commits</dt>      <dd>23c1762b</dd>
         <dt>agent name</dt>   <dd>claude-fable-5</dd>
         <dt>session id</dt>   <dd>0ba1a8bc-9e37-472e-866c-38e50a3afa22</dd>
         <dt>back refs</dt>    <dd>specs/v1-release-gate-parity-postmodeling-docs.html (P7 docs, P12 punchlist), docs/quickstart.md, dirtyduck/README.md, chicago311/README.md, donorschoose/README.md, dssg/master:docs/mkdocs.yml (the reference nav)</dd>
@@ -88,7 +88,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
       <rect x="20" y="20" width="180" height="46" rx="9" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.5"/>
       <text x="110" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">Dirty Duckling</text>
-      <text x="110" y="56" text-anchor="middle" font-size="10.5" fill="#475569">10-minute quickstart</text>
+      <text x="110" y="56" text-anchor="middle" font-size="10.5" fill="#475569">install smoke test + tour</text>
       <rect x="20" y="76" width="180" height="46" rx="9" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.5"/>
       <text x="110" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">DirtyDuck</text>
       <text x="110" y="112" text-anchor="middle" font-size="10.5" fill="#475569">full case · EIS + inspections</text>
@@ -99,11 +99,11 @@ details summary { cursor: pointer; font-weight: 600; }
       <text x="110" y="208" text-anchor="middle" font-size="13" font-weight="700" fill="#4f46e5">DonorsChoose</text>
       <text x="110" y="224" text-anchor="middle" font-size="10.5" fill="#475569">funding risk · deep DFS</text>
       <rect x="330" y="96" width="200" height="64" rx="9" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
-      <text x="430" y="122" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">docs/tutorials/*.md</text>
+      <text x="430" y="122" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">docs-site/…/tutorials/*.md</text>
       <text x="430" y="140" text-anchor="middle" font-size="10.5" fill="#475569">markdown, readable on GitHub</text>
       <rect x="600" y="40" width="240" height="56" rx="9" fill="#fffbeb" stroke="#b45309" stroke-width="1.5"/>
-      <text x="720" y="62" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b45309">scripts/build_docs_site.py</text>
-      <text x="720" y="80" text-anchor="middle" font-size="10.5" fill="#475569">md → styled self-contained HTML</text>
+      <text x="720" y="62" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b45309">Astro Starlight build</text>
+      <text x="720" y="80" text-anchor="middle" font-size="10.5" fill="#475569">sidebar · search · i18n · links check</text>
       <rect x="600" y="160" width="240" height="56" rx="9" fill="#f0fdf4" stroke="#15803d" stroke-width="1.5"/>
       <text x="720" y="182" text-anchor="middle" font-size="12.5" font-weight="700" fill="#15803d">ccd-ia.github.io/triage-pg</text>
       <text x="720" y="200" text-anchor="middle" font-size="10.5" fill="#475569">docs-pages.yml · nav + index</text>
@@ -130,7 +130,7 @@ details summary { cursor: pointer; font-weight: 600; }
 
   <section id="solution">
     <h2>Solution</h2>
-    <p>Two layers. <strong>(1) A minimal markdown→HTML site step</strong>: tutorials are authored as plain markdown under <code>docs/tutorials/</code> (readable and reviewable on GitHub, per the repo's docs philosophy), and a small committed builder (<code>scripts/build_docs_site.py</code>, python-markdown, ~150 lines) renders them into self-contained HTML with the onboarding.html visual identity, a per-page table of contents, and a shared nav strip; <code>docs-pages.yml</code> gains one build step and <code>just docs-site</code> previews locally. Deliberately <em>not</em> mkdocs — that tool was retired with the inherited workflows, and a 150-line renderer is inspectable and dependency-light. <strong>(2) Four tutorials sharing one chapter skeleton</strong> lifted from DSSG's nav (Welcome → Dirty Duckling → Problem description → EIS → Inspections → deeper-look → Infrastructure/Data), adapted per dataset and extended with the surfaces DSSG never had: the dashboard, in-PG audition/fairness, subset evaluations, monitoring, survival, and the derivation DAG.</p>
+    <p>Two layers. <strong>(1) An Astro Starlight docs site as the front door</strong> (maintainer decision 2026-07-12, over Quarto and mkdocs-material): tutorials are plain markdown under <code>docs-site/src/content/docs/</code>, and Starlight provides the sidebar, client-side search (Pagefind), dark/light themes, and first-class i18n (English now; <code>es/</code> can land per-tutorial later) — riding the npm toolchain the dashboard already put in CI. The site root <em>becomes</em> the docs index; <code>onboarding.html</code> and the DSSG comparison are passed through <code>public/</code> so their existing URLs (README, Release assets) keep working. A links-validator plugin fails the build on broken internal links. <strong>(2) Four tutorials sharing one chapter skeleton</strong> lifted from DSSG's nav (Welcome → Dirty Duckling → Problem description → EIS → Inspections → deeper-look → Infrastructure/Data), adapted per dataset and extended with the surfaces DSSG never had: the dashboard, in-PG audition/fairness, subset evaluations, monitoring, survival, and the derivation DAG. Dirty Duckling is reframed per the maintainer: an <em>installation smoke test</em> (pass/fail, expected outputs quoted) plus a 5-minute dashboard mini-tour.</p>
     <figure>
       <svg viewBox="0 0 880 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
         <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
@@ -173,14 +173,15 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <h3>New Files</h3>
     <ul>
-      <li><span class="tag new">new</span> <code>scripts/build_docs_site.py</code> — markdown → self-contained HTML renderer (python-markdown + house template string); builds <code>_site/</code> locally and in CI; <code>--check</code> mode validates internal links and code-fence languages</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/index.md</code> — the tutorials landing page (the constellation: which tutorial for which reader)</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/dirtyduckling.md</code> — the 10-minute quickstart (DSSG's "Dirty Duckling" homage)</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/dirtyduck.md</code> — the full case study: Chicago food inspections, BOTH framings (EIS <code>early_warning</code> + inspections <code>resource_prioritization</code>)</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/chicago311.md</code> — EWS on service requests + fairness/subsets/monitoring/survival chapters</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/donorschoose.md</code> — project-funding risk + the deep-DFS/feature-groups showcase</li>
+      <li><span class="tag new">new</span> <code>docs-site/</code> — the Astro Starlight workspace: <code>package.json</code> (pinned astro + @astrojs/starlight + starlight-links-validator), <code>astro.config.mjs</code> (site <code>https://ccd-ia.github.io</code>, base <code>/triage-pg</code>, sidebar), <code>src/styles/house.css</code> (teal identity tokens), a prebuild script copying <code>docs/*.html</code> + <code>docs/images/</code> into <code>public/</code></li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/index.mdx</code> — the site landing page (hero + cards: tutorials · onboarding · DSSG comparison · GitHub)</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/tutorials/index.md</code> — which-tutorial-for-which-reader</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/tutorials/dirtyduckling.md</code> — the installation smoke test + 5-minute mini-tour (DSSG's "Dirty Duckling" homage, reframed as pass/fail testing)</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/tutorials/dirtyduck.md</code> — the full case study: Chicago food inspections, BOTH framings (EIS <code>early_warning</code> + inspections <code>resource_prioritization</code>)</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/tutorials/chicago311.md</code> — EWS on service requests + fairness/subsets/monitoring/survival chapters</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/tutorials/donorschoose.md</code> — project-funding risk + the deep-DFS/feature-groups showcase</li>
       <li><span class="tag new">new</span> <code>example/dirtyduck/experiment-inspections.yaml</code> — the resource-prioritization twin of the base config (label restricted to inspected facilities, <code>task_framing: resource_prioritization</code>) so the two-framings chapter is runnable, not hypothetical</li>
-      <li><span class="tag new">new</span> <code>docs/tutorials/images/</code> — per-tutorial screenshots + small SVG diagrams (temporal splits, ER graphs), committed like <code>docs/images/</code></li>
+      <li><span class="tag new">new</span> <code>docs-site/src/assets/tutorials/</code> — per-tutorial screenshots + small SVG diagrams (temporal splits, ER graphs), committed and optimized by Astro at build</li>
     </ul>
   </section>
 
@@ -192,40 +193,44 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 1 ========================= -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 1: Site Pipeline — markdown in, styled Pages out</h3>
-      <p>The one-time plumbing every tutorial rides on. Markdown sources stay first-class on GitHub; the builder produces self-contained HTML matching the onboarding identity. No mkdocs, no npm, no external theme — one inspectable script.</p>
+      <h3><code class="status">[]</code> Phase 1: Site Pipeline — Starlight as the front door</h3>
+      <p>The one-time plumbing every tutorial rides on (maintainer decisions 2026-07-12: Starlight over Quarto/mkdocs; docs site becomes the Pages index). Markdown sources stay first-class and readable on GitHub; Starlight supplies sidebar, search, themes, and i18n headroom; the two existing HTML artifacts keep their URLs via <code>public/</code> passthrough.</p>
 
-      <h4>1.1. The builder</h4>
+      <h4>1.1. Scaffold + identity</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>uv add --group docs markdown</code> (python-markdown only; extensions: <code>fenced_code</code>, <code>tables</code>, <code>toc</code>, <code>attr_list</code>) — a <code>docs</code> dependency group, not a runtime dep</li>
-        <li><code class="status">[]</code> <code>scripts/build_docs_site.py</code>: render <code>docs/tutorials/*.md</code> → <code>_site/tutorials/*.html</code> with an embedded house template (teal identity, nav strip linking index · duckling · dirtyduck · chi311 · donors · onboarding · comparison, per-page right-rail TOC from the <code>toc</code> extension); copy <code>docs/onboarding.html → _site/index.html</code>, the comparison page, <code>docs/images/</code> and <code>docs/tutorials/images/</code></li>
-        <li><code class="status">[]</code> <code>--check</code> mode: every relative link resolves inside <code>_site/</code>, every internal anchor exists, every fenced block carries a language tag; exit non-zero on any failure (CI gate)</li>
-        <li><code class="status">[]</code> <code>just docs-site</code> recipe: build into a temp dir and <code>open</code> the index (local preview without CI)</li>
+        <li><code class="status">[]</code> Scaffold <code>docs-site/</code> with pinned <code>astro</code> + <code>@astrojs/starlight</code> + <code>starlight-links-validator</code>; commit the lockfile. <code>astro.config.mjs</code>: <code>site: 'https://ccd-ia.github.io'</code>, <code>base: '/triage-pg'</code> (project-pages path — every internal link must respect it), sidebar with a Tutorials group, title <code>triage-pg</code></li>
+        <li><code class="status">[]</code> House identity via Starlight custom CSS: teal <code>#0f766e</code> accent tokens matching onboarding.html/the dashboard; light+dark verified</li>
+        <li><code class="status">[]</code> Landing <code>index.mdx</code>: hero + cards (Tutorials · Onboarding one-pager · DSSG comparison · GitHub repo · GHCR image)</li>
+        <li><code class="status">[]</code> Prebuild passthrough: copy <code>docs/onboarding.html</code>, <code>docs/triage-pg-vs-dssg-triage.html</code>, <code>docs/images/</code> into <code>public/</code> so <code>/triage-pg/onboarding.html</code> (etc.) keep serving — README and the v1.0.0-rc1 Release assets link them</li>
+        <li><code class="status">[]</code> <code>just docs-site</code> recipe: <code>npm --prefix docs-site run dev</code> (hot local preview)</li>
       </ul>
 
       <h4>1.2. Publish plumbing</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>docs-pages.yml</code>: replace the hand-rolled <code>mkdir/cp</code> assembly with <code>uv run python scripts/build_docs_site.py --out _site</code> (+ <code>astral-sh/setup-uv</code>); extend the push-trigger paths with <code>docs/tutorials/**</code> and <code>scripts/build_docs_site.py</code></li>
-        <li><code class="status">[]</code> <code>docs/onboarding.html</code>: add a Tutorials section (4 cards linking the Pages URLs) so the site index advertises them</li>
+        <li><code class="status">[]</code> <code>docs-pages.yml</code>: setup-node (cache npm on <code>docs-site/package-lock.json</code>) → <code>npm ci</code> → <code>npm run build</code> → upload <code>docs-site/dist</code>; push-trigger paths become <code>docs-site/**</code>, <code>docs/*.html</code>, <code>docs/images/**</code></li>
+        <li><code class="status">[]</code> Links-validator plugin active in the production build — a broken internal link or anchor fails the build (the CI gate)</li>
       </ul>
 
       <h4>1.3. Testing Strategy</h4>
-      <p>The builder is pure file-in/file-out: test it by building. Edge cases: a md file with a broken relative link, a fence without a language, a missing image ref — all must fail <code>--check</code> loudly, not publish broken.</p>
+      <p>The site is file-in/file-out: prove it by building. Edge cases: base-path correctness (project pages under <code>/triage-pg/</code>), a deliberately broken internal link (build must fail), the passthrough URLs, dark-mode identity.</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --out /tmp/site && uv run python scripts/build_docs_site.py --check</code> — builds clean with a placeholder index.md; check passes</li>
-        <li><code class="status">[]</code> Feed it a deliberately broken fixture page (bad link + bare fence) — <code>--check</code> exits non-zero naming both</li>
-        <li><code class="status">[]</code> <code>uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/docs-pages.yml'))"</code> — workflow still parses</li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — clean build with the links validator on</li>
+        <li><code class="status">[]</code> Add a temporary broken link to a fixture page — the build fails naming it; remove it</li>
+        <li><code class="status">[]</code> <code>ls docs-site/dist/onboarding.html docs-site/dist/triage-pg-vs-dssg-triage.html</code> — passthrough intact; spot-check <code>dist/</code> internal hrefs carry the <code>/triage-pg/</code> base</li>
+        <li><code class="status">[]</code> <code>uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/docs-pages.yml'))"</code> — workflow parses</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
 
     <!-- ========================= PHASE 2 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 2: Dirty Duckling — the 10-minute path</h3>
-      <p>The homage to DSSG's quickstart chapter and the shortest useful page on the site: zero narrative debt, every block copy-paste runnable. Written first because it exercises the whole Phase-1 pipeline with the least content at risk.</p>
+      <h3><code class="status">[]</code> Phase 2: Dirty Duckling — the installation smoke test (+ mini-tour)</h3>
+      <p>Reframed per the maintainer (2026-07-12): like DSSG's dirty duckling, this page exists to <strong>test that your triage-pg setup works</strong> — pass/fail in ~10 minutes — then hands you a 5-minute dashboard mini-tour as the teaser for the full DirtyDuck. Written first because it exercises the whole Phase-1 pipeline with the least content at risk.</p>
       <h4>2.1. Content</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Sections: what you'll have in 10 minutes → <code>just tutorial-up</code> → <code>uv run triage --dbfile dirtyduck-database.yaml run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run</code> → <code>triage leaderboard</code> → <code>just serve</code> + a 60-second dashboard tour (experiment header, heatmap, one model card) → "now read the full DirtyDuck" hand-off</li>
+        <li><code class="status">[]</code> Smoke-test spine, each step with its PASS criterion quoted: <code>uv sync</code> + <code>uv run triage --version</code> (1.0.0) → <code>just tutorial-up</code> (pg_isready on 5440) → config validation passes (<code>validate_experiment_config</code> verdict via CLI/webapp — zero errors) → <code>uv run triage --dbfile dirtyduck-database.yaml run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run</code> → expected terminal line quoted verbatim (experiment <code>b9e38fd8…</code>, 20 models / 268,860 predictions / 120 evaluations — YOUR hash must match) → <code>triage leaderboard</code> shows 4 splits</li>
+        <li><code class="status">[]</code> "If a step fails" box per step (docker not running, port taken → <code>DIRTYDUCK_PG_PORT</code>, missing extras) — the page is a diagnostic, not just a script</li>
+        <li><code class="status">[]</code> Mini-tour: <code>just serve</code> + 5 minutes through experiment header (framing pill), heatmap, one model card → "now read the full DirtyDuck" hand-off</li>
         <li><code class="status">[]</code> One committed screenshot (experiment overview) via the screenshot rig; one small SVG (the 5-box pipeline) reusing the house diagram style</li>
         <li><code class="status">[]</code> Every command block verified verbatim against a fresh <code>just tutorial-clean && just tutorial-up</code> stack (ports: 5440)</li>
       </ul>
@@ -233,7 +238,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <p>Runnability IS the test: a fresh stack, every block executed top to bottom, expected outputs quoted in the page match reality (20 models / 268,860 predictions / 120 evaluations).</p>
       <ul class="checklist">
         <li><code class="status">[]</code> Fresh-stack verbatim pass of every fenced command; quoted outputs match</li>
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code> — links/anchors/fences clean</li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -261,7 +266,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <ul class="checklist">
         <li><code class="status">[]</code> Fresh-stack verbatim pass over both framing paths; quoted hashes/counts match</li>
         <li><code class="status">[]</code> <code>uv run pytest src/tests/ -q -k "identity or validate"</code> — the new example config validates through <code>validate_experiment_config</code> with zero errors</li>
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -281,7 +286,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <h4>4.2. Testing Strategy</h4>
       <ul class="checklist">
         <li><code class="status">[]</code> Fresh-stack (<code>just chi311-clean && just chi311-up</code>) verbatim pass incl. the bias/subset config and one <code>triage score</code>; quoted counts match</li>
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -300,7 +305,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <h4>5.2. Testing Strategy</h4>
       <ul class="checklist">
         <li><code class="status">[]</code> Fresh-stack (<code>just donors-clean && just donors-up</code>, port 5441) verbatim pass incl. one feature-group-strategy run; quoted counts match</li>
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -313,6 +318,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <ul class="checklist">
         <li><code class="status">[]</code> <code>docs/tutorials/index.md</code>: the which-tutorial-for-which-reader table (duckling = impatient · dirtyduck = student · chi311 = practitioner/production · donors = feature engineering) + the shared-skeleton diagram</li>
         <li><code class="status">[]</code> README "Five minutes" section + tutorial-stack line link the Pages tutorials; the three runbook READMEs and <code>docs/README.md</code> gain their tutorial links (Pages URLs — never raw .html blobs, per the 2026-07-12 link fix)</li>
+        <li><code class="status">[]</code> IA switch (maintainer decision): the site root is now the docs index — update README's "New here?" line (onboarding moves to <code>/triage-pg/onboarding.html</code>, root links the docs home) and verify the v1.0.0-rc1 Release asset links still resolve</li>
         <li><code class="status">[]</code> Screenshot sweep via the rig (per-tutorial dashboard shots into <code>docs/tutorials/images/</code>)</li>
       </ul>
       <h4>6.2. Publish + live verification</h4>
@@ -335,11 +341,11 @@ details summary { cursor: pointer; font-weight: 600; }
     <h2>Validation Commands</h2>
     <p>Execute these commands to validate the entire plan is complete:</p>
     <ul class="checklist">
-      <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --out /tmp/site && uv run python scripts/build_docs_site.py --check</code> — the whole site builds and self-validates</li>
+      <li><code class="status">[]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — the whole site builds with the links validator on</li>
       <li><code class="status">[]</code> <code>just test</code> + <code>just lint</code> — the new example config and any script changes ride the standard battery</li>
       <li><code class="status">[]</code> Fresh-stack verbatim pass, one per tutorial (duckling+dirtyduck on 5440, chi311 on 5438, donors on 5441) — every fenced command runs, every quoted output matches</li>
       <li><code class="status">[]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code>; the five live URLs return 200</li>
-      <li><code class="status">[]</code> <code>git ls-files docs/tutorials/ | wc -l</code> ≥ 5 (index + 4 tutorials) and README/docs indexes link only Pages URLs for HTML artifacts</li>
+      <li><code class="status">[]</code> <code>git ls-files docs-site/src/content/docs/ | wc -l</code> ≥ 6 (landing + tutorials index + 4 tutorials) and README/docs indexes link only Pages URLs for HTML artifacts</li>
     </ul>
     <div class="loop">🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong></div>
   </section>
@@ -348,8 +354,8 @@ details summary { cursor: pointer; font-weight: 600; }
   <section id="questionables">
     <h2>Questionables</h2>
     <details>
-      <summary>Why a 150-line builder script instead of mkdocs-material (what DSSG actually uses)?</summary>
-      <p class="qa-answer">mkdocs was deliberately retired with the inherited workflows (P10: <code>build-mkdocs.yaml</code> deleted, no <code>mkdocs.yml</code> exists), and the repo's docs philosophy is "plain markdown, rendered on GitHub". A pinned python-markdown + an inspectable template keeps that contract: sources readable in-repo, zero theme/config surface, one dependency in a docs-only group. Cost: no built-in search and hand-rolled nav — acceptable for a six-page site. If the site grows past ~15 pages, revisit mkdocs as its own decision (candidate ADR then, not now).</p>
+      <summary>SETTLED 2026-07-12 — generator: Starlight (over Quarto and mkdocs-material)</summary>
+      <p class="qa-answer">Maintainer narrowed to Starlight vs Quarto; Starlight chosen. The decider: our tutorial blocks are operational shell+SQL against dockerized databases — Quarto's killer feature (render-time execution proving outputs real) would require the docker stacks inside the docs CI build, so in practice it degrades to freeze-mode local renders, roughly the manual discipline this plan already mandates. Starlight wins the rest for this repo: npm is already first-class in CI (the dashboard), the docs-site-as-index IA makes nav/search/aesthetics the product, and first-class i18n keeps "Spanish later" cheap. Quarto remains the right tool if we ever author executed-notebook analytical tutorials; mkdocs-material was the boring fallback (Python-native, DSSG-familiar) and lost on IA ambition + i18n.</p>
     </details>
     <details>
       <summary>Is "Dirty Duckling" ours to use?</summary>
@@ -388,6 +394,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <li><strong>Ports discipline:</strong> tutorials quote the compose defaults (dirtyduck 5440 · chi311 5438 · donors 5441) — the 2026-07-11 port-drift audit is the cautionary tale; the <code>--check</code> gate can grep for stale port literals as a cheap guard.</li>
       <li><strong>Voice:</strong> the DSSG tutorial's register (narrative, opinionated, "we choose X because Y") is the model; the runbook READMEs stay terse. No content is duplicated between README and tutorial — READMEs run, tutorials teach.</li>
       <li><strong>Site identity:</strong> the builder's template lifts onboarding.html's palette/typography verbatim so the site reads as one artifact; the nav strip is shared by every generated page.</li>
+      <li><strong>Decisions 2026-07-12 (AskUserQuestion):</strong> generator = Starlight; Dirty Duckling = smoke test + mini-tour; language = English (site structured so <code>es/</code> translations can land per-tutorial later — Starlight i18n); IA = the docs site is the Pages index, onboarding/comparison preserved at stable passthrough URLs.</li>
       <li><strong>Estimated weight:</strong> P1 ≈ half a day; P3 is the heavy one (two framings, new config, longest prose) ≈ 1–1.5 days; P2/P4/P5 ≈ half–1 day each; P6 ≈ half a day. The phases are independent after P1, so P3–P5 can interleave with other work or parallelize (plan-team candidate if wanted).</li>
     </ul>
   </section>
@@ -396,6 +403,10 @@ details summary { cursor: pointer; font-weight: 600; }
   <section id="amendments">
     <h2>Amendments</h2>
     <p class="small">Append-only history of changes made after the plan was first authored. Newest at the bottom.</p>
+    <details>
+      <summary>2026-07-12T12:25 — Maintainer decisions folded in: Starlight generator, smoke-test Duckling, English, docs-site-as-index</summary>
+      <p>Pre-build question round (AskUserQuestion). Generator settled on Astro Starlight after a Starlight-vs-Quarto trade-off (execution-at-render neutered by our shell+SQL block shape; npm already in CI; IA + i18n favor Starlight) — Phase 1 rewritten from the 150-line builder to the <code>docs-site/</code> Starlight workspace with links-validator and public/ passthrough keeping onboarding/comparison URLs stable. Dirty Duckling reframed as an installation smoke test with pass/fail criteria + a 5-minute mini-tour (Phase 2 rewritten). Language: English, with Starlight i18n leaving per-tutorial Spanish open. Site root becomes the docs index (P6 gains the README/Release-link IA switch task). Files/validation sections updated to match.</p>
+    </details>
   </section>
 
 </main>
