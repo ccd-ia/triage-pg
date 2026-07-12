@@ -1,0 +1,19 @@
+{
+  "name": "triage-pg-docs",
+  "private": true,
+  "type": "module",
+  "description": "The triage-pg documentation site (Astro Starlight) — tutorials + published artifacts, served at https://ccd-ia.github.io/triage-pg/",
+  "scripts": {
+    "prebuild": "node scripts/prebuild.mjs",
+    "predev": "node scripts/prebuild.mjs",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.36.0",
+    "astro": "^5.0.0",
+    "sharp": "^0.34.0",
+    "starlight-links-validator": "^0.18.0"
+  }
+}

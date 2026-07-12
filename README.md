@@ -11,7 +11,7 @@ triage-pg builds end-to-end early-warning and resource-prioritization models —
 
 > **Status: local v1 complete.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival), with in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is authored and offline-validated; its live validation is the gate between `v1.0.0-rc1` and `v1.0.0`. All 28 architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
 
-**New here?** Read the [onboarding one-pager](https://ccd-ia.github.io/triage-pg/) · **Coming from DSSG triage?** The [honest side-by-side](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html). (Both also live in the repo under [`docs/`](docs/).)
+**New here?** Start at the [docs site](https://ccd-ia.github.io/triage-pg/) — or jump straight to the [onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html) · **Coming from DSSG triage?** The [honest side-by-side](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html). (Sources live in the repo under [`docs/`](docs/).)
 
 ## The pipeline
 

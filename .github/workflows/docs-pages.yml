@@ -1,7 +1,10 @@
-# Publishes the two self-contained HTML artifacts + screenshots to GitHub Pages:
-# https://ccd-ia.github.io/triage-pg/ (onboarding.html serves as index.html).
-# Pages enabled 2026-07-11 (Source: GitHub Actions) — the push trigger is live again
-# (it was manual-only while Pages was off, when any triggered run failed red).
+# Publishes the docs site (Astro Starlight, docs-site/) to GitHub Pages:
+# https://ccd-ia.github.io/triage-pg/ — the Starlight index is the site root
+# (IA decision 2026-07-12, specs/dssg-style-tutorials-github-pages.html);
+# onboarding.html + the DSSG comparison keep their URLs via public/ passthrough
+# (docs-site/scripts/prebuild.mjs). The build fails on broken internal links
+# (starlight-links-validator), so a red run here means a real docs defect.
+# Pages enabled 2026-07-11 (Source: GitHub Actions).
 
 name: docs-pages
 
@@ -10,6 +13,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "docs-site/**"
       - "docs/*.html"
       - "docs/images/**"
 
@@ -24,20 +28,23 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble the static bundle
-        run: |
-          mkdir -p _site/images
-          cp docs/onboarding.html _site/index.html
-          cp docs/triage-pg-vs-dssg-triage.html _site/
-          cp docs/images/*.png _site/images/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+        working-directory: docs-site
+      - run: npm run build
+        working-directory: docs-site
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: docs-site/dist
       - id: deployment
         uses: actions/deploy-pages@v4

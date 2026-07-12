@@ -8,6 +8,10 @@ default:
 docs:
     @echo "Greenfield docs are plain Markdown — start at docs/README.md:" && ls docs/*.md && echo "ADRs:" && ls docs/adr/*.md
 
+# Preview the docs site (Astro Starlight, hot reload) — published at ccd-ia.github.io/triage-pg
+docs-site:
+    npm --prefix docs-site install && npm --prefix docs-site run dev
+
 # Serve the dashboard app — read views + write surface (set TRIAGE_REGISTRY_URL to enable POST routes)
 serve PORT="8000":
     TRIAGE_DASHBOARD_STATIC="${TRIAGE_DASHBOARD_STATIC:-{{justfile_directory()}}/frontend/dist}" \

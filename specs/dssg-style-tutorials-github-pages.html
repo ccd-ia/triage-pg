@@ -193,31 +193,31 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 1 ========================= -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 1: Site Pipeline — Starlight as the front door</h3>
+      <h3><code class="status">[wip]</code> Phase 1: Site Pipeline — Starlight as the front door</h3>
       <p>The one-time plumbing every tutorial rides on (maintainer decisions 2026-07-12: Starlight over Quarto/mkdocs; docs site becomes the Pages index). Markdown sources stay first-class and readable on GitHub; Starlight supplies sidebar, search, themes, and i18n headroom; the two existing HTML artifacts keep their URLs via <code>public/</code> passthrough.</p>
 
       <h4>1.1. Scaffold + identity</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Scaffold <code>docs-site/</code> with pinned <code>astro</code> + <code>@astrojs/starlight</code> + <code>starlight-links-validator</code>; commit the lockfile. <code>astro.config.mjs</code>: <code>site: 'https://ccd-ia.github.io'</code>, <code>base: '/triage-pg'</code> (project-pages path — every internal link must respect it), sidebar with a Tutorials group, title <code>triage-pg</code></li>
-        <li><code class="status">[]</code> House identity via Starlight custom CSS: teal <code>#0f766e</code> accent tokens matching onboarding.html/the dashboard; light+dark verified</li>
-        <li><code class="status">[]</code> Landing <code>index.mdx</code>: hero + cards (Tutorials · Onboarding one-pager · DSSG comparison · GitHub repo · GHCR image)</li>
-        <li><code class="status">[]</code> Prebuild passthrough: copy <code>docs/onboarding.html</code>, <code>docs/triage-pg-vs-dssg-triage.html</code>, <code>docs/images/</code> into <code>public/</code> so <code>/triage-pg/onboarding.html</code> (etc.) keep serving — README and the v1.0.0-rc1 Release assets link them</li>
-        <li><code class="status">[]</code> <code>just docs-site</code> recipe: <code>npm --prefix docs-site run dev</code> (hot local preview)</li>
+        <li><code class="status">[x]</code> Scaffold <code>docs-site/</code> with pinned <code>astro</code> + <code>@astrojs/starlight</code> + <code>starlight-links-validator</code>; commit the lockfile. <code>astro.config.mjs</code>: <code>site: 'https://ccd-ia.github.io'</code>, <code>base: '/triage-pg'</code> (project-pages path — every internal link must respect it), sidebar with a Tutorials group, title <code>triage-pg</code></li>
+        <li><code class="status">[x]</code> House identity via Starlight custom CSS: teal <code>#0f766e</code> accent tokens matching onboarding.html/the dashboard; light+dark verified</li>
+        <li><code class="status">[x]</code> Landing <code>index.mdx</code>: hero + cards (Tutorials · Onboarding one-pager · DSSG comparison · GitHub repo · GHCR image)</li>
+        <li><code class="status">[x]</code> Prebuild passthrough: copy <code>docs/onboarding.html</code>, <code>docs/triage-pg-vs-dssg-triage.html</code>, <code>docs/images/</code> into <code>public/</code> so <code>/triage-pg/onboarding.html</code> (etc.) keep serving — README and the v1.0.0-rc1 Release assets link them</li>
+        <li><code class="status">[x]</code> <code>just docs-site</code> recipe: <code>npm --prefix docs-site run dev</code> (hot local preview)</li>
       </ul>
 
       <h4>1.2. Publish plumbing</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>docs-pages.yml</code>: setup-node (cache npm on <code>docs-site/package-lock.json</code>) → <code>npm ci</code> → <code>npm run build</code> → upload <code>docs-site/dist</code>; push-trigger paths become <code>docs-site/**</code>, <code>docs/*.html</code>, <code>docs/images/**</code></li>
-        <li><code class="status">[]</code> Links-validator plugin active in the production build — a broken internal link or anchor fails the build (the CI gate)</li>
+        <li><code class="status">[x]</code> <code>docs-pages.yml</code>: setup-node (cache npm on <code>docs-site/package-lock.json</code>) → <code>npm ci</code> → <code>npm run build</code> → upload <code>docs-site/dist</code>; push-trigger paths become <code>docs-site/**</code>, <code>docs/*.html</code>, <code>docs/images/**</code></li>
+        <li><code class="status">[x]</code> Links-validator plugin active in the production build — a broken internal link or anchor fails the build (the CI gate)</li>
       </ul>
 
       <h4>1.3. Testing Strategy</h4>
       <p>The site is file-in/file-out: prove it by building. Edge cases: base-path correctness (project pages under <code>/triage-pg/</code>), a deliberately broken internal link (build must fail), the passthrough URLs, dark-mode identity.</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — clean build with the links validator on</li>
-        <li><code class="status">[]</code> Add a temporary broken link to a fixture page — the build fails naming it; remove it</li>
-        <li><code class="status">[]</code> <code>ls docs-site/dist/onboarding.html docs-site/dist/triage-pg-vs-dssg-triage.html</code> — passthrough intact; spot-check <code>dist/</code> internal hrefs carry the <code>/triage-pg/</code> base</li>
-        <li><code class="status">[]</code> <code>uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/docs-pages.yml'))"</code> — workflow parses</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site ci && npm --prefix docs-site run build</code> — clean build with the links validator on</li>
+        <li><code class="status">[x]</code> Add a temporary broken link to a fixture page — the build fails naming it; remove it</li>
+        <li><code class="status">[x]</code> <code>ls docs-site/dist/onboarding.html docs-site/dist/triage-pg-vs-dssg-triage.html</code> — passthrough intact; spot-check <code>dist/</code> internal hrefs carry the <code>/triage-pg/</code> base</li>
+        <li><code class="status">[x]</code> <code>uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/docs-pages.yml'))"</code> — workflow parses</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>

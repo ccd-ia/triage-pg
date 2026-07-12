@@ -1,0 +1,15 @@
+/*
+ * triage-pg house identity for Starlight — the teal (#0f766e) accent shared by
+ * onboarding.html, the plan specs, and the dashboard. Only accent tokens are
+ * overridden; Starlight's gray ramps stay stock so dark mode keeps its contrast.
+ */
+:root {
+  --sl-color-accent-low: #d5f0ec;
+  --sl-color-accent: #0f766e;
+  --sl-color-accent-high: #0b4f4a;
+}
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #123f3b;
+  --sl-color-accent: #2aa198;
+  --sl-color-accent-high: #a7e0da;
+}

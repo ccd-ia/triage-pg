@@ -1,0 +1,41 @@
+---
+title: triage-pg
+description: PostgreSQL-native temporal ML on tabular public-policy data — a deliberately simplified fork of DSSG triage.
+template: splash
+hero:
+  tagline: PostgreSQL-native temporal machine learning for public-policy data — cohorts, point-in-time features, append-only predictions, in-database evaluation. A deliberately simplified fork of DSSG triage.
+  actions:
+    - text: Start with a tutorial
+      link: /triage-pg/tutorials/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/ccd-ia/triage-pg
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Where to go
+
+<CardGrid stagger>
+  <Card title="Tutorials" icon="open-book">
+    Four DSSG-style case studies: the Dirty Duckling smoke test, the full
+    DirtyDuck walkthrough (both problem framings), Chicago 311 with the
+    production surfaces, and DonorsChoose's deep feature synthesis.
+    [Pick your tutorial →](/triage-pg/tutorials/)
+  </Card>
+  <Card title="Onboarding one-pager" icon="rocket">
+    The whole system on one page: pipeline, schema, capabilities, quickstart.
+    [Read it →](https://ccd-ia.github.io/triage-pg/onboarding.html)
+  </Card>
+  <Card title="Coming from DSSG triage?" icon="random">
+    The honest dimension-by-dimension comparison — what was kept, moved
+    into PostgreSQL, or deliberately dropped.
+    [See the side-by-side →](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html)
+  </Card>
+  <Card title="Run it now" icon="seti:docker">
+    `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1` — the CLI and dashboard,
+    no local Python needed. Point it at any PostgreSQL 11+.
+  </Card>
+</CardGrid>
