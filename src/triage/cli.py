@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from sqlalchemy.engine import make_url
 
 from triage.adapters.forward import predict_forward
 from triage.adapters.retrain import retrain_and_predict
@@ -304,9 +305,24 @@ def load_experiment_config(config_path: str) -> Dict[str, Any]:
     return load_yaml_from_store(config_path)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from triage import __version__
+
+        typer.echo(f"triage-pg {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def triage_callback(
     ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print the triage-pg version and exit.",
+    ),
     dbfile: Optional[pathlib.Path] = typer.Option(
         None,
         "--dbfile",
@@ -342,7 +358,11 @@ def triage_callback(
         load_setup_module(setup_path)
     ctx.obj = CLIState(db_url=db_url, setup_path=setup_path, db_error=db_error)
     if db_url is not None:
-        logger.info("Using database %s", db_url)
+        # Never log credentials: strip the password from the URL before printing
+        # (tutorials quote CLI output verbatim; real deployments carry real secrets).
+        logger.info(
+            "Using database %s", make_url(db_url).render_as_string(hide_password=True)
+        )
     if setup_path:
         logger.info("Setup module: %s", setup_path)
 

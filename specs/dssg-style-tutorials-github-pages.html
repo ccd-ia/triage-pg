@@ -224,21 +224,21 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 2 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 2: Dirty Duckling — the installation smoke test (+ mini-tour)</h3>
+      <h3><code class="status">[x]</code> Phase 2: Dirty Duckling — the installation smoke test (+ mini-tour)</h3>
       <p>Reframed per the maintainer (2026-07-12): like DSSG's dirty duckling, this page exists to <strong>test that your triage-pg setup works</strong> — pass/fail in ~10 minutes — then hands you a 5-minute dashboard mini-tour as the teaser for the full DirtyDuck. Written first because it exercises the whole Phase-1 pipeline with the least content at risk.</p>
       <h4>2.1. Content</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Smoke-test spine, each step with its PASS criterion quoted: <code>uv sync</code> + <code>uv run triage --version</code> (1.0.0) → <code>just tutorial-up</code> (pg_isready on 5440) → config validation passes (<code>validate_experiment_config</code> verdict via CLI/webapp — zero errors) → <code>uv run triage --dbfile dirtyduck-database.yaml run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run</code> → expected terminal line quoted verbatim (experiment <code>b9e38fd8…</code>, 20 models / 268,860 predictions / 120 evaluations — YOUR hash must match) → <code>triage leaderboard</code> shows 4 splits</li>
-        <li><code class="status">[]</code> "If a step fails" box per step (docker not running, port taken → <code>DIRTYDUCK_PG_PORT</code>, missing extras) — the page is a diagnostic, not just a script</li>
-        <li><code class="status">[]</code> Mini-tour: <code>just serve</code> + 5 minutes through experiment header (framing pill), heatmap, one model card → "now read the full DirtyDuck" hand-off</li>
-        <li><code class="status">[]</code> One committed screenshot (experiment overview) via the screenshot rig; one small SVG (the 5-box pipeline) reusing the house diagram style</li>
-        <li><code class="status">[]</code> Every command block verified verbatim against a fresh <code>just tutorial-clean && just tutorial-up</code> stack (ports: 5440)</li>
+        <li><code class="status">[x]</code> Smoke-test spine, each step with its PASS criterion quoted: <code>uv sync</code> + <code>uv run triage --version</code> (1.0.0) → <code>just tutorial-up</code> (pg_isready on 5440) → config validation passes (<code>validate_experiment_config</code> verdict via CLI/webapp — zero errors) → <code>uv run triage --dbfile dirtyduck-database.yaml run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run</code> → expected terminal line quoted verbatim (experiment <code>b9e38fd8…</code>, 20 models / 268,860 predictions / 120 evaluations — YOUR hash must match) → <code>triage leaderboard</code> shows 4 splits</li>
+        <li><code class="status">[x]</code> "If a step fails" box per step (docker not running, port taken → <code>DIRTYDUCK_PG_PORT</code>, missing extras) — the page is a diagnostic, not just a script</li>
+        <li><code class="status">[x]</code> Mini-tour: <code>just serve</code> + 5 minutes through experiment header (framing pill), heatmap, one model card → "now read the full DirtyDuck" hand-off</li>
+        <li><code class="status">[x]</code> One committed screenshot (experiment overview) via the screenshot rig; one small SVG (the 5-box pipeline) reusing the house diagram style</li>
+        <li><code class="status">[x]</code> Every command block verified verbatim against a fresh <code>just tutorial-clean && just tutorial-up</code> stack (ports: 5440) — found + fixed on the way: the smoke spine needs the <code>triage db upgrade</code> step (added as Step 3), the CLI lacked <code>--version</code> (added), and the CLI logged a credential-bearing DB URL (now masked)</li>
       </ul>
       <h4>2.2. Testing Strategy</h4>
       <p>Runnability IS the test: a fresh stack, every block executed top to bottom, expected outputs quoted in the page match reality (20 models / 268,860 predictions / 120 evaluations).</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> Fresh-stack verbatim pass of every fenced command; quoted outputs match</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
+        <li><code class="status">[x]</code> Fresh-stack verbatim pass of every fenced command; quoted outputs match</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
