@@ -273,20 +273,20 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 4 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 4: Chicago 311 — EWS with the production surfaces</h3>
+      <h3><code class="status">[x]</code> Phase 4: Chicago 311 — EWS with the production surfaces</h3>
       <p>The tutorial for what DSSG's never covered: an early-warning case (<code>slow_resolution</code> — administratively observed for every SR, hence 100% labeled, the very question that spawned <code>task_framing</code>) carried all the way into fairness auditing, subset evaluations, monitoring, and the survival variant.</p>
       <h4>4.1. Chapters</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> The case + data (service requests as entities; why resolution-delay is an EWS; the 100%-labeled discussion verbatim from the dogfooding finding)</li>
-        <li><code class="status">[]</code> Formulation + features + run (base config, <code>task_framing: early_warning</code>)</li>
-        <li><code class="status">[]</code> Fairness chapter: <code>bias_config</code> over community_area, the fairness-tree wizard, τ verdicts; subsets chapter: the austin slice and re-rank-within-subset semantics</li>
-        <li><code class="status">[]</code> Monitoring chapter: <code>triage score</code>, drift PSI/KS, volume, realized outcomes (purpose chip: backtest vs production)</li>
-        <li><code class="status">[]</code> Survival chapter: <code>experiment-survival.yaml</code>, duration/event_observed labels, in-PG C-index, the event-rate card</li>
+        <li><code class="status">[x]</code> The case + data (service requests as entities; why resolution-delay is an EWS; the 100%-labeled discussion verbatim from the dogfooding finding)</li>
+        <li><code class="status">[x]</code> Formulation + features + run (base config, <code>task_framing: early_warning</code>)</li>
+        <li><code class="status">[x]</code> Fairness chapter: <code>bias_config</code> over community_area, the fairness-tree wizard, τ verdicts; subsets chapter: the austin slice and re-rank-within-subset semantics</li>
+        <li><code class="status">[x]</code> Monitoring chapter: <code>triage score</code>, drift PSI/KS, volume, realized outcomes (purpose chip: backtest vs production)</li>
+        <li><code class="status">[x]</code> Survival chapter: <code>experiment-survival.yaml</code>, duration/event_observed labels, in-PG C-index, the event-rate card</li>
       </ul>
       <h4>4.2. Testing Strategy</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Fresh-stack (<code>just chi311-clean && just chi311-up</code>) verbatim pass incl. the bias/subset config and one <code>triage score</code>; quoted counts match</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
+        <li><code class="status">[x]</code> Fresh-stack (<code>just chi311-clean && just chi311-up</code>) verbatim pass incl. the bias/subset config and one <code>triage score</code>; quoted counts match (318,927 protected rows / 600 bias rows / 120 subset evals / 6 survival models; the score entrypoint needs an in-range date with 2019 tutorial data — the page shows the date argument)</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>

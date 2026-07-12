@@ -15,7 +15,7 @@ audition, subset evaluations, monitoring, survival).
 | --- | --- | --- |
 | checking your setup works | [**Dirty Duckling**](/triage-pg/tutorials/dirtyduckling/) | a pass/fail smoke test + 5-minute dashboard tour |
 | learning temporal ML on policy data | [**DirtyDuck**](/triage-pg/tutorials/dirtyduck/) | the full case study — early warning vs resource prioritization on the same data |
-| running something production-shaped | **Chicago 311** *(coming)* | fairness auditing, subset evaluations, monitoring, survival |
+| running something production-shaped | [**Chicago 311**](/triage-pg/tutorials/chicago311/) | fairness auditing, subset evaluations, monitoring, survival |
 | deep into feature engineering | **DonorsChoose** *(coming)* | Deep Feature Synthesis over a multi-stream entity graph |
 
 The tutorials land one by one (plan phases P2–P5); this index becomes the

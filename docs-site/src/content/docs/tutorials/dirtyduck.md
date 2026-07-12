@@ -247,8 +247,8 @@ dimension-by-dimension account is the
 
 ## Where next
 
-- **Chicago 311** *(next in this series)* — an early-warning case carried
-  into fairness auditing, monitoring, and survival analysis.
+- [**Chicago 311**](/triage-pg/tutorials/chicago311/) — an early-warning case
+  carried into fairness auditing, monitoring, and survival analysis.
 - [`docs/fairness.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/fairness.md),
   [`docs/problem-types.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/problem-types.md)
   for the reference treatments.
