@@ -223,8 +223,8 @@ has the full account.
 
 ## Where next
 
-- **DonorsChoose** *(next in this series)* — diffuse signal and the deep
-  feature synthesis showcase.
+- [**DonorsChoose**](/triage-pg/tutorials/donorschoose/) — diffuse signal and
+  the deep feature synthesis showcase.
 - [`docs/fairness.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/fairness.md) ·
   [`docs/monitoring.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/monitoring.md) ·
   [`docs/problem-types.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/problem-types.md)

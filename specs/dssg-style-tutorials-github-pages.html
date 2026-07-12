@@ -293,19 +293,19 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 5 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 5: DonorsChoose — funding risk and the deep-DFS showcase</h3>
+      <h3><code class="status">[x]</code> Phase 5: DonorsChoose — funding risk and the deep-DFS showcase</h3>
       <p>KDD Cup 2014: will a posted classroom project remain unfunded after 4 months (<code>unfunded_4mo</code>, <code>early_warning</code>)? The dataset earns its tutorial through its ER graph — projects with THREE child streams (resources, teacher history, school history) — making it the Deep Feature Synthesis and feature-group-strategies (ADR-0023) chapter.</p>
       <h4>5.1. Chapters</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> The case + data (project entity; donations as the outcome stream; the one-month posting cohort window)</li>
-        <li><code class="status">[]</code> Formulation + the DFS deep-dive: the 3-relationship star, per-relationship feature families, how as-of joins keep teacher/school history leak-free</li>
-        <li><code class="status">[]</code> Feature-group strategies chapter: <code>leave-one-out / all</code> runs sharing one experiment (ADR-0023), read through the model-groups table and the leaderboard</li>
-        <li><code class="status">[]</code> Evaluate + close (which feature family carries the signal; DSSG-diff note)</li>
+        <li><code class="status">[x]</code> The case + data (project entity; donations as the outcome stream — label source ONLY, the leakage-trap chapter; the one-month posting cohort window)</li>
+        <li><code class="status">[x]</code> Formulation + the DFS deep-dive: the 3-relationship star, per-relationship feature families, how as-of joins keep teacher/school history leak-free</li>
+        <li><code class="status">[x]</code> Feature-group strategies chapter: <code>leave-one-out / all</code> runs sharing one experiment (ADR-0023), read through the model-groups table and the leaderboard — run for real: 1 experiment fanned into 5 runs / 100 models, quoted verbatim. (Found on the way: a top-level <code>feature_groups</code> key is silently ignored — it must nest inside <code>feature_config</code>; candidate validator warning, noted in P6.)</li>
+        <li><code class="status">[x]</code> Evaluate + close (which feature family carries the signal; the three-signal-regimes calibration chapter; DSSG-diff note)</li>
       </ul>
       <h4>5.2. Testing Strategy</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Fresh-stack (<code>just donors-clean && just donors-up</code>, port 5441) verbatim pass incl. one feature-group-strategy run; quoted counts match</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
+        <li><code class="status">[x]</code> Fresh-stack (<code>just donors-clean && just donors-up</code>, port 5441) verbatim pass incl. one feature-group-strategy run; quoted counts match (base 20 models / 1,820 predictions; fan-out 5 runs × 20 models; AUC top 0.755; base rate 0.317)</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> — links validator clean</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>

@@ -16,10 +16,12 @@ audition, subset evaluations, monitoring, survival).
 | checking your setup works | [**Dirty Duckling**](/triage-pg/tutorials/dirtyduckling/) | a pass/fail smoke test + 5-minute dashboard tour |
 | learning temporal ML on policy data | [**DirtyDuck**](/triage-pg/tutorials/dirtyduck/) | the full case study — early warning vs resource prioritization on the same data |
 | running something production-shaped | [**Chicago 311**](/triage-pg/tutorials/chicago311/) | fairness auditing, subset evaluations, monitoring, survival |
-| deep into feature engineering | **DonorsChoose** *(coming)* | Deep Feature Synthesis over a multi-stream entity graph |
+| deep into feature engineering | [**DonorsChoose**](/triage-pg/tutorials/donorschoose/) | Deep Feature Synthesis over a multi-stream entity graph |
 
-The tutorials land one by one (plan phases P2–P5); this index becomes the
-choose-your-own-adventure table as they do. Meanwhile the
-[onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html) and the
-runbook READMEs in the [repository](https://github.com/ccd-ia/triage-pg) cover
-the commands.
+Read them in order for the full course — smoke test, the two observation
+regimes on one dataset, the production surfaces, the three signal regimes —
+or jump to the row that matches you. The
+[onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html) is the
+system-at-a-glance map, and the runbook READMEs in the
+[repository](https://github.com/ccd-ia/triage-pg) stay the terse command
+references.
