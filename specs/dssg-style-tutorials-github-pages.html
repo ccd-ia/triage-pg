@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: DSSG-style Tutorials on GitHub Pages — DirtyDuck · Dirty Duckling · Chicago 311 · DonorsChoose</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --fg: #0f172a;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --accent: #0f766e;      /* teal — the site/house identity (matches onboarding.html) */
+  --accent-2: #4f46e5;    /* indigo — tutorial content */
+  --accent-3: #b45309;    /* amber — publishing/integration */
+  --muted: #64748b;
+  --ok: #15803d;
+  --warn: #b91c1c;
+  --code-bg: #f1f5f9;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 40px 28px 120px; }
+h1 { font-size: 1.7rem; line-height: 1.25; letter-spacing: -0.02em; margin: 0 0 10px; }
+h2 { font-size: 1.25rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+h4 { font-size: 0.95rem; margin: 20px 0 6px; color: #1e293b; }
+p { margin: 8px 0; }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-size: 0.85em; }
+pre code { background: none; border: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+figure { margin: 24px auto; text-align: center; }
+figure svg { max-width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: 0.85em; margin-top: 8px; }
+.meta { margin: 12px 0 4px; }
+.meta summary { cursor: pointer; color: var(--muted); font-size: 0.9em; }
+.meta dl { display: grid; grid-template-columns: 130px 1fr; gap: 4px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 10px 0; font-size: 0.85em; }
+.meta dt { color: var(--muted); font-weight: 600; }
+.meta dd { margin: 0; font-family: var(--mono); font-size: 0.95em; word-break: break-all; }
+.tag { display: inline-block; font-size: 0.72em; font-weight: 700; text-transform: uppercase; border-radius: 4px; padding: 1px 7px; margin-right: 6px; letter-spacing: 0.03em; }
+.tag.existing { background: #e0f2fe; color: #075985; }
+.tag.new { background: #dcfce7; color: #166534; }
+.files ul { list-style: none; padding-left: 0; }
+.files li { margin: 5px 0; }
+.phase { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; padding: 18px 24px; margin: 22px 0; }
+.phase.content { border-left-color: var(--accent-2); }
+.phase.publish { border-left-color: var(--accent-3); }
+.phase h3 { margin-top: 0; }
+.checklist { list-style: none; padding-left: 6px; }
+.checklist li { margin: 7px 0; padding-left: 2px; }
+code.status { background: #fff7ed; border-color: #fdba74; color: #9a3412; font-weight: 700; min-width: 34px; display: inline-block; text-align: center; }
+.loop { background: #fefce8; border: 1px solid #fde047; border-radius: 8px; padding: 10px 14px; margin: 14px 0 4px; font-size: 0.9em; }
+details { margin: 10px 0; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
+details summary { cursor: pointer; font-weight: 600; }
+.qa-answer { color: #334155; }
+.callout { border-left: 4px solid var(--accent-2); background: #eef2ff; border-radius: 0 8px 8px 0; padding: 10px 16px; margin: 14px 0; font-size: 0.93em; }
+.callout.amber { border-left-color: var(--accent-3); background: #fffbeb; }
+.small { font-size: 0.85em; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: DSSG-style Tutorials on GitHub Pages — DirtyDuck · Dirty Duckling · Chicago 311 · DonorsChoose</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-07-12T12:05-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00</dd>
+        <dt>commits</dt>      <dd>(none yet)</dd>
+        <dt>agent name</dt>   <dd>claude-fable-5</dd>
+        <dt>session id</dt>   <dd>0ba1a8bc-9e37-472e-866c-38e50a3afa22</dd>
+        <dt>back refs</dt>    <dd>specs/v1-release-gate-parity-postmodeling-docs.html (P7 docs, P12 punchlist), docs/quickstart.md, dirtyduck/README.md, chicago311/README.md, donorschoose/README.md, dssg/master:docs/mkdocs.yml (the reference nav)</dd>
+        <dt>forward refs</dt> <dd>(none yet)</dd>
+      </dl>
+    </details>
+  </header>
+
+  <!-- Hero image — the tutorial constellation and how it reaches Pages. -->
+  <figure>
+    <svg viewBox="0 0 860 250" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+      <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
+      <rect x="20" y="20" width="180" height="46" rx="9" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.5"/>
+      <text x="110" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">Dirty Duckling</text>
+      <text x="110" y="56" text-anchor="middle" font-size="10.5" fill="#475569">10-minute quickstart</text>
+      <rect x="20" y="76" width="180" height="46" rx="9" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.5"/>
+      <text x="110" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">DirtyDuck</text>
+      <text x="110" y="112" text-anchor="middle" font-size="10.5" fill="#475569">full case · EIS + inspections</text>
+      <rect x="20" y="132" width="180" height="46" rx="9" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+      <text x="110" y="152" text-anchor="middle" font-size="13" font-weight="700" fill="#4f46e5">Chicago 311</text>
+      <text x="110" y="168" text-anchor="middle" font-size="10.5" fill="#475569">EWS · fairness · monitoring</text>
+      <rect x="20" y="188" width="180" height="46" rx="9" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+      <text x="110" y="208" text-anchor="middle" font-size="13" font-weight="700" fill="#4f46e5">DonorsChoose</text>
+      <text x="110" y="224" text-anchor="middle" font-size="10.5" fill="#475569">funding risk · deep DFS</text>
+      <rect x="330" y="96" width="200" height="64" rx="9" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+      <text x="430" y="122" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">docs/tutorials/*.md</text>
+      <text x="430" y="140" text-anchor="middle" font-size="10.5" fill="#475569">markdown, readable on GitHub</text>
+      <rect x="600" y="40" width="240" height="56" rx="9" fill="#fffbeb" stroke="#b45309" stroke-width="1.5"/>
+      <text x="720" y="62" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b45309">scripts/build_docs_site.py</text>
+      <text x="720" y="80" text-anchor="middle" font-size="10.5" fill="#475569">md → styled self-contained HTML</text>
+      <rect x="600" y="160" width="240" height="56" rx="9" fill="#f0fdf4" stroke="#15803d" stroke-width="1.5"/>
+      <text x="720" y="182" text-anchor="middle" font-size="12.5" font-weight="700" fill="#15803d">ccd-ia.github.io/triage-pg</text>
+      <text x="720" y="200" text-anchor="middle" font-size="10.5" fill="#475569">docs-pages.yml · nav + index</text>
+      <line x1="200" y1="43" x2="330" y2="112" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+      <line x1="200" y1="99" x2="330" y2="120" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+      <line x1="200" y1="155" x2="330" y2="136" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+      <line x1="200" y1="211" x2="330" y2="146" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+      <line x1="530" y1="116" x2="600" y2="76" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+      <line x1="720" y1="96" x2="720" y2="160" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr)"/>
+    </svg>
+    <figcaption>Four DSSG-style tutorials, authored as markdown, built into house-styled HTML, published on the live Pages site.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>Give triage-pg what made DSSG triage learnable: a narrative, case-study tutorial per dataset — the full <strong>DirtyDuck</strong> walkthrough, its 10-minute <strong>Dirty Duckling</strong> sibling, and new <strong>Chicago 311</strong> and <strong>DonorsChoose</strong> case studies — with the same discussion arc as <code>dssg.github.io/triage</code>'s Dirty Duck Tutorial (case framing → infrastructure → data → problem formulation → features → run → evaluate), published on the already-live <code>ccd-ia.github.io/triage-pg</code> Pages site.</p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>The three tutorial datasets ship as runnable docker stacks with ~100-line runbook READMEs — commands, not teaching. Someone who wants to <em>understand</em> temporal ML on policy data (why point-in-time correctness, why the cohort/label split, what an as-of join buys, when early-warning differs from inspections prioritization) has nothing between the quickstart and the ADRs. DSSG triage solved exactly this with the Dirty Duck tutorial: a narrated case study a student can follow end to end. triage-pg has the datasets, the live Pages site, and (as of migration 0019) the <code>task_framing</code> vocabulary the DSSG tutorial teaches — but no tutorials. Meanwhile the publishing pipeline only knows how to copy two hand-written HTML artifacts; there is no way to author long-form docs comfortably (markdown) and still get styled pages on the site.</p>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>Two layers. <strong>(1) A minimal markdown→HTML site step</strong>: tutorials are authored as plain markdown under <code>docs/tutorials/</code> (readable and reviewable on GitHub, per the repo's docs philosophy), and a small committed builder (<code>scripts/build_docs_site.py</code>, python-markdown, ~150 lines) renders them into self-contained HTML with the onboarding.html visual identity, a per-page table of contents, and a shared nav strip; <code>docs-pages.yml</code> gains one build step and <code>just docs-site</code> previews locally. Deliberately <em>not</em> mkdocs — that tool was retired with the inherited workflows, and a 150-line renderer is inspectable and dependency-light. <strong>(2) Four tutorials sharing one chapter skeleton</strong> lifted from DSSG's nav (Welcome → Dirty Duckling → Problem description → EIS → Inspections → deeper-look → Infrastructure/Data), adapted per dataset and extended with the surfaces DSSG never had: the dashboard, in-PG audition/fairness, subset evaluations, monitoring, survival, and the derivation DAG.</p>
+    <figure>
+      <svg viewBox="0 0 880 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+        <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
+        <g font-size="11.5" font-weight="600">
+          <rect x="10"  y="45" width="92" height="40" rx="8" fill="#ecfdf5" stroke="#0f766e"/><text x="56" y="69" text-anchor="middle" fill="#0f766e">the case</text>
+          <rect x="118" y="45" width="92" height="40" rx="8" fill="#ecfdf5" stroke="#0f766e"/><text x="164" y="63" text-anchor="middle" fill="#0f766e">infra +</text><text x="164" y="77" text-anchor="middle" fill="#0f766e">data</text>
+          <rect x="226" y="45" width="118" height="40" rx="8" fill="#eef2ff" stroke="#4f46e5"/><text x="285" y="63" text-anchor="middle" fill="#4f46e5">formulation</text><text x="285" y="77" text-anchor="middle" fill="#4f46e5">cohort·label·framing</text>
+          <rect x="360" y="45" width="92" height="40" rx="8" fill="#eef2ff" stroke="#4f46e5"/><text x="406" y="63" text-anchor="middle" fill="#4f46e5">features</text><text x="406" y="77" text-anchor="middle" fill="#4f46e5">DFS as-of</text>
+          <rect x="468" y="45" width="92" height="40" rx="8" fill="#eef2ff" stroke="#4f46e5"/><text x="514" y="63" text-anchor="middle" fill="#4f46e5">grid +</text><text x="514" y="77" text-anchor="middle" fill="#4f46e5">run</text>
+          <rect x="576" y="45" width="118" height="40" rx="8" fill="#fffbeb" stroke="#b45309"/><text x="635" y="63" text-anchor="middle" fill="#b45309">evaluate</text><text x="635" y="77" text-anchor="middle" fill="#b45309">leaderboard·audition</text>
+          <rect x="710" y="45" width="160" height="40" rx="8" fill="#f0fdf4" stroke="#15803d"/><text x="790" y="63" text-anchor="middle" fill="#15803d">dataset-specific</text><text x="790" y="77" text-anchor="middle" fill="#15803d">bias·monitoring·survival</text>
+        </g>
+        <g stroke="#64748b" stroke-width="1.3">
+          <line x1="102" y1="65" x2="118" y2="65" marker-end="url(#arr2)"/><line x1="210" y1="65" x2="226" y2="65" marker-end="url(#arr2)"/>
+          <line x1="344" y1="65" x2="360" y2="65" marker-end="url(#arr2)"/><line x1="452" y1="65" x2="468" y2="65" marker-end="url(#arr2)"/>
+          <line x1="560" y1="65" x2="576" y2="65" marker-end="url(#arr2)"/><line x1="694" y1="65" x2="710" y2="65" marker-end="url(#arr2)"/>
+        </g>
+        <text x="440" y="125" text-anchor="middle" font-size="11" fill="#64748b">one shared chapter skeleton — every tutorial walks it; Dirty Duckling compresses it to one page</text>
+      </svg>
+      <figcaption>The shared discussion arc, lifted from DSSG's Dirty Duck nav and extended with triage-pg's surfaces.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>.github/workflows/docs-pages.yml</code> — the Pages publisher; gains the tutorial build step (currently copies two HTML files + images)</li>
+      <li><span class="tag existing">existing</span> <code>docs/onboarding.html</code> — the site index and the visual identity (teal <code>#0f766e</code>, chips, self-contained CSS) the builder template must match; gains a Tutorials nav block</li>
+      <li><span class="tag existing">existing</span> <code>dirtyduck/README.md</code>, <code>chicago311/README.md</code>, <code>donorschoose/README.md</code> — the runbooks; stay as-is (commands), gain a link to their tutorial; their "ML problem" sections seed tutorial chapters</li>
+      <li><span class="tag existing">existing</span> <code>docs/quickstart.md</code> — the chi311 fast path; Dirty Duckling mirrors its shape on the food DB</li>
+      <li><span class="tag existing">existing</span> <code>example/dirtyduck/experiment*.yaml</code> (6 configs), <code>example/chicago311/experiment*.yaml</code> (2), <code>example/donorschoose/experiment.yaml</code> — every tutorial config block quotes these verbatim</li>
+      <li><span class="tag existing">existing</span> <code>justfile</code> — gains <code>docs-site</code> (build + open locally); <code>tutorial-up</code>/<code>chi311-up</code>/<code>donors-up</code> are the infra chapters' commands</li>
+      <li><span class="tag existing">existing</span> <code>scripts/capture_screenshots.py</code> — the reproducible screenshot rig; extended for per-tutorial dashboard shots</li>
+      <li><span class="tag existing">existing</span> <code>docs/README.md</code>, <code>README.md</code> — doc indexes; gain the tutorial links (Pages URLs, not raw .html blobs)</li>
+      <li><span class="tag existing">existing</span> <code>docs/fairness.md</code>, <code>docs/monitoring.md</code>, <code>docs/postmodeling.md</code>, <code>docs/problem-types.md</code> — reference docs the tutorials link into rather than duplicate</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>scripts/build_docs_site.py</code> — markdown → self-contained HTML renderer (python-markdown + house template string); builds <code>_site/</code> locally and in CI; <code>--check</code> mode validates internal links and code-fence languages</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/index.md</code> — the tutorials landing page (the constellation: which tutorial for which reader)</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/dirtyduckling.md</code> — the 10-minute quickstart (DSSG's "Dirty Duckling" homage)</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/dirtyduck.md</code> — the full case study: Chicago food inspections, BOTH framings (EIS <code>early_warning</code> + inspections <code>resource_prioritization</code>)</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/chicago311.md</code> — EWS on service requests + fairness/subsets/monitoring/survival chapters</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/donorschoose.md</code> — project-funding risk + the deep-DFS/feature-groups showcase</li>
+      <li><span class="tag new">new</span> <code>example/dirtyduck/experiment-inspections.yaml</code> — the resource-prioritization twin of the base config (label restricted to inspected facilities, <code>task_framing: resource_prioritization</code>) so the two-framings chapter is runnable, not hypothetical</li>
+      <li><span class="tag new">new</span> <code>docs/tutorials/images/</code> — per-tutorial screenshots + small SVG diagrams (temporal splits, ER graphs), committed like <code>docs/images/</code></li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <!-- ========================= PHASE 1 ========================= -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 1: Site Pipeline — markdown in, styled Pages out</h3>
+      <p>The one-time plumbing every tutorial rides on. Markdown sources stay first-class on GitHub; the builder produces self-contained HTML matching the onboarding identity. No mkdocs, no npm, no external theme — one inspectable script.</p>
+
+      <h4>1.1. The builder</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv add --group docs markdown</code> (python-markdown only; extensions: <code>fenced_code</code>, <code>tables</code>, <code>toc</code>, <code>attr_list</code>) — a <code>docs</code> dependency group, not a runtime dep</li>
+        <li><code class="status">[]</code> <code>scripts/build_docs_site.py</code>: render <code>docs/tutorials/*.md</code> → <code>_site/tutorials/*.html</code> with an embedded house template (teal identity, nav strip linking index · duckling · dirtyduck · chi311 · donors · onboarding · comparison, per-page right-rail TOC from the <code>toc</code> extension); copy <code>docs/onboarding.html → _site/index.html</code>, the comparison page, <code>docs/images/</code> and <code>docs/tutorials/images/</code></li>
+        <li><code class="status">[]</code> <code>--check</code> mode: every relative link resolves inside <code>_site/</code>, every internal anchor exists, every fenced block carries a language tag; exit non-zero on any failure (CI gate)</li>
+        <li><code class="status">[]</code> <code>just docs-site</code> recipe: build into a temp dir and <code>open</code> the index (local preview without CI)</li>
+      </ul>
+
+      <h4>1.2. Publish plumbing</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>docs-pages.yml</code>: replace the hand-rolled <code>mkdir/cp</code> assembly with <code>uv run python scripts/build_docs_site.py --out _site</code> (+ <code>astral-sh/setup-uv</code>); extend the push-trigger paths with <code>docs/tutorials/**</code> and <code>scripts/build_docs_site.py</code></li>
+        <li><code class="status">[]</code> <code>docs/onboarding.html</code>: add a Tutorials section (4 cards linking the Pages URLs) so the site index advertises them</li>
+      </ul>
+
+      <h4>1.3. Testing Strategy</h4>
+      <p>The builder is pure file-in/file-out: test it by building. Edge cases: a md file with a broken relative link, a fence without a language, a missing image ref — all must fail <code>--check</code> loudly, not publish broken.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --out /tmp/site && uv run python scripts/build_docs_site.py --check</code> — builds clean with a placeholder index.md; check passes</li>
+        <li><code class="status">[]</code> Feed it a deliberately broken fixture page (bad link + bare fence) — <code>--check</code> exits non-zero naming both</li>
+        <li><code class="status">[]</code> <code>uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/docs-pages.yml'))"</code> — workflow still parses</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 2 ========================= -->
+    <div class="phase content">
+      <h3><code class="status">[]</code> Phase 2: Dirty Duckling — the 10-minute path</h3>
+      <p>The homage to DSSG's quickstart chapter and the shortest useful page on the site: zero narrative debt, every block copy-paste runnable. Written first because it exercises the whole Phase-1 pipeline with the least content at risk.</p>
+      <h4>2.1. Content</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Sections: what you'll have in 10 minutes → <code>just tutorial-up</code> → <code>uv run triage --dbfile dirtyduck-database.yaml run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run</code> → <code>triage leaderboard</code> → <code>just serve</code> + a 60-second dashboard tour (experiment header, heatmap, one model card) → "now read the full DirtyDuck" hand-off</li>
+        <li><code class="status">[]</code> One committed screenshot (experiment overview) via the screenshot rig; one small SVG (the 5-box pipeline) reusing the house diagram style</li>
+        <li><code class="status">[]</code> Every command block verified verbatim against a fresh <code>just tutorial-clean && just tutorial-up</code> stack (ports: 5440)</li>
+      </ul>
+      <h4>2.2. Testing Strategy</h4>
+      <p>Runnability IS the test: a fresh stack, every block executed top to bottom, expected outputs quoted in the page match reality (20 models / 268,860 predictions / 120 evaluations).</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Fresh-stack verbatim pass of every fenced command; quoted outputs match</li>
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code> — links/anchors/fences clean</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 3 ========================= -->
+    <div class="phase content">
+      <h3><code class="status">[]</code> Phase 3: DirtyDuck — the full case study, both framings</h3>
+      <p>The flagship, mirroring DSSG's chapter graph on the same Chicago food-inspections story: problem description, then the SAME data formulated twice — an Early Warning System (<code>early_warning</code>: will this active facility fail an inspection in the next 6 months?) and Resource Prioritization (<code>resource_prioritization</code>: among facilities we could inspect, which are most likely to be found violating?). This is where migration 0019's framing tag stops being a chip and becomes pedagogy: the two configs differ in cohort/label SQL and framing, and the dashboard's %-labeled card reads differently for each.</p>
+      <h4>3.1. The inspections twin config</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>example/dirtyduck/experiment-inspections.yaml</code>: cohort = facilities with at least one prior inspection still active; label = failed <em>given inspected in the window</em> (NULL for uninspected — %labeled &lt; 100 by construction); <code>task_framing: resource_prioritization</code>; same feature/grid config as the base for comparability</li>
+        <li><code class="status">[]</code> Run it E2E on the food DB; confirm a DIFFERENT experiment_hash than the base (the problem changed), the framing pill, and a &lt;100% labeled card with the selective-labels note</li>
+      </ul>
+      <h4>3.2. Chapters</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Welcome + who-is-this-for (mirrors DSSG's <code>index.md</code>/<code>who_is_this_tutorial_for.md</code>; sets the two-framings promise)</li>
+        <li><code class="status">[]</code> Infrastructure + data preparation (the docker stack; <code>raw → clean → ontology.*</code> with the entity/event tables and <code>knowledge_date</code> discussion — the "knowledge date, not event date" gotcha gets its DSSG-style treatment)</li>
+        <li><code class="status">[]</code> Problem formulation × 2 (EIS chapter, Inspections chapter): cohort SQL, label SQL, framing, temporal config with a split diagram; the leakage discussion (fit-free vs fit-based imputation, ADR-0009)</li>
+        <li><code class="status">[]</code> Features via featurizer DFS (the ER star, as-of joins, windows — replacing DSSG's collate aggregate walkthrough); grid + run; the derivation DAG as the cache/provenance story (what DSSG never had)</li>
+        <li><code class="status">[]</code> Evaluate: leaderboard, audition rules, bias block (facility_type, punitive intervention → FPR parity) and restaurant subset — reusing the README's identity-neutral blocks; model card tour</li>
+        <li><code class="status">[]</code> Problem-type variants appendix (regression/survival/deepgrid configs table) + "where this differs from DSSG triage" close linking the comparison page</li>
+      </ul>
+      <h4>3.3. Testing Strategy</h4>
+      <p>Same discipline as P2 plus the new config's correctness: both experiments runnable fresh, the framing UI states match the prose, screenshots reproducible.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Fresh-stack verbatim pass over both framing paths; quoted hashes/counts match</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/ -q -k "identity or validate"</code> — the new example config validates through <code>validate_experiment_config</code> with zero errors</li>
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 4 ========================= -->
+    <div class="phase content">
+      <h3><code class="status">[]</code> Phase 4: Chicago 311 — EWS with the production surfaces</h3>
+      <p>The tutorial for what DSSG's never covered: an early-warning case (<code>slow_resolution</code> — administratively observed for every SR, hence 100% labeled, the very question that spawned <code>task_framing</code>) carried all the way into fairness auditing, subset evaluations, monitoring, and the survival variant.</p>
+      <h4>4.1. Chapters</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> The case + data (service requests as entities; why resolution-delay is an EWS; the 100%-labeled discussion verbatim from the dogfooding finding)</li>
+        <li><code class="status">[]</code> Formulation + features + run (base config, <code>task_framing: early_warning</code>)</li>
+        <li><code class="status">[]</code> Fairness chapter: <code>bias_config</code> over community_area, the fairness-tree wizard, τ verdicts; subsets chapter: the austin slice and re-rank-within-subset semantics</li>
+        <li><code class="status">[]</code> Monitoring chapter: <code>triage score</code>, drift PSI/KS, volume, realized outcomes (purpose chip: backtest vs production)</li>
+        <li><code class="status">[]</code> Survival chapter: <code>experiment-survival.yaml</code>, duration/event_observed labels, in-PG C-index, the event-rate card</li>
+      </ul>
+      <h4>4.2. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Fresh-stack (<code>just chi311-clean && just chi311-up</code>) verbatim pass incl. the bias/subset config and one <code>triage score</code>; quoted counts match</li>
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 5 ========================= -->
+    <div class="phase content">
+      <h3><code class="status">[]</code> Phase 5: DonorsChoose — funding risk and the deep-DFS showcase</h3>
+      <p>KDD Cup 2014: will a posted classroom project remain unfunded after 4 months (<code>unfunded_4mo</code>, <code>early_warning</code>)? The dataset earns its tutorial through its ER graph — projects with THREE child streams (resources, teacher history, school history) — making it the Deep Feature Synthesis and feature-group-strategies (ADR-0023) chapter.</p>
+      <h4>5.1. Chapters</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> The case + data (project entity; donations as the outcome stream; the one-month posting cohort window)</li>
+        <li><code class="status">[]</code> Formulation + the DFS deep-dive: the 3-relationship star, per-relationship feature families, how as-of joins keep teacher/school history leak-free</li>
+        <li><code class="status">[]</code> Feature-group strategies chapter: <code>leave-one-out / all</code> runs sharing one experiment (ADR-0023), read through the model-groups table and the leaderboard</li>
+        <li><code class="status">[]</code> Evaluate + close (which feature family carries the signal; DSSG-diff note)</li>
+      </ul>
+      <h4>5.2. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Fresh-stack (<code>just donors-clean && just donors-up</code>, port 5441) verbatim pass incl. one feature-group-strategy run; quoted counts match</li>
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 6 ========================= -->
+    <div class="phase publish">
+      <h3><code class="status">[]</code> Phase 6: Integration, Publish, Prove</h3>
+      <p>Wire the constellation together, publish, and verify the live site — the gate the whole plan funnels into.</p>
+      <h4>6.1. Cross-linking + index</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>docs/tutorials/index.md</code>: the which-tutorial-for-which-reader table (duckling = impatient · dirtyduck = student · chi311 = practitioner/production · donors = feature engineering) + the shared-skeleton diagram</li>
+        <li><code class="status">[]</code> README "Five minutes" section + tutorial-stack line link the Pages tutorials; the three runbook READMEs and <code>docs/README.md</code> gain their tutorial links (Pages URLs — never raw .html blobs, per the 2026-07-12 link fix)</li>
+        <li><code class="status">[]</code> Screenshot sweep via the rig (per-tutorial dashboard shots into <code>docs/tutorials/images/</code>)</li>
+      </ul>
+      <h4>6.2. Publish + live verification</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Commit series (phase-shaped), push; <code>docs-pages</code> fires on the tutorials paths → green</li>
+        <li><code class="status">[]</code> Live checks: all five tutorial URLs 200 on <code>ccd-ia.github.io/triage-pg/tutorials/…</code>; nav strip round-trips; images load; onboarding index shows the Tutorials cards</li>
+      </ul>
+      <h4>6.3. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code> — full-site links/anchors/fences clean</li>
+        <li><code class="status">[]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion</code> → <code>success</code></li>
+        <li><code class="status">[]</code> <code>for p in "" tutorials/ tutorials/dirtyduckling.html tutorials/dirtyduck.html tutorials/chicago311.html tutorials/donorschoose.html; do curl -sf -o /dev/null "https://ccd-ia.github.io/triage-pg/$p" || echo "FAIL $p"; done</code> — every page serves</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --out /tmp/site && uv run python scripts/build_docs_site.py --check</code> — the whole site builds and self-validates</li>
+      <li><code class="status">[]</code> <code>just test</code> + <code>just lint</code> — the new example config and any script changes ride the standard battery</li>
+      <li><code class="status">[]</code> Fresh-stack verbatim pass, one per tutorial (duckling+dirtyduck on 5440, chi311 on 5438, donors on 5441) — every fenced command runs, every quoted output matches</li>
+      <li><code class="status">[]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion --jq '.[0].conclusion'</code> → <code>success</code>; the five live URLs return 200</li>
+      <li><code class="status">[]</code> <code>git ls-files docs/tutorials/ | wc -l</code> ≥ 5 (index + 4 tutorials) and README/docs indexes link only Pages URLs for HTML artifacts</li>
+    </ul>
+    <div class="loop">🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong></div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+    <details>
+      <summary>Why a 150-line builder script instead of mkdocs-material (what DSSG actually uses)?</summary>
+      <p class="qa-answer">mkdocs was deliberately retired with the inherited workflows (P10: <code>build-mkdocs.yaml</code> deleted, no <code>mkdocs.yml</code> exists), and the repo's docs philosophy is "plain markdown, rendered on GitHub". A pinned python-markdown + an inspectable template keeps that contract: sources readable in-repo, zero theme/config surface, one dependency in a docs-only group. Cost: no built-in search and hand-rolled nav — acceptable for a six-page site. If the site grows past ~15 pages, revisit mkdocs as its own decision (candidate ADR then, not now).</p>
+    </details>
+    <details>
+      <summary>Is "Dirty Duckling" ours to use?</summary>
+      <p class="qa-answer">It's an homage, not a claim: DSSG's tutorial is MIT-licensed and triage-pg's README already carries the acknowledgment section crediting DSaPP/CMU for the ideas. Each tutorial's closing chapter cites the original Dirty Duck tutorial explicitly. The alternative (renaming) loses the recognition value for exactly the audience the tutorials target — people coming from DSSG triage.</p>
+    </details>
+    <details>
+      <summary>Does the new inspections config pollute the tutorial DB?</summary>
+      <p class="qa-answer">It adds a second experiment to the food DB (different hash — the problem genuinely differs). That's the point: the dashboard's experiment rail showing EIS and Inspections side by side IS the two-framings lesson. The DB is tutorial data; the wipe/re-run path (2026-07-10) exists if it ever needs resetting.</p>
+    </details>
+    <details>
+      <summary>Verbatim-runnability: manual passes or CI automation?</summary>
+      <p class="qa-answer">Manual fresh-stack passes per phase (as P8 did for the READMEs), NOT a CI job running dockerized tutorials — that would double CI time and couple docs publishing to docker stacks. The <code>--check</code> gate covers what CI can cheaply prove (links, anchors, fences). Command drift is caught at the next docs touch; if that proves too loose, a nightly tutorial-smoke workflow is the follow-up, out of scope here.</p>
+    </details>
+    <details>
+      <summary>What of DSSG's remaining chapters — ml_governance, aws_batch, choose_your_own_adventure?</summary>
+      <p class="qa-answer">Deferred deliberately: governance maps to the model-card/derivation surfaces already covered inside each tutorial; an AWS Batch chapter is gated on the cloud gate opening (it would document unverified steps); choose-your-own-adventure is the tutorials index table in P6. None block the four case studies.</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+    <h3>DSSG chapter → triage-pg mapping</h3>
+    <table>
+      <tr><th>DSSG Dirty Duck (dssg.github.io/triage)</th><th>This plan</th></tr>
+      <tr><td>Welcome! (<code>index.md</code>) + Who is this for</td><td>each tutorial's Welcome chapter + <code>tutorials/index.md</code></td></tr>
+      <tr><td>Dirty duckling (<code>dirty_duckling.md</code>)</td><td><code>tutorials/dirtyduckling.md</code> (P2)</td></tr>
+      <tr><td>Problem description / EIS / Resource prioritization</td><td>DirtyDuck chapters ×2 framings, powered by <code>task_framing</code> (P3) — the tag built 2026-07-12 makes DSSG's central distinction first-class in config and UI</td></tr>
+      <tr><td>A deeper look into triage</td><td>folded into each tutorial's formulation/features chapters + links into <code>docs/problem-types.md</code>, <code>docs/derivation-dag.md</code></td></tr>
+      <tr><td>Infrastructure / Data preparation / Quick setup</td><td>per-tutorial infra+data chapters (the docker stacks already exist — DSSG built theirs in-tutorial)</td></tr>
+      <tr><td>— (no equivalent)</td><td>chi311's fairness/subsets/monitoring/survival chapters; donors' DFS/feature-groups chapter; dashboard tours throughout</td></tr>
+    </table>
+    <h3>Working notes</h3>
+    <ul>
+      <li><strong>Dependency:</strong> one new dev-group dep (<code>markdown</code>) via <code>uv add --group docs markdown</code>; CI's docs-pages job gains setup-uv but the test job is untouched.</li>
+      <li><strong>Ports discipline:</strong> tutorials quote the compose defaults (dirtyduck 5440 · chi311 5438 · donors 5441) — the 2026-07-11 port-drift audit is the cautionary tale; the <code>--check</code> gate can grep for stale port literals as a cheap guard.</li>
+      <li><strong>Voice:</strong> the DSSG tutorial's register (narrative, opinionated, "we choose X because Y") is the model; the runbook READMEs stay terse. No content is duplicated between README and tutorial — READMEs run, tutorials teach.</li>
+      <li><strong>Site identity:</strong> the builder's template lifts onboarding.html's palette/typography verbatim so the site reads as one artifact; the nav strip is shared by every generated page.</li>
+      <li><strong>Estimated weight:</strong> P1 ≈ half a day; P3 is the heavy one (two framings, new config, longest prose) ≈ 1–1.5 days; P2/P4/P5 ≈ half–1 day each; P6 ≈ half a day. The phases are independent after P1, so P3–P5 can interleave with other work or parallelize (plan-team candidate if wanted).</li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <p class="small">Append-only history of changes made after the plan was first authored. Newest at the bottom.</p>
+  </section>
+
+</main>
+</body>
+</html>
