@@ -729,7 +729,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <h4>12.1. Maintainer repo settings (GitHub-side; blocked on maintainer)</h4>
       <ul class="checklist">
         <li><code class="status">[]</code> Branch protection on <code>main</code> (after the first green CI run — protecting on red locks the fix out)</li>
-        <li><code class="status">[]</code> Enable GitHub Pages iff <code>docs-pages.yml</code> is wanted (it ships gated/manual-only)</li>
+        <li><code class="status">[x]</code> Enable GitHub Pages — DONE 2026-07-11 (Source: GitHub Actions); https://ccd-ia.github.io/triage-pg/ serves the onboarding one-pager + comparison; push trigger restored</li>
         <li><code class="status">[]</code> <code>git rm</code> the 3 neutralized workflow stubs (<code>test.yaml</code>, <code>build-mkdocs.yaml</code>, <code>publish-to-pypi.yml</code>) — the pre-tool-use hook forbids <code>.github</code> deletions mid-session, so this is a maintainer one-liner (or a hook-exempt shell)</li>
       </ul>
 
