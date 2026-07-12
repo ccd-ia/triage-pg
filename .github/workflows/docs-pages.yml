@@ -1,18 +1,14 @@
 # OPTIONAL, GATED (v1-release plan P10): publishes the two self-contained HTML artifacts
 # + screenshots to GitHub Pages so the onboarding one-pager gets a shareable URL.
-# Fires only after the maintainer enables Pages (Settings → Pages → Source: GitHub Actions);
-# until then, runs of this workflow fail at deploy with a clear Pages-not-enabled error,
-# so it ships trigger-gated to manual dispatch + docs pushes on main.
+# MANUAL-ONLY until the maintainer enables Pages (Settings → Pages → Source: GitHub
+# Actions) — with Pages off, any triggered run fails and reddens the checks (seen
+# 2026-07-06 and 2026-07-11). Once Pages is enabled, restore the push trigger:
+#   push: { branches: [main], paths: ["docs/*.html", "docs/images/**"] }
 
 name: docs-pages
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "docs/*.html"
-      - "docs/images/**"
 
 permissions:
   pages: write
