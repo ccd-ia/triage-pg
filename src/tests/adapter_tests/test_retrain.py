@@ -33,7 +33,13 @@ def test_retrain_rejoins_original_group(db_pool_greenfield, tmp_path):
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
+    run_experiment(
+        engine,
+        _experiment_config(),
+        storage=LocalStorage(),
+        storage_root=storage,
+        random_seed=42,
+    )
     group_id = _the_group(engine)
 
     with engine.connection() as conn:
@@ -74,7 +80,13 @@ def test_retrain_and_predict_scores_the_fresh_model(db_pool_greenfield, tmp_path
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
+    run_experiment(
+        engine,
+        _experiment_config(),
+        storage=LocalStorage(),
+        storage_root=storage,
+        random_seed=42,
+    )
     group_id = _the_group(engine)
 
     retrain_result, forward_result = retrain_and_predict(

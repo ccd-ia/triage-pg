@@ -573,9 +573,7 @@ def _create_experiment_and_run(
     # USER env var is the documented fallback when neither is available).
     try:
         author = getpass.getuser()
-    except (
-        Exception
-    ):  # noqa: BLE001 - getuser() can raise on an unconfigured passwd/env
+    except Exception:  # noqa: BLE001 - getuser() can raise on an unconfigured passwd/env
         author = os.environ.get("USER")
     with db_engine.connection() as conn:
         conn.execute(
@@ -710,9 +708,7 @@ def _refresh_leaderboard(db_engine: ConnectionPool) -> None:
         with db_engine.connection() as conn:
             conn.execute("refresh materialized view triage.leaderboard")
         logger.info("Refreshed triage.leaderboard")
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - leaderboard is a read convenience, never fatal
+    except Exception as exc:  # noqa: BLE001 - leaderboard is a read convenience, never fatal
         logger.warning(f"Could not refresh triage.leaderboard (non-fatal): {exc}")
 
 

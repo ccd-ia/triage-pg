@@ -135,20 +135,24 @@ def populate_source_data(db_engine):
     ]
 
     with db_engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table cat_complaints (
                 entity_id int,
                 as_of_date date,
                 cat_sightings int
                 )
-                """))
+                """)
+        )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table entity_zip_codes (
                 entity_id int,
                 zip_code text
                 )
-                """))
+                """)
+        )
 
         conn.execute(
             text(
@@ -176,13 +180,15 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table zip_code_events (
                 zip_code text,
                 as_of_date date,
                 num_events int
                 )
-                """))
+                """)
+        )
         for zip_code_event in zip_code_events:
             conn.execute(
                 text(
@@ -207,13 +213,15 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
                 create table events (
                 entity_id int,
                 outcome int,
                 outcome_date date
                 )
-                """))
+                """)
+        )
 
         for event in events:
             conn.execute(

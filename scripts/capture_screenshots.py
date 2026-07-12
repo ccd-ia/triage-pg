@@ -72,9 +72,7 @@ def capture(base: str) -> int:
             try:
                 page.goto(base + path.format(exp=exp), wait_until="domcontentloaded")
                 shoot(filename, selector)
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 — report every failed shot, then fail
+            except Exception as exc:  # noqa: BLE001 — report every failed shot, then fail
                 failures.append(f"{filename}: {exc}")
                 print(f"FAILED {filename}: {exc}", file=sys.stderr)
 

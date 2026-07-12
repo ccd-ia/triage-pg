@@ -33,7 +33,13 @@ def test_predict_forward_appends_production_predictions(db_pool_greenfield, tmp_
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
+    run_experiment(
+        engine,
+        _experiment_config(),
+        storage=LocalStorage(),
+        storage_root=storage,
+        random_seed=42,
+    )
     model = _latest_model(engine)
 
     result = predict_forward(
@@ -91,7 +97,13 @@ def test_predict_forward_is_append_only_across_calls(db_pool_greenfield, tmp_pat
     engine = db_pool_greenfield
     _seed_source(engine)
     storage = str(tmp_path / "store")
-    run_experiment(engine, _experiment_config(), storage=LocalStorage(), storage_root=storage, random_seed=42)
+    run_experiment(
+        engine,
+        _experiment_config(),
+        storage=LocalStorage(),
+        storage_root=storage,
+        random_seed=42,
+    )
     model = _latest_model(engine)
 
     predict_forward(engine, model["model_id"], FORWARD_DATE, storage_dir=storage)

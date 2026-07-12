@@ -17,6 +17,7 @@ All functions should return: (float) the resulting score
 Functions defined here are meant to be used in ModelEvaluator.available_metrics
 
 """
+
 from sklearn import metrics
 from sklearn.metrics import confusion_matrix
 import numpy as np

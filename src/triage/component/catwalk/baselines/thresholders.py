@@ -9,7 +9,7 @@ REQUIRED_KEYS = frozenset(["feature_name", "operator", "threshold"])
 
 
 def get_operator_method(operator_string):
-    """ Convert the user-passed operator into the the name of the apprpriate
+    """Convert the user-passed operator into the the name of the apprpriate
     pandas method.
     """
     try:
@@ -29,7 +29,7 @@ def get_operator_method(operator_string):
 
 
 class SimpleThresholder:
-    """ The simple thresholder applies a set of predetermined logical rules to a
+    """The simple thresholder applies a set of predetermined logical rules to a
     test matrix to classify entities. By default, it will classify entities as 1
     if they satisfy any of the rules. When 'and' is set as the logical_operator,
     it will classify entities as 1 only if they pass *all* of the rules.
@@ -66,7 +66,7 @@ class SimpleThresholder:
 
     @rules.setter
     def rules(self, rules):
-        """ Validates the rules passed by the user and converts them to the
+        """Validates the rules passed by the user and converts them to the
         internal representation. Can be used to validate rules before running an
         experiment.
 
@@ -109,14 +109,14 @@ class SimpleThresholder:
         return [rule["feature_name"] for rule in self.rules]
 
     def lookup_rule_combination_method(self, logical_operator):
-        """ Convert 'and' to 'all' and 'or' to 'any' for interacting with
+        """Convert 'and' to 'all' and 'or' to 'any' for interacting with
         pandas DataFrames.
         """
         rule_combination_method_lookup = {"or": "any", "and": "all"}
         return rule_combination_method_lookup[logical_operator]
 
     def _convert_string_rule_to_dict(self, rule):
-        """ Converts a string rule into a dict, raising helpful exceptions if it
+        """Converts a string rule into a dict, raising helpful exceptions if it
         cannot be parsed.
         """
         components = rule.rsplit(" ", 2)
@@ -150,7 +150,7 @@ class SimpleThresholder:
         }
 
     def _set_feature_importances_(self, x):
-        """ Assigns feature importances following the rule: 1 for the features
+        """Assigns feature importances following the rule: 1 for the features
         we are thresholding on, 0 for all other features.
         """
         feature_importances = [0] * len(x.columns)
@@ -168,14 +168,12 @@ class SimpleThresholder:
         self.feature_importances_ = np.array(feature_importances)
 
     def fit(self, x, y):
-        """ Set feature importances and return self.
-        """
+        """Set feature importances and return self."""
         self._set_feature_importances_(x)
         return self
 
     def predict_proba(self, x):
-        """ Assign 1 for entities that meet the rules and 0 for those that do not.
-        """
+        """Assign 1 for entities that meet the rules and 0 for those that do not."""
         rule_evaluations_list = []
         for rule in self.rules:
             rule_evaluations_list.append(

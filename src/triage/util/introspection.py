@@ -20,8 +20,8 @@ def bind_kwargs(kallable, **kwargs):
     Returns: (dict)
     """
     call_signature = inspect.signature(kallable).bind_partial(**kwargs).arguments
-    if 'kwargs' in call_signature:
-        passed_kwargs = call_signature['kwargs']
+    if "kwargs" in call_signature:
+        passed_kwargs = call_signature["kwargs"]
     else:
         passed_kwargs = call_signature
     return passed_kwargs

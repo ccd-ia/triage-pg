@@ -3,7 +3,8 @@ import matplotlib.dates as md
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 
 from datetime import datetime
 from plotly.subplots import make_subplots
@@ -13,7 +14,9 @@ from triage.util.conf import convert_str_to_relativedelta
 FIG_SIZE = (32, 16)
 
 
-def visualize_chops(chopper, show_as_of_times=True, show_boundaries=True, save_target=None):
+def visualize_chops(
+    chopper, show_as_of_times=True, show_boundaries=True, save_target=None
+):
     """Visualize time chops of a given Timechop object using matplotlib
 
     Args:
@@ -29,7 +32,9 @@ def visualize_chops(chopper, show_as_of_times=True, show_boundaries=True, save_t
 
     chops.reverse()
 
-    fig, ax = plt.subplots(nrows=len(chops), sharex=True, sharey=True, squeeze=False, figsize=FIG_SIZE)
+    fig, ax = plt.subplots(
+        nrows=len(chops), sharex=True, sharey=True, squeeze=False, figsize=FIG_SIZE
+    )
 
     for idx, chop in enumerate(chops):
         train_as_of_times = chop["train_matrix"]["as_of_times"]
@@ -109,8 +114,11 @@ def visualize_chops(chopper, show_as_of_times=True, show_boundaries=True, save_t
 
         ax[idx][0].yaxis.set_major_locator(plt.NullLocator())
         ax[idx][0].yaxis.set_label_position("right")
-        ax[idx][0].set_ylabel(f'Label timespan \n {test_label_timespan} (test), {training_label_timespan} (training)',
-                              rotation="vertical", labelpad=30)
+        ax[idx][0].set_ylabel(
+            f"Label timespan \n {test_label_timespan} (test), {training_label_timespan} (training)",
+            rotation="vertical",
+            labelpad=30,
+        )
 
         ax[idx][0].xaxis.set_major_formatter(md.DateFormatter("%Y"))
         ax[idx][0].xaxis.set_major_locator(md.YearLocator())
@@ -124,7 +132,13 @@ def visualize_chops(chopper, show_as_of_times=True, show_boundaries=True, save_t
     plt.show()
 
 
-def visualize_chops_plotly(chopper, selected_splits=None, show_label_timespans=True, show_boxes=True, show_annotations=True):
+def visualize_chops_plotly(
+    chopper,
+    selected_splits=None,
+    show_label_timespans=True,
+    show_boxes=True,
+    show_annotations=True,
+):
     """Visualize time chops of a given Timechop object using plotly, to get an interactive output
     Args:
         chopper (triage.component.timechop.Timechop): A fully-configured Timechop object
@@ -136,22 +150,23 @@ def visualize_chops_plotly(chopper, selected_splits=None, show_label_timespans=T
         show_annotations (bool): Whether or not to add annotations on the latest split, showing what each of the timechop parameters mean
     """
     chops = chopper.chop_time()
-    chops.reverse() # reverse to get the most recent set first
+    chops.reverse()  # reverse to get the most recent set first
 
     # Subset to relevant splits if arg specified, and generate titles for each split
     if selected_splits is not None:
-      chops = [chops[i] for i in selected_splits]
-      titles = tuple(f"Train-Validation Split {i+1}" for i in selected_splits)
+        chops = [chops[i] for i in selected_splits]
+        titles = tuple(f"Train-Validation Split {i + 1}" for i in selected_splits)
     else:
-      titles = tuple(f"Train-Validation Split {i+1}" for i in range(len(chops)))
+        titles = tuple(f"Train-Validation Split {i + 1}" for i in range(len(chops)))
 
-    fig = make_subplots(rows=len(chops), 
-                        cols=1,
-                        shared_xaxes=True,
-                        shared_yaxes=True,
-                        # vertical_spacing=0.05,
-                        subplot_titles=titles
-        ) # adds titles for each subplot
+    fig = make_subplots(
+        rows=len(chops),
+        cols=1,
+        shared_xaxes=True,
+        shared_yaxes=True,
+        # vertical_spacing=0.05,
+        subplot_titles=titles,
+    )  # adds titles for each subplot
 
     # For each train-val split
     for idx, chop in enumerate(chops):
@@ -161,12 +176,14 @@ def visualize_chops_plotly(chopper, selected_splits=None, show_label_timespans=T
         test_label_timespan = chop["test_matrices"][0]["test_label_timespan"]
         training_label_timespan = chop["train_matrix"]["training_label_timespan"]
 
-        # Colors for train/test 
-        train_color = "rgba(3, 37, 126" # dark blue (left open because we add an opacity argument below)
-        test_color = "rgba(139, 0, 0" # magenta (left open because we add an opacity argument below)
-        as_of_date_marker_opacity = ', 1)' # the extra ', 1)' defines opacity. 100% solid for markers
-        label_line_opacity = ', 0.3)' # 30% opacity for the label lines
-        rectangle_fill_opacity = ', 0.15)' # 15% opacity for rectangle fill
+        # Colors for train/test
+        train_color = "rgba(3, 37, 126"  # dark blue (left open because we add an opacity argument below)
+        test_color = "rgba(139, 0, 0"  # magenta (left open because we add an opacity argument below)
+        as_of_date_marker_opacity = (
+            ", 1)"  # the extra ', 1)' defines opacity. 100% solid for markers
+        )
+        label_line_opacity = ", 0.3)"  # 30% opacity for the label lines
+        rectangle_fill_opacity = ", 0.15)"  # 15% opacity for rectangle fill
 
         train_as_of_date_color = train_color + as_of_date_marker_opacity
         train_label_period_color = train_color + label_line_opacity
@@ -177,187 +194,262 @@ def visualize_chops_plotly(chopper, selected_splits=None, show_label_timespans=T
 
         # Show legend only if idx = 0 (i.e. first train-val set we are displaying)
         if idx == 0:
-          # Train set as-of-date markers
-          fig.add_trace(
-              go.Scatter(x=[x.date() for x in train_as_of_times], 
-                        y=[x for x in range(len(train_as_of_times))], 
-                        mode='markers',
-                        marker=dict(color=train_as_of_date_color),
-                        name='Training as-of-date',
-                        showlegend=True,
-                        hovertemplate="%{x}<extra></extra>" # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
-                        ), 
-              row=idx+1, # row and column of the subplots to add this trace object to
-              col=1
-              )
-          # Validation set as-of-date markers
-          fig.add_trace(
-            go.Scatter(x=[x for x in test_as_of_times], 
-                      y=[x for x in range(len(test_as_of_times))], 
-                      mode='markers',
-                      name='Validation as-of-date',
-                      showlegend=True,
-                      marker=dict(color=test_as_of_date_color),
-                      hovertemplate="%{x}<extra></extra>"),
-            row=idx+1,
-            col=1
+            # Train set as-of-date markers
+            fig.add_trace(
+                go.Scatter(
+                    x=[x.date() for x in train_as_of_times],
+                    y=[x for x in range(len(train_as_of_times))],
+                    mode="markers",
+                    marker=dict(color=train_as_of_date_color),
+                    name="Training as-of-date",
+                    showlegend=True,
+                    hovertemplate="%{x}<extra></extra>",  # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
+                ),
+                row=idx
+                + 1,  # row and column of the subplots to add this trace object to
+                col=1,
+            )
+            # Validation set as-of-date markers
+            fig.add_trace(
+                go.Scatter(
+                    x=[x for x in test_as_of_times],
+                    y=[x for x in range(len(test_as_of_times))],
+                    mode="markers",
+                    name="Validation as-of-date",
+                    showlegend=True,
+                    marker=dict(color=test_as_of_date_color),
+                    hovertemplate="%{x}<extra></extra>",
+                ),
+                row=idx + 1,
+                col=1,
             )
         # Suppress legend if not the first subplot; only difference with above is showlegend=False (note, anytime we add a trace, we have to set showlegend=False to suppress useless info in the legend)
         else:
-          # Train set as-of-date markers
-          fig.add_trace(
-              go.Scatter(x=[x.date() for x in train_as_of_times], 
-                        y=[x for x in range(len(train_as_of_times))], 
-                        mode='markers',
-                        marker=dict(color=train_as_of_date_color),
-                        name='Training as-of-date',
-                        showlegend=False,
-                        hovertemplate="%{x}<extra></extra>" # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
-                        ), 
-              row=idx+1, # row and column of the subplots to add this trace object to
-              col=1
-              )
-
-          # Validation set as-of-date markers
-          fig.add_trace(
-            go.Scatter(x=[x for x in test_as_of_times], 
-                      y=[x for x in range(len(test_as_of_times))], 
-                      mode='markers',
-                      name='Validation as-of-date',
-                      showlegend=False,
-                      marker=dict(color=test_as_of_date_color),
-                      hovertemplate="%{x}<extra></extra>"),
-            row=idx+1,
-            col=1
+            # Train set as-of-date markers
+            fig.add_trace(
+                go.Scatter(
+                    x=[x.date() for x in train_as_of_times],
+                    y=[x for x in range(len(train_as_of_times))],
+                    mode="markers",
+                    marker=dict(color=train_as_of_date_color),
+                    name="Training as-of-date",
+                    showlegend=False,
+                    hovertemplate="%{x}<extra></extra>",  # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
+                ),
+                row=idx
+                + 1,  # row and column of the subplots to add this trace object to
+                col=1,
             )
 
+            # Validation set as-of-date markers
+            fig.add_trace(
+                go.Scatter(
+                    x=[x for x in test_as_of_times],
+                    y=[x for x in range(len(test_as_of_times))],
+                    mode="markers",
+                    name="Validation as-of-date",
+                    showlegend=False,
+                    marker=dict(color=test_as_of_date_color),
+                    hovertemplate="%{x}<extra></extra>",
+                ),
+                row=idx + 1,
+                col=1,
+            )
 
         # Add test_durations annotation if option selected
-        if idx == 0 and show_annotations==True:
-
-          # Add a dashed line to show test_durations span
-          x0 = test_as_of_times[0]
-          x1 = test_as_of_times[-1]
-          x_mid = x0 + (x1-x0)/2
-          y = -1 # place the test durations labeling below the graph
-          fig.add_shape(type='line', x0=x0, x1=x1, y0=y, y1=y, line={'color': 'green'}, row=idx+1, col=1)
-          fig.add_annotation(x=x_mid, y=y-1, text=f"Test duration: {chop['test_matrices'][0]['test_duration']}", showarrow=False)
+        if idx == 0 and show_annotations == True:
+            # Add a dashed line to show test_durations span
+            x0 = test_as_of_times[0]
+            x1 = test_as_of_times[-1]
+            x_mid = x0 + (x1 - x0) / 2
+            y = -1  # place the test durations labeling below the graph
+            fig.add_shape(
+                type="line",
+                x0=x0,
+                x1=x1,
+                y0=y,
+                y1=y,
+                line={"color": "green"},
+                row=idx + 1,
+                col=1,
+            )
+            fig.add_annotation(
+                x=x_mid,
+                y=y - 1,
+                text=f"Test duration: {chop['test_matrices'][0]['test_duration']}",
+                showarrow=False,
+            )
 
         # Add label timespan lines if option selected
         if show_label_timespans is True:
+            # For training as_of_dates
+            for i in range(len(train_as_of_times)):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[
+                            train_as_of_times[i].date(),
+                            train_as_of_times[i].date()
+                            + convert_str_to_relativedelta(training_label_timespan),
+                        ],
+                        y=[i, i],
+                        marker=dict(
+                            color=train_label_period_color,
+                            line=dict(color=train_label_period_color),
+                        ),
+                        hovertemplate="%{x}<extra></extra>",
+                        showlegend=False,
+                    ),
+                    row=idx + 1,
+                    col=1,
+                )
 
-          # For training as_of_dates
-          for i in range(len(train_as_of_times)):
-            fig.add_trace(
-                go.Scatter(
-                    x=[train_as_of_times[i].date(), train_as_of_times[i].date() + convert_str_to_relativedelta(training_label_timespan)],
-                    y=[i,i],
-                    marker=dict(color=train_label_period_color, line=dict(color=train_label_period_color)),
-                    hovertemplate="%{x}<extra></extra>",
-                    showlegend=False
-                ),
-              row=idx+1,
-              col=1 
-            )
+                # Add annotation showing train label timespan on first bar in first train-val set (if option specified)
+                if (
+                    i == len(train_as_of_times) - 1
+                    and idx == 0
+                    and show_annotations == True
+                ):
+                    # Have the x in between the label timespan
+                    x0 = train_as_of_times[i].date()
+                    x1 = train_as_of_times[i].date() + convert_str_to_relativedelta(
+                        training_label_timespan
+                    )
+                    x_pos = x0 + (x1 - x0) / 2
 
-            # Add annotation showing train label timespan on first bar in first train-val set (if option specified) 
-            if i == len(train_as_of_times)-1 and idx == 0 and show_annotations==True:
+                    # Position at a y-value above the bar
+                    y_pos = i
+                    fig.add_annotation(
+                        x=x_pos,
+                        y=y_pos,
+                        text="Label timespan",
+                        showarrow=True,
+                        arrowhead=1,
+                        row=idx + 1,
+                        col=1,
+                    )
 
-              # Have the x in between the label timespan
-              x0 = train_as_of_times[i].date()
-              x1 = train_as_of_times[i].date() + convert_str_to_relativedelta(training_label_timespan)
-              x_pos = x0 + (x1 - x0)/2
+            # For test as_of_dates
+            for i in range(len(test_as_of_times)):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[
+                            test_as_of_times[i].date(),
+                            test_as_of_times[i].date()
+                            + convert_str_to_relativedelta(test_label_timespan),
+                        ],
+                        y=[i, i],
+                        marker=dict(
+                            color=test_label_period_color,
+                            line=dict(color=test_label_period_color),
+                        ),
+                        showlegend=False,
+                        hovertemplate="%{x}<extra></extra>",
+                    ),
+                    row=idx + 1,
+                    col=1,
+                )
 
-              # Position at a y-value above the bar
-              y_pos = i
-              fig.add_annotation(x=x_pos, y=y_pos, text='Label timespan', showarrow=True, arrowhead=1, row=idx+1, col=1)
+                # Add annotation showing test label timespan on first bar in first train-val set (if option specified)
+                if (
+                    i == len(test_as_of_times) - 1
+                    and idx == 0
+                    and show_annotations == True
+                ):
+                    # Have the x in between the label timespan
+                    x0 = test_as_of_times[i].date()
+                    x1 = test_as_of_times[i].date() + convert_str_to_relativedelta(
+                        test_label_timespan
+                    )
+                    x_pos = x0 + (x1 - x0) / 2
 
-          # For test as_of_dates
-          for i in range(len(test_as_of_times)):
-            fig.add_trace(
-                go.Scatter(
-                    x=[test_as_of_times[i].date(), test_as_of_times[i].date() + convert_str_to_relativedelta(test_label_timespan)],
-                    y=[i,i],
-                    marker=dict(color= test_label_period_color, line=dict(color= test_label_period_color)),
-                    showlegend=False,
-                    hovertemplate="%{x}<extra></extra>"),
-              row=idx+1,
-              col=1 
-            )
-
-            # Add annotation showing test label timespan on first bar in first train-val set (if option specified) 
-            if i == len(test_as_of_times)-1 and idx == 0 and show_annotations==True:
-
-                # Have the x in between the label timespan
-                x0 = test_as_of_times[i].date()
-                x1 = test_as_of_times[i].date() + convert_str_to_relativedelta(test_label_timespan)
-                x_pos = x0 + (x1 - x0)/2
-
-                # Position at a y-value above the bar
-                y_pos = i
-                fig.add_annotation(x=x_pos, y=y_pos, text='Label timespan', showarrow=True, arrowhead=1, row=idx+1, col=1)
+                    # Position at a y-value above the bar
+                    y_pos = i
+                    fig.add_annotation(
+                        x=x_pos,
+                        y=y_pos,
+                        text="Label timespan",
+                        showarrow=True,
+                        arrowhead=1,
+                        row=idx + 1,
+                        col=1,
+                    )
 
         # Add rectangles/boxes to mark train-test matrices
         if show_boxes is True:
+            # Training matrix rectangle
+            # Rectangle params
+            x0 = min(train_as_of_times).date()
+            x1 = max(train_as_of_times).date() + convert_str_to_relativedelta(
+                training_label_timespan
+            )
+            y = max(len(test_as_of_times), len(train_as_of_times))
 
-          # Training matrix rectangle
-          # Rectangle params
-          x0 = min(train_as_of_times).date()
-          x1 = max(train_as_of_times).date() + convert_str_to_relativedelta(training_label_timespan)
-          y = max(len(test_as_of_times), len(train_as_of_times))
+            fig.add_trace(
+                go.Scatter(
+                    x=[x0, x0, x1, x1, x0],
+                    y=[0, y, y, 0, 0],
+                    fill="toself",
+                    fillcolor=train_rectangle_fill,
+                    showlegend=False,
+                    marker=dict(
+                        color="rgba(0,255,0,0)", line=dict(color="rgba(0,255,0,0)")
+                    ),  # setting 0 opacity so we don't see the lines or markers
+                    hoverinfo="skip",
+                ),
+                row=idx + 1,
+                col=1,
+            )
 
-          fig.add_trace(
-              go.Scatter(x =[x0,x0,x1,x1,x0], y=[0,y,y,0,0], 
-                        fill='toself', fillcolor=train_rectangle_fill,
-                        showlegend=False,
-                        marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines or markers
-                        hoverinfo='skip'), 
-              row=idx+1,
-              col=1,
-          )
+            # #Add annotated text to the middle of the training set rectangle -> this code works, but the positioning is a bit weird, so need to tweak
+            # middle_index = round(len(train_as_of_times)/2)
+            # x_middle = train_as_of_times[middle_index].date() + convert_str_to_relativedelta(training_label_timespan)
+            # fig.add_trace(
+            #     go.Scatter(x =[x_middle], y=[y-1],
+            #               mode='text',
+            #               text="Training Data",
+            #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines
+            #               hoverinfo='skip'),
+            #     row=idx+1,
+            #     col=1,
+            # )
 
-          # #Add annotated text to the middle of the training set rectangle -> this code works, but the positioning is a bit weird, so need to tweak
-          # middle_index = round(len(train_as_of_times)/2)
-          # x_middle = train_as_of_times[middle_index].date() + convert_str_to_relativedelta(training_label_timespan)
-          # fig.add_trace(
-          #     go.Scatter(x =[x_middle], y=[y-1], 
-          #               mode='text',
-          #               text="Training Data",
-          #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines 
-          #               hoverinfo='skip'),
-          #     row=idx+1,
-          #     col=1,
-          # )
+            # Test set rectangle
 
-          # Test set rectangle
+            # Rectangle params
+            x0 = min(test_as_of_times).date()
+            x1 = max(test_as_of_times).date() + convert_str_to_relativedelta(
+                test_label_timespan
+            )
+            y = max(len(test_as_of_times), len(train_as_of_times))
 
-          # Rectangle params
-          x0 = min(test_as_of_times).date()
-          x1 = max(test_as_of_times).date() + convert_str_to_relativedelta(test_label_timespan)
-          y = max(len(test_as_of_times), len(train_as_of_times))
+            fig.add_trace(
+                go.Scatter(
+                    x=[x0, x0, x1, x1, x0],
+                    y=[0, y, y, 0, 0],
+                    fill="toself",
+                    fillcolor=test_rectangle_fill,
+                    showlegend=False,
+                    marker=dict(
+                        color="rgba(0,255,0,0)", line=dict(color="rgba(0,255,0,0)")
+                    ),  # setting 0 opacity so we don't see the lines
+                    hoverinfo="skip",
+                ),
+                row=idx + 1,
+                col=1,
+            )
 
-          fig.add_trace(
-              go.Scatter(x =[x0,x0,x1,x1,x0], y=[0,y,y,0,0], 
-                        fill='toself', fillcolor=test_rectangle_fill,
-                        showlegend=False,
-                        marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines 
-                        hoverinfo='skip'),
-              row=idx+1,
-              col=1,
-          )
+            # #Add annotated text to the test set rectangle
+            # middle_index = round(len(test_as_of_times)/2)
+            # x_middle = test_as_of_times[middle_index].date() + convert_str_to_relativedelta(test_label_timespan)
+            # fig.add_trace(
+            #     go.Scatter(x =[x_middle], y=[y-1],
+            #               mode='text',
+            #               text="Test Data",
+            #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines
+            #               hoverinfo='skip'),
+            #     row=idx+1,
+            #     col=1,
+            # )
 
-          # #Add annotated text to the test set rectangle
-          # middle_index = round(len(test_as_of_times)/2)
-          # x_middle = test_as_of_times[middle_index].date() + convert_str_to_relativedelta(test_label_timespan)
-          # fig.add_trace(
-          #     go.Scatter(x =[x_middle], y=[y-1],  
-          #               mode='text',
-          #               text="Test Data",
-          #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines 
-          #               hoverinfo='skip'),
-          #     row=idx+1,
-          #     col=1,
-          # )
-
-    fig.update_layout(height=150*len(chops), width=800, showlegend=True)
+    fig.update_layout(height=150 * len(chops), width=800, showlegend=True)
     fig.show()

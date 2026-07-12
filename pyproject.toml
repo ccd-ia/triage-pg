@@ -187,7 +187,10 @@ filterwarnings = [
 ]
 
 [tool.ruff]
-line-length = 120
+# 88 (the ruff/black default and the workspace-wide convention) — the tree has
+# always been wrapped at 88; a 120 setting here caused a 91-file rewrap on any
+# `ruff format` run (2026-07-11) that was reverted rather than adopted.
+line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]

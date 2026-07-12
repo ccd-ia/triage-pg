@@ -38,9 +38,12 @@ def test_cutoff_warning():
 def test_cutoff_transformer():
     cutoff = CutOff()
 
-    X_data = np.array([1, 2, 0.5, 0.7, 100, -1, -23, 0]).reshape(-1,1)
+    X_data = np.array([1, 2, 0.5, 0.7, 100, -1, -23, 0]).reshape(-1, 1)
 
-    assert np.all(cutoff.fit_transform(X_data) == np.array([1, 1, 0.5, 0.7, 1, 0, 0, 0]).reshape(-1,1))
+    assert np.all(
+        cutoff.fit_transform(X_data)
+        == np.array([1, 1, 0.5, 0.7, 1, 0, 0, 0]).reshape(-1, 1)
+    )
 
 
 def test_cutoff_inside_a_pipeline(data):
@@ -69,7 +72,7 @@ def test_dsapp_lr(data):
 
     minmax_scaler = preprocessing.MinMaxScaler()
     dsapp_cutoff = CutOff()
-    lr = linear_model.LogisticRegression(solver='lbfgs')
+    lr = linear_model.LogisticRegression(solver="lbfgs")
 
     pipeline = Pipeline(
         [("minmax_scaler", minmax_scaler), ("dsapp_cutoff", dsapp_cutoff), ("lr", lr)]

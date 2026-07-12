@@ -228,9 +228,9 @@ def test_experiment_audition_nonempty_after_rerun(client, seeded):
     resp = client.get(f"/api/experiments/{seeded.experiment_hash}/audition")
     assert resp.status_code == 200
     body = resp.json()
-    assert not body.get(
-        "empty"
-    ), "experiment-scoped audition must survive a cache-shared re-run"
+    assert not body.get("empty"), (
+        "experiment-scoped audition must survive a cache-shared re-run"
+    )
     assert len(body["ranking"]) == 3
 
 
@@ -641,9 +641,7 @@ def test_entity_attributes_geo_decoded(client, seeded, db_pool_greenfield):
     with db_pool_greenfield.connection() as conn:
         try:
             conn.execute("create extension if not exists postgis")
-        except (
-            Exception
-        ):  # noqa: BLE001 - environment without PostGIS: nothing to assert
+        except Exception:  # noqa: BLE001 - environment without PostGIS: nothing to assert
             pytest.skip("PostGIS not available in the test server")
         conn.execute(
             "create table geo_facilities (entity_id bigint, name text, as_of date,"

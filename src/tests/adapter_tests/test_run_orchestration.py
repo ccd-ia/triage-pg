@@ -528,9 +528,9 @@ def test_feature_group_fanout_runs_share_one_experiment(db_pool_greenfield, tmp_
     groups = partition_features(
         full_feats, aliases, target_alias=_featurizer_config()["target"]
     )
-    assert (
-        len(groups) >= 2
-    ), f"expected ≥2 source-entity groups, got {list(groups)} from {full_feats}"
+    assert len(groups) >= 2, (
+        f"expected ≥2 source-entity groups, got {list(groups)} from {full_feats}"
+    )
     expected = mix_strategies(groups, ["all", "leave-one-in"])
     assert experiment.num_runs == len(expected)
     assert {r.feature_group for r in experiment.runs} == {s.label for s in expected}
