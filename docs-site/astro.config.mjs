@@ -31,6 +31,10 @@ export default defineConfig({
           label: 'Tutorials',
           autogenerate: { directory: 'tutorials' },
         },
+        {
+          label: 'Reference',
+          autogenerate: { directory: 'reference' },
+        },
       ],
       plugins: [starlightLinksValidator()],
     }),

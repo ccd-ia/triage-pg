@@ -337,7 +337,7 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 7 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[wip]</code> Phase 7: Reference pages — architecture · dashboard tour · CLI tour (maintainer request 2026-07-13)</h3>
+      <h3><code class="status">[x]</code> Phase 7: Reference pages — architecture · dashboard tour · CLI tour (maintainer request 2026-07-13)</h3>
       <p>Post-launch additions from the maintainer's landing-page review: polish the hero, then grow the site beyond tutorials with three reference pages, each carded on the landing. Authoring notes: the ERD is rendered to an SVG asset from the committed <code>docs/erd.md</code>/<code>docs/schema-design.md</code> material (no PlantUML toolchain in CI — same no-new-build-deps rule as the tutorials); the AWS section stays honest about the closed cloud gate (authored + offline-validated, not live-proven).</p>
 
       <h4>7.1. Landing polish (done with this amendment)</h4>
@@ -349,24 +349,24 @@ details summary { cursor: pointer; font-weight: 600; }
 
       <h4>7.2. Technical architecture page</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>reference/architecture.md</code>: the two-tier registry/project-DB design (ADR-0002), the detailed ERD as an SVG asset (every FK edge + ON DELETE semantics), the pipeline walk with the derivation-DAG/content-addressing story</li>
-        <li><code class="status">[]</code> "How it runs on AWS" section: the cloud profile seam (RDS-IAM auth, S3 storage, one Batch job per experiment; Terraform in <code>infra/terraform/</code>) with an architecture SVG — worded as authored/offline-validated until the cloud gate opens</li>
+        <li><code class="status">[x]</code> <code>reference/architecture.md</code>: the two-tier registry/project-DB design (ADR-0002), the detailed ERD as an SVG asset (rendered ONCE locally from docs/erd.md's mermaid via mmdc and committed — CI untouched), the pipeline walk with the derivation-DAG/content-addressing story</li>
+        <li><code class="status">[x]</code> "How it runs on AWS" section: the cloud profile seam (RDS-IAM auth, S3 storage, one Batch job per experiment; Terraform in <code>infra/terraform/</code>) with an architecture SVG — worded as authored/offline-validated until the cloud gate opens (the honesty note is in the page itself)</li>
       </ul>
 
       <h4>7.3. Dashboard tour page</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>reference/dashboard.md</code>: screenshot-led walk of every surface using the rig's committed set (experiments list, overview heatmap, model card, audition, bias + fairness wizard, model groups, monitoring, derivation, projects/submissions) — what question each panel answers</li>
+        <li><code class="status">[x]</code> <code>reference/dashboard.md</code>: screenshot-led walk of every surface using the rig's committed set (experiments list, overview heatmap, model card, audition, bias + fairness wizard, model groups, monitoring, projects/submissions incl. the read-only notice) — what question each panel answers; the derivation graph is covered via the tutorials' guided tours</li>
       </ul>
 
       <h4>7.4. CLI tour page</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>reference/cli.md</code>: the command surface by workflow (run / leaderboard / audition / models / model show / postmodel / score / db / project / source / gc) with real quoted output per command, dbfile/env resolution, hash-prefix ergonomics</li>
+        <li><code class="status">[x]</code> <code>reference/cli.md</code>: the command surface by workflow with REAL quoted output captured this session (version, db upgrade, analyze-config, run, leaderboard, models, audition, postmodel crosstabs, score), dbfile/env resolution, hash-prefix ergonomics</li>
       </ul>
 
       <h4>7.5. Landing + validation</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Second CardGrid row: Architecture · Dashboard tour · CLI tour; sidebar gains a Reference group</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> links-validator clean; deploy green; live URLs 200</li>
+        <li><code class="status">[x]</code> Second CardGrid row: Architecture · Dashboard tour · CLI tour; sidebar gains a Reference group; the Run-it-now card repointed at rc2; the Latest-release icon fixed (seti:shell rendered a literal $ — now the download icon)</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> links-validator clean; deploy green; live URLs 200</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>

@@ -14,7 +14,7 @@ hero:
       variant: minimal
     - text: Latest release
       link: https://github.com/ccd-ia/triage-pg/releases/latest
-      icon: seti:shell
+      icon: download
       variant: minimal
 ---
 
@@ -39,7 +39,21 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     [See the side-by-side →](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html)
   </Card>
   <Card title="Run it now" icon="seti:docker">
-    `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1` — the CLI and dashboard,
+    `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc2` — the CLI and dashboard,
     no local Python needed. Point it at any PostgreSQL 11+.
+  </Card>
+  <Card title="Technical architecture" icon="seti:db">
+    The two-tier database design, the full results-schema ERD, the pipeline's
+    derivation DAG, and how the cloud profile maps onto AWS.
+    [Read the architecture →](/triage-pg/reference/architecture/)
+  </Card>
+  <Card title="Dashboard tour" icon="laptop">
+    Every surface, screenshot by screenshot — what question each panel
+    answers and which table feeds it.
+    [Take the tour →](/triage-pg/reference/dashboard/)
+  </Card>
+  <Card title="CLI tour" icon="seti:powershell">
+    The headless-complete command line, workflow by workflow, with real
+    output. [Read the CLI tour →](/triage-pg/reference/cli/)
   </Card>
 </CardGrid>
