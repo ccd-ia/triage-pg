@@ -72,7 +72,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-12T12:05-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00, 2026-07-12T13:20-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00, 2026-07-12T13:20-06:00, 2026-07-13T07:30-06:00</dd>
         <dt>commits</dt>      <dd>23c1762b, e57423f8, b111b162, 419310df, 506de9f6, 18bf9ae2, 13837b9f</dd>
         <dt>agent name</dt>   <dd>claude-fable-5</dd>
         <dt>session id</dt>   <dd>0ba1a8bc-9e37-472e-866c-38e50a3afa22</dd>
@@ -326,11 +326,47 @@ details summary { cursor: pointer; font-weight: 600; }
         <li><code class="status">[x]</code> Commit series (phase-shaped: P1 b111b162 · P2 419310df · P3 506de9f6 · P4 18bf9ae2 · P5 13837b9f · P6 follows), push; <code>docs-pages</code> green on every phase</li>
         <li><code class="status">[x]</code> Live checks: tutorials index + all four tutorial URLs 200; passthrough URLs intact; the site landing carries the Tutorials card (the Starlight landing superseded per-card onboarding edits)</li>
       </ul>
-      <h4>6.3. Testing Strategy</h4>
+      <h4>6.3. Testing Strategy <span class="small">(rewritten 2026-07-13 — this block still carried the pre-Starlight builder commands the generator decision replaced)</span></h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>uv run python scripts/build_docs_site.py --check</code> — full-site links/anchors/fences clean</li>
-        <li><code class="status">[]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion</code> → <code>success</code></li>
-        <li><code class="status">[]</code> <code>for p in "" tutorials/ tutorials/dirtyduckling.html tutorials/dirtyduck.html tutorials/chicago311.html tutorials/donorschoose.html; do curl -sf -o /dev/null "https://ccd-ia.github.io/triage-pg/$p" || echo "FAIL $p"; done</code> — every page serves</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> — full-site build with the links validator clean</li>
+        <li><code class="status">[x]</code> <code>gh run list --workflow docs-pages --limit 1 --json conclusion</code> → <code>success</code> (per phase and on the final push)</li>
+        <li><code class="status">[x]</code> Live sweep — /, /tutorials/, all four tutorial pages, and onboarding.html all 200</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- ========================= PHASE 7 ========================= -->
+    <div class="phase content">
+      <h3><code class="status">[wip]</code> Phase 7: Reference pages — architecture · dashboard tour · CLI tour (maintainer request 2026-07-13)</h3>
+      <p>Post-launch additions from the maintainer's landing-page review: polish the hero, then grow the site beyond tutorials with three reference pages, each carded on the landing. Authoring notes: the ERD is rendered to an SVG asset from the committed <code>docs/erd.md</code>/<code>docs/schema-design.md</code> material (no PlantUML toolchain in CI — same no-new-build-deps rule as the tutorials); the AWS section stays honest about the closed cloud gate (authored + offline-validated, not live-proven).</p>
+
+      <h4>7.1. Landing polish (done with this amendment)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Hero action "GitHub" → "View on GitHub"</li>
+        <li><code class="status">[x]</code> Hero gains a "Latest release" action → <code>github.com/ccd-ia/triage-pg/releases/latest</code></li>
+        <li><code class="status">[x]</code> (Same review) CardGrid stagger removed — the offset second column read as broken alignment</li>
+      </ul>
+
+      <h4>7.2. Technical architecture page</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>reference/architecture.md</code>: the two-tier registry/project-DB design (ADR-0002), the detailed ERD as an SVG asset (every FK edge + ON DELETE semantics), the pipeline walk with the derivation-DAG/content-addressing story</li>
+        <li><code class="status">[]</code> "How it runs on AWS" section: the cloud profile seam (RDS-IAM auth, S3 storage, one Batch job per experiment; Terraform in <code>infra/terraform/</code>) with an architecture SVG — worded as authored/offline-validated until the cloud gate opens</li>
+      </ul>
+
+      <h4>7.3. Dashboard tour page</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>reference/dashboard.md</code>: screenshot-led walk of every surface using the rig's committed set (experiments list, overview heatmap, model card, audition, bias + fairness wizard, model groups, monitoring, derivation, projects/submissions) — what question each panel answers</li>
+      </ul>
+
+      <h4>7.4. CLI tour page</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>reference/cli.md</code>: the command surface by workflow (run / leaderboard / audition / models / model show / postmodel / score / db / project / source / gc) with real quoted output per command, dbfile/env resolution, hash-prefix ergonomics</li>
+      </ul>
+
+      <h4>7.5. Landing + validation</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Second CardGrid row: Architecture · Dashboard tour · CLI tour; sidebar gains a Reference group</li>
+        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> links-validator clean; deploy green; live URLs 200</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -406,6 +442,10 @@ details summary { cursor: pointer; font-weight: 600; }
     <details>
       <summary>2026-07-12T12:25 — Maintainer decisions folded in: Starlight generator, smoke-test Duckling, English, docs-site-as-index</summary>
       <p>Pre-build question round (AskUserQuestion). Generator settled on Astro Starlight after a Starlight-vs-Quarto trade-off (execution-at-render neutered by our shell+SQL block shape; npm already in CI; IA + i18n favor Starlight) — Phase 1 rewritten from the 150-line builder to the <code>docs-site/</code> Starlight workspace with links-validator and public/ passthrough keeping onboarding/comparison URLs stable. Dirty Duckling reframed as an installation smoke test with pass/fail criteria + a 5-minute mini-tour (Phase 2 rewritten). Language: English, with Starlight i18n leaving per-tutorial Spanish open. Site root becomes the docs index (P6 gains the README/Release-link IA switch task). Files/validation sections updated to match.</p>
+    </details>
+    <details>
+      <summary>2026-07-13T07:30 — Phase 7 added: landing polish (done) + three reference pages; 6.3 modernized</summary>
+      <p>Maintainer landing review: hero reworded to "View on GitHub", a "Latest release" action added (the stagger removal landed earlier in the same review). The proposed cards accepted into the plan as Phase 7 reference pages — technical architecture (detailed ERD as SVG from the committed erd source, not PlantUML, keeping CI free of new toolchains; the pipeline; the AWS profile worded honestly against the closed cloud gate), a screenshot-led dashboard tour, and a CLI tour with real quoted output. Also found and fixed: 6.3's testing checklist still carried the pre-Starlight builder commands — rewritten to the commands that actually gated the build. Reference-page authoring awaits the maintainer's go.</p>
     </details>
   </section>
 
