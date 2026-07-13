@@ -1,0 +1,137 @@
+# DirtyDuck — the visit-level variant: the cohort row IS the inspection visit.
+#
+# Problem: will THIS inspection (occurring in the coming month) find a violation?
+# The unit of prediction is the visit (ontology.events.event_id), not the facility:
+# a facility inspected twice in the window contributes two independently-scored rows.
+# Every visit that happens gets an outcome from its own result → 100% of events
+# labeled (the visit_level regime's signature — see the problem-space reference).
+#
+# Teaching caveat, stated honestly: the cohort "inspections occurring in the next
+# month" assumes the visit schedule is known at the as_of_date. This dataset has no
+# schedule table, so the historical visits stand in for it — the standard visit-level
+# approximation. The visit's own `type` (canvass vs complaint-triggered) is deliberately
+# NOT a feature: a complaint-driven visit's existence is only knowable when the
+# complaint arrives, which may be after as_of. `risk` (the facility's standing risk
+# category) is stable and fair game.
+
+problem_type: classification
+
+# Observation regime (identity-neutral, migration 0019): the label attaches to the
+# event, not to an entity-period — the visit-level regime.
+task_framing: visit_level
+
+temporal_config:
+  feature_start_time: '2014-01-01'
+  feature_end_time: '2017-07-01'
+  label_start_time: '2015-01-01'
+  label_end_time: '2017-07-01'
+  model_update_frequency: '6month'
+  # One cohort per month: the visits occurring in [as_of, as_of + 1 month).
+  training_as_of_date_frequencies: '1month'
+  training_label_timespans: ['1month']
+  test_as_of_date_frequencies: '1month'
+  test_durations: '0day'
+  test_label_timespans: ['1month']
+  max_training_histories: '1year'
+
+cohort_config:
+  name: upcoming_visits
+  # The cohort row is the VISIT: event_id becomes the pipeline's entity_id.
+  query: |
+    select ev.event_id as entity_id
+    from ontology.events as ev
+    where {as_of_date}::date <= ev.date
+      and ev.date < {as_of_date}::date + interval '1 month'
+
+label_config:
+  name: visit_finds_violation
+  # The visit's own outcome: known at the visit's date, inside the label window.
+  query: |
+    select
+      ev.event_id as entity_id,
+      (ev.result = 'fail')::integer as outcome
+    from ontology.events as ev
+    where {as_of_date}::date <= ev.date
+      and ev.date < {as_of_date}::date + {label_timespan}
+
+# featurizer ER-graph: the VISIT is the target entity; the facility's PRIOR
+# inspection history is the as-of child stream, reached through the facility id
+# (ontology.events.entity_id) that both tables share — an equal-key relationship.
+# History is joined as of the as_of_date, i.e. strictly before the visit occurs.
+feature_config:
+  target: visits
+  max_depth: 2
+  intervals:
+    - P3M
+    - P6M
+    - P1Y
+
+  entities:
+    - alias: visits
+      id: event_id
+      table: ontology.events
+      # entity_id (the facility fk) is the relationship key below — never declared as a
+      # variable; the matrix adapter drops the key passthrough so it cannot collide with
+      # the pipeline's universal entity_id (which is the VISIT id here).
+      variables:
+        risk:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "high"
+            - "medium"
+            - "low"
+
+    - alias: facility_history
+      id: ~
+      table: ontology.events
+      # 'date' is when the past inspection happened = when its outcome became known.
+      temporal_ix: date
+      variables:
+        result:
+          type: categorical
+        risk:
+          type: categorical
+
+  relationships:
+    - parent:
+        entity: visits
+        key: entity_id
+      child:
+        entity: facility_history
+        key: entity_id
+      temporal:
+        mode: as_of
+
+# Tiny grid: this variant exists to teach the regime, not to tune models.
+grid_config:
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [5]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: start_time
+    version_label: 'dirtyduck-v1'
+    role: entity
+    type_column: facility_type
+    description: Active food-service facilities (DirtyDuck tutorial)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'dirtyduck-v1'
+    role: event
+    type_column: type
+    description: Food inspection events with result and violations (DirtyDuck tutorial)
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

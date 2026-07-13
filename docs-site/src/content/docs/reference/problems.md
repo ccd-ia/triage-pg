@@ -408,24 +408,36 @@ upcoming visits need the senior inspector, which incoming calls get the
 specialist queue — decisions about *occasions*, not standing entity
 designations.
 
-**Config + example.** The cohort's `entity_id` is the *event* (the request,
-the visit), not the long-lived actor behind it:
+**Config + example.** The cohort's `entity_id` is the *event* (the visit),
+not the long-lived actor behind it — from the committed DirtyDuck variant
+("will *this* inspection find a violation?"):
 
 ```yaml
 task_framing: visit_level
 # the signature move: the cohort row IS the event
 cohort_config:
+  name: upcoming_visits
   query: |
-    select v.visit_id as entity_id
-    from ontology.events v
-    where v.scheduled_date >= {as_of_date}::date
-      and v.scheduled_date <  {as_of_date}::date + interval '1 month'
+    select ev.event_id as entity_id
+    from ontology.events as ev
+    where {as_of_date}::date <= ev.date
+      and ev.date < {as_of_date}::date + interval '1 month'
+label_config:
+  name: visit_finds_violation
+  query: |
+    select ev.event_id as entity_id,
+           (ev.result = 'fail')::integer as outcome
+    from ontology.events as ev
+    where {as_of_date}::date <= ev.date
+      and ev.date < {as_of_date}::date + {label_timespan}
 ```
 
-**Honesty note:** there is no committed `visit_level` example config yet —
-the sketch above shows the shape (Chicago 311 comes *close*: its entity is a
-filed request, an event-like unit, but its labels are period-framed).
-A committed worked example is a recorded follow-up.
+Full committed config:
+[`example/dirtyduck/experiment-visits.yaml`](https://github.com/ccd-ia/triage-pg/blob/main/example/dirtyduck/experiment-visits.yaml)
+— note its two honesty caveats, stated in the file: the historical visits
+stand in for a schedule table (the standard visit-level approximation), and
+the visit's `type` is deliberately *not* a feature (a complaint-triggered
+visit's existence is only knowable when the complaint arrives).
 
 ---
 
@@ -437,10 +449,11 @@ without interaction terms: a survival label can be fully observed
 (early-warning) or generated only by inspections (resource-prioritization);
 a classification label can attach to visits. Teaching twelve combinations
 would repeat the same two lessons twelve times. The living proof that the
-axes are independent is DirtyDuck's twin configs: **identical
-`problem_type`, different regime, different hash, different truth** — one
-decision about "what does no-event mean?" moved an experiment from one
-regime to the other while the model machinery never noticed.
+axes are independent is DirtyDuck itself: **three committed configs on one
+dataset, one per regime, all `classification`** — the base (inspections),
+the EIS twin (early warning), and the visits variant (visit-level) differ
+only in cohort/label SQL and the framing tag, while the model machinery
+never notices.
 
 Where to see each axis exercised for real: the
 [tutorials](/triage-pg/tutorials/) (all four problem types, both entity-level

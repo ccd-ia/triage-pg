@@ -234,6 +234,7 @@ config against the same database, run the same way:
 | `experiment-regression.yaml` | regression_ranking | violation count over the window, ranked |
 | `experiment-survival.yaml` | survival | time-to-failure `(duration, event_observed)`, in-PG C-index |
 | `experiment-deepgrid.yaml` | classification | a wider grid + a no-categoricals ablation twin |
+| `experiment-visits.yaml` | classification | **visit-level** regime: will *this* inspection find a violation? |
 
 ## Where this differs from DSSG triage
 

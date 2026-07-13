@@ -69,6 +69,7 @@ committed config against the same food DB:
 | [`example/dirtyduck/experiment-regression.yaml`](../example/dirtyduck/experiment-regression.yaml) | `regression_ranking` | violation COUNT over the label window, ranked (config-selectable metrics via the `evaluation:` block) |
 | [`example/dirtyduck/experiment-survival.yaml`](../example/dirtyduck/experiment-survival.yaml) | `survival` | time-to-failure `(duration, event_observed)`; C-index in PL/pgSQL |
 | [`example/dirtyduck/experiment-deepgrid.yaml`](../example/dirtyduck/experiment-deepgrid.yaml) | `classification` | a wider hyperparameter grid (+ a no-categoricals ablation twin) |
+| [`example/dirtyduck/experiment-visits.yaml`](../example/dirtyduck/experiment-visits.yaml) | `classification` | **visit-level**: the cohort row is the inspection itself — will *this* visit find a violation? |
 
 Run any of them exactly like the base config — only the YAML path changes.
 

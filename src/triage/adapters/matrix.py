@@ -818,6 +818,12 @@ def _assemble(
     features = pl.from_arrow(feature_table)
     # Normalize the target id to triage's universal ``entity_id`` for joining.
     if target_id_col != "entity_id":
+        # An event-grain target (e.g. the visit-level regime: id = event_id) can carry a
+        # passthrough column literally named entity_id — its relationship key to the
+        # parent entity. It is a join key, never a feature; drop it or the rename below
+        # duplicates the universal id column.
+        if "entity_id" in features.columns:
+            features = features.drop("entity_id")
         features = features.rename({target_id_col: "entity_id"})
     features = features.with_columns(pl.col(_AS_OF_COL).cast(pl.Date))
 

@@ -72,7 +72,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-12T12:05-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00, 2026-07-12T13:20-06:00, 2026-07-13T07:30-06:00, 2026-07-13T07:50-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-12T12:05-06:00, 2026-07-12T12:25-06:00, 2026-07-12T12:40-06:00, 2026-07-12T13:20-06:00, 2026-07-13T07:30-06:00, 2026-07-13T07:50-06:00, 2026-07-13T10:15-06:00</dd>
         <dt>commits</dt>      <dd>23c1762b, e57423f8, b111b162, 419310df, 506de9f6, 18bf9ae2, 13837b9f</dd>
         <dt>agent name</dt>   <dd>claude-fable-5</dd>
         <dt>session id</dt>   <dd>0ba1a8bc-9e37-472e-866c-38e50a3afa22</dd>
@@ -482,6 +482,10 @@ details summary { cursor: pointer; font-weight: 600; }
     <details>
       <summary>2026-07-13T07:50 — Phase 8 added: the problems page (two orthogonal axes, exhaustive, no cross-products)</summary>
       <p>Maintainer request with three decisions taken via AskUserQuestion: all FOUR problem types as peers (not the three-family rollup); ONE reference page (<code>reference/problems.md</code>) covering both axes so the orthogonality lesson lands; the full per-entry field outline PLUS a worked runnable mini-example per entry. Cross-products explicitly excluded per the maintainer. Noted honestly: <code>visit_level</code> has no committed example config yet — the entry sketches the shape and records the follow-up. P7 (reference pages) closed the same morning: architecture/dashboard/CLI live, deploy green, all URLs 200.</p>
+    </details>
+    <details>
+      <summary>2026-07-13T10:15 — The visit_level follow-up closed: committed example config, run E2E; adapter bug found + fixed</summary>
+      <p><code>example/dirtyduck/experiment-visits.yaml</code>: the cohort row IS the inspection visit (event_id as the unit) — "will this visit find a violation?" — with the two honesty caveats stated in the file (historical visits stand in for a schedule table; the visit's <code>type</code> is deliberately not a feature). Run E2E on the food DB: hash <code>09539164</code>, 5 splits, 10 models, 16,260 predictions — the dataset now carries all three regimes as committed configs, and the problems page's orthogonality close cites that instead of the twins alone. Building it surfaced a real adapter bug: when the featurizer target's id is not <code>entity_id</code> and its relationship key IS a column named <code>entity_id</code> (exactly the event-grain shape), the matrix assembler's id rename duplicated the column — the passthrough key is now dropped before the rename (<code>adapters/matrix.py</code>). Suite 405 OK / 1 skipped after the fix; problems page + both variants tables updated.</p>
     </details>
   </section>
 
