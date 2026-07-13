@@ -1,5 +1,7 @@
 # triage-pg — `problem_type` and the ranking spine
 
+> The narrated, exhaustive treatment of both axes — the four problem types **and** the three observation regimes (`task_framing`) — lives on the docs site: [The problem space](https://ccd-ia.github.io/triage-pg/reference/problems/). This file stays the terse in-repo reference.
+
 > triage-pg is a **prioritization** system. Its whole architecture is one spine — **produce a score
 > → rank entities → evaluate the ranking** — and the `problem_type` on an Experiment selects a few
 > swaps on that spine. Pick the wrong `problem_type` and you're answering a different question.

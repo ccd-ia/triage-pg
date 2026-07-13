@@ -42,6 +42,12 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc2` — the CLI and dashboard,
     no local Python needed. Point it at any PostgreSQL 11+.
   </Card>
+  <Card title="The problem space" icon="puzzle">
+    Two orthogonal axes: four problem types (what the model predicts) and
+    three observation regimes (who gets a label and why) — exhaustively,
+    with no combinatorial matrix.
+    [Map the space →](/triage-pg/reference/problems/)
+  </Card>
   <Card title="Technical architecture" icon="seti:db">
     The two-tier database design, the full results-schema ERD, the pipeline's
     derivation DAG, and how the cloud profile maps onto AWS.

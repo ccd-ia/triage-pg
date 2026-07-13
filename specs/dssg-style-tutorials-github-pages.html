@@ -373,32 +373,32 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 8 ========================= -->
     <div class="phase content">
-      <h3><code class="status">[]</code> Phase 8: The problems page — <code>reference/problems.md</code> (maintainer request 2026-07-13)</h3>
+      <h3><code class="status">[x]</code> Phase 8: The problems page — <code>reference/problems.md</code> (maintainer request 2026-07-13)</h3>
       <p>One exhaustive reference page teaching the TWO ORTHOGONAL AXES of a triage-pg problem, each axis treated in full and the cross-products deliberately NOT enumerated (maintainer instruction — the axes compose freely; the page teaches each axis once and says so). Decisions via AskUserQuestion: all FOUR problem types as peers; ONE page; the full field outline PLUS a worked runnable config mini-example per entry. Carded on the landing; the repo's terse <code>docs/problem-types.md</code> gains a pointer to it.</p>
 
       <h4>8.1. Axis 1 — problem types (all four as peers; per-entry fields, identically structured)</h4>
       <p>For EACH of <code>classification</code> · <code>regression_ranking</code> · <code>regression</code> · <code>survival</code>: <em>posing the question</em> (the sentence a policy team says); <em>label shape</em> (columns + a real label-SQL fragment: <code>outcome</code> 0/1 · continuous <code>outcome</code> · <code>(duration, event_observed)</code>); <em>what the model outputs</em> (score semantics on the score→rank→evaluate spine, ADR-0010); <em>evaluation</em> (precision/recall@k, AUC/AP · rank metrics on continuous targets · RMSE/MAE/R² · in-PG C-index, ADR-0026); <em>estimators</em> (sklearn family · the ranking use of regressors · scikit-survival via the <code>survival</code> extra); <em>characteristics & when to choose it</em>; <em>pitfalls</em> (e.g. thresholding a ranking, censoring ≠ missing, pure-regression metrics on skewed targets); <em>worked mini-example</em> (a minimal runnable config fragment naming a committed example config as its full version).</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> classification entry (full field set + mini-example → <code>example/dirtyduck/experiment.yaml</code>)</li>
-        <li><code class="status">[]</code> regression_ranking entry (the PRIMARY continuous mode: rank by predicted magnitude, evaluate as a list; mini-example → <code>example/dirtyduck/experiment-regression.yaml</code>)</li>
-        <li><code class="status">[]</code> regression entry (pure point prediction; config-selectable rmse/mae/r2; mini-example → <code>example/dirtyduck/experiment-pure-regression.yaml</code>)</li>
-        <li><code class="status">[]</code> survival entry (censoring as lower bound; <code>(duration, event_observed)</code>; C-index; event-rate card; mini-example → <code>example/chicago311/experiment-survival.yaml</code>)</li>
+        <li><code class="status">[x]</code> classification entry (full field set + mini-example → <code>example/dirtyduck/experiment.yaml</code>)</li>
+        <li><code class="status">[x]</code> regression_ranking entry (the PRIMARY continuous mode; correction from the code: the regression family evaluates with rmse/mae/r2 by default — the RANKING is the deliverable/spine, not a separate metric set; mini-example → <code>example/dirtyduck/experiment-regression.yaml</code>)</li>
+        <li><code class="status">[x]</code> regression entry (pure point prediction; config-selectable rmse/mae/r2; mini-example → <code>example/dirtyduck/experiment-pure-regression.yaml</code>)</li>
+        <li><code class="status">[x]</code> survival entry (censoring as lower bound; <code>(duration, event_observed)</code>; C-index; event-rate card; mini-example → <code>example/chicago311/experiment-survival.yaml</code>)</li>
       </ul>
 
       <h4>8.2. Axis 2 — observation regimes (task_framing; per-entry fields, identically structured)</h4>
       <p>For EACH of <code>early_warning</code> · <code>resource_prioritization</code> · <code>visit_level</code>: <em>observation semantics</em> (who gets a label and why); <em>%labeled expectation</em> (and what the dashboard card says); <em>what the base rate means</em> (population vs conditional-on-action); <em>selection-bias implications</em> (what the model actually learns); <em>how you act on the list</em> (flag/escalate · choose whom to visit · per-event routing); <em>config</em> (<code>task_framing:</code> key, identity-neutral, migration 0019); <em>worked mini-example</em> (label-SQL sketch showing the regime's signature move: coalesce-to-0 · NULL-for-unobserved · event-grain cohort).</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> early_warning entry (register semantics; the 100%-labeled promise; chi311 + the dirtyduck EIS twin as the committed examples)</li>
-        <li><code class="status">[]</code> resource_prioritization entry (selective labels; conditional base rate; the inspections selection-bias discussion; dirtyduck base as the committed example)</li>
-        <li><code class="status">[]</code> visit_level entry (the label attaches to an event/visit, not an entity-period; cohort = events; NOTE: no committed example config yet — the entry says so honestly and sketches the shape; a committed example is a recorded follow-up, not part of this page)</li>
-        <li><code class="status">[]</code> The orthogonality close: one short section stating the axes compose freely, pointing at DirtyDuck's twin configs as the living proof — explicitly NOT a matrix of cross-products (maintainer instruction)</li>
+        <li><code class="status">[x]</code> early_warning entry (register semantics; the 100%-labeled promise; chi311 + the dirtyduck EIS twin as the committed examples)</li>
+        <li><code class="status">[x]</code> resource_prioritization entry (selective labels; conditional base rate; the inspections selection-bias + feedback-loop discussion; dirtyduck base as the committed example)</li>
+        <li><code class="status">[x]</code> visit_level entry (the label attaches to an event/visit, not an entity-period; cohort = events; the honesty note about the missing committed example is IN the page; follow-up recorded)</li>
+        <li><code class="status">[x]</code> The orthogonality close ("Why there is no 4×3 matrix"): the axes compose freely; DirtyDuck's twin configs as the living proof — no cross-product matrix (maintainer instruction)</li>
       </ul>
 
       <h4>8.3. Wiring + validation</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Landing card ("The problem space" — two axes, one page) + Reference sidebar order; cross-links from the DirtyDuck tutorial's framing chapter and from <code>docs/problem-types.md</code> (pointer, no duplication)</li>
-        <li><code class="status">[]</code> Every label-SQL fragment and config mini-example validated (committed examples verbatim; sketches run through <code>validate_experiment_config</code> where they are complete configs)</li>
-        <li><code class="status">[]</code> <code>npm --prefix docs-site run build</code> links-validator clean; deploy green; live URL 200</li>
+        <li><code class="status">[x]</code> Landing card ("The problem space") + Reference sidebar order 0 (tops the group); cross-links from the DirtyDuck framing chapter and from <code>docs/problem-types.md</code> (pointer, no duplication)</li>
+        <li><code class="status">[x]</code> Every label-SQL fragment quoted verbatim from a committed config; all seven referenced example configs re-validated through <code>validate_experiment_config</code> — 7/7 valid, zero errors; the two regime sketches are marked as sketches in-page</li>
+        <li><code class="status">[x]</code> <code>npm --prefix docs-site run build</code> links-validator clean; deploy green; live URL 200</li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>

@@ -30,7 +30,9 @@ questions of the same inspection history:
    the failed-inspections register in the next six months?"*
 
 These sound alike. They are not — and the difference is exactly what the
-`task_framing` chip in the dashboard makes visible.
+`task_framing` chip in the dashboard makes visible. (The full taxonomy of
+both axes — problem types and observation regimes — is the
+[problem-space reference](/triage-pg/reference/problems/).)
 
 ## The data
 
