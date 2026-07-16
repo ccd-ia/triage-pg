@@ -52,7 +52,6 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
-from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from triage.adapters.bias import (
@@ -84,6 +83,7 @@ from triage.sources import (
     register_source,
     resolve_pins,
 )
+from triage.util.db import DictRowPool, returned_row
 
 logger = get_logger(__name__)
 
@@ -206,6 +206,29 @@ def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
 # The triage.problem_type enum values (migration 0001, ADR-0010).
 _PROBLEM_TYPES = ("classification", "regression_ranking", "regression", "survival")
 
+# Every top-level key run_experiment (or the CLI) actually reads. Anything else in a config
+# is dead weight the pipeline silently skips — the validator warns so a misplacement
+# (feature_groups at the top level instead of under feature_config, ADR-0023) or a typo
+# (label_confg) surfaces at validate time instead of as a mysteriously ignored setting.
+_KNOWN_TOP_LEVEL_KEYS = frozenset(
+    {
+        "problem_type",
+        "cohort_config",
+        "label_config",
+        "temporal_config",
+        "feature_config",
+        "grid_config",
+        "imputation_config",
+        "bias_config",
+        "evaluation",
+        "sources",
+        "task_framing",
+        "name",
+        "description",
+        "config_version",
+    }
+)
+
 
 def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
     """Dry-run config validation: structured errors + derived identity, nothing persisted.
@@ -259,11 +282,19 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 " install with `uv sync --extra survival` (ADR-0026)",
             )
 
+    def _query_of(block: object) -> str | None:
+        """The block's 'query' when the block is a mapping holding a non-empty string."""
+        if not isinstance(block, Mapping):
+            return None
+        query = block.get("query")
+        return query if isinstance(query, str) and query else None
+
     cohort_config = experiment_config.get("cohort_config")
     if cohort_config is not None:
-        if not isinstance(cohort_config, Mapping) or not cohort_config.get("query"):
+        cohort_query = _query_of(cohort_config)
+        if cohort_query is None:
             _err("cohort_config.query", "cohort_config needs a 'query'")
-        elif "{as_of_date}" not in cohort_config["query"]:
+        elif "{as_of_date}" not in cohort_query:
             _err(
                 "cohort_config.query",
                 "the cohort query must contain the {as_of_date} placeholder",
@@ -271,11 +302,12 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
 
     label_config = experiment_config.get("label_config")
     if label_config is not None:
-        if not isinstance(label_config, Mapping) or not label_config.get("query"):
+        label_query = _query_of(label_config)
+        if label_query is None:
             _err("label_config.query", "label_config needs a 'query'")
         else:
             for placeholder in ("{as_of_date}", "{label_timespan}"):
-                if placeholder not in label_config["query"]:
+                if placeholder not in label_query:
                     _err(
                         "label_config.query",
                         f"the label query must contain the {placeholder} placeholder",
@@ -327,10 +359,10 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
             )
         else:
             groups = feature_config.get("feature_groups")
-            if isinstance(groups, Mapping) and isinstance(
-                groups.get("definitions"), Mapping
-            ):
-                n_feature_groups = len(groups["definitions"])
+            if isinstance(groups, Mapping):
+                definitions = groups.get("definitions")
+                if isinstance(definitions, Mapping):
+                    n_feature_groups = len(definitions)
 
     task_framing = experiment_config.get("task_framing")
     if task_framing is not None and task_framing not in _TASK_FRAMINGS:
@@ -345,13 +377,14 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
             _err("bias_config", "bias_config must be a mapping")
         else:
             # mirror validate_bias_config's fail-fast checks as path-addressed errors
-            if not bias_config.get("query"):
+            bias_query = _query_of(bias_config)
+            if bias_query is None:
                 _err(
                     "bias_config.query",
                     "bias_config needs a 'query' returning entity_id + one column per"
                     " protected attribute",
                 )
-            elif "{as_of_date}" not in bias_config["query"]:
+            elif "{as_of_date}" not in bias_query:
                 _err(
                     "bias_config.query",
                     "the bias query must contain the {as_of_date} placeholder",
@@ -405,20 +438,29 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                     _err(path, "each subset must be a mapping with 'name' and 'query'")
                     continue
                 name = subset.get("name")
-                if not name:
+                if not (isinstance(name, str) and name):
                     _err(f"{path}.name", "subset needs a 'name'")
                 elif name in seen_names:
                     _err(f"{path}.name", f"duplicate subset name {name!r}")
                 else:
                     seen_names.add(name)
-                query = subset.get("query")
-                if not query:
+                query = _query_of(subset)
+                if query is None:
                     _err(f"{path}.query", "subset needs a 'query' returning entity_id")
                 elif "{as_of_date}" not in query:
                     _err(
                         f"{path}.query",
                         "the subset query must contain the {as_of_date} placeholder",
                     )
+
+    for key in sorted(k for k in experiment_config if k not in _KNOWN_TOP_LEVEL_KEYS):
+        if key == "feature_groups":
+            warnings.append(
+                "top-level 'feature_groups' is ignored — nest it under"
+                " feature_config.feature_groups (ADR-0023) to get the fan-out"
+            )
+        else:
+            warnings.append(f"unknown top-level key {key!r} is ignored")
 
     if not experiment_config.get("sources"):
         warnings.append(
@@ -496,7 +538,7 @@ def _union_as_of_dates(splits: Sequence[Mapping[str, Any]]) -> list[date]:
 
 
 def _pin_sources(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     declared_sources: Sequence[Mapping[str, Any]],
     source_pins: Mapping[str, str | None] | None,
@@ -541,7 +583,7 @@ def _pin_sources(
 
 
 def _version_exists(
-    db_engine: ConnectionPool, source_name: str, version_label: str | None
+    db_engine: DictRowPool, source_name: str, version_label: str | None
 ) -> bool:
     """Whether ``(source_name, version_label)`` is already pinned (for idempotent bumps).
 
@@ -562,7 +604,7 @@ def _version_exists(
 
 
 def _create_experiment_and_run(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     experiment_config: Mapping[str, Any],
     problem_type: str,
     profile: str,
@@ -615,21 +657,23 @@ def _create_experiment_and_run(
                 "framing": experiment_config.get("task_framing"),
             },
         )
-        run_id = conn.execute(
-            "insert into triage.runs (experiment_hash, profile, status, random_seed,"
-            + " batch_job_id)"
-            + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
-            + " returning run_id",
-            {
-                "h": exp_hash,
-                "profile": profile,
-                "seed": random_seed,
-                # Inside an AWS Batch container, Batch injects AWS_BATCH_JOB_ID — recording it
-                # correlates this run with its job so `triage runs status` can backfill a
-                # terminal Batch state (cloud-profile-spec §7). NULL locally.
-                "job": os.environ.get("AWS_BATCH_JOB_ID"),
-            },
-        ).fetchone()["run_id"]
+        run_id = returned_row(
+            conn.execute(
+                "insert into triage.runs (experiment_hash, profile, status, random_seed,"
+                + " batch_job_id)"
+                + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
+                + " returning run_id",
+                {
+                    "h": exp_hash,
+                    "profile": profile,
+                    "seed": random_seed,
+                    # Inside an AWS Batch container, Batch injects AWS_BATCH_JOB_ID — recording it
+                    # correlates this run with its job so `triage runs status` can backfill a
+                    # terminal Batch state (cloud-profile-spec §7). NULL locally.
+                    "job": os.environ.get("AWS_BATCH_JOB_ID"),
+                },
+            ).fetchone()
+        )["run_id"]
         # Live telemetry (read-dashboard-spec §4): the run has started. Emitted on
         # the same COMMIT as the runs INSERT.
         _notify_run_progress(conn, str(run_id), "run", "started")
@@ -640,7 +684,7 @@ def _create_experiment_and_run(
 
 
 def _create_run(
-    db_engine: ConnectionPool, exp_hash: str, profile: str, random_seed: int
+    db_engine: DictRowPool, exp_hash: str, profile: str, random_seed: int
 ) -> str:
     """Create an additional 'started' run under an EXISTING experiment (ADR-0023 fan-out).
 
@@ -649,18 +693,20 @@ def _create_run(
     this just mints another run under it.
     """
     with db_engine.connection() as conn:
-        run_id = conn.execute(
-            "insert into triage.runs (experiment_hash, profile, status, random_seed,"
-            + " batch_job_id)"
-            + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
-            + " returning run_id",
-            {
-                "h": exp_hash,
-                "profile": profile,
-                "seed": random_seed,
-                "job": os.environ.get("AWS_BATCH_JOB_ID"),
-            },
-        ).fetchone()["run_id"]
+        run_id = returned_row(
+            conn.execute(
+                "insert into triage.runs (experiment_hash, profile, status, random_seed,"
+                + " batch_job_id)"
+                + " values (%(h)s, %(profile)s, 'started', %(seed)s, %(job)s)"
+                + " returning run_id",
+                {
+                    "h": exp_hash,
+                    "profile": profile,
+                    "seed": random_seed,
+                    "job": os.environ.get("AWS_BATCH_JOB_ID"),
+                },
+            ).fetchone()
+        )["run_id"]
         _notify_run_progress(conn, str(run_id), "run", "started")
     return str(run_id)
 
@@ -718,7 +764,7 @@ def _featurizer_only(feature_config: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in feature_config.items() if k != "feature_groups"}
 
 
-def _refresh_leaderboard(db_engine: ConnectionPool) -> None:
+def _refresh_leaderboard(db_engine: DictRowPool) -> None:
     """Refresh the ``triage.leaderboard`` materialized view so reads see this run (ADR-0007).
 
     The matview is never auto-populated otherwise (querying it errors "has not been populated"),
@@ -735,7 +781,7 @@ def _refresh_leaderboard(db_engine: ConnectionPool) -> None:
 
 
 def _mark_run(
-    db_engine: ConnectionPool, run_id: str, status: str, error: str | None = None
+    db_engine: DictRowPool, run_id: str, status: str, error: str | None = None
 ) -> None:
     """Set a run's terminal status (``completed`` | ``failed``) + finish time."""
     with db_engine.connection() as conn:
@@ -751,7 +797,7 @@ def _mark_run(
 
 
 def _record_run_plan(
-    db_engine: ConnectionPool, run_id: str, plan: Mapping[str, Any]
+    db_engine: DictRowPool, run_id: str, plan: Mapping[str, Any]
 ) -> None:
     """Persist the run's planned shape on ``triage.runs.plan`` (ADR-0021 telemetry).
 
@@ -769,7 +815,7 @@ def _record_run_plan(
 
 
 def _build_split(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     split: Mapping[str, Any],
     *,
@@ -882,7 +928,7 @@ def _grid_specs(grid_config: Mapping[str, Any]) -> list[tuple[str, dict[str, Any
 
 
 def run_experiment(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     experiment_config: Mapping[str, Any],
     *,
     storage: StorageAdapter,

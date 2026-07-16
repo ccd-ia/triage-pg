@@ -173,9 +173,57 @@ def test_unknown_task_framing_is_a_path_addressed_error():
     assert not any(e["path"] == "task_framing" for e in ok["errors"])
 
 
+def test_toplevel_feature_groups_warns_about_placement():
+    """A top-level 'feature_groups' key used to be silently ignored (it belongs under
+    feature_config, ADR-0023) — the validator now warns with the correct placement."""
+    from triage.adapters.run import validate_experiment_config
+
+    misplaced = validate_experiment_config(
+        {**_BASE_CONFIG, "feature_groups": {"definitions": {"a": ["a_*"]}}}
+    )
+    assert any(
+        "feature_groups" in w and "feature_config" in w for w in misplaced["warnings"]
+    )
+    # a warning, not an error — the run would still work (it just wouldn't fan out)
+    assert not any("feature_groups" in e["path"] for e in misplaced["errors"])
+
+    nested = validate_experiment_config(
+        {
+            **_BASE_CONFIG,
+            "feature_config": {
+                "target": "customers",
+                "feature_groups": {"definitions": {"a": ["a_*"]}},
+            },
+        }
+    )
+    assert not any("feature_groups" in w for w in nested["warnings"])
+    assert nested["n_feature_groups"] == 1
+
+
+def test_unknown_toplevel_key_warns():
+    """Typos in top-level keys (label_confg) surface as warnings instead of being
+    silently skipped; every known key stays warning-free."""
+    from triage.adapters.run import validate_experiment_config
+
+    typo = validate_experiment_config({**_BASE_CONFIG, "label_confg": {"query": "x"}})
+    assert any("label_confg" in w for w in typo["warnings"])
+
+    clean = validate_experiment_config(
+        {
+            **_BASE_CONFIG,
+            "name": "n",
+            "description": "d",
+            "task_framing": "early_warning",
+            "sources": [{"name": "s", "schema": "clean"}],
+        }
+    )
+    assert not any("unknown top-level key" in w for w in clean["warnings"])
+
+
 def test_task_framing_persists_updates_and_never_clears(db_pool_greenfield):
     """The upsert semantics (migration 0019): a re-run that provides task_framing updates
-    the experiment row (last write wins); a re-run that omits it never clears the tag."""
+    the experiment row (last write wins); a re-run that omits it never clears the tag.
+    """
     engine = db_pool_greenfield
 
     def stored(h):
