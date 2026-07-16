@@ -1,0 +1,77 @@
+# Nightly tutorial smoke — the Duckling tutorial, verbatim, against a fresh stack.
+#
+# The docs site's tutorials are verbatim-verified: every command block is expected to
+# run as written. This workflow re-proves that claim on a schedule so drift (a runner
+# image change, a dependency resolution change, a docs edit that forgot to re-run the
+# commands) surfaces as a red nightly run instead of a broken first-user experience.
+#
+# It mirrors docs-site/src/content/docs/tutorials/dirtyduckling.md step by step:
+# bring up the food DB (docker compose), migrate, validate the config, run the
+# experiment E2E, then assert the tutorial's published outcomes — the ADR-0022
+# problem hash and the deterministic counts on the baked data — from the database
+# itself (not from log scraping).
+#
+# No secrets required (featurizer is a public git+https pin, ADR-0016).
+
+name: tutorial-smoke
+
+on:
+  schedule:
+    - cron: "13 8 * * *" # nightly 08:13 UTC ≈ 02:13 America/Mexico_City
+  workflow_dispatch:
+
+jobs:
+  dirtyduckling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+
+      - name: Step 0 — the CLI answers (install smoke)
+        run: uv run triage --version
+
+      - name: Step 1 — food DB up (docker compose, port 5440)
+        run: |
+          docker compose -f dirtyduck/docker-compose.yml up -d --build --wait food_db
+
+      - name: Step 2 — greenfield schema (idempotent alembic)
+        run: uv run triage --dbfile dirtyduck-database.yaml db upgrade
+
+      - name: Step 3 — the config validates clean
+        run: |
+          uv run triage --dbfile dirtyduck-database.yaml \
+            analyze-config example/dirtyduck/experiment.yaml
+
+      - name: Step 4 — the pipeline runs end to end
+        run: |
+          uv run triage --dbfile dirtyduck-database.yaml \
+            run example/dirtyduck/experiment.yaml --project-path /tmp/dirtyduck-run
+
+      - name: Step 5 — the tutorial's published outcomes hold
+        # The PASS block in dirtyduckling.md: hash b9e38fd8… (the problem identity,
+        # ADR-0022) and 20 models / 268,860 predictions / 120 evaluations — all
+        # deterministic on the baked tutorial data.
+        run: |
+          psql_food() {
+            docker compose -f dirtyduck/docker-compose.yml \
+              exec -T food_db psql -U food_user -d food -tA -c "$1"
+          }
+          hash=$(psql_food "select experiment_hash from triage.experiments")
+          models=$(psql_food "select count(*) from triage.models")
+          preds=$(psql_food "select count(*) from triage.predictions")
+          evals=$(psql_food "select count(*) from triage.evaluations")
+          echo "hash=$hash models=$models predictions=$preds evaluations=$evals"
+          case "$hash" in b9e38fd8*) ;; *)
+            echo "::error::experiment_hash drifted: $hash (expected b9e38fd8…)"; exit 1;;
+          esac
+          [ "$models" = "20" ] || { echo "::error::models=$models (expected 20)"; exit 1; }
+          [ "$preds" = "268860" ] || { echo "::error::predictions=$preds (expected 268860)"; exit 1; }
+          [ "$evals" = "120" ] || { echo "::error::evaluations=$evals (expected 120)"; exit 1; }
+
+      - name: Step 6 — the leaderboard answers
+        run: uv run triage --dbfile dirtyduck-database.yaml leaderboard b9e38fd8
