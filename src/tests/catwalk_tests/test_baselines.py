@@ -1,17 +1,22 @@
+from typing import Any, ClassVar, cast
+from unittest import TestCase
+
 import numpy as np
 import pandas as pd
 import pandas.api.types as ptypes
-
 import pytest
-from unittest import TestCase
 from numpy.testing import assert_array_equal
 
-from triage.component.catwalk.baselines.rankers import PercentileRankOneFeature
-from triage.component.catwalk.baselines.rankers import BaselineRankMultiFeature
-from triage.component.catwalk.baselines.rankers import LinearRanker
-from triage.component.catwalk.baselines.thresholders import SimpleThresholder
-from triage.component.catwalk.baselines.thresholders import get_operator_method
-from triage.component.catwalk.baselines.thresholders import OPERATOR_METHODS
+from triage.component.catwalk.baselines.rankers import (
+    BaselineRankMultiFeature,
+    LinearRanker,
+    PercentileRankOneFeature,
+)
+from triage.component.catwalk.baselines.thresholders import (
+    OPERATOR_METHODS,
+    SimpleThresholder,
+    get_operator_method,
+)
 from triage.component.catwalk.exceptions import BaselineFeatureNotInMatrix
 
 
@@ -140,6 +145,8 @@ def test_scores_align_with_ranks():
 
 @pytest.mark.usefixtures("data")
 class TestRankOneFeature(TestCase):
+    data: ClassVar[dict[str, Any]]
+
     def test_fit(self):
         ranker = PercentileRankOneFeature(feature="x3")
         assert ranker.feature_importances_ is None
@@ -170,6 +177,8 @@ class TestRankOneFeature(TestCase):
 
 @pytest.mark.usefixtures("data")
 class TestRankMultiFeature(TestCase):
+    data: ClassVar[dict[str, Any]]
+
     def test_fit(self):
         rules = {"feature": "x3", "low_value_high_score": False}
         ranker = BaselineRankMultiFeature(rules=rules)
@@ -256,6 +265,9 @@ def test_get_operator_method(operator):
 
 @pytest.mark.usefixtures("data", "rules")
 class TestSimpleThresholder(TestCase):
+    data: ClassVar[dict[str, Any]]
+    rules: ClassVar[list[str]]
+
     def test__convert_string_rule_to_dict(self):
         thresholder = SimpleThresholder(self.rules, "or")
         results = thresholder._convert_string_rule_to_dict(self.rules[0])
@@ -290,7 +302,7 @@ class TestSimpleThresholder(TestCase):
                 expected_results = np.array(
                     [[0, 1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0]]
                 ).transpose()
-            elif logical_operator == "or":
+            else:  # "or" — the only other value the loop yields
                 expected_results = np.array(
                     [[1, 1, 1, 1, 1, 1, 0, 1], [1, 1, 1, 1, 1, 1, 0, 1]]
                 ).transpose()
@@ -299,12 +311,19 @@ class TestSimpleThresholder(TestCase):
 
 @pytest.mark.usefixtures("data", "features", "weights")
 class TestLinearRanker(TestCase):
+    data: ClassVar[dict[str, Any]]
+    features: ClassVar[list[str]]
+    weights: ClassVar[list[float]]
+
     def test_fit(self):
         ranker = LinearRanker(self.features, self.weights)
         assert ranker.feature_importances_ is None
         ranker.fit(x=self.data["X_train"], y=self.data["y_train"])
+        # feature_importances_ is populated by fit() above, but pyright keeps the
+        # `is None` narrowing from the assert across the call; assert_almost_equal's
+        # stub rejects None, so widen through object per pyright's own guidance.
         np.testing.assert_almost_equal(
-            ranker.feature_importances_,
+            cast("np.ndarray[Any, Any]", cast(object, ranker.feature_importances_)),
             np.array(
                 [0.19354839, 0.16129032, 0.12903226, 0.22580645, 0.19354839, 0.09677419]
             ),

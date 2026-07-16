@@ -13,6 +13,7 @@ matching NOTIFY); live streaming is covered at integration.
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 import pytest
 
@@ -228,9 +229,9 @@ def test_experiment_audition_nonempty_after_rerun(client, seeded):
     resp = client.get(f"/api/experiments/{seeded.experiment_hash}/audition")
     assert resp.status_code == 200
     body = resp.json()
-    assert not body.get("empty"), (
-        "experiment-scoped audition must survive a cache-shared re-run"
-    )
+    assert not body.get(
+        "empty"
+    ), "experiment-scoped audition must survive a cache-shared re-run"
     assert len(body["ranking"]) == 3
 
 
@@ -641,7 +642,9 @@ def test_entity_attributes_geo_decoded(client, seeded, db_pool_greenfield):
     with db_pool_greenfield.connection() as conn:
         try:
             conn.execute("create extension if not exists postgis")
-        except Exception:  # noqa: BLE001 - environment without PostGIS: nothing to assert
+        except (
+            Exception
+        ):  # noqa: BLE001 - environment without PostGIS: nothing to assert
             pytest.skip("PostGIS not available in the test server")
         conn.execute(
             "create table geo_facilities (entity_id bigint, name text, as_of date,"
@@ -721,10 +724,13 @@ def test_stream_route_registered_event_stream(db_pool_greenfield):
     from uuid import uuid4
 
     from starlette.requests import Request
+    from starlette.routing import Route
 
     from triage.dashboard.routes import router, stream
 
     route = next(r for r in router.routes if getattr(r, "name", "") == "stream")
+    assert isinstance(route, Route)  # narrow BaseRoute -> Route for .methods/.path
+    assert route.methods is not None
     assert "GET" in route.methods
     assert route.path.endswith("/stream")
 
@@ -742,13 +748,14 @@ def test_stream_forwards_notify(seeded, db_pool_greenfield):
     import asyncio
 
     import psycopg
+    from starlette.requests import Request
 
     from triage.dashboard.routes import _run_progress_events
 
     conninfo = db_pool_greenfield.conninfo
     run_id = seeded.run_id
 
-    async def _notify(payload: dict):
+    async def _notify(payload: dict[str, Any]):
         async with await psycopg.AsyncConnection.connect(
             conninfo, autocommit=True
         ) as nconn:
@@ -762,7 +769,10 @@ def test_stream_forwards_notify(seeded, db_pool_greenfield):
             async def is_disconnected(self):
                 return False
 
-        gen = _run_progress_events(_AlwaysConnected(), conninfo, run_id)
+        # only .is_disconnected() is used by the generator; the double is a stand-in Request.
+        gen = _run_progress_events(
+            cast(Request, cast(object, _AlwaysConnected())), conninfo, run_id
+        )
         frames: list[str] = []
         frames.append(await gen.__anext__())
         frames.append(await gen.__anext__())  # first keep-alive (no notify yet)

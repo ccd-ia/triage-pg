@@ -1,21 +1,20 @@
+from typing import cast
+
 import numpy as np
-
 import pytest
-
-from triage.component.catwalk.estimators.transformers import CutOff
-from triage.component.catwalk.estimators.classifiers import ScaledLogisticRegression
-
-from sklearn import linear_model
-
-from sklearn import datasets
-from sklearn import preprocessing
-from sklearn.pipeline import Pipeline
+from sklearn import datasets, linear_model, preprocessing
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.utils import Bunch
+
+from triage.component.catwalk.estimators.classifiers import ScaledLogisticRegression
+from triage.component.catwalk.estimators.transformers import CutOff
 
 
 @pytest.fixture
 def data():
-    dataset = datasets.load_breast_cancer()
+    # no-arg call returns a Bunch (return_X_y defaults False); the stub's union hides it.
+    dataset = cast(Bunch, datasets.load_breast_cancer())
     X = dataset.data
     y = dataset.target
 

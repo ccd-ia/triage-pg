@@ -8,6 +8,7 @@ matrices, and a grid × split of models scored + evaluated.
 
 import json
 import os
+from typing import Any
 
 import pytest
 
@@ -65,7 +66,7 @@ _LABELS = {1: 1.0, 2: 1.0, 3: 1.0, 4: 0.0, 5: 0.0, 6: 0.0}
 _AS_OF_MONTHS = ["2013-01-01", "2013-07-01", "2014-01-01", "2014-07-01"]
 
 
-def _featurizer_config() -> dict:
+def _featurizer_config() -> dict[str, Any]:
     """customers (target) ⋈ orders. COUNT/SUM/MEAN of orders.amount is the signal."""
     return {
         "target": "customers",
@@ -99,7 +100,7 @@ def _featurizer_config() -> dict:
     }
 
 
-def _experiment_config() -> dict:
+def _experiment_config() -> dict[str, Any]:
     return {
         "problem_type": PROBLEM_TYPE,
         "temporal_config": TEMPORAL_CONFIG,
@@ -528,9 +529,9 @@ def test_feature_group_fanout_runs_share_one_experiment(db_pool_greenfield, tmp_
     groups = partition_features(
         full_feats, aliases, target_alias=_featurizer_config()["target"]
     )
-    assert len(groups) >= 2, (
-        f"expected ≥2 source-entity groups, got {list(groups)} from {full_feats}"
-    )
+    assert (
+        len(groups) >= 2
+    ), f"expected ≥2 source-entity groups, got {list(groups)} from {full_feats}"
     expected = mix_strategies(groups, ["all", "leave-one-in"])
     assert experiment.num_runs == len(expected)
     assert {r.feature_group for r in experiment.runs} == {s.label for s in expected}

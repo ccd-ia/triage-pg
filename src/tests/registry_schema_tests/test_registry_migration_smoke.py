@@ -21,7 +21,7 @@ ALEMBIC_INI = SRC / "triage" / "component" / "registry_schema" / "alembic.ini"
 EXPECTED_TABLES = {"projects", "users", "project_members", "submissions"}
 
 
-def _run_alembic(database_url: str, *args: str) -> subprocess.CompletedProcess:
+def _run_alembic(database_url: str, *args: str) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(SRC)
     env["DATABASE_URL"] = database_url
@@ -45,9 +45,9 @@ def test_registry_migration_upgrade_and_downgrade(postgresql):
     up = _run_alembic(base_url, "upgrade", "head")
     print("\n=== alembic-registry upgrade head ===")
     print((up.stdout + up.stderr).strip())
-    assert up.returncode == 0, (
-        f"upgrade failed:\nSTDOUT:{up.stdout}\nSTDERR:{up.stderr}"
-    )
+    assert (
+        up.returncode == 0
+    ), f"upgrade failed:\nSTDOUT:{up.stdout}\nSTDERR:{up.stderr}"
 
     engine = create_engine(
         base_url.replace("postgresql://", "postgresql+psycopg://", 1)
@@ -72,9 +72,9 @@ def test_registry_migration_upgrade_and_downgrade(postgresql):
             print("=== \\dt registry.* (after upgrade head) ===")
             for name in sorted(tables):
                 print(f"registry | {name} | table")
-            assert EXPECTED_TABLES <= tables, (
-                f"missing tables: {EXPECTED_TABLES - tables}"
-            )
+            assert (
+                EXPECTED_TABLES <= tables
+            ), f"missing tables: {EXPECTED_TABLES - tables}"
 
             version_table = conn.execute(
                 text(
@@ -87,9 +87,9 @@ def test_registry_migration_upgrade_and_downgrade(postgresql):
         down = _run_alembic(base_url, "downgrade", "base")
         print("\n=== alembic-registry downgrade base ===")
         print((down.stdout + down.stderr).strip())
-        assert down.returncode == 0, (
-            f"downgrade failed:\nSTDOUT:{down.stdout}\nSTDERR:{down.stderr}"
-        )
+        assert (
+            down.returncode == 0
+        ), f"downgrade failed:\nSTDOUT:{down.stdout}\nSTDERR:{down.stderr}"
 
         with engine.connect() as conn:
             schema_exists = conn.execute(

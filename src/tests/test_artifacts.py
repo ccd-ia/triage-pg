@@ -380,4 +380,6 @@ def test_notify_is_a_no_op_without_listener(triage_db):
         run_id=run_id,
     )
     mark_built(triage_db, derivation.id, kind="labels", run_id=run_id)
-    assert get_artifact(triage_db, derivation.id)["status"] == "built"
+    artifact = get_artifact(triage_db, derivation.id)
+    assert artifact is not None
+    assert artifact["status"] == "built"

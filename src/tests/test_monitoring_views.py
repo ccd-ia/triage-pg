@@ -10,6 +10,8 @@ the idempotent ``evaluations`` upserts.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 from scipy import stats
@@ -112,7 +114,9 @@ def test_score_drift_matches_scipy_and_psi_reference(db_pool_greenfield):
     row = _sql_drift(db_pool_greenfield, group_id)
     assert row["n_reference"] == 400 and row["n_window"] == 300
     assert row["psi"] == pytest.approx(_psi_reference(ref, win), abs=1e-9)
-    assert row["ks"] == pytest.approx(stats.ks_2samp(ref, win).statistic, abs=1e-9)
+    # scipy-stubs types the ks_2samp result as an anonymous class lacking .statistic
+    ks_stat = cast(Any, stats.ks_2samp(ref, win)).statistic
+    assert row["ks"] == pytest.approx(ks_stat, abs=1e-9)
     assert row["psi"] > 0.25  # the shift is real — sanity on the rule-of-thumb scale
 
 

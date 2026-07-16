@@ -18,6 +18,8 @@ Covered:
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import boto3
 import polars as pl
 import pytest
@@ -39,6 +41,7 @@ from triage.profiles.storage import (
     storage_for_root,
     write_parquet,
 )
+from triage.util.db import DictRowPool
 
 REGION = "us-east-1"
 BUCKET = "triage-test-bucket"
@@ -93,7 +96,7 @@ def _provision_batch(region: str) -> None:
 
 def test_iam_connection_class_injects_token_and_forces_tls(monkeypatch):
     """The IAM connection_class stamps the (stub) token as the password + verify-full + CA bundle."""
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     def fake_connect(cls, conninfo="", **kwargs):
         captured["conninfo"] = conninfo
@@ -123,7 +126,7 @@ def test_cloud_auth_uses_injected_token_provider(monkeypatch):
     We stop short of opening a real connection (there is no RDS): patch ConnectionPool to capture
     its kwargs and assert the password-less conninfo + the IAM connection_class + max_lifetime.
     """
-    calls: dict = {}
+    calls: dict[str, Any] = {}
 
     class FakePool:
         def __init__(self, conninfo, **kwargs):
@@ -217,7 +220,7 @@ def test_s3_storage_write_bytes_and_open_input(aws_credentials):
 
 def test_in_process_execution_calls_run_experiment(monkeypatch):
     """InProcessExecution.run threads storage/storage_root into run_experiment synchronously."""
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     def fake_run_experiment(pool, config, *, storage, storage_root, **kw):
         captured.update(
@@ -229,7 +232,9 @@ def test_in_process_execution_calls_run_experiment(monkeypatch):
 
     storage = LocalStorage()
     handle = InProcessExecution().run(
-        "POOL",
+        # local profile doesn't touch the pool (run_experiment is monkeypatched); a
+        # sentinel string stands in for the DictRowPool the signature asks for.
+        cast(DictRowPool, cast(object, "POOL")),
         {"problem_type": "classification"},
         storage=storage,
         storage_root="./store",
@@ -258,7 +263,8 @@ def test_batch_execution_stages_config_and_submits(aws_credentials):
     )
 
     handle = execution.run(
-        None,
+        # cloud profile opens its own pool inside the Batch job (ADR-0005), so None here.
+        cast(DictRowPool, cast(object, None)),
         {"problem_type": "classification", "grid_config": {"x": {}}},
         storage=storage,
         storage_root=f"s3://{BUCKET}/scope",
@@ -300,12 +306,14 @@ def test_batch_job_status_reads_and_handles_unknown(aws_credentials):
         config_uri=f"s3://{BUCKET}/scope/config.json",
     )
     handle = execution.run(
-        None,
+        # cloud profile opens its own pool inside the Batch job (ADR-0005), so None here.
+        cast(DictRowPool, cast(object, None)),
         {"problem_type": "classification"},
         storage=S3Storage(region=REGION),
         storage_root=f"s3://{BUCKET}/scope",
     )
 
+    assert handle.batch_job_id is not None
     info = batch_job_status(handle.batch_job_id, region=REGION)
     assert info["job_id"] == handle.batch_job_id
     # moto walks the job through the Batch lifecycle; any real lifecycle state is fine here —

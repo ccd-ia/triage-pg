@@ -2,17 +2,17 @@ import datetime
 import unittest
 from unittest import TestCase, mock
 
+from tests.utils import open_side_effect, sample_cohort_config
 from triage.util.conf import (
     convert_str_to_relativedelta,
-    parse_delta_string,
     load_query_if_needed,
+    parse_delta_string,
 )
-from tests.utils import sample_cohort_config, open_side_effect
 
 
 class TestLoadQuery(unittest.TestCase):
     def test_update_in_place_if_filepath(self):
-        with unittest.mock.patch(
+        with mock.patch(
             "triage.util.conf.open", side_effect=open_side_effect
         ) as mock_file:
             file_cohort_config = sample_cohort_config("filepath")
@@ -21,7 +21,7 @@ class TestLoadQuery(unittest.TestCase):
             assert loaded_config == query_cohort_config
 
     def test_no_update_if_no_filepath(self):
-        with unittest.mock.patch(
+        with mock.patch(
             "triage.util.conf.open", side_effect=open_side_effect
         ) as mock_file:
             query_cohort_config = sample_cohort_config("query")

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from typing import Any
 
 import pytest
 import yaml
@@ -33,7 +34,7 @@ CHI311_YAML = EXAMPLE_DIR / "chicago311" / "experiment.yaml"
 
 class _StubRunner:
     def __init__(self):
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, Any]] = []
 
     def __call__(self, pool, config, *, profile="local"):
         self.calls.append({"config": config, "profile": profile})

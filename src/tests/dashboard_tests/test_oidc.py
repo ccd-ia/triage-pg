@@ -10,6 +10,7 @@ behavior is untouched (the seam holds) — covered by the existing write-API tes
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -47,7 +48,7 @@ def oidc_env(monkeypatch):
 @pytest.fixture
 def stub_idp(monkeypatch):
     """Stub the three IdP round-trips; record what the callback exchanged."""
-    calls: dict = {}
+    calls: dict[str, Any] = {}
 
     def fake_discovery(issuer):
         assert issuer == ISSUER

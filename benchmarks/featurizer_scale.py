@@ -50,6 +50,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any, LiteralString, cast
 
 import psycopg
 import yaml
@@ -63,7 +64,7 @@ from pytest_postgresql.executor import PostgreSQLExecutor
 # shape: a population of entities, each with a stream of dated events, and we
 # want point-in-time features ("activity in the last 30/90/180 days").
 
-CONFIG: dict = {
+CONFIG: dict[str, Any] = {
     "target": "clients",
     "max_depth": 2,
     # 3 intervals × ~5 aggregations × the child numeric/categorical vars gives a
@@ -111,7 +112,9 @@ DATA_END = date(2023, 1, 1)
 _DATA_SPAN_DAYS = (DATA_END - DATA_START).days
 
 
-def _load_synthetic_data(conn: psycopg.Connection, n_entities: int, events_per_entity: int, seed: int = 7) -> int:
+def _load_synthetic_data(
+    conn: psycopg.Connection, n_entities: int, events_per_entity: int, seed: int = 7
+) -> int:
     """(Re)create + populate clients/visits. Returns the number of visit rows."""
     rng = random.Random(seed)
     with conn.cursor() as cur:
@@ -133,13 +136,19 @@ def _load_synthetic_data(conn: psycopg.Connection, n_entities: int, events_per_e
             " service text)"
         )
 
-        with cur.copy("copy clients (client_id, enrolled_on, region, baseline_score) from stdin") as copy:
+        with cur.copy(
+            "copy clients (client_id, enrolled_on, region, baseline_score) from stdin"
+        ) as copy:
             for cid in range(1, n_entities + 1):
                 enrolled = DATA_START + timedelta(days=rng.randint(0, 180))
-                copy.write_row((cid, enrolled, rng.choice(REGIONS), round(rng.uniform(0, 100), 3)))
+                copy.write_row(
+                    (cid, enrolled, rng.choice(REGIONS), round(rng.uniform(0, 100), 3))
+                )
 
         n_visits = n_entities * events_per_entity
-        with cur.copy("copy visits (visit_id, client_id, visited_on, amount, service) from stdin") as copy:
+        with cur.copy(
+            "copy visits (visit_id, client_id, visited_on, amount, service) from stdin"
+        ) as copy:
             vid = 0
             for cid in range(1, n_entities + 1):
                 for _ in range(events_per_entity):
@@ -212,7 +221,9 @@ def _render_query(config_path: str) -> tuple[str, float]:
     return sql, gen
 
 
-def _time_execution(conn: psycopg.Connection, sql: str, statement_timeout_ms: int) -> tuple[float, float, int]:
+def _time_execution(
+    conn: psycopg.Connection, sql: str, statement_timeout_ms: int
+) -> tuple[float, float, int]:
     """Execute the query into a TEMP table; return (wall_seconds, explain_ms, n_cols).
 
     Materializing into ``create temp table ... as`` forces the server to
@@ -221,18 +232,30 @@ def _time_execution(conn: psycopg.Connection, sql: str, statement_timeout_ms: in
     ``EXPLAIN ANALYZE`` on the same query for the server-reported execution time.
     """
     with conn.cursor() as cur:
-        cur.execute(f"set statement_timeout = {statement_timeout_ms}")
+        # psycopg types the query as LiteralString to discourage dynamic SQL; this
+        # benchmark deliberately interpolates generated SQL, so cast the f-strings.
+        cur.execute(
+            cast(LiteralString, f"set statement_timeout = {statement_timeout_ms}")
+        )
 
         cur.execute("drop table if exists _bench_out")
         t0 = time.perf_counter()
-        cur.execute(f"create temp table _bench_out as {sql}")
+        cur.execute(cast(LiteralString, f"create temp table _bench_out as {sql}"))
         wall = time.perf_counter() - t0
 
-        cur.execute("select count(*) from information_schema.columns where table_name = '_bench_out'")
-        n_cols = int(cur.fetchone()[0])
+        cur.execute(
+            "select count(*) from information_schema.columns where table_name = '_bench_out'"
+        )
+        cols_row = cur.fetchone()
+        assert cols_row is not None
+        n_cols = int(cols_row[0])
 
-        cur.execute(f"explain (analyze, timing off, format json) {sql}")
-        plan = cur.fetchone()[0]
+        cur.execute(
+            cast(LiteralString, f"explain (analyze, timing off, format json) {sql}")
+        )
+        plan_row = cur.fetchone()
+        assert plan_row is not None
+        plan = plan_row[0]
         explain_ms = float(plan[0]["Execution Time"])
     conn.rollback()  # drop the temp table / leave no state
     return wall, explain_ms, n_cols
@@ -288,7 +311,9 @@ def throwaway_postgres():
     try:
         # initdb created the bench_user superuser + the default databases, but
         # not our ``bench`` db — create it through the maintenance connection.
-        admin = psycopg.connect(f"host=127.0.0.1 port={port} user=bench_user dbname=postgres")
+        admin = psycopg.connect(
+            f"host=127.0.0.1 port={port} user=bench_user dbname=postgres"
+        )
         admin.autocommit = True
         with admin.cursor() as cur:
             cur.execute("create database bench")
@@ -356,7 +381,9 @@ def main() -> None:
         action="store_true",
         help="smaller scales for a fast smoke run",
     )
-    parser.add_argument("--repeats", type=int, default=2, help="timed repeats per point (best-of)")
+    parser.add_argument(
+        "--repeats", type=int, default=2, help="timed repeats per point (best-of)"
+    )
     parser.add_argument(
         "--timeout-s",
         type=int,
@@ -377,7 +404,9 @@ def main() -> None:
         entity_axis = [(1_000, 30), (10_000, 30), (100_000, 30)]
         secondary_dates = 12
 
-    print(f"featurizer scale benchmark — repeats={args.repeats}, statement_timeout={args.timeout_s}s\n")
+    print(
+        f"featurizer scale benchmark — repeats={args.repeats}, statement_timeout={args.timeout_s}s\n"
+    )
 
     with throwaway_postgres() as (dsn, pg_version):
         print(f"throwaway PostgreSQL {pg_version} started\n")
@@ -409,7 +438,9 @@ def main() -> None:
                     )
 
                 # ----- SECONDARY: vary #entities at fixed #as_of_dates -----
-                print(f"\nSECONDARY axis — {secondary_dates} as_of_dates, vary #entities")
+                print(
+                    f"\nSECONDARY axis — {secondary_dates} as_of_dates, vary #entities"
+                )
                 secondary: list[Timing] = []
                 for n_entities, events in entity_axis:
                     nv = _load_synthetic_data(conn, n_entities, events)
@@ -468,7 +499,9 @@ def main() -> None:
         f"rising per-date cost ⇒ superlinear)"
     )
 
-    print(f"\n\n### SECONDARY: execution time vs #entities ({secondary_dates} as_of_dates)\n")
+    print(
+        f"\n\n### SECONDARY: execution time vs #entities ({secondary_dates} as_of_dates)\n"
+    )
     rows = []
     for t in secondary:
         rows.append(

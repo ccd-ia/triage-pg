@@ -4,6 +4,7 @@ import os
 import random
 from contextlib import contextmanager
 from functools import cached_property
+from typing import cast
 from unittest import mock
 
 import matplotlib
@@ -135,24 +136,20 @@ def populate_source_data(db_engine):
     ]
 
     with db_engine.begin() as conn:
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table cat_complaints (
                 entity_id int,
                 as_of_date date,
                 cat_sightings int
                 )
-                """)
-        )
+                """))
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table entity_zip_codes (
                 entity_id int,
                 zip_code text
                 )
-                """)
-        )
+                """))
 
         conn.execute(
             text(
@@ -180,15 +177,13 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table zip_code_events (
                 zip_code text,
                 as_of_date date,
                 num_events int
                 )
-                """)
-        )
+                """))
         for zip_code_event in zip_code_events:
             conn.execute(
                 text(
@@ -213,15 +208,13 @@ def populate_source_data(db_engine):
                 },
             )
 
-        conn.execute(
-            text("""
+        conn.execute(text("""
                 create table events (
                 entity_id int,
                 outcome int,
                 outcome_date date
                 )
-                """)
-        )
+                """))
 
         for event in events:
             conn.execute(
@@ -343,7 +336,8 @@ def assert_plot_figures_added():
     num_figures_before = plt.gcf().number
     yield
     num_figures_after = plt.gcf().number
-    assert num_figures_before < num_figures_after
+    # Figure.number is typed int | str in the stubs; it is an int at runtime.
+    assert cast(int, num_figures_before) < cast(int, num_figures_after)
 
 
 class CallSpy:
@@ -379,6 +373,7 @@ class CallSpy:
     @cached_property
     def target_base(self):
         # walk target path until can no longer import it as a module path
+        base = None
         for index in range(len(self.target_path)):
             path_parts = self.target_path[: (index + 1)]
             import_path = ".".join(path_parts)

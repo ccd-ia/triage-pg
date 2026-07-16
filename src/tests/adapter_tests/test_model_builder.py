@@ -18,6 +18,7 @@ scores + evaluates it with :func:`triage.adapters.score_and_evaluate`. Asserts:
 """
 
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -63,7 +64,7 @@ def _temporal_config() -> TemporalConfig:
     )
 
 
-def _featurizer_config() -> dict:
+def _featurizer_config() -> dict[str, Any]:
     """customers (target) ⋈ orders. The COUNT/SUM/MEAN of orders.amount is the signal."""
     return {
         "target": "customers",
@@ -504,7 +505,7 @@ def test_build_model_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
         storage_root=storage,
         source_pins=_PINS,
     )
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         train_matrix_result=train,
         class_path=CLASS_PATH,
         hyperparameters={"max_depth": 3},
@@ -542,7 +543,8 @@ def test_feature_importance_values_linear_betas_and_odds():
     class _Linear:
         coef_ = np.array([[0.5, -1.0, 0.0]])
 
-    fi = _feature_importance_values(_Linear(), 3)
+    fi: dict[str, Any] | None = _feature_importance_values(_Linear(), 3)
+    assert fi is not None
     assert fi["kind"] == "coef"
     assert list(fi["signed"]) == [0.5, -1.0, 0.0]
     assert fi["ranking"][1] == 1.0  # |-1.0| used for ranking
@@ -559,7 +561,8 @@ def test_feature_importance_values_tree_gini():
     class _Tree:
         feature_importances_ = np.array([0.7, 0.3])
 
-    fi = _feature_importance_values(_Tree(), 2)
+    fi: dict[str, Any] | None = _feature_importance_values(_Tree(), 2)
+    assert fi is not None
     assert fi["kind"] == "gini"
     assert fi["signed"] is None and fi["odds"] is None
     assert list(fi["ranking"]) == [0.7, 0.3]
@@ -594,7 +597,7 @@ def test_evaluation_is_per_as_of_date(db_pool_greenfield, tmp_path):
     policy = ImputationPolicy.model_validate(
         {"all": {"type": "zero"}, "mean": {"type": "mean"}}
     )
-    common = dict(
+    common: dict[str, Any] = dict(
         featurizer_config=_featurizer_config(),
         cohort_artifact_id=cohort,
         labels_artifact_id=labels,

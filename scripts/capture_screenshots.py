@@ -18,9 +18,13 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.sync_api import ViewportSize
 
 OUT = Path(__file__).resolve().parents[1] / "docs" / "images"
-VIEWPORT = {"width": 1440, "height": 900}
+VIEWPORT: ViewportSize = {"width": 1440, "height": 900}
 
 # plain routes: (filename, path, wait-for selector)
 ROUTE_SHOTS = [
@@ -72,7 +76,9 @@ def capture(base: str) -> int:
             try:
                 page.goto(base + path.format(exp=exp), wait_until="domcontentloaded")
                 shoot(filename, selector)
-            except Exception as exc:  # noqa: BLE001 — report every failed shot, then fail
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 — report every failed shot, then fail
                 failures.append(f"{filename}: {exc}")
                 print(f"FAILED {filename}: {exc}", file=sys.stderr)
 

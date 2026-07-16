@@ -1,7 +1,9 @@
 import datetime
 import re
+from typing import cast
 
 import numpy as np
+import pandas as pd
 import pytest
 from numpy.testing import assert_array_equal
 
@@ -62,7 +64,9 @@ def test_sort_predictions_and_labels():
     )
     assert_array_equal(sorted_predictions, np.array([0.6, 0.6, 0.5, 0.5, 0.4]))
     assert_array_equal(sorted_labels, np.array([1, None, 1, 0, 0]))
-    assert_array_equal(sorted_entities.to_numpy(), np.array([2, 4, 3, 0, 1]))
+    assert_array_equal(
+        cast(pd.Index, sorted_entities).to_numpy(), np.array([2, 4, 3, 0, 1])
+    )
 
     # worst sort
     sorted_predictions, sorted_labels, sorted_entities = sort_predictions_and_labels(
@@ -70,7 +74,9 @@ def test_sort_predictions_and_labels():
     )
     assert_array_equal(sorted_predictions, np.array([0.6, 0.6, 0.5, 0.5, 0.4]))
     assert_array_equal(sorted_labels, np.array([None, 1, 0, 1, 0]))
-    assert_array_equal(sorted_entities.to_numpy(), np.array([4, 2, 0, 3, 1]))
+    assert_array_equal(
+        cast(pd.Index, sorted_entities).to_numpy(), np.array([4, 2, 0, 3, 1])
+    )
 
     # random tiebreaker needs a seed
     with pytest.raises(ValueError):
@@ -82,11 +88,15 @@ def test_sort_predictions_and_labels():
     )
     assert_array_equal(sorted_predictions, np.array([0.6, 0.6, 0.5, 0.5, 0.4]))
     assert_array_equal(sorted_labels, np.array([None, 1, 1, 0, 0]))
-    assert_array_equal(sorted_entities.to_numpy(), np.array([4, 2, 3, 0, 1]))
+    assert_array_equal(
+        cast(pd.Index, sorted_entities).to_numpy(), np.array([4, 2, 3, 0, 1])
+    )
 
     sorted_predictions, sorted_labels, sorted_entities = sort_predictions_and_labels(
         predictions, labels, entities, tiebreaker="random", sort_seed=24376234
     )
     assert_array_equal(sorted_predictions, np.array([0.6, 0.6, 0.5, 0.5, 0.4]))
     assert_array_equal(sorted_labels, np.array([None, 1, 0, 1, 0]))
-    assert_array_equal(sorted_entities.to_numpy(), np.array([4, 2, 0, 3, 1]))
+    assert_array_equal(
+        cast(pd.Index, sorted_entities).to_numpy(), np.array([4, 2, 0, 3, 1])
+    )

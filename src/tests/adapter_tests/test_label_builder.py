@@ -8,6 +8,7 @@ fails loudly.
 """
 
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -166,7 +167,7 @@ def test_build_labels_is_cache_hit_on_rebuild(db_pool_greenfield):
     _seed_outcomes(engine)
     cohort_hash = _build_cohort(engine, run_id)
 
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         cohort_artifact_id=cohort_hash,
         label_query_template=CLASSIFICATION_LABEL_QUERY,
         as_of_dates=AS_OF_DATES,

@@ -13,6 +13,7 @@ a fixed admin so the tests don't depend on ambient ``TRIAGE_*`` env.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,7 +32,7 @@ class _StubRunner:
     """Records its calls and returns a canned :class:`RunHandle` (local or cloud shape)."""
 
     def __init__(self, *, cloud: bool = False):
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, Any]] = []
         self._cloud = cloud
 
     def __call__(self, pool, config, *, profile="local"):

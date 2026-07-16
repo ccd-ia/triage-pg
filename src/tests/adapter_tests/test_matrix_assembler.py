@@ -15,6 +15,7 @@ the two ADR boundaries:
 """
 
 from datetime import date
+from typing import Any
 
 import polars as pl
 import pytest
@@ -62,7 +63,7 @@ def _temporal_config() -> TemporalConfig:
     )
 
 
-def _featurizer_config() -> dict:
+def _featurizer_config() -> dict[str, Any]:
     """A two-entity ER graph: customers (target) with orders. P3650D = ~10y window.
 
     The wide P3650D interval makes the aggregation effectively all-history so the boundary
@@ -369,7 +370,7 @@ def test_matrix_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
     storage = str(tmp_path / "matrices")
     cohort_tr, labels_tr = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF])
 
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         featurizer_config=_featurizer_config(),
         cohort_artifact_id=cohort_tr,
         labels_artifact_id=labels_tr,
@@ -607,9 +608,9 @@ def test_fit_free_zero_fills_measures_so_nan_intolerant_model_trains(
         col = frame.get_column(feature)
         assert col.null_count() == 0, f"{feature} still has NULLs"
         if frame.schema[feature] in (pl.Float32, pl.Float64):
-            assert not any(v is not None and math.isnan(v) for v in col.to_list()), (
-                f"{feature} has NaN"
-            )
+            assert not any(
+                v is not None and math.isnan(v) for v in col.to_list()
+            ), f"{feature} has NaN"
 
     # GradientBoosting rejects NaN, so a successful fit proves the matrix is clean. feature_names
     # is now fully numeric (the target temporal_ix leak is dropped by _numeric_feature_columns —
@@ -683,8 +684,8 @@ def test_target_temporal_ix_dropped_from_feature_set(db_pool_greenfield, tmp_pat
     frame = pl.read_parquet(train.storage_uri)
     numeric = (pl.Float32, pl.Float64, pl.Int8, pl.Int16, pl.Int32, pl.Int64)
     for feature in train.feature_names:
-        assert frame.schema[feature] in numeric, (
-            f"{feature} is {frame.schema[feature]} — feature set must be fully numeric"
-        )
+        assert (
+            frame.schema[feature] in numeric
+        ), f"{feature} is {frame.schema[feature]} — feature set must be fully numeric"
     # the leaked Date column is dropped from the Parquet entirely (not merely excluded)
     assert "signup_date" not in frame.columns

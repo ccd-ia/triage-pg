@@ -15,6 +15,7 @@ audition would go empty on the re-run; experiment-scoped audition must still be 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import pytest
@@ -270,7 +271,7 @@ def empty_experiment(db_pool_greenfield) -> tuple[str, str]:
 
 
 @pytest.fixture
-def client(db_pool_greenfield) -> TestClient:
+def client(db_pool_greenfield) -> Iterator[TestClient]:
     """A TestClient whose app shares the throwaway greenfield test DB pool."""
     app = create_app(pool=db_pool_greenfield)
     with TestClient(app) as c:

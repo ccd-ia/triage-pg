@@ -7,6 +7,7 @@ cache-hit behavior on a second build.
 """
 
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_build_cohort_is_cache_hit_on_rebuild(db_pool_greenfield):
     run_id = _seed_lineage(engine)
     _seed_events(engine)
 
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         cohort_query_template=COHORT_QUERY,
         as_of_dates=AS_OF_DATES,
         config={"query": COHORT_QUERY},
@@ -138,7 +139,7 @@ def test_unpinned_source_is_volatile_no_cache_hit(db_pool_greenfield):
     run_id = _seed_lineage(engine)
     _seed_events(engine)
 
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         cohort_query_template=COHORT_QUERY,
         as_of_dates=[date(2014, 1, 1)],
         config={"query": COHORT_QUERY},
