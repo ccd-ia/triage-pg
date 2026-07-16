@@ -45,7 +45,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.logging import get_logger
 
@@ -56,7 +56,7 @@ VALID_SPLIT_KINDS = frozenset({"train", "test", "validation", "production"})
 
 
 def record_predictions(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     split_kind: str,
     scores: Iterable[Mapping[str, Any]],
@@ -130,7 +130,7 @@ def record_predictions(
 
 
 def fetch_ranks(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     as_of_date: date | str,
 ) -> list[dict[str, Any]]:
@@ -165,7 +165,7 @@ def fetch_ranks(
 
 
 def rank_predictions(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     split_kind: str,
     scores: Sequence[Mapping[str, Any]],

@@ -16,9 +16,9 @@ import datetime
 import json
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import LiteralString, cast, Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool, returned_row
 
 from triage.logging import get_logger
 
@@ -50,7 +50,7 @@ def _quote_column(column: str) -> str:
 
 
 def register_source(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     source_name: str,
     relation: str,
     knowledge_date_column: str | None = None,
@@ -100,7 +100,7 @@ def register_source(
     logger.info(f"Registered source {source_name!r} -> {relation}")
 
 
-def get_source(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None:
+def get_source(pool: DictRowPool, source_name: str) -> dict[str, Any] | None:
     with pool.connection() as conn:
         row = conn.execute(
             "select * from triage.sources where source_name = %(name)s",
@@ -109,7 +109,7 @@ def get_source(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def list_sources(pool: ConnectionPool) -> list[dict[str, Any]]:
+def list_sources(pool: DictRowPool) -> list[dict[str, Any]]:
     """All sources with their current pin (null version_label = unpinned)."""
     with pool.connection() as conn:
         rows = conn.execute("""
@@ -122,7 +122,7 @@ def list_sources(pool: ConnectionPool) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def capture_fingerprint(pool: ConnectionPool, source_name: str) -> dict[str, Any]:
+def capture_fingerprint(pool: DictRowPool, source_name: str) -> dict[str, Any]:
     """Cheap advisory fingerprint: row count + max knowledge date (if declared)."""
     source = get_source(pool, source_name)
     if source is None:
@@ -134,9 +134,17 @@ def capture_fingerprint(pool: ConnectionPool, source_name: str) -> dict[str, Any
     kdc = source["knowledge_date_column"]
     max_expr = f"max({_quote_column(kdc)})::text" if kdc else "null"
     with pool.connection() as conn:
-        row = conn.execute(
-            f"select count(*) as row_count, {max_expr} as max_knowledge_date from {relation}"
-        ).fetchone()
+        # cast: the relation/column are registry-validated identifiers quoted above —
+        # this is deliberately dynamic SQL, so LiteralString cannot apply.
+        row = returned_row(
+            conn.execute(
+                cast(
+                    LiteralString,
+                    f"select count(*) as row_count, {max_expr} as max_knowledge_date"
+                    f" from {relation}",
+                )
+            ).fetchone()
+        )
     return {
         "row_count": row["row_count"],
         "max_knowledge_date": row["max_knowledge_date"],
@@ -144,7 +152,7 @@ def capture_fingerprint(pool: ConnectionPool, source_name: str) -> dict[str, Any
 
 
 def bump_source(
-    pool: ConnectionPool, source_name: str, version_label: str | None = None
+    pool: DictRowPool, source_name: str, version_label: str | None = None
 ) -> str:
     """Record a new version pin for a source, fingerprinting it now.
 
@@ -176,7 +184,7 @@ def bump_source(
     return version_label
 
 
-def current_pin(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None:
+def current_pin(pool: DictRowPool, source_name: str) -> dict[str, Any] | None:
     with pool.connection() as conn:
         row = conn.execute(
             "select * from triage.current_source_pins where source_name = %(name)s",
@@ -185,9 +193,7 @@ def current_pin(pool: ConnectionPool, source_name: str) -> dict[str, Any] | None
     return dict(row) if row else None
 
 
-def resolve_pins(
-    pool: ConnectionPool, declared: Iterable[str]
-) -> dict[str, str | None]:
+def resolve_pins(pool: DictRowPool, declared: Iterable[str]) -> dict[str, str | None]:
     """Freeze the current pin of every declared source (plan time, ADR-0014).
 
     Unregistered or unpinned sources resolve to ``None`` — volatile, meaning
@@ -219,7 +225,7 @@ def resolve_pins(
     return pins
 
 
-def check_drift(pool: ConnectionPool, source_name: str) -> bool:
+def check_drift(pool: DictRowPool, source_name: str) -> bool:
     """Advisory drift check: did the data move while the pin stayed put?
 
     Compares the current fingerprint against the one stored with the source's
@@ -243,7 +249,7 @@ def check_drift(pool: ConnectionPool, source_name: str) -> bool:
 
 
 def record_run_pins(
-    pool: ConnectionPool, run_id: str, pins: dict[str, str | None]
+    pool: DictRowPool, run_id: str, pins: dict[str, str | None]
 ) -> None:
     """Persist the pins frozen for a run (the ``guix describe`` analog).
 

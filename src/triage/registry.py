@@ -3,7 +3,7 @@
 The *registry* is the instance-wide control plane — projects, users, membership, and an
 append-only submission audit trail — living in its own PostgreSQL database, distinct from the
 per-project ``triage`` results schema. This module is the psycopg3 access layer over it, in the
-same shape as :mod:`triage.sources`: plain functions over a ``ConnectionPool`` whose connections
+same shape as :mod:`triage.sources`: plain functions over a ``DictRowPool`` whose connections
 use ``dict_row`` (:func:`triage.util.db.connection_pool`), every parameter bound with ``%(name)s``
 (never interpolated — SQL-injection + the global hard rule).
 
@@ -20,11 +20,23 @@ import re
 from typing import Any, Optional
 from uuid import UUID
 
-from psycopg_pool import ConnectionPool
+from psycopg.rows import DictRow
 
 from triage.logging import get_logger
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
+
+
+def _returned(row: DictRow | None) -> DictRow:
+    """Narrow an ``INSERT … RETURNING`` fetchone — it always yields a row.
+
+    The driver types ``fetchone()`` as ``DictRow | None``, but every call site here is an
+    INSERT (or upsert) with RETURNING, which cannot return zero rows without raising first.
+    """
+    assert row is not None, "INSERT … RETURNING yielded no row"
+    return row
+
 
 __all__ = [
     "list_projects",
@@ -60,8 +72,8 @@ def _validate_slug(slug: str) -> str:
 
 
 def list_projects(
-    pool: ConnectionPool, *, include_archived: bool = False
-) -> list[dict]:
+    pool: DictRowPool, *, include_archived: bool = False
+) -> list[dict[str, Any]]:
     """All registry projects (active only unless ``include_archived``), newest first."""
     sql = "select project_id, slug, display_name, database_name, status, created_at, archived_at from registry.projects"
     if not include_archived:
@@ -71,7 +83,7 @@ def list_projects(
         return conn.execute(sql).fetchall()
 
 
-def get_project(pool: ConnectionPool, slug: str) -> Optional[dict]:
+def get_project(pool: DictRowPool, slug: str) -> Optional[dict[str, Any]]:
     """The project with this slug, or ``None``."""
     with pool.connection() as conn:
         return conn.execute(
@@ -82,28 +94,30 @@ def get_project(pool: ConnectionPool, slug: str) -> Optional[dict]:
 
 
 def create_project(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     *,
     slug: str,
     display_name: str,
     database_name: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Register a project. ``database_name`` defaults to the slug (ADR-0002: the slug names the
     per-project database). Raises ``ValueError`` on a bad slug; the unique constraints surface a
     ``psycopg`` error on a duplicate slug / database_name (fail-fast, not swallowed)."""
     _validate_slug(slug)
     db_name = database_name or slug
     with pool.connection() as conn:
-        return conn.execute(
-            "insert into registry.projects (slug, display_name, database_name)"
-            " values (%(slug)s, %(dn)s, %(db)s)"
-            " returning project_id, slug, display_name, database_name, status,"
-            " created_at, archived_at",
-            {"slug": slug, "dn": display_name, "db": db_name},
-        ).fetchone()
+        return _returned(
+            conn.execute(
+                "insert into registry.projects (slug, display_name, database_name)"
+                " values (%(slug)s, %(dn)s, %(db)s)"
+                " returning project_id, slug, display_name, database_name, status,"
+                " created_at, archived_at",
+                {"slug": slug, "dn": display_name, "db": db_name},
+            ).fetchone()
+        )
 
 
-def mark_project_dropped(pool: ConnectionPool, *, slug: str) -> dict:
+def mark_project_dropped(pool: DictRowPool, *, slug: str) -> dict[str, Any]:
     """Tombstone a project whose database has been dropped (``triage project drop``).
 
     The row is kept — submissions foreign-key to it and the control plane's history should
@@ -126,7 +140,7 @@ def mark_project_dropped(pool: ConnectionPool, *, slug: str) -> dict:
 # --------------------------------------------------------------------------- users
 
 
-def get_user_by_email(pool: ConnectionPool, email: str) -> Optional[dict]:
+def get_user_by_email(pool: DictRowPool, email: str) -> Optional[dict[str, Any]]:
     with pool.connection() as conn:
         return conn.execute(
             "select user_id, email, display_name, is_admin, created_at from registry.users where email = %(email)s",
@@ -135,12 +149,12 @@ def get_user_by_email(pool: ConnectionPool, email: str) -> Optional[dict]:
 
 
 def get_or_create_user(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     *,
     email: str,
     display_name: Optional[str] = None,
     is_admin: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Idempotently resolve a user by email, creating the row on first sight.
 
     This is the join point for the auth seam: a request principal (whoever the auth backend says
@@ -152,40 +166,44 @@ def get_or_create_user(
         raise ValueError("get_or_create_user requires a non-empty email")
     with pool.connection() as conn:
         # ON CONFLICT DO UPDATE (not DO NOTHING) so RETURNING always yields the row.
-        return conn.execute(
-            "insert into registry.users (email, display_name, is_admin)"
-            " values (%(email)s, %(dn)s, %(admin)s)"
-            " on conflict (email) do update set"
-            "   display_name = coalesce(excluded.display_name, registry.users.display_name)"
-            " returning user_id, email, display_name, is_admin, created_at",
-            {"email": email, "dn": display_name, "admin": is_admin},
-        ).fetchone()
+        return _returned(
+            conn.execute(
+                "insert into registry.users (email, display_name, is_admin)"
+                " values (%(email)s, %(dn)s, %(admin)s)"
+                " on conflict (email) do update set"
+                "   display_name = coalesce(excluded.display_name, registry.users.display_name)"
+                " returning user_id, email, display_name, is_admin, created_at",
+                {"email": email, "dn": display_name, "admin": is_admin},
+            ).fetchone()
+        )
 
 
 # --------------------------------------------------------------------------- membership
 
 
 def add_member(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     *,
     project_id: UUID,
     user_id: UUID,
     role: str = "contributor",
-) -> dict:
+) -> dict[str, Any]:
     """Add (or re-role) a user on a project. Idempotent on ``(project_id, user_id)``."""
     if role not in _ROLES:
         raise ValueError(f"role must be one of {_ROLES}; got {role!r}")
     with pool.connection() as conn:
-        return conn.execute(
-            "insert into registry.project_members (project_id, user_id, role)"
-            " values (%(p)s, %(u)s, %(r)s)"
-            " on conflict (project_id, user_id) do update set role = excluded.role"
-            " returning project_id, user_id, role, added_at",
-            {"p": project_id, "u": user_id, "r": role},
-        ).fetchone()
+        return _returned(
+            conn.execute(
+                "insert into registry.project_members (project_id, user_id, role)"
+                " values (%(p)s, %(u)s, %(r)s)"
+                " on conflict (project_id, user_id) do update set role = excluded.role"
+                " returning project_id, user_id, role, added_at",
+                {"p": project_id, "u": user_id, "r": role},
+            ).fetchone()
+        )
 
 
-def list_members(pool: ConnectionPool, *, project_id: UUID) -> list[dict]:
+def list_members(pool: DictRowPool, *, project_id: UUID) -> list[dict[str, Any]]:
     with pool.connection() as conn:
         return conn.execute(
             "select m.project_id, m.user_id, m.role, m.added_at,"
@@ -197,9 +215,7 @@ def list_members(pool: ConnectionPool, *, project_id: UUID) -> list[dict]:
         ).fetchall()
 
 
-def member_role(
-    pool: ConnectionPool, *, project_id: UUID, user_id: UUID
-) -> Optional[str]:
+def member_role(pool: DictRowPool, *, project_id: UUID, user_id: UUID) -> Optional[str]:
     """The user's role on the project, or ``None`` if they are not a member."""
     with pool.connection() as conn:
         row = conn.execute(
@@ -213,14 +229,14 @@ def member_role(
 
 
 def record_submission(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     *,
     project_id: UUID,
     submitted_by: Optional[UUID],
     experiment_hash: Optional[str] = None,
     profile: str = "local",
     batch_job_id: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Append one row to the submission audit trail (who submitted what, where it routed).
 
     Append-only by design (schema-design §3): a submission is never mutated. ``experiment_hash``
@@ -229,28 +245,30 @@ def record_submission(
     if profile not in _PROFILES:
         raise ValueError(f"profile must be one of {_PROFILES}; got {profile!r}")
     with pool.connection() as conn:
-        return conn.execute(
-            "insert into registry.submissions"
-            " (project_id, submitted_by, experiment_hash, profile, batch_job_id)"
-            " values (%(p)s, %(u)s, %(h)s, %(prof)s, %(job)s)"
-            " returning submission_id, project_id, submitted_by, experiment_hash,"
-            " profile, batch_job_id, submitted_at",
-            {
-                "p": project_id,
-                "u": submitted_by,
-                "h": experiment_hash,
-                "prof": profile,
-                "job": batch_job_id,
-            },
-        ).fetchone()
+        return _returned(
+            conn.execute(
+                "insert into registry.submissions"
+                " (project_id, submitted_by, experiment_hash, profile, batch_job_id)"
+                " values (%(p)s, %(u)s, %(h)s, %(prof)s, %(job)s)"
+                " returning submission_id, project_id, submitted_by, experiment_hash,"
+                " profile, batch_job_id, submitted_at",
+                {
+                    "p": project_id,
+                    "u": submitted_by,
+                    "h": experiment_hash,
+                    "prof": profile,
+                    "job": batch_job_id,
+                },
+            ).fetchone()
+        )
 
 
 def list_submissions(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     *,
     project_id: Optional[UUID] = None,
     limit: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """The submission audit trail, newest first, optionally scoped to one project."""
     params: dict[str, Any] = {"limit": limit}
     sql = (

@@ -1,6 +1,6 @@
 """FastAPI app factory + lifespan pool for the read dashboard (read-dashboard-spec §5).
 
-The app opens one psycopg3 ``ConnectionPool`` over the *project* database at startup
+The app opens one psycopg3 ``DictRowPool`` over the *project* database at startup
 (reusing ``cli.resolve_db_url`` -> ``util.db.connection_pool``; PG*/DATABASE_URL from the
 environment per the project DB hard rule), shares it with every request handler, and closes
 it at shutdown. The API is mounted under ``/api``; ``/`` serves the built SPA bundle with a
@@ -26,7 +26,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
@@ -79,6 +79,7 @@ class _SpaStaticFiles(StaticFiles):
             # mount root ('/'), so an /api/unknown request arrives here as 'api/unknown'.
             if path == "api" or path.startswith("api/"):
                 raise
+            assert self.directory is not None  # always mounted with a directory
             index = pathlib.Path(self.directory) / "index.html"
             if index.is_file():
                 # Serve the SPA entrypoint; React Router resolves the client route in-browser.
@@ -86,7 +87,7 @@ class _SpaStaticFiles(StaticFiles):
             raise
 
 
-def _open_project_pool() -> tuple[ConnectionPool, str]:
+def _open_project_pool() -> tuple[DictRowPool, str]:
     """Open the request pool over the project DB; return ``(pool, base_url)``.
 
     Reuses the inherited resolution (``--dbfile`` / ``database.yaml`` / ``DATABASE_URL`` /
@@ -99,7 +100,7 @@ def _open_project_pool() -> tuple[ConnectionPool, str]:
     return connection_pool(dburl), dburl
 
 
-def _open_registry_pool() -> Optional[ConnectionPool]:
+def _open_registry_pool() -> Optional[DictRowPool]:
     """Open the registry control-plane pool from ``TRIAGE_REGISTRY_URL`` if set, else ``None``.
 
     The registry is optional: the read dashboard needs no control plane, so a missing
@@ -116,9 +117,9 @@ def _open_registry_pool() -> Optional[ConnectionPool]:
 
 
 def create_app(
-    pool: Optional[ConnectionPool] = None,
+    pool: Optional[DictRowPool] = None,
     *,
-    registry_pool: Optional[ConnectionPool] = None,
+    registry_pool: Optional[DictRowPool] = None,
     auth_backend: Optional[AuthBackend] = None,
     experiment_runner=None,
 ) -> FastAPI:
@@ -201,7 +202,7 @@ def create_app(
     return app
 
 
-def get_pool(request: Request) -> ConnectionPool:
+def get_pool(request: Request) -> DictRowPool:
     """FastAPI dependency: the per-app request pool (set by the lifespan)."""
     pool = getattr(request.app.state, "pool", None)
     if pool is None:

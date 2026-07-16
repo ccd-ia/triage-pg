@@ -11,16 +11,16 @@ from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import Any, Protocol, runtime_checkable
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 __all__ = ["AuthAdapter", "StorageAdapter", "ExecutionAdapter"]
 
 
 @runtime_checkable
 class AuthAdapter(Protocol):
-    """Produces the project ``ConnectionPool`` (static password locally, RDS IAM in cloud)."""
+    """Produces the project ``DictRowPool`` (static password locally, RDS IAM in cloud)."""
 
-    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> ConnectionPool: ...
+    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> DictRowPool: ...
 
 
 @runtime_checkable
@@ -48,7 +48,7 @@ class ExecutionAdapter(Protocol):
 
     def run(
         self,
-        pool: ConnectionPool,
+        pool: DictRowPool,
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,

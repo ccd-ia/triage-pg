@@ -3,7 +3,7 @@
 psycopg3-native (ADR-0019): the column-type checks compare against Postgres
 ``information_schema`` ``data_type`` name strings (what :func:`column_type` returns) rather
 than SQLAlchemy DDL type classes. Each ``*_should_*`` helper takes a
-``psycopg_pool.ConnectionPool``.
+``psycopg_pool.DictRowPool``.
 """
 
 from triage.database_reflection import (
@@ -30,7 +30,7 @@ def table_should_exist(table_name, pool):
 
     Args:
         table_name (string) A table name (with schema)
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the table does not exist
     """
@@ -44,7 +44,7 @@ def table_should_have_column(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) The name of a column
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the table does not contain the column
     """
@@ -58,7 +58,7 @@ def table_should_have_data(table_name, pool):
 
     Args:
         table_name (string) A table name (with schema)
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the table does not have at least one row
     """
@@ -74,7 +74,7 @@ def column_should_be_in_types(table_name, column, valid_types, pool):
         table_name (string) A table name (with schema)
         column (string) The name of a column
         valid_types (list) A list of Postgres ``data_type`` name strings, like ``'boolean'``
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the column is not one of the given types
     """
@@ -97,7 +97,7 @@ def column_should_be_booleanlike(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) The name of a column
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the column is not a recognized boolean-compatible type
     """
@@ -115,7 +115,7 @@ def column_should_be_timelike(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) The name of a column
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the column is not a recognized temporal type
     """
@@ -129,7 +129,7 @@ def column_should_be_intlike(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) The name of a column
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the column is not a recognized integer type
     """
@@ -143,7 +143,7 @@ def column_should_be_stringlike(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) The name of a column
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Raises: ValueError if the column is not a recognized string type
     """

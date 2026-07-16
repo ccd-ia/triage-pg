@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.derivation import canonical_json
 from triage.logging import get_logger
@@ -68,7 +68,7 @@ class InProcessExecution:
 
     def run(
         self,
-        pool: ConnectionPool,
+        pool: DictRowPool,
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,
@@ -113,7 +113,7 @@ class BatchExecution:
 
     def run(
         self,
-        pool: ConnectionPool,  # noqa: ARG002 — unused in cloud (the job opens its own pool)
+        pool: DictRowPool,  # noqa: ARG002 — unused in cloud (the job opens its own pool)
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,

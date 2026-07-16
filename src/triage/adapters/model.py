@@ -53,7 +53,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool, returned_row
 
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import (
@@ -171,7 +171,7 @@ def _model_group_hash(
 
 
 def _reconstruct_derivation(
-    engine: ConnectionPool, artifact_id: str, what: str
+    engine: DictRowPool, artifact_id: str, what: str
 ) -> Derivation:
     """Re-read an upstream artifact and rebuild its Derivation so it can chain.
 
@@ -191,7 +191,7 @@ def _reconstruct_derivation(
 
 
 def build_model(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     train_matrix_result: MatrixResult,
     class_path: str,
@@ -572,7 +572,7 @@ def _load_estimator(artifact_uri: str, storage: StorageAdapter | None = None):
 
 
 def _select_or_insert_model_group(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     group_hash: str,
     class_path: str,
     hyperparameters: Mapping[str, Any],
@@ -611,11 +611,11 @@ def _select_or_insert_model_group(
                 + " where model_group_hash = %(h)s",
                 {"h": group_hash},
             ).fetchone()
-    return inserted["model_group_id"]
+    return returned_row(inserted)["model_group_id"]
 
 
 def _insert_model_row(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_artifact_id: str,
     model_group_id: int,
     run_id: str,
@@ -637,34 +637,36 @@ def _insert_model_row(
     with it.
     """
     with db_engine.connection() as conn:
-        model_id = conn.execute(
-            "insert into triage.models"
-            + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
-            + "  train_end_time, training_label_timespan, artifact_uri,"
-            + "  artifact_format, model_size_bytes, random_seed, train_duration_ms)"
-            + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
-            + "  cast(%(train_end_time)s as date),"
-            + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
-            + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s)"
-            + " on conflict (model_hash) do update set"
-            + "  run_id = excluded.run_id,"
-            + "  artifact_uri = excluded.artifact_uri,"
-            + "  model_size_bytes = excluded.model_size_bytes,"
-            + "  train_duration_ms = excluded.train_duration_ms"
-            + " returning model_id",
-            {
-                "model_group_id": model_group_id,
-                "model_hash": model_artifact_id,
-                "run_id": run_id,
-                "train_matrix_uuid": as_uuid(train_matrix_artifact_id),
-                "train_end_time": str(train_end_time) if train_end_time else None,
-                "training_label_timespan": training_label_timespan,
-                "artifact_uri": artifact_uri,
-                "model_size_bytes": model_size_bytes,
-                "random_seed": random_seed,
-                "train_duration_ms": train_duration_ms,
-            },
-        ).fetchone()["model_id"]
+        model_id = returned_row(
+            conn.execute(
+                "insert into triage.models"
+                + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
+                + "  train_end_time, training_label_timespan, artifact_uri,"
+                + "  artifact_format, model_size_bytes, random_seed, train_duration_ms)"
+                + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
+                + "  cast(%(train_end_time)s as date),"
+                + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
+                + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s)"
+                + " on conflict (model_hash) do update set"
+                + "  run_id = excluded.run_id,"
+                + "  artifact_uri = excluded.artifact_uri,"
+                + "  model_size_bytes = excluded.model_size_bytes,"
+                + "  train_duration_ms = excluded.train_duration_ms"
+                + " returning model_id",
+                {
+                    "model_group_id": model_group_id,
+                    "model_hash": model_artifact_id,
+                    "run_id": run_id,
+                    "train_matrix_uuid": as_uuid(train_matrix_artifact_id),
+                    "train_end_time": str(train_end_time) if train_end_time else None,
+                    "training_label_timespan": training_label_timespan,
+                    "artifact_uri": artifact_uri,
+                    "model_size_bytes": model_size_bytes,
+                    "random_seed": random_seed,
+                    "train_duration_ms": train_duration_ms,
+                },
+            ).fetchone()
+        )["model_id"]
     return model_id
 
 
@@ -714,7 +716,7 @@ def _feature_importance_values(estimator, n_features: int):
 
 
 def _persist_feature_importances(
-    db_engine: ConnectionPool, model_id: int, estimator, feature_columns: Sequence[str]
+    db_engine: DictRowPool, model_id: int, estimator, feature_columns: Sequence[str]
 ) -> None:
     """INSERT ``triage.feature_importances`` rows with absolute + percentile ranks (ADR-0011).
 
@@ -731,11 +733,13 @@ def _persist_feature_importances(
         return
 
     kind, signed, odds = fi["kind"], fi["signed"], fi["odds"]
+    ranking = fi["ranking"]
+    assert ranking is not None  # every non-None fi carries a ranking (gini or |β|)
     # (feature, |importance|, signed β | None, odds-ratio exp(β) | None) per feature.
     quads = [
         (
             feature,
-            float(fi["ranking"][i]),
+            float(ranking[i]),
             None if signed is None else float(signed[i]),
             None if odds is None else float(odds[i]),
         )
@@ -780,7 +784,7 @@ def _persist_feature_importances(
 
 
 def _existing_model_row(
-    db_engine: ConnectionPool, model_artifact_id: str
+    db_engine: DictRowPool, model_artifact_id: str
 ) -> dict[str, Any]:
     with db_engine.connection() as conn:
         row = conn.execute(
@@ -824,7 +828,7 @@ def _score_column(estimator, x):
 
 
 def score_and_evaluate(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     estimator,
     test_matrix_result: MatrixResult,

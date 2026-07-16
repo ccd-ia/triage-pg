@@ -27,12 +27,12 @@ from __future__ import annotations
 import os
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage import registry
 from triage.dashboard.auth import Principal
@@ -86,7 +86,7 @@ def _serializer(secret: str):
     return URLSafeTimedSerializer(secret, salt="triage-oidc")
 
 
-def _unauthenticated(message: str = "authentication required"):
+def _unauthenticated(message: str = "authentication required") -> NoReturn:
     # A dict detail so the SPA can follow login_url; ApiError-side handling in api/client.ts.
     raise HTTPException(
         status_code=401, detail={"message": message, "login_url": LOGIN_PATH}
@@ -105,9 +105,7 @@ class OidcAuth:
         # under real auth on a shared deployment, admin must be an explicit configuration act.
         self._admin_emails = frozenset(e.strip() for e in raw.split(",") if e.strip())
 
-    def authenticate(
-        self, request: Request, registry_pool: ConnectionPool
-    ) -> Principal:
+    def authenticate(self, request: Request, registry_pool: DictRowPool) -> Principal:
         raw = request.cookies.get(SESSION_COOKIE)
         if not raw:
             _unauthenticated()

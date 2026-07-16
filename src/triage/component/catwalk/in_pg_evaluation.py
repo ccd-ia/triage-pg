@@ -65,7 +65,7 @@ def evaluate_in_db(
     Calls ``triage.evaluate_model``, which upserts into ``triage.evaluations``.
 
     Args:
-        db_engine (psycopg_pool.ConnectionPool): pool for the project DB.
+        db_engine (psycopg_pool.DictRowPool): pool for the project DB.
         model_id (int): the model to evaluate.
         as_of_date (str | datetime.date): the prediction date to evaluate at.
         label_timespan (str): label timespan interval the labels were built with
@@ -142,7 +142,7 @@ def compute_bias_in_db(
     the Aequitas dump (ADR-0007).
 
     Args:
-        db_engine (psycopg_pool.ConnectionPool): pool for the project DB.
+        db_engine (psycopg_pool.DictRowPool): pool for the project DB.
         model_id (int): the model to audit.
         as_of_date (str | datetime.date): the prediction date.
         label_timespan (str): label timespan interval (e.g. ``'6 months'``).

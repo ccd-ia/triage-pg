@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import get_artifact
@@ -64,9 +64,7 @@ class ModelLineage:
     source_pins: dict[str, str | None]
 
 
-def matrix_result_from_uuid(
-    db_engine: ConnectionPool, matrix_uuid: Any
-) -> MatrixResult:
+def matrix_result_from_uuid(db_engine: DictRowPool, matrix_uuid: Any) -> MatrixResult:
     """Rebuild a :class:`MatrixResult` from its ``triage.matrices`` row (by ``matrix_uuid``).
 
     ``feature_group_artifact_id`` is left empty — the forward/retrain path does not re-derive
@@ -97,7 +95,7 @@ def matrix_result_from_uuid(
     )
 
 
-def parents_of(db_engine: ConnectionPool, artifact_id: str) -> dict[str, str]:
+def parents_of(db_engine: DictRowPool, artifact_id: str) -> dict[str, str]:
     """The DAG parents of an artifact, as ``{kind: parent_artifact_id}``.
 
     A train matrix's parents are its feature_group, cohort, and labels nodes. Returns the
@@ -113,7 +111,7 @@ def parents_of(db_engine: ConnectionPool, artifact_id: str) -> dict[str, str]:
     return {str(row["kind"]): str(row["artifact_id"]) for row in rows}
 
 
-def latest_model_in_group(db_engine: ConnectionPool, model_group_id: int) -> int:
+def latest_model_in_group(db_engine: DictRowPool, model_group_id: int) -> int:
     """The most recently trained model in a group — the spec source for a retrain.
 
     Ordered by ``train_end_time`` (the data cut), then ``created_at`` / ``model_id`` to break
@@ -133,7 +131,7 @@ def latest_model_in_group(db_engine: ConnectionPool, model_group_id: int) -> int
     return int(row["model_id"])
 
 
-def _run_links(db_engine: ConnectionPool, run_id: Any) -> tuple[str | None, str | None]:
+def _run_links(db_engine: DictRowPool, run_id: Any) -> tuple[str | None, str | None]:
     """The ``(experiment_hash, problem_type)`` of the experiment a run belongs to.
 
     ``triage.models.run_id`` is nullable (FK on delete set null) and a run may have a NULL
@@ -157,7 +155,7 @@ def _run_links(db_engine: ConnectionPool, run_id: Any) -> tuple[str | None, str 
 
 
 def reconstruct_model_lineage(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     *,
     problem_type_override: str | None = None,

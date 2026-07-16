@@ -29,9 +29,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import date
-from typing import Any
+from typing import LiteralString, cast, Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.artifacts import (
     begin_artifact,
@@ -70,7 +70,7 @@ def _validate_template(cohort_query_template: str) -> None:
 
 
 def build_cohort(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     cohort_query_template: str,
     as_of_dates: Sequence[date],
@@ -145,12 +145,17 @@ def build_cohort(
                 # The rendered user SQL is embedded directly; psycopg3 reads ``%`` as the
                 # parameter marker, so any literal ``%`` in the user's query (e.g. LIKE
                 # patterns) must be doubled to ``%%`` — our own binds stay ``%(name)s``.
-                conn.execute(
+                # cast: the cohort query is operator-supplied template SQL — dynamic
+                # by design, so psycopg's LiteralString guard cannot apply here.
+                sql = cast(
+                    LiteralString,
                     "insert into triage.cohorts (cohort_hash, entity_id, as_of_date)"
                     + " select %(cohort_hash)s, sub.entity_id, %(as_of_date)s"
                     + f" from ({rendered.replace('%', '%%')}) sub"
                     + " on conflict do nothing",
-                    {"cohort_hash": artifact_id, "as_of_date": as_of_date},
+                )
+                conn.execute(
+                    sql, {"cohort_hash": artifact_id, "as_of_date": as_of_date}
                 )
         mark_built(
             db_engine,

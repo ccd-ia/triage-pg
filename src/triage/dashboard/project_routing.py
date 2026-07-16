@@ -2,7 +2,7 @@
 
 The read dashboard binds ONE project database per app instance. To let one instance serve many
 projects (the ADR-0002 shared cluster), a request may name the active project with an
-``X-Triage-Project: <slug>`` header; this module resolves that slug to a ``ConnectionPool`` on the
+``X-Triage-Project: <slug>`` header; this module resolves that slug to a ``DictRowPool`` on the
 project's own database, opening + caching one pool per distinct database URL.
 
 Credentials never live in the registry (ADR-0002): the registry stores each project's
@@ -25,7 +25,7 @@ import json
 import os
 
 from fastapi import HTTPException, Request
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage import registry
 from triage.logging import get_logger
@@ -73,14 +73,14 @@ def project_dburl(slug: str, database_name: str, base_url: str | None) -> str:
     )
 
 
-def _pool_for(app, slug: str, database_name: str) -> ConnectionPool:
+def _pool_for(app, slug: str, database_name: str) -> DictRowPool:
     """Open (or reuse) the pool for a project's database. Raises 503 on an unroutable project.
 
     Reuses the app's bound (default) pool when the resolved URL is the same database, so the common
     single-cluster case never opens a duplicate; otherwise opens once and caches on
     ``app.state.project_pools``.
     """
-    default_pool: ConnectionPool | None = getattr(app.state, "pool", None)
+    default_pool: DictRowPool | None = getattr(app.state, "pool", None)
     base_url: str | None = getattr(app.state, "base_project_url", None)
     try:
         url = project_dburl(slug, database_name, base_url)
@@ -94,14 +94,14 @@ def _pool_for(app, slug: str, database_name: str) -> ConnectionPool:
         except (TypeError, ValueError):
             pass
 
-    cache: dict[str, ConnectionPool] = app.state.project_pools
+    cache: dict[str, DictRowPool] = app.state.project_pools
     if url not in cache:
         logger.info("opening project pool for %r (database %s)", slug, database_name)
         cache[url] = connection_pool(url)
     return cache[url]
 
 
-def resolve_active_pool(request: Request) -> ConnectionPool:
+def resolve_active_pool(request: Request) -> DictRowPool:
     """Resolve the pool a read request runs against — the active project, else the default.
 
     Falls back to the app's bound pool when: no ``X-Triage-Project`` header, no registry
@@ -110,7 +110,7 @@ def resolve_active_pool(request: Request) -> ConnectionPool:
     another project's data).
     """
     app = request.app
-    default_pool: ConnectionPool | None = getattr(app.state, "pool", None)
+    default_pool: DictRowPool | None = getattr(app.state, "pool", None)
     reg = getattr(app.state, "registry_pool", None)
     slug = active_project_slug(request)
 
@@ -133,6 +133,6 @@ def resolve_active_pool(request: Request) -> ConnectionPool:
     return _pool_for(app, slug, project["database_name"])
 
 
-def pool_for_slug(request: Request, slug: str, database_name: str) -> ConnectionPool:
+def pool_for_slug(request: Request, slug: str, database_name: str) -> DictRowPool:
     """The pool for an explicitly-named project (the submit route runs against its target DB)."""
     return _pool_for(request.app, slug, database_name)

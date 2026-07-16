@@ -1,6 +1,6 @@
 """Functions to retrieve basic information about tables in a Postgres database.
 
-psycopg3-native (ADR-0019): each function takes a ``psycopg_pool.ConnectionPool`` and runs
+psycopg3-native (ADR-0019): each function takes a ``psycopg_pool.DictRowPool`` and runs
 catalog queries directly (``to_regclass`` + ``information_schema``). Table/column identifiers
 that must be embedded in SQL go through ``psycopg.sql.Identifier`` (never string-formatted),
 and data values are always bound. ``column_type`` returns the Postgres ``data_type`` name
@@ -40,7 +40,7 @@ def table_exists(table_name, pool):
 
     Args:
         table_name (string) A table name (with schema)
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (boolean) Whether or not the table exists in the database
     """
@@ -57,7 +57,7 @@ def table_has_data(table_name, pool):
 
     Args:
         table_name (string) A table name (with schema)
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (boolean) Whether or not the table has any data
     """
@@ -76,7 +76,7 @@ def table_row_count(table_name, pool):
 
     Args:
         table_name (string) A table name (with schema)
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (int) The number of rows in the table
     """
@@ -95,7 +95,7 @@ def table_has_duplicates(table_name, column_list, pool):
     Args:
         table_name (string) A table name (with schema)
         column_list (list) A list of column names
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (boolean) Whether or not duplicates are found
     """
@@ -123,7 +123,7 @@ def table_has_column(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) A column name
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (boolean) Whether or not the table contains the column
     """
@@ -147,7 +147,7 @@ def column_type(table_name, column, pool):
     Args:
         table_name (string) A table name (with schema)
         column (string) A column name
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (str) the ``information_schema`` ``data_type`` name, e.g. ``'character varying'``,
         ``'integer'``, ``'boolean'``, ``'timestamp without time zone'``.
@@ -170,7 +170,7 @@ def schema_tables(schema_name, pool):
 
     Args:
         schema_name (string) A schema name
-        pool (psycopg_pool.ConnectionPool)
+        pool (psycopg_pool.DictRowPool)
 
     Returns: (list) of table names (str)
     """

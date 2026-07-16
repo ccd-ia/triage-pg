@@ -6,12 +6,30 @@ The application-side data layer is psycopg3-native: this module exposes the
 here — it survives only behind alembic (``triage.component.results_schema``).
 """
 
-from psycopg.rows import dict_row
+from psycopg import Connection
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool
 
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
+
+# The pool type every adapter actually receives: rows are dicts (row_factory=dict_row
+# below), so call sites use mapping access. Naming the alias keeps the generic
+# parameter in ONE place — annotate pool-taking functions with it so basedpyright
+# knows row["column"] is legal.
+DictRowPool = ConnectionPool[Connection[DictRow]]
+
+
+def returned_row(row: DictRow | None) -> DictRow:
+    """Narrow a ``fetchone()`` that follows a statement guaranteed to return a row.
+
+    The driver types every ``fetchone()`` as ``DictRow | None``, but an
+    ``INSERT/UPDATE … RETURNING`` (or a SELECT the schema guarantees non-empty)
+    cannot yield zero rows without raising first — the None branch is unreachable.
+    """
+    assert row is not None, "statement expected to RETURN a row yielded none"
+    return row
 
 
 def libpq_conninfo(dburl) -> str:
@@ -50,8 +68,8 @@ def swap_dbname(base_url: str, database_name: str) -> str:
 
 
 def connection_pool(
-    dburl, *, min_size: int = 1, max_size: int = 10, **kwargs
-) -> ConnectionPool:
+    dburl: str, *, min_size: int = 1, max_size: int = 10, **kwargs
+) -> DictRowPool:
     """Open a psycopg3 ``ConnectionPool`` for the project database (ADR-0019).
 
     The single application-side connection factory. Every greenfield adapter takes the
@@ -62,6 +80,7 @@ def connection_pool(
     """
     pool = ConnectionPool(
         libpq_conninfo(dburl),
+        connection_class=Connection[DictRow],
         min_size=min_size,
         max_size=max_size,
         kwargs={"row_factory": dict_row},

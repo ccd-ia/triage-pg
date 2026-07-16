@@ -10,13 +10,14 @@ session persists regardless of token expiry, so no refresh timer is needed.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from triage.logging import get_logger
-from triage.util.db import connection_pool
+from triage.util.db import DictRowPool, connection_pool
 
 logger = get_logger(__name__)
 
@@ -41,7 +42,7 @@ class LocalAuth:
     def __init__(self, dburl: str) -> None:
         self._dburl = dburl
 
-    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> ConnectionPool:
+    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> DictRowPool:
         return connection_pool(self._dburl, min_size=min_size, max_size=max_size)
 
 
@@ -115,16 +116,21 @@ class CloudAuth:
             + f" dbname={self._dbname} user={self._user}"
         )
 
-    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> ConnectionPool:
+    def open_pool(self, *, min_size: int = 1, max_size: int = 10) -> DictRowPool:
         connection_class = make_iam_connection_class(
             self._token_provider, sslrootcert=self._sslrootcert
         )
-        return ConnectionPool(
-            self._base_conninfo(),
-            connection_class=connection_class,
-            kwargs={"row_factory": dict_row},
-            max_lifetime=_TOKEN_TTL_SECONDS,
-            min_size=min_size,
-            max_size=max_size,
-            open=True,
+        # The IAM subclass still yields dict rows (row_factory below), so the pool IS a
+        # DictRowPool — the cast records what the runtime kwargs guarantee.
+        return cast(
+            DictRowPool,
+            ConnectionPool(
+                self._base_conninfo(),
+                connection_class=connection_class,
+                kwargs={"row_factory": dict_row},
+                max_lifetime=_TOKEN_TTL_SECONDS,
+                min_size=min_size,
+                max_size=max_size,
+                open=True,
+            ),
         )

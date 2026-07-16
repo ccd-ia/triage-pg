@@ -156,7 +156,7 @@ def _strategy_combos(
     strategy: str,
     *,
     all_combinations_max_groups: int,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, tuple[str, ...]]]:
     """Return ``[(label_suffix, group_name_tuple)]`` for one strategy over the group names."""
     names = sorted(group_names)
     n = len(names)
@@ -177,7 +177,7 @@ def _strategy_combos(
                 f"all_combinations_max_groups={all_combinations_max_groups}. Raise the cap "
                 "deliberately or use leave-one-out/leave-one-in."
             )
-        out: list[tuple[str, str]] = []
+        out: list[tuple[str, tuple[str, ...]]] = []
         for k in range(1, n + 1):
             for combo in combinations(names, k):
                 out.append((f"all-combinations:{'+'.join(combo)}", combo))

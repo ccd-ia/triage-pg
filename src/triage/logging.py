@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from icecream import ic
 from loguru import logger as _logger
+
+if TYPE_CHECKING:
+    from loguru import Record  # stub-only: loguru does not export Record at runtime
 
 __all__ = ["configure_logging", "get_logger", "LoguruAdapter", "ic"]
 
@@ -117,7 +120,7 @@ class InterceptHandler(logging.Handler):
         ).log(level, record.getMessage())
 
 
-def _formatter(record: dict[str, Any]) -> str:
+def _formatter(record: Record) -> str:
     """Format string with a default ``module`` so third-party loguru records don't KeyError.
 
     Our format references ``{extra[module]}``, which our own loggers bind. featurizer (and any

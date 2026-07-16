@@ -25,9 +25,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import date
-from typing import Any
+from typing import LiteralString, cast, Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.artifacts import (
     begin_artifact,
@@ -96,7 +96,7 @@ def _label_projection(problem_type: str) -> tuple[str, str]:
 
 
 def build_labels(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     cohort_artifact_id: str,
     label_query_template: str,
@@ -200,10 +200,16 @@ def build_labels(
                     # the parameter marker, so literal ``%`` in the user's query (LIKE
                     # patterns etc.) is doubled to ``%%``. The %(name)s binds in
                     # select_columns stay as-is.
-                    conn.execute(
+                    # cast: the label query is operator-supplied template SQL —
+                    # dynamic by design; LiteralString cannot apply here.
+                    sql = cast(
+                        LiteralString,
                         f"insert into triage.labels ({target_columns})"
                         + f" select {select_columns} from ({rendered.replace('%', '%%')}) sub"
                         + " on conflict do nothing",
+                    )
+                    conn.execute(
+                        sql,
                         {
                             "label_hash": artifact_id,
                             "as_of_date": as_of_date,

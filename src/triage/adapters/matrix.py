@@ -72,7 +72,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.temporal import TemporalConfig
@@ -156,7 +156,7 @@ class MatrixResult:
 
 
 def _reconstruct_derivation(
-    engine: ConnectionPool, artifact_id: str, what: str
+    engine: DictRowPool, artifact_id: str, what: str
 ) -> Derivation:
     """Re-read an upstream artifact and rebuild just enough of its Derivation to chain.
 
@@ -198,7 +198,7 @@ def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
 
 
 def _run_featurizer(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     featurizer_config: Mapping[str, Any],
     as_of_dates: Sequence[date],
 ):
@@ -220,6 +220,7 @@ def _run_featurizer(
 
     try:
         featurizer = Featurizer(config_path, validate=True)
+        assert featurizer.target.id is not None  # validate=True guarantees a target id
         target_id_col = featurizer.target.id.name
 
         # featurizer reads ``as_of_dates`` (and the source tables) by bare name on this
@@ -269,7 +270,9 @@ def _merge_arrow_groups(groups, target_id_col: str):
     merged: pl.DataFrame | None = None
     for table in groups.values():
         frame = pl.from_arrow(table)
+        assert isinstance(frame, pl.DataFrame)  # from_arrow(Table) is a frame
         merged = frame if merged is None else merged.join(frame, on=keys, how="left")
+    assert merged is not None, "sharding always yields at least one column group"
     return merged.to_arrow()
 
 
@@ -491,7 +494,7 @@ def _apply_cat_encoding(frame, encodings: Mapping[str, Mapping[str, int]]):
 
 
 def _resolve_cat_encodings(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     design,
     feature_columns: Sequence[str],
     train_matrix_artifact_id: str | None,
@@ -549,7 +552,7 @@ def _check_no_nulls_remain(
 
 
 def build_matrix(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     featurizer_config: Mapping[str, Any],
     cohort_artifact_id: str,
@@ -796,7 +799,7 @@ def _canonical_featurizer(featurizer_config: Mapping[str, Any]) -> dict[str, Any
 
 
 def _assemble(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     featurizer_config: Mapping[str, Any],
     cohort_artifact_id: str,
     labels_artifact_id: str,
@@ -816,6 +819,7 @@ def _assemble(
         db_engine, featurizer_config, as_of_dates
     )
     features = pl.from_arrow(feature_table)
+    assert isinstance(features, pl.DataFrame)  # from_arrow(Table) is a frame
     # Normalize the target id to triage's universal ``entity_id`` for joining.
     if target_id_col != "entity_id":
         # An event-grain target (e.g. the visit-level regime: id = event_id) can carry a
@@ -892,7 +896,7 @@ def _assemble(
 
 
 def _resolve_fit_stats(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     design,
     feature_columns: Sequence[str],
     imputation_policy: ImputationPolicy,
@@ -930,7 +934,7 @@ def _resolve_fit_stats(
     return fitted
 
 
-def _load_cohort(db_engine: ConnectionPool, cohort_artifact_id: str):
+def _load_cohort(db_engine: DictRowPool, cohort_artifact_id: str):
     """The cohort selection mask as a Polars frame: (entity_id, as_of_date)."""
     import polars as pl
 
@@ -949,9 +953,7 @@ def _load_cohort(db_engine: ConnectionPool, cohort_artifact_id: str):
     )
 
 
-def _load_labels(
-    db_engine: ConnectionPool, labels_artifact_id: str, label_timespan: str
-):
+def _load_labels(db_engine: DictRowPool, labels_artifact_id: str, label_timespan: str):
     """The labels target as a Polars frame, filtered to this split's label_timespan.
 
     Carries all of ``outcome``/``duration``/``event_observed`` — the unused columns are NULL
@@ -985,7 +987,7 @@ def _load_labels(
 
 
 def _existing_matrix_row(
-    db_engine: ConnectionPool, matrix_artifact_id: str
+    db_engine: DictRowPool, matrix_artifact_id: str
 ) -> dict[str, Any]:
     with db_engine.connection() as conn:
         row = conn.execute(
@@ -1002,7 +1004,7 @@ def _existing_matrix_row(
 
 
 def _insert_matrix_row(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     matrix_artifact_id: str,
     matrix_kind: str,
     result: MatrixResult,

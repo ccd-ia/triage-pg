@@ -23,23 +23,23 @@ telemetry emitters own the NOTIFY).
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, LiteralString, Optional
 from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from psycopg_pool import ConnectionPool
 
 from triage.component.catwalk.in_pg_evaluation import AUDITION_RULES as _AUDITION_RULES
 from triage.logging import get_logger
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
 
-def _pool(request: Request) -> ConnectionPool:
+def _pool(request: Request) -> DictRowPool:
     """Request-pool dependency — resolves the ACTIVE project (ADR-0025 project switcher).
 
     Reads the ``X-Triage-Project`` header and routes to that project's database pool when a
@@ -52,14 +52,18 @@ def _pool(request: Request) -> ConnectionPool:
     return resolve_active_pool(request)
 
 
-def _rows(pool: ConnectionPool, sql: str, params: Optional[dict] = None) -> list[dict]:
+def _rows(
+    pool: DictRowPool, sql: LiteralString, params: Optional[dict[str, Any]] = None
+) -> list[dict[str, Any]]:
+    # LiteralString: every read query in this module is a literal — typing it keeps
+    # dynamically-built SQL (an injection surface) out of the read layer by construction.
     with pool.connection() as conn:
         return conn.execute(sql, params or {}).fetchall()
 
 
 def _one(
-    pool: ConnectionPool, sql: str, params: Optional[dict] = None
-) -> Optional[dict]:
+    pool: DictRowPool, sql: LiteralString, params: Optional[dict[str, Any]] = None
+) -> Optional[dict[str, Any]]:
     with pool.connection() as conn:
         return conn.execute(sql, params or {}).fetchone()
 
@@ -71,7 +75,7 @@ def _empty(reason: str, hint: str) -> dict[str, Any]:
 
 # ================================================================ runs (rail + monitoring)
 @router.get("/runs")
-def list_runs(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+def list_runs(pool: DictRowPool = Depends(_pool)) -> list[dict[str, Any]]:
     """Rail list of runs (newest first)."""
     return _rows(
         pool,
@@ -82,7 +86,7 @@ def list_runs(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
 
 
 @router.get("/runs/{run_id}/summary")
-def run_summary(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
+def run_summary(run_id: UUID, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Summary strip + summary card: run_summary + per-split cohort_profile + label_base_rate."""
     params = {"run": str(run_id)}
     summary = _one(
@@ -108,7 +112,7 @@ def run_summary(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
 
 
 @router.get("/runs/{run_id}/progress")
-def run_progress(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
+def run_progress(run_id: UUID, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Pipeline DAG state: per-(kind,status) counts + the runs.plan denominators (N/M)."""
     params = {"run": str(run_id)}
     progress = _rows(
@@ -141,7 +145,7 @@ _NODE_SPLIT_JOINS = (
 
 
 @router.get("/runs/{run_id}/derivation")
-def run_derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
+def run_derivation(run_id: UUID, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Derivation graph for the run closure: {nodes, edges}.
 
     Nodes = artifacts the run touched (built OR cache-hit, via run_artifacts); edges =
@@ -175,7 +179,7 @@ def run_derivation(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
 
 
 @router.get("/runs/{run_id}/source-pins")
-def source_pins(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
+def source_pins(run_id: UUID, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Source pins / drift card.
 
     ``run_source_pins`` are the pins frozen at this run's plan time (the per-run record);
@@ -197,7 +201,7 @@ def source_pins(run_id: UUID, pool: ConnectionPool = Depends(_pool)) -> dict:
 
 # ============================================================== experiments (analysis scope)
 @router.get("/experiments")
-def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+def list_experiments(pool: DictRowPool = Depends(_pool)) -> list[dict[str, Any]]:
     """Experiment rail: one row per experiment (newest first).
 
     Soft-archived experiments (``archived_at`` set — e.g. a stale pre-fix duplicate) are hidden
@@ -216,8 +220,8 @@ def list_experiments(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
 
 @router.get("/experiments/{experiment_hash}")
 def experiment_detail(
-    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
-) -> dict:
+    experiment_hash: str, pool: DictRowPool = Depends(_pool)
+) -> dict[str, Any]:
     """Experiment header: summary + raw config + this experiment's runs (newest first)."""
     params = {"hash": experiment_hash}
     summary = _one(
@@ -322,8 +326,8 @@ def audition(
     metric: str = "auc_roc",
     parameter: str = "",
     rule: str = "best_average_value",
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
+    pool: DictRowPool = Depends(_pool),
+) -> dict[str, Any]:
     """Audition ranking + per-split curves + the pick + a pick per standard rule.
 
     Experiment-scoped (migration 0005): a re-run cache-shares models, so run-scoping is empty
@@ -425,7 +429,7 @@ def audition(
 def bias(
     experiment_hash: str,
     model_id: Optional[int] = None,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Bias / fairness group-bys for the experiment's models (optionally a single model).
 
@@ -466,8 +470,8 @@ def bias(
 
 @router.get("/experiments/{experiment_hash}/leaderboard")
 def leaderboard(
-    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
-) -> list[dict]:
+    experiment_hash: str, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """The leaderboard matview, scoped to the experiment (migration 0005)."""
     return _rows(
         pool,
@@ -482,8 +486,8 @@ def leaderboard(
 
 @router.get("/experiments/{experiment_hash}/subsets")
 def experiment_subsets(
-    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
-) -> list[dict]:
+    experiment_hash: str, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """The subsets this experiment's models have evaluations for (migration 0015) —
     feeds the heatmap's subset selector. Empty list = full-cohort only."""
     return _rows(
@@ -504,8 +508,8 @@ def evaluations(
     experiment_hash: str,
     metric: Optional[str] = None,
     subset_hash: str = "",
-    pool: ConnectionPool = Depends(_pool),
-) -> list[dict]:
+    pool: DictRowPool = Depends(_pool),
+) -> list[dict[str, Any]]:
     """Metric-over-time card: raw evaluations (test split), scoped via evaluations ⋈ models ⋈ runs.
 
     ``subset_hash`` selects a cohort slice's evaluations (migration 0015); the default
@@ -530,8 +534,8 @@ def evaluations(
 
 @router.get("/experiments/{experiment_hash}/model-groups")
 def experiment_model_groups(
-    experiment_hash: str, pool: ConnectionPool = Depends(_pool)
-) -> list[dict]:
+    experiment_hash: str, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """Model-group cards for the experiment (the Experiment ▸ Model Group level)."""
     return _rows(
         pool,
@@ -549,8 +553,8 @@ def selected_model(
     metric: str = "auc_roc",
     parameter: str = "",
     rule: str = "best_average_value",
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
+    pool: DictRowPool = Depends(_pool),
+) -> dict[str, Any]:
     """Selected-model bar: audition pick vs leaderboard #1 + divergence flag.
 
     Wraps ``triage.selected_model(hash, metric, parameter, rule)`` (migration 0005); the
@@ -581,8 +585,8 @@ def model_group_detail(
     metric: str = "auc_roc",
     parameter: str = "",
     experiment_hash: str | None = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
+    pool: DictRowPool = Depends(_pool),
+) -> dict[str, Any]:
     """Model-group drill-down: the card facts + its models + metric-over-time + per-split evals.
 
     A model_group can be SHARED across experiments (content-addressed: same algorithm +
@@ -676,7 +680,7 @@ def model_group_detail(
 
 
 @router.get("/models/{model_id}")
-def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
+def model_detail(model_id: int, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Model-detail drill-down: the model's group + feature importances + per-split evaluations."""
     model = _one(
         pool,
@@ -723,7 +727,9 @@ def model_detail(model_id: int, pool: ConnectionPool = Depends(_pool)) -> dict:
 
 
 @router.get("/models/{model_id}/curve")
-def model_curve(model_id: int, pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+def model_curve(
+    model_id: int, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this)."""
     return _rows(
         pool,
@@ -735,8 +741,8 @@ def model_curve(model_id: int, pool: ConnectionPool = Depends(_pool)) -> list[di
 
 @router.get("/models/{model_id}/histogram")
 def model_histogram(
-    model_id: int, bins: int = 20, pool: ConnectionPool = Depends(_pool)
-) -> list[dict]:
+    model_id: int, bins: int = 20, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """Predicted-score histogram (by class) for the model card."""
     return _rows(
         pool,
@@ -751,7 +757,7 @@ def model_calibration(
     model_id: int,
     split_kind: str = "test",
     as_of_date: Optional[str] = None,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Reliability deciles for the model card (migration 0012's function is model-generic
     despite its ``monitoring_`` name): decile mean score vs realized outcome rate.
@@ -802,8 +808,8 @@ def model_overlap(
     other_model_id: int,
     parameter: str = "100_abs",
     split_kind: str = "test",
-    pool: ConnectionPool = Depends(_pool),
-) -> list[dict]:
+    pool: DictRowPool = Depends(_pool),
+) -> list[dict[str, Any]]:
     """Top-k list overlap between two models (migration 0016): per shared prediction
     date — intersection, Jaccard over the union of the two lists, Spearman rank corr."""
     return _rows(
@@ -821,7 +827,7 @@ def model_entity_importances(
     model_id: int,
     entity_id: int,
     limit: int = 5,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Per-entity feature contributions ('why this entity'), when a diagnostics pass has
     written ``individual_importances`` (``triage postmodel``, plan P5)."""
@@ -847,7 +853,7 @@ def model_crosstabs(
     model_id: int,
     parameter: Optional[str] = None,
     limit: int = 20,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Top distinguishing features (mean among selected vs rest, by |log ratio|) —
     thin read over ``triage.crosstabs`` (persisted by ``triage postmodel crosstabs``).
@@ -877,7 +883,7 @@ def model_error_rules(
     model_id: int,
     error_kind: Optional[str] = None,
     limit: int = 20,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """The error-tree rules (where does this model fail?) — thin read over
     ``triage.error_analysis`` (persisted by ``triage postmodel error-tree``)."""
@@ -906,7 +912,7 @@ def model_predictions(
     model_id: int,
     limit: int = 20,
     offset: int = 0,
-    pool: ConnectionPool = Depends(_pool),
+    pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Ranked predictions (page) joined to outcome via the model's run's labels artifact.
 
@@ -953,7 +959,7 @@ def model_predictions(
 
 # ================================================================ project-level
 @router.get("/metrics")
-def metrics(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
+def metrics(pool: DictRowPool = Depends(_pool)) -> list[dict[str, Any]]:
     """The (metric, parameter, higher_is_better) catalog present in this project (SPA selectors)."""
     return _rows(
         pool,
@@ -963,7 +969,7 @@ def metrics(pool: ConnectionPool = Depends(_pool)) -> list[dict]:
 
 
 @router.get("/ontology")
-def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
+def ontology(pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Per-project data profile: the registered sources + each source's volume over time.
 
     Source names come from the trusted ``triage.sources`` table; they are still passed as
@@ -974,9 +980,9 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
         "select source_name, relation, knowledge_date_column, description, role, type_column"
         " from triage.sources order by source_name",
     )
-    volumes: dict[str, list[dict]] = {}
-    volumes_by_type: dict[str, list[dict]] = {}
-    profile: dict[str, dict] = {}
+    volumes: dict[str, list[dict[str, Any]]] = {}
+    volumes_by_type: dict[str, list[dict[str, Any]]] = {}
+    profile: dict[str, dict[str, Any]] = {}
     for src in sources:
         name = src["source_name"]
         volumes[name] = _rows(
@@ -1014,8 +1020,8 @@ def ontology(pool: ConnectionPool = Depends(_pool)) -> dict:
 def entity_profile(
     entity_id: int,
     experiment_hash: Optional[str] = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
+    pool: DictRowPool = Depends(_pool),
+) -> dict[str, Any]:
     """Full entity profile: the entity-grain attributes + its label history + its score/rank
     trajectory across as_of_dates per model group (optionally scoped to one experiment).
 
@@ -1055,7 +1061,7 @@ def entity_profile(
 
 
 @router.get("/status")
-def status(pool: ConnectionPool = Depends(_pool)) -> dict:
+def status(pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Project control panel: DB health, execution mode + compute, source pins/drift, engine
     versions, GC tallies, run counts. (If this endpoint answers at all the project DB is
     reachable — the pool could not connect otherwise.)"""
@@ -1171,7 +1177,7 @@ def status(pool: ConnectionPool = Depends(_pool)) -> dict:
 
 
 @router.get("/derivation")
-def project_derivation(pool: ConnectionPool = Depends(_pool)) -> dict:
+def project_derivation(pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
     """Project-wide derivation graph: every artifact + its inputs, with cross-experiment sharing.
 
     Nodes carry ``n_experiments``/``n_runs`` from ``triage.artifact_sharing``; a node touched
@@ -1240,12 +1246,12 @@ async def _run_progress_events(request: Request, conninfo: str, run_id: str):
 
 @router.get("/runs/{run_id}/stream")
 def stream(
-    request: Request, run_id: UUID, pool: ConnectionPool = Depends(_pool)
+    request: Request, run_id: UUID, pool: DictRowPool = Depends(_pool)
 ) -> StreamingResponse:
     """SSE endpoint: a long-lived ``LISTEN run_progress`` connection."""
     # Borrow the pool's conninfo only to open a SEPARATE dedicated connection (the stream must
     # not tie up a request-pool connection for its lifetime).
-    conninfo = pool.conninfo
+    conninfo = str(pool.conninfo)
     return StreamingResponse(
         _run_progress_events(request, conninfo, str(run_id)),
         media_type="text/event-stream",
@@ -1261,11 +1267,11 @@ def stream(
 
 @router.get("/monitoring/volume")
 def monitoring_volume(
-    model_group_id: Optional[int] = None, pool: ConnectionPool = Depends(_pool)
-) -> list[dict]:
+    model_group_id: Optional[int] = None, pool: DictRowPool = Depends(_pool)
+) -> list[dict[str, Any]]:
     """The scoring heartbeat: predictions + distinct entities per (group, model, split, day)."""
     sql = "select * from triage.monitoring_volume"
-    params: dict = {}
+    params: dict[str, Any] = {}
     if model_group_id is not None:
         sql += " where model_group_id = %(g)s"
         params["g"] = model_group_id
@@ -1280,8 +1286,8 @@ def monitoring_drift(
     reference_to: str,
     window_from: str,
     window_to: str,
-    pool: ConnectionPool = Depends(_pool),
-) -> dict:
+    pool: DictRowPool = Depends(_pool),
+) -> dict[str, Any]:
     """PSI + KS between a pinned reference window and a scoring window (scored_at bounds)."""
     row = _one(
         pool,
@@ -1303,8 +1309,8 @@ def monitoring_drift(
 def monitoring_outcomes(
     model_group_id: int,
     metric: Optional[str] = None,
-    pool: ConnectionPool = Depends(_pool),
-) -> list[dict]:
+    pool: DictRowPool = Depends(_pool),
+) -> list[dict[str, Any]]:
     """Realized metrics over time (evaluations upserts sequenced per model group).
 
     Full-cohort rows only (``subset_hash = ''``, migration 0018): monitoring is the
@@ -1314,7 +1320,7 @@ def monitoring_outcomes(
         "select * from triage.monitoring_outcome_tracking"
         " where model_group_id = %(g)s and subset_hash = ''"
     )
-    params: dict = {"g": model_group_id}
+    params: dict[str, Any] = {"g": model_group_id}
     if metric:
         sql += " and metric = %(m)s"
         params["m"] = metric

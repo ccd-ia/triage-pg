@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 from pydantic import BaseModel, Field
 
 from triage import project_lifecycle, registry
@@ -95,7 +95,7 @@ class ConfigPayload(BaseModel):
 
 
 def default_experiment_runner(
-    pool: ConnectionPool, config: dict[str, Any], *, profile: str = "local"
+    pool: DictRowPool, config: dict[str, Any], *, profile: str = "local"
 ) -> RunHandle:
     """Run/submit an experiment via the profile seam (the same path as ``triage run``).
 
@@ -158,7 +158,7 @@ def _resolve_config(
     if config is not None:
         return config
     try:
-        parsed = yaml.safe_load(config_text)  # type: ignore[arg-type]
+        parsed = yaml.safe_load(config_text or "")
     except yaml.YAMLError as exc:
         raise HTTPException(
             status_code=400, detail=f"config_text is not valid YAML/JSON: {exc}"
@@ -188,7 +188,9 @@ def _examples_dir() -> Optional[pathlib.Path]:
 
 
 @write_router.get("/me")
-def whoami(request: Request, principal: Principal = Depends(current_principal)) -> dict:
+def whoami(
+    request: Request, principal: Principal = Depends(current_principal)
+) -> dict[str, Any]:
     """The resolved caller identity (a sanity check on the auth seam)."""
     return {
         "user_id": principal.user_id,
@@ -208,7 +210,7 @@ def get_projects(
     request: Request,
     include_archived: bool = False,
     principal: Principal = Depends(current_principal),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     return registry.list_projects(
         _registry_pool(request), include_archived=include_archived
     )
@@ -219,7 +221,7 @@ def post_project(
     body: ProjectCreate,
     request: Request,
     principal: Principal = Depends(require_admin),
-) -> dict:
+) -> dict[str, Any]:
     """Create a project (admin only) and make the creator its owner."""
     reg = _registry_pool(request)
     try:
@@ -250,7 +252,7 @@ def post_project(
 @write_router.get("/projects/{slug}/members")
 def get_members(
     slug: str, request: Request, principal: Principal = Depends(current_principal)
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     reg = _registry_pool(request)
     project = registry.get_project(reg, slug)
     if project is None:
@@ -265,7 +267,7 @@ def get_members(
 def post_validate_config(
     body: ConfigPayload,
     principal: Principal = Depends(current_principal),
-) -> dict:
+) -> dict[str, Any]:
     """Dry-run validation of an experiment config — nothing persisted, nothing run.
 
     Accepts the config as a JSON object (``config``) or raw YAML/JSON text (``config_text``,
@@ -283,7 +285,7 @@ def post_validate_config(
         config = body.config
     else:
         try:
-            config = yaml.safe_load(body.config_text)  # type: ignore[arg-type]
+            config = yaml.safe_load(body.config_text or "")
             if not isinstance(config, dict):
                 raise ValueError("config_text must parse to a mapping")
         except (yaml.YAMLError, ValueError) as exc:
@@ -303,7 +305,7 @@ def post_validate_config(
 @write_router.get("/example-configs")
 def get_example_configs(
     principal: Principal = Depends(current_principal),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """The committed ``example/*/experiment*.yaml`` configs, for the submit-form picker.
 
     Served by the backend so the SPA needs no filesystem access; an instance without an
@@ -312,7 +314,7 @@ def get_example_configs(
     root = _examples_dir()
     if root is None:
         return []
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     for path in sorted(root.glob("*/experiment*.yaml")):
         content = path.read_text(encoding="utf-8")
         description = next(
@@ -338,7 +340,7 @@ def get_example_configs(
 @write_router.get("/batch-status/{job_id}")
 def get_batch_status(
     job_id: str, principal: Principal = Depends(current_principal)
-) -> dict:
+) -> dict[str, Any]:
     """On-request AWS Batch job status for a cloud submission (cloud-profile-spec §7).
 
     Read-only and pull-based — no background polling thread; the CLI backfill
@@ -364,7 +366,7 @@ def get_submissions(
     project_slug: Optional[str] = None,
     limit: int = 100,
     principal: Principal = Depends(current_principal),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     reg = _registry_pool(request)
     project_id = None
     if project_slug is not None:
@@ -380,7 +382,7 @@ def post_submission(
     body: SubmissionCreate,
     request: Request,
     principal: Principal = Depends(current_principal),
-) -> dict:
+) -> dict[str, Any]:
     """Submit an experiment: authz → run/submit via the profile seam → record the audit row.
 
     Runs against the app's bound project pool (v1: one project DB per instance). The registry

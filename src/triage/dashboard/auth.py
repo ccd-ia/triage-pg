@@ -14,6 +14,10 @@ is a drop-in replacement for this one class — the routes only ever see a resol
 :class:`Principal`, so nothing downstream changes. Selection is by the ``TRIAGE_AUTH`` env var.
 """
 
+# pyright: reportImportCycles=false
+# The auth<->oidc cycle is deliberate: oidc.py needs Principal at module level, while
+# resolve_auth_backend imports OidcAuth lazily (function-local) so the oidc extra stays
+# optional (ADR-0028). The lazy import breaks the cycle at runtime.
 from __future__ import annotations
 
 import os
@@ -22,7 +26,7 @@ from typing import Optional, Protocol, runtime_checkable
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage import registry
 from triage.logging import get_logger
@@ -56,7 +60,7 @@ class AuthBackend(Protocol):
     """Resolve a request + the registry pool into a :class:`Principal`, or raise 401."""
 
     def authenticate(
-        self, request: Request, registry_pool: ConnectionPool
+        self, request: Request, registry_pool: DictRowPool
     ) -> Principal: ...
 
 
@@ -96,9 +100,7 @@ class TrustedHeaderAuth:
         # the box). Configure TRIAGE_ADMIN_EMAILS to lock this down.
         self._admin_emails = admin_emails or frozenset({self._default_user})
 
-    def authenticate(
-        self, request: Request, registry_pool: ConnectionPool
-    ) -> Principal:
+    def authenticate(self, request: Request, registry_pool: DictRowPool) -> Principal:
         email = (request.headers.get(_USER_HEADER) or self._default_user).strip()
         if not email:
             raise HTTPException(status_code=401, detail="no caller identity")
@@ -139,7 +141,7 @@ def resolve_auth_backend(name: Optional[str] = None) -> AuthBackend:
     )
 
 
-def _registry_pool(request: Request) -> ConnectionPool:
+def _registry_pool(request: Request) -> DictRowPool:
     """The registry control-plane pool, or 503 when the app has no registry configured.
 
     The read dashboard runs without a registry (single-project, read-only); the write surface

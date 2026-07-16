@@ -40,7 +40,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from psycopg import Connection
-from psycopg_pool import ConnectionPool
+from psycopg.rows import DictRow
+
+from triage.util.db import DictRowPool, returned_row
 
 from triage.derivation import Derivation, canonical_json
 from triage.logging import get_logger
@@ -49,7 +51,7 @@ logger = get_logger(__name__)
 
 
 def _notify_run_progress(
-    conn: Connection, run_id: str | None, kind: str, status: str
+    conn: Connection[DictRow], run_id: str | None, kind: str, status: str
 ) -> None:
     """Emit a ``run_progress`` NOTIFY on ``conn`` (read-dashboard-spec §4).
 
@@ -71,7 +73,7 @@ def _notify_run_progress(
 FEATURE_GROUP_OUTPUT_REF = "featurizer:feature_group"
 
 
-def get_artifact(pool: ConnectionPool, artifact_id: str) -> dict[str, Any] | None:
+def get_artifact(pool: DictRowPool, artifact_id: str) -> dict[str, Any] | None:
     with pool.connection() as conn:
         row = conn.execute(
             "select * from triage.artifacts where artifact_id = %(id)s",
@@ -81,7 +83,7 @@ def get_artifact(pool: ConnectionPool, artifact_id: str) -> dict[str, Any] | Non
 
 
 def cache_hit(
-    pool: ConnectionPool, derivation: Derivation, policy: str = "exact"
+    pool: DictRowPool, derivation: Derivation, policy: str = "exact"
 ) -> dict[str, Any] | None:
     """Return the built artifact row for a derivation, or None to build.
 
@@ -131,12 +133,12 @@ def cache_hit(
                 + " Outputs may differ under the current engines — rebuild with"
                 + " policy='exact' to be certain."
             )
-            return dict(row)
+            return dict(returned_row(row))
     return None
 
 
 def begin_artifact(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     derivation: Derivation,
     kind: str,
     config: Mapping[str, Any],
@@ -188,11 +190,11 @@ def begin_artifact(
                     """,
                 {"id": derivation.id, "parent": parent_id},
             )
-    return dict(row)
+    return dict(returned_row(row))
 
 
 def mark_built(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     artifact_id: str,
     output_ref: str | None = None,
     kind: str | None = None,
@@ -222,7 +224,7 @@ def mark_built(
 
 
 def mark_failed(
-    pool: ConnectionPool,
+    pool: DictRowPool,
     artifact_id: str,
     kind: str | None = None,
     run_id: str | None = None,
@@ -244,7 +246,7 @@ def mark_failed(
         )
 
 
-def record_use(pool: ConnectionPool, run_id: str, artifact_ids: Sequence[str]) -> None:
+def record_use(pool: DictRowPool, run_id: str, artifact_ids: Sequence[str]) -> None:
     """Record that a run used these artifacts — built OR cache-hit (ADR-0017).
 
     These usage edges, not ``built_by_run``, are the GC root evidence: a run
@@ -262,7 +264,7 @@ def record_use(pool: ConnectionPool, run_id: str, artifact_ids: Sequence[str]) -
             )
 
 
-def archive_experiment(pool: ConnectionPool, experiment_hash: str) -> None:
+def archive_experiment(pool: DictRowPool, experiment_hash: str) -> None:
     """Soft-archive an experiment — removes it from the GC root set.
 
     Idempotent: re-archiving keeps the original timestamp. Reversible until a
@@ -317,7 +319,7 @@ order by a.kind, a.artifact_id
 
 
 def _dead_artifacts(
-    pool: ConnectionPool, statuses: Sequence[str], min_age_days: int
+    pool: DictRowPool, statuses: Sequence[str], min_age_days: int
 ) -> list[dict[str, Any]]:
     with pool.connection() as conn:
         rows = conn.execute(
@@ -327,12 +329,12 @@ def _dead_artifacts(
     return [dict(row) for row in rows]
 
 
-def gc_candidates(pool: ConnectionPool, min_age_days: int = 0) -> list[dict[str, Any]]:
+def gc_candidates(pool: DictRowPool, min_age_days: int = 0) -> list[dict[str, Any]]:
     """Built artifacts that are dead: unreachable from any GC root."""
     return _dead_artifacts(pool, statuses=["built"], min_age_days=min_age_days)
 
 
-def collect(pool: ConnectionPool, artifact_ids: Sequence[str]) -> list[dict[str, Any]]:
+def collect(pool: DictRowPool, artifact_ids: Sequence[str]) -> list[dict[str, Any]]:
     """Output GC: delete in-PG outputs and mark rows 'collected' (ADR-0017).
 
     Rows, lineage, and pins stay — provenance is never collected, and a
@@ -440,7 +442,7 @@ def delete_outputs(
     return {"deleted": deleted, "absent": absent}
 
 
-def purge(pool: ConnectionPool, min_age_days: int = 0) -> list[str]:
+def purge(pool: DictRowPool, min_age_days: int = 0) -> list[str]:
     """Deep GC: delete the rows of dead collected/failed artifacts (ADR-0017).
 
     Recomputes deadness itself (defense in depth) — only artifacts that are
@@ -507,7 +509,7 @@ order by depth, artifact_id
 """
 
 
-def closure(pool: ConnectionPool, artifact_id: str) -> list[dict[str, Any]]:
+def closure(pool: DictRowPool, artifact_id: str) -> list[dict[str, Any]]:
     """The artifact plus its full upstream input closure (provenance)."""
     sql = _CLOSURE_SQL.format(near="artifact_id", far="parent_id")
     with pool.connection() as conn:
@@ -515,7 +517,7 @@ def closure(pool: ConnectionPool, artifact_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def dependents(pool: ConnectionPool, artifact_id: str) -> list[dict[str, Any]]:
+def dependents(pool: DictRowPool, artifact_id: str) -> list[dict[str, Any]]:
     """The artifact plus its full downstream cone (what a change invalidates)."""
     sql = _CLOSURE_SQL.format(near="parent_id", far="artifact_id")
     with pool.connection() as conn:

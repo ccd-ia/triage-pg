@@ -25,11 +25,11 @@ requires).
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import psycopg
 from psycopg import sql
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage import registry
 from triage.logging import get_logger
@@ -101,13 +101,13 @@ def database_exists(maint_url: str, database_name: str) -> bool:
 
 
 def create_project(
-    registry_pool: ConnectionPool,
+    registry_pool: DictRowPool,
     *,
     slug: str,
     maint_url: str,
     display_name: Optional[str] = None,
     database_name: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Create a project end-to-end: registry row → ``CREATE DATABASE`` → triage schema at head.
 
     Fail-loud, never adopt: an already-registered slug or an already-existing database is an
@@ -157,12 +157,12 @@ def create_project(
 
 
 def drop_project(
-    registry_pool: ConnectionPool,
+    registry_pool: DictRowPool,
     *,
     slug: str,
     confirm: str,
     maint_url: str,
-) -> dict:
+) -> dict[str, Any]:
     """``DROP DATABASE … WITH (FORCE)`` + tombstone the registry row (``status='dropped'``).
 
     ``confirm`` must repeat the slug exactly — the standard guard for an irreversible teardown.
