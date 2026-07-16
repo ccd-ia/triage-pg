@@ -1,0 +1,66 @@
+---
+title: triage-pg
+description: ML temporal nativo de PostgreSQL sobre datos tabulares de política pública — un fork deliberadamente simplificado de DSSG triage.
+template: splash
+hero:
+  tagline: Machine learning temporal nativo de PostgreSQL para datos de política pública — cohortes, features punto-en-el-tiempo, predicciones append-only, evaluación dentro de la base de datos. Un fork deliberadamente simplificado de DSSG triage.
+  actions:
+    - text: Comienza con un tutorial
+      link: /triage-pg/es/tutorials/
+      icon: right-arrow
+    - text: Ver en GitHub
+      link: https://github.com/ccd-ia/triage-pg
+      icon: github
+      variant: minimal
+    - text: Última versión
+      link: https://github.com/ccd-ia/triage-pg/releases/latest
+      icon: download
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## A dónde ir
+
+<CardGrid>
+  <Card title="Tutoriales" icon="open-book">
+    Cuatro casos de estudio al estilo DSSG: la prueba de humo Dirty Duckling, el
+    recorrido completo de DirtyDuck (ambos encuadres del problema), Chicago 311 con
+    las superficies de producción, y el Deep Feature Synthesis de DonorsChoose.
+    [Elige tu tutorial →](/triage-pg/es/tutorials/)
+  </Card>
+  <Card title="Resumen en una página" icon="rocket">
+    Todo el sistema en una página: pipeline, esquema, capacidades, inicio rápido.
+    [Léelo →](https://ccd-ia.github.io/triage-pg/onboarding.html)
+  </Card>
+  <Card title="¿Vienes de DSSG triage?" icon="random">
+    La comparación honesta dimensión por dimensión — qué se conservó, qué se movió
+    a PostgreSQL y qué se descartó deliberadamente.
+    [Ve la comparación lado a lado →](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html)
+  </Card>
+  <Card title="Ejecútalo ahora" icon="seti:docker">
+    `docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc2` — la CLI y el dashboard,
+    sin necesidad de Python local. Apúntalo a cualquier PostgreSQL 11+.
+  </Card>
+  <Card title="El espacio del problema" icon="puzzle">
+    Dos ejes ortogonales: cuatro tipos de problema (problem_type) (lo que predice el
+    modelo) y tres regímenes de observación (quién recibe una etiqueta y por qué) —
+    de forma exhaustiva, sin matriz combinatoria.
+    [Mapea el espacio →](/triage-pg/es/reference/problems/)
+  </Card>
+  <Card title="Arquitectura técnica" icon="seti:db">
+    El diseño de base de datos de dos niveles, el ERD completo del esquema de
+    resultados, el DAG de derivación del pipeline, y cómo el perfil cloud se mapea
+    sobre AWS.
+    [Lee la arquitectura →](/triage-pg/es/reference/architecture/)
+  </Card>
+  <Card title="Recorrido por el dashboard" icon="laptop">
+    Cada superficie, captura por captura — qué pregunta responde cada panel
+    y qué tabla lo alimenta.
+    [Haz el recorrido →](/triage-pg/es/reference/dashboard/)
+  </Card>
+  <Card title="Recorrido por la CLI" icon="seti:powershell">
+    La línea de comandos headless-complete, flujo por flujo, con salida
+    real. [Lee el recorrido por la CLI →](/triage-pg/es/reference/cli/)
+  </Card>
+</CardGrid>

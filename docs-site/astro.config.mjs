@@ -16,23 +16,36 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/ccd-ia/triage-pg' },
       ],
+      // i18n: English lives at the root (published URLs unchanged); Spanish is a
+      // full translation under /es/ (content in src/content/docs/es/**, mirroring
+      // the tree). Starlight ships its own es UI strings; the language picker
+      // appears once a second locale exists.
+      defaultLocale: 'root',
+      locales: {
+        root: { label: 'English', lang: 'en' },
+        es: { label: 'Español', lang: 'es' },
+      },
       sidebar: [
         {
           label: 'Start here',
+          translations: { es: 'Empieza aquí' },
           items: [
-            { label: 'Welcome', slug: 'index' },
+            { label: 'Welcome', translations: { es: 'Bienvenida' }, slug: 'index' },
             // The two published artifacts are static passthrough pages (public/),
-            // linked absolutely so the links-validator does not treat them as routes.
+            // linked absolutely so the links-validator does not treat them as
+            // routes. They exist in English only.
             { label: 'Onboarding one-pager', link: 'https://ccd-ia.github.io/triage-pg/onboarding.html' },
             { label: 'vs DSSG triage', link: 'https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html' },
           ],
         },
         {
           label: 'Tutorials',
+          translations: { es: 'Tutoriales' },
           autogenerate: { directory: 'tutorials' },
         },
         {
           label: 'Reference',
+          translations: { es: 'Referencia' },
           autogenerate: { directory: 'reference' },
         },
       ],
