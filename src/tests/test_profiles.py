@@ -33,7 +33,12 @@ from triage.profiles import (
     load_profile,
 )
 from triage.profiles.auth import make_iam_connection_class
-from triage.profiles.storage import read_parquet, storage_for_root, write_parquet
+from triage.profiles.storage import (
+    parent_root,
+    read_parquet,
+    storage_for_root,
+    write_parquet,
+)
 
 REGION = "us-east-1"
 BUCKET = "triage-test-bucket"
@@ -170,6 +175,14 @@ def test_storage_for_root_dispatches_by_scheme():
     assert isinstance(storage_for_root("s3://bucket/scope"), S3Storage)
     with pytest.raises(ValueError, match="unsupported storage scheme"):
         storage_for_root("gs://bucket/scope")
+
+
+def test_parent_root_recovers_storage_root_per_scheme():
+    """The flat layout means an artifact URI's parent IS the storage root — all schemes."""
+    assert parent_root("/data/store/abc123.joblib") == "/data/store"
+    assert parent_root("./store/abc123.parquet") == "store"
+    assert parent_root("s3://bucket/scope/abc123.joblib") == "s3://bucket/scope"
+    assert parent_root("file:///data/store/abc123.joblib") == "file:///data/store"
 
 
 @mock_aws

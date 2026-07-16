@@ -15,10 +15,15 @@ GC routes file-backed outputs straight back through :meth:`StorageAdapter.delete
 from __future__ import annotations
 
 import io
+import posixpath
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse
+
+if TYPE_CHECKING:
+    import polars as pl
 
 from triage.logging import get_logger
 
@@ -28,6 +33,7 @@ __all__ = [
     "LocalStorage",
     "S3Storage",
     "storage_for_root",
+    "parent_root",
     "write_parquet",
     "read_parquet",
 ]
@@ -36,6 +42,20 @@ __all__ = [
 def _scheme(uri: str) -> str:
     """The URI scheme, treating a bare path (``./matrices``, ``/abs``) as local (``''``)."""
     return urlparse(uri).scheme
+
+
+def parent_root(artifact_uri: str) -> str:
+    """The storage root an artifact URI lives under (its parent directory, scheme-aware).
+
+    The file layout is flat — ``<root>/<uuid>.parquet`` / ``<root>/<uuid>.joblib`` — so the
+    parent of any artifact URI *is* the storage root. Lets forward-scoring default its output
+    root to wherever the model's artifacts already live instead of requiring ``--project-path``.
+    """
+    parsed = urlparse(artifact_uri)
+    if parsed.scheme in ("s3", "file"):
+        parent = posixpath.dirname(parsed.path.rstrip("/"))
+        return urlunparse(parsed._replace(path=parent))
+    return str(Path(artifact_uri).parent)
 
 
 class LocalStorage:
@@ -181,11 +201,15 @@ def write_parquet(storage, uri: str, frame) -> None:
         pq.write_table(frame.to_arrow(), handle)
 
 
-def read_parquet(storage, uri: str):
+def read_parquet(storage, uri: str) -> "pl.DataFrame":
     """Read a Parquet ``uri`` into a Polars DataFrame through ``storage`` (FS or s3fs stream)."""
     import polars as pl
     import pyarrow.parquet as pq
 
     with storage.open_input(uri) as handle:
         table = pq.read_table(handle)
-    return pl.from_arrow(table)
+    frame = pl.from_arrow(table)
+    assert isinstance(
+        frame, pl.DataFrame
+    )  # from_arrow(Table) is a frame, never a Series
+    return frame

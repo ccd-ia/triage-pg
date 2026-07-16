@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.forward import (
@@ -43,7 +43,7 @@ from triage.adapters.matrix import build_matrix
 from triage.adapters.model import build_model
 from triage.adapters.temporal import TemporalConfig
 from triage.logging import get_logger
-from triage.profiles.storage import storage_for_root
+from triage.profiles.storage import parent_root, storage_for_root
 from triage.util.conf import convert_str_to_relativedelta
 
 logger = get_logger(__name__)
@@ -65,11 +65,11 @@ class RetrainResult:
 
 
 def retrain(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_group_id: int,
     prediction_date: date,
     *,
-    storage_dir: str,
+    storage_dir: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
     random_seed: int | None = None,
     profile: str = "local",
@@ -84,6 +84,8 @@ def retrain(
         prediction_date: the date the retrain targets; the train cut is this minus the
             group's label_timespan (so labels are realized by ``prediction_date``).
         storage_dir: directory the matrix Parquet + joblib model are written under.
+            ``None`` (the default) uses the latest group model's artifact root (the parent
+            of its recorded ``artifact_uri``) — new artifacts land beside the old ones.
         source_pins: pins to use; defaults to the latest model's recovered pins.
         random_seed: seed override; defaults to the latest model's seed (reproducible retrain).
         profile: ``'local'`` | ``'cloud'`` for the run row.
@@ -105,6 +107,12 @@ def retrain(
     pins = dict(source_pins) if source_pins is not None else lineage.source_pins
     seed = random_seed if random_seed is not None else lineage.random_seed
     label_timespan = lineage.label_timespan
+    if storage_dir is None:
+        storage_dir = parent_root(lineage.artifact_uri)
+        logger.info(
+            "no storage_dir given — defaulting to the group's artifact root {}",
+            storage_dir,
+        )
     train_as_of = prediction_date - convert_str_to_relativedelta(label_timespan)
 
     run_id = open_run(
@@ -191,11 +199,11 @@ def retrain(
 
 
 def retrain_and_predict(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_group_id: int,
     prediction_date: date,
     *,
-    storage_dir: str,
+    storage_dir: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
     random_seed: int | None = None,
     profile: str = "local",
@@ -203,6 +211,10 @@ def retrain_and_predict(
     problem_type_override: str | None = None,
 ) -> tuple[RetrainResult, ForwardResult]:
     """Retrain the group then forward-score the fresh model at ``prediction_date``.
+
+    ``storage_dir=None`` defaults each leg to the relevant model's own artifact root
+    (the retrain writes beside the group's latest model; the forward-score beside the
+    freshly retrained one — the same root by construction).
 
     Returns the ``(RetrainResult, ForwardResult)`` pair. The forward-score is its own run
     (``purpose='forward_score'``); see :func:`triage.adapters.forward.predict_forward`.

@@ -7,6 +7,7 @@ Asserts the production predictions, the production matrix + its train-matrix lea
 """
 
 from datetime import date
+from pathlib import Path
 
 from tests.adapter_tests.test_run_orchestration import (
     _experiment_config,
@@ -90,6 +91,44 @@ def test_predict_forward_appends_production_predictions(db_pool_greenfield, tmp_
     assert run["purpose"] == "forward_score"
     assert run["prediction_date"] == FORWARD_DATE
     assert run["status"] == "completed"
+
+
+def test_predict_forward_defaults_storage_to_model_root(
+    db_pool_greenfield, tmp_path, monkeypatch
+):
+    """No storage_dir → the production Parquet lands under the model's own artifact root.
+
+    A scheduled ``triage score`` line without --project-path must not scatter Parquets
+    into whatever CWD the scheduler used — the model's recorded artifact_uri parent wins.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    storage = str(tmp_path / "store")
+    run_experiment(
+        engine,
+        _experiment_config(),
+        storage=LocalStorage(),
+        storage_root=storage,
+        random_seed=42,
+    )
+    model = _latest_model(engine)
+
+    # Run from an unrelated CWD (a cron job's HOME, say) — nothing may be written here.
+    elsewhere = tmp_path / "cron-cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    result = predict_forward(engine, model["model_id"], FORWARD_DATE)
+
+    assert result.num_predictions == 6
+    with engine.connection() as conn:
+        output_ref = conn.execute(
+            "select output_ref from triage.artifacts where artifact_id = %(a)s",
+            {"a": result.production_matrix_artifact_id},
+        ).fetchone()["output_ref"]
+    assert output_ref.startswith(storage)
+    assert Path(output_ref).exists()
+    assert list(elsewhere.iterdir()) == []  # the cron CWD stayed clean
 
 
 def test_predict_forward_is_append_only_across_calls(db_pool_greenfield, tmp_path):

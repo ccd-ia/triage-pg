@@ -10,13 +10,16 @@ the operator's scheduler invokes the existing CLI, and drift/health are SQL (mig
 
 The monitoring entrypoint is `triage score <model_id> [prediction_date]` (forward scoring —
 `runs.purpose='forward_score'`, ADR-0018). The date defaults to **today**, so a schedule line
-needs no date arithmetic; re-invocation is safe (appends, never overwrites).
+needs no date arithmetic; re-invocation is safe (appends, never overwrites). `--project-path`
+defaults to the **model's own artifact root** (the parent of its recorded `artifact_uri`), so
+a bare schedule line writes the production matrix beside the model's other artifacts instead
+of scattering Parquets into the scheduler's CWD — pass the flag only to redirect output.
 
 **Local (cron):**
 
 ```cron
 # score model 42 against fresh data on the 1st of each month, 06:00
-0 6 1 * *  cd /path/to/project && DATABASE_URL=… uv run triage score 42 --project-path /data/artifacts
+0 6 1 * *  cd /path/to/project && DATABASE_URL=… uv run triage score 42
 ```
 
 **Cloud (EventBridge → Batch, gated with the cloud apply):** populate

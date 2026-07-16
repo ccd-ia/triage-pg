@@ -32,7 +32,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
-from psycopg_pool import ConnectionPool
+from triage.util.db import DictRowPool, returned_row
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
@@ -44,7 +44,7 @@ from triage.adapters.temporal import TemporalConfig
 from triage.component.catwalk.prediction_ranking import record_predictions
 from triage.derivation import as_uuid
 from triage.logging import get_logger
-from triage.profiles.storage import storage_for_root
+from triage.profiles.storage import parent_root, storage_for_root
 
 logger = get_logger(__name__)
 
@@ -83,7 +83,7 @@ class ForwardResult:
 
 
 def open_run(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     *,
     purpose: str,
     prediction_date: date,
@@ -100,23 +100,25 @@ def open_run(
     from under an in-use model.
     """
     with db_engine.connection() as conn:
-        run_id = conn.execute(
-            "insert into triage.runs (profile, status, random_seed, purpose,"
-            + " prediction_date, experiment_hash) values (%(profile)s, 'started', %(seed)s,"
-            + " %(purpose)s, %(pred)s, %(exp)s) returning run_id",
-            {
-                "profile": profile,
-                "seed": random_seed,
-                "purpose": purpose,
-                "pred": prediction_date,
-                "exp": experiment_hash,
-            },
-        ).fetchone()["run_id"]
+        run_id = returned_row(
+            conn.execute(
+                "insert into triage.runs (profile, status, random_seed, purpose,"
+                + " prediction_date, experiment_hash) values (%(profile)s, 'started',"
+                + " %(seed)s, %(purpose)s, %(pred)s, %(exp)s) returning run_id",
+                {
+                    "profile": profile,
+                    "seed": random_seed,
+                    "purpose": purpose,
+                    "pred": prediction_date,
+                    "exp": experiment_hash,
+                },
+            ).fetchone()
+        )["run_id"]
     return str(run_id)
 
 
 def close_run(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     run_id: str,
     status: str,
     error: str | None = None,
@@ -132,11 +134,11 @@ def close_run(
 
 
 def predict_forward(
-    db_engine: ConnectionPool,
+    db_engine: DictRowPool,
     model_id: int,
     as_of_date: date,
     *,
-    storage_dir: str,
+    storage_dir: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
     profile: str = "local",
     cache_policy: str = "exact",
@@ -149,7 +151,10 @@ def predict_forward(
         db_engine: project-database engine (greenfield ``triage.*`` schema).
         model_id: the trained model to score with (``triage.models.model_id``).
         as_of_date: the new date to score at.
-        storage_dir: directory the production matrix Parquet is written under.
+        storage_dir: directory the production matrix Parquet is written under. ``None``
+            (the default) uses the model's own artifact root — the parent of its recorded
+            ``artifact_uri`` — so a scheduled ``triage score`` line never scatters Parquets
+            into whatever CWD the scheduler happened to use.
         source_pins: pins to use; defaults to the model's train-matrix pins (recovered from
             the DAG) so the forward closure is cacheable and consistent.
         profile: ``'local'`` | ``'cloud'`` for the run row.
@@ -171,6 +176,12 @@ def predict_forward(
         )
     pins = dict(source_pins) if source_pins is not None else lineage.source_pins
     label_timespan = lineage.label_timespan
+    if storage_dir is None:
+        storage_dir = parent_root(lineage.artifact_uri)
+        logger.info(
+            "no storage_dir given — defaulting to the model's artifact root {}",
+            storage_dir,
+        )
 
     run_id = open_run(
         db_engine,

@@ -48,7 +48,7 @@ from triage.sources import (
     list_sources,
     register_source,
 )
-from triage.util.db import connection_pool
+from triage.util.db import connection_pool, returned_row
 
 logger = get_logger(__name__)
 console = Console()
@@ -734,11 +734,13 @@ def model_show(
             {"m": model_id},
         ).fetchall()
         calibration = []
-        cal_date = conn.execute(
-            "select max(as_of_date) as d from triage.evaluations"
-            " where model_id = %(m)s and split_kind = 'test' and subset_hash = ''",
-            {"m": model_id},
-        ).fetchone()["d"]
+        cal_date = returned_row(
+            conn.execute(
+                "select max(as_of_date) as d from triage.evaluations"
+                " where model_id = %(m)s and split_kind = 'test' and subset_hash = ''",
+                {"m": model_id},
+            ).fetchone()  # an aggregate SELECT always yields one row
+        )["d"]
         if cal_date is not None and card["label_timespan"] is not None:
             calibration = conn.execute(
                 "select decile, n, avg_score, realized_rate"
@@ -935,7 +937,10 @@ def audition_command(
                 {**params, "r": rule_name, "rp": json.dumps(rule_params)},
             ).fetchone()
             strategies.append(
-                {"rule": rule_name, "model_group_id": gid["model_group_id"]}
+                {
+                    "rule": rule_name,
+                    "model_group_id": returned_row(gid)["model_group_id"],
+                }
             )
 
         selected = conn.execute(
@@ -1019,8 +1024,10 @@ def retrain_predict_command(
     ctx: typer.Context,
     model_group_id: int = typer.Argument(..., callback=natural_number),
     prediction_date: datetime = typer.Argument(..., callback=parse_date),
-    project_path: pathlib.Path = typer.Option(
-        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    project_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--project-path",
+        help="Artifact storage path. Omitted = the group's existing artifact root.",
     ),
 ) -> None:
     engine = get_pool(ctx)
@@ -1028,7 +1035,7 @@ def retrain_predict_command(
         engine,
         model_group_id,
         prediction_date.date(),
-        storage_dir=str(project_path),
+        storage_dir=str(project_path) if project_path is not None else None,
     )
     console.print("[green]Retrain and predict completed.[/green]")
 
@@ -1038,8 +1045,10 @@ def predictlist_command(
     ctx: typer.Context,
     model_id: int = typer.Argument(..., callback=natural_number),
     as_of_date: datetime = typer.Argument(..., callback=parse_date),
-    project_path: pathlib.Path = typer.Option(
-        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    project_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--project-path",
+        help="Artifact storage path. Omitted = the model's existing artifact root.",
     ),
 ) -> None:
     engine = get_pool(ctx)
@@ -1047,7 +1056,7 @@ def predictlist_command(
         engine,
         model_id,
         as_of_date.date(),
-        storage_dir=str(project_path),
+        storage_dir=str(project_path) if project_path is not None else None,
     )
     console.print("[green]Prediction list generated.[/green]")
 
@@ -1061,8 +1070,11 @@ def score_command(
         help="Prediction date (YYYY-MM-DD). Omitted = today — so a cron/EventBridge line"
         " needs no date arithmetic.",
     ),
-    project_path: pathlib.Path = typer.Option(
-        pathlib.Path.cwd(), "--project-path", help="Artifact storage path."
+    project_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--project-path",
+        help="Artifact storage path. Omitted = the model's existing artifact root —"
+        " so a bare cron line never scatters Parquets into the scheduler's CWD.",
     ),
 ) -> None:
     """Forward-score a model (the ADR-0027 monitoring entrypoint; alias of predictlist).
@@ -1077,7 +1089,12 @@ def score_command(
         else datetime.now().date()
     )
     engine = get_pool(ctx)
-    predict_forward(engine, model_id, when, storage_dir=str(project_path))
+    predict_forward(
+        engine,
+        model_id,
+        when,
+        storage_dir=str(project_path) if project_path is not None else None,
+    )
     console.print(
         f"[green]Forward-scored model {model_id} at {when} (append-only).[/green]"
     )
