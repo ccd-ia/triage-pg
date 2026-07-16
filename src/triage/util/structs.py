@@ -2,8 +2,10 @@
 Triage code and want to display more intelligently in log files
 """
 
+from typing import Any
 
-class TruncatedRepresentationList(list):
+
+class TruncatedRepresentationList(list[Any]):
     def __repr__(self):
         total = len(self)
         if total != 1:

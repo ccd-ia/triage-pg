@@ -7,7 +7,10 @@ logger = get_logger(__name__)
 from triage.util.conf import convert_str_to_relativedelta, dt_from_str
 from triage.util.structs import AsOfTimeList
 
-from . import utils
+# Import the helper from the submodule directly (not `from . import utils`): the
+# package __init__ imports Timechop from this module, so going through the package
+# would form an import cycle.
+from .utils import convert_to_list
 
 # Throughout the code here, we're going to follow an example
 # based around the following config:
@@ -91,21 +94,21 @@ class Timechop:
             model_update_frequency
         )
 
-        self.training_as_of_date_frequencies = utils.convert_to_list(
+        self.training_as_of_date_frequencies = convert_to_list(
             training_as_of_date_frequencies
         )
 
-        self.test_as_of_date_frequencies = utils.convert_to_list(
+        self.test_as_of_date_frequencies = convert_to_list(
             test_as_of_date_frequencies
         )
 
-        self.max_training_histories = utils.convert_to_list(max_training_histories)
+        self.max_training_histories = convert_to_list(max_training_histories)
 
-        self.test_durations = utils.convert_to_list(test_durations)
+        self.test_durations = convert_to_list(test_durations)
 
-        self.training_label_timespans = utils.convert_to_list(training_label_timespans)
+        self.training_label_timespans = convert_to_list(training_label_timespans)
 
-        self.test_label_timespans = utils.convert_to_list(test_label_timespans)
+        self.test_label_timespans = convert_to_list(test_label_timespans)
 
     def chop_time(self):
         """Given the attributes of the object, define all train/test splits

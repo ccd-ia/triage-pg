@@ -10,6 +10,9 @@ A side benefit is identical to the LR case: the persisted coefficients (ADR-0011
 comparable across features, and ``exp(β)`` reads as a hazard ratio per feature-range.
 """
 
+# model and coef_ are fitted attributes set in fit() (the sklearn convention),
+# never __init__ — turn off the rule that flags exactly that pattern.
+# pyright: reportUninitializedInstanceVariable=false
 from sklearn.base import BaseEstimator
 from sklearn.preprocessing import MinMaxScaler
 
@@ -38,7 +41,12 @@ class ScaledCoxPHSurvivalAnalysis(BaseEstimator):
         from sksurv.linear_model import CoxPHSurvivalAnalysis
 
         self.model = CoxPHSurvivalAnalysis(
-            alpha=self.alpha, ties=self.ties, n_iter=self.n_iter, tol=self.tol
+            # sksurv's stub types alpha as int, but it is the (float) ridge
+            # regularization strength — 0.1 is correct.
+            alpha=self.alpha,  # pyright: ignore[reportArgumentType]
+            ties=self.ties,
+            n_iter=self.n_iter,
+            tol=self.tol,
         )
         x = self.minmax_scaler.fit_transform(x)
         self.model.fit(x, y)

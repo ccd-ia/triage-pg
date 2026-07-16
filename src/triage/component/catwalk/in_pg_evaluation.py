@@ -13,6 +13,7 @@ retiring the inherited sklearn ``evaluation.py`` path) is Phase F's adapter pass
 """
 
 import json
+from typing import Any
 
 from triage.artifacts import _notify_run_progress
 from triage.logging import get_logger
@@ -39,7 +40,7 @@ DEFAULT_SURVIVAL_CONFIG = {
 # Python ``component/audition`` module is retired). ``best_average_two_metrics`` needs a
 # second metric — callers fill ``metric2``/``parameter2`` from ``triage.metric_catalog``
 # when one exists, else skip that rule.
-AUDITION_RULES: tuple[tuple[str, dict], ...] = (
+AUDITION_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
     ("best_current_value", {}),
     ("best_average_value", {}),
     ("lowest_metric_variance", {}),

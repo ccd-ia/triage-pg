@@ -1,3 +1,6 @@
+# n_features_in_ is a fitted attribute set in fit() (the sklearn convention),
+# never __init__ — turn off the rule that flags exactly that pattern.
+# pyright: reportUninitializedInstanceVariable=false
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,6 +36,10 @@ class CutOff(BaseEstimator, TransformerMixin):
 
     """
 
+    # Fitted attribute (set in fit(); the sklearn trailing-underscore convention,
+    # here just to satisfy check_is_fitted).
+    n_features_in_: int
+
     def __init__(self, feature_range=(0, 1), copy=True):
         self.feature_range = feature_range
         self.copy = copy
@@ -45,15 +52,15 @@ class CutOff(BaseEstimator, TransformerMixin):
     def transform(self, X):
         feature_range = self.feature_range
 
-        X = check_array(X, copy=self.copy, ensure_2d=True)
+        checked = check_array(X, copy=self.copy, ensure_2d=True)
 
-        if np.any(X > feature_range[1]) or np.any(X < feature_range[0]):
+        if np.any(checked > feature_range[1]) or np.any(checked < feature_range[0]):
             logger.notice(
                 f"You got feature values that are out of the range: {feature_range}. "
                 f"The feature values will cutoff to fit in the range {feature_range}."
             )
 
-        X[X > feature_range[1]] = feature_range[1]
-        X[X < feature_range[0]] = feature_range[0]
+        checked[checked > feature_range[1]] = feature_range[1]
+        checked[checked < feature_range[0]] = feature_range[0]
 
-        return X
+        return checked

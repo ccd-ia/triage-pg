@@ -66,17 +66,18 @@ if not url:
         url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 if not url and os.environ.get("PGDATABASE") and os.environ.get("PGHOST"):
+    pgport = os.environ.get("PGPORT")
     url = URL.create(
         "postgresql+psycopg",
         host=os.environ["PGHOST"],
-        port=os.environ.get("PGPORT"),
+        port=int(pgport) if pgport else None,
         username=os.environ.get("PGUSER"),
         password=os.environ.get("PGPASSWORD"),
         database=os.environ["PGDATABASE"],
     )
 
 if not url:
-    db_config_file = context.get_x_argument("db_config_file").get(
+    db_config_file = context.get_x_argument(as_dictionary=True).get(
         "db_config_file", None
     )
     if not db_config_file:
@@ -128,7 +129,8 @@ def run_migrations_online():
     and associate a connection with the context.
 
     """
-
+    # By here the module-level resolution above has set url or raised.
+    assert url is not None, "no database URL resolved for migrations"
     connectable = create_engine(url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:

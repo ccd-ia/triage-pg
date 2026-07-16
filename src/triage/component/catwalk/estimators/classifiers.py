@@ -1,4 +1,9 @@
 # coding: utf-8
+# The fitted attributes below (min_, coef_, classes_, … — the sklearn
+# trailing-underscore convention) are set in fit(), never __init__: sklearn's
+# check_is_fitted relies on their absence before fit, so they cannot be
+# initialized up front. Turn off the rule that would flag exactly that pattern.
+# pyright: reportUninitializedInstanceVariable=false
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
@@ -112,5 +117,5 @@ class ScaledLogisticRegression(BaseEstimator, ClassifierMixin):
     def predict(self, X):
         return self.pipeline.predict(X)
 
-    def score(self, X, y):
-        return self.pipeline.score(X, y)
+    def score(self, X, y, sample_weight=None):
+        return self.pipeline.score(X, y, sample_weight=sample_weight)

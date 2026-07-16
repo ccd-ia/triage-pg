@@ -35,6 +35,9 @@ def dt_from_str(dt_str):
     return datetime.strptime(dt_str, "%Y-%m-%d")
 
 
+_DELTA_PATTERN = re.compile(r"^(\d+) *([^ ]+)$")
+
+
 def parse_delta_string(delta_string):
     """Given a string in a postgres interval format (e.g., '1 month'),
     parse the units and value from it.
@@ -55,7 +58,7 @@ def parse_delta_string(delta_string):
     :raises: ValueError if the delta_string is not in the expected format
 
     """
-    match = parse_delta_string.pattern.search(delta_string)
+    match = _DELTA_PATTERN.search(delta_string)
     if match:
         pre_value, units = match.groups()
         return (units, int(pre_value))
@@ -63,9 +66,6 @@ def parse_delta_string(delta_string):
     raise ValueError(
         "Could not parse value from time delta string: {!r}".format(delta_string)
     )
-
-
-parse_delta_string.pattern = re.compile(r"^(\d+) *([^ ]+)$")
 
 
 def load_query_if_needed(config_component):
@@ -94,6 +94,21 @@ def load_query_if_needed(config_component):
     return config_component_copy
 
 
+_VERBOSE_UNIT_PATTERN = re.compile(
+    r"^(year|month|day|week|hour|minute|second|microsecond)s?$"
+)
+
+_BRIEF_UNITS = {
+    "y": "years",
+    "d": "days",
+    "w": "weeks",
+    "h": "hours",
+    "m": "minutes",
+    "s": "seconds",
+    "ms": "microseconds",
+}
+
+
 def convert_str_to_relativedelta(delta_string):
     """Given a string in a postgres interval format (e.g., '1 month'),
     convert it to a dateutil.relativedelta.relativedelta.
@@ -116,33 +131,22 @@ def convert_str_to_relativedelta(delta_string):
     """
     units, value = parse_delta_string(delta_string)
 
-    verbose_match = convert_str_to_relativedelta.pattern_verbose.search(units)
+    # value is an int count of a validated plural unit (years/months/…); the
+    # dynamic **kwarg spread is a real relativedelta keyword, not the dt1/dt2
+    # positional dates pyright matches it against.
+    verbose_match = _VERBOSE_UNIT_PATTERN.search(units)
     if verbose_match:
-        unit_type = verbose_match.group(1) + "s"
-        return relativedelta(**{unit_type: value})
+        kwargs = {verbose_match.group(1) + "s": value}
+        return relativedelta(**kwargs)  # pyright: ignore[reportArgumentType]
 
     try:
-        unit_type = convert_str_to_relativedelta.brief_units[units.lower()]
+        unit_type = _BRIEF_UNITS[units.lower()]
     except KeyError:
         pass
     else:
         if unit_type == "minutes":
             logger.warning(f'Time delta units "{units}" converted to minutes.')
-        return relativedelta(**{unit_type: value})
+        kwargs = {unit_type: value}
+        return relativedelta(**kwargs)  # pyright: ignore[reportArgumentType]
 
     raise ValueError("Could not handle units. Units: {} Value: {}".format(units, value))
-
-
-convert_str_to_relativedelta.pattern_verbose = re.compile(
-    r"^(year|month|day|week|hour|minute|second|microsecond)s?$"
-)
-
-convert_str_to_relativedelta.brief_units = {
-    "y": "years",
-    "d": "days",
-    "w": "weeks",
-    "h": "hours",
-    "m": "minutes",
-    "s": "seconds",
-    "ms": "microseconds",
-}
