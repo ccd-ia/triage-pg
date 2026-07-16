@@ -1,11 +1,52 @@
 # featurizer scale validation — the per-as_of_date CTE cost (ADR-0008)
 
-**Status:** validated 2026-06-17 @ featurizer **v0.3.0** · **re-validated
-2026-06-28 @ featurizer v0.4.1** (numbers within ~3% of baseline; verdict
-unchanged — see [Re-validation](#re-validation--2026-06-28--featurizer-v041)) ·
+**Status:** validated 2026-06-17 @ featurizer **v0.3.0** · re-validated
+2026-06-28 @ **v0.4.1** · **re-validated 2026-07-13 @ v0.8.0** (numbers within
+noise of both baselines; verdict unchanged — see
+[Re-validation @ v0.8.0](#re-validation--2026-07-13--featurizer-v080)) ·
 **Verdict:** (a) scalable as-is for our realistic volumes, with a known
 featurizer-side optimization filed for later if volumes grow. · **Benchmark:**
 [`benchmarks/featurizer_scale.py`](../benchmarks/featurizer_scale.py)
+
+## Re-validation — 2026-07-13 @ featurizer v0.8.0
+
+The pin advanced v0.4.1 → v0.7.0 → **v0.8.0** across the release push (named
+relationships, relationship-topology bug fixes, manifest lineage, the 0.7.0
+performance fixes, and the 0.8.0 release the tutorials shipped on). None of it
+changed the `cross join lateral` SQL **shape**, and the numbers confirm: same
+benchmark, same config (33 output columns), same hardware (Apple M5 Max,
+PostgreSQL 16.14).
+
+**PRIMARY** — execution time vs #as_of_dates (20,000 entities, 600,000 visits):
+
+| #as_of_dates | v0.4.1 exec (s) | v0.8.0 exec (s) | v0.8.0 s/date | v0.8.0 vs 1 date |
+|--------------|-----------------|-----------------|---------------|------------------|
+| 1            | 1.372           | 1.357           | 1.357         | 1.00x            |
+| 5            | 6.678           | 6.555           | 1.311         | 4.83x            |
+| 10           | 12.773          | 12.916          | 1.292         | 9.52x            |
+| 20           | 23.409          | 23.545          | 1.177         | 17.35x           |
+| 40           | 38.122          | 38.187          | 0.955         | 28.14x           |
+
+Per-as_of_date cost at v0.8.0: **mean 1.218 s, CV 11.9%**, monotonically
+declining — still **sub-linear** (cf. v0.4.1: mean 1.222 s, CV 12.3%, 27.78×;
+v0.3.0: mean 1.24 s, CV 13.3%, 26.90×).
+
+**SECONDARY** — execution time vs #entities (12 as_of_dates, 30 events/entity):
+
+| #entities | #visits   | v0.4.1 exec (s) | v0.8.0 exec (s) |
+|-----------|-----------|-----------------|-----------------|
+| 1,000     | 30,000    | 0.749           | 0.745           |
+| 10,000    | 300,000   | 7.562           | 7.474           |
+| 100,000   | 3,000,000 | 76.075          | 76.058          |
+
+Still clean **linear** in entity/event volume; every point within ~1% of the
+v0.4.1 baseline (measurement noise).
+
+**Conclusion:** the verdict is **re-confirmed at v0.8.0** — three pins across
+five months (v0.3.0 → v0.4.1 → v0.8.0) produce statistically indistinguishable
+scaling. ADR-0008's "scale is the main open risk" note is retired as *resolved*:
+the risk was validated benign at adoption and has stayed benign through every
+engine release since.
 
 ## Re-validation — 2026-06-28 @ featurizer v0.4.1
 

@@ -4,6 +4,7 @@
 - Date: 2026-06-04
 - Status update (2026-06-17): **scale risk validated** — verdict *(a) scalable as-is* (per-as_of_date cost constant-to-sub-linear, linear in entities; the `cross join lateral` re-eval is the benign linear case, not superlinear). Collate not revisited. See [`docs/featurizer-scale.md`](../featurizer-scale.md) + `benchmarks/featurizer_scale.py`.
 - Status update (2026-06-28): scale **re-validated** against the current pin (featurizer v0.4.1) — numbers within ~3% of the v0.3.0 baseline, verdict unchanged.
+- Status update (2026-07-13): scale **re-validated at v0.8.0** (the pin the v1.0.0-rc2 release ships) — per-as_of_date cost mean 1.218s CV 11.9% (sub-linear), entity axis clean linear, all points within ~1% of the v0.4.1 baseline. Three pins over five months are statistically indistinguishable; the scale-risk note below is **retired as resolved**.
 
 triage-pg uses **featurizer** — our modernized fork of `dssg/featurizer`, a PostgreSQL-native Deep Feature Synthesis engine — as its feature engine, replacing Collate. A deep-dive that *executed* featurizer against real PostgreSQL verified the two make-or-break properties: in one run it emits the full `cohort × as_of_dates` cross-product (triage's `(entity_id, as_of_date)` matrix shape), and its generated SQL is point-in-time-correct (no leakage). The repos split cleanly: **featurizer stays a general DFS engine**; **triage-pg owns the triage-specific adapters** (timechop→`as_of_dates`, cohort, labels, matrix assembly, cache keys). Triage concepts must never leak into featurizer.
 
