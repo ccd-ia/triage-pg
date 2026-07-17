@@ -47,29 +47,13 @@ A `--force` stays as an operator override.
 
 A small worked closure:
 
-```plantuml
-@startuml
-left to right direction
-skinparam defaultTextAlignment center
-skinparam shadowing false
-skinparam rectangle {
-  BackgroundColor #EEF2FF
-  BorderColor #4F46E5
-  FontColor #1E293B
-}
-skinparam ArrowColor #64748B
-rectangle "cohort\n@(config, dates)" as C
-rectangle "labels\n@(config, dates)" as L
-rectangle "feature_group\n@(dates)" as F
-rectangle "matrix\n(train)" as MT
-rectangle "matrix\n(test)" as MX
-rectangle "model" as MD
-C --> MT
-L --> MT
-F --> MT
-MT --> MX : consumes train-fitted\nimputation (ADR-0009)
-MX --> MD
-@enduml
+```mermaid
+flowchart LR
+  C["cohort<br/>@(config, dates)"] --> MT["matrix<br/>(train)"]
+  L["labels<br/>@(config, dates)"] --> MT
+  F["feature_group<br/>@(dates)"] --> MT
+  MT -->|"consumes train-fitted<br/>imputation (ADR-0009)"| MX["matrix<br/>(test)"]
+  MX --> MD["model"]
 ```
 
 The test matrix takes the train matrix as a parent: it consumes the

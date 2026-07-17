@@ -65,18 +65,10 @@ genuinely-knowable facts.
 
 Read a single `(entity_id, as_of_date)` row left to right:
 
-```plantuml
-@startuml
-left to right direction
-skinparam defaultTextAlignment center
-skinparam shadowing false
-skinparam ArrowColor #64748B
-rectangle "feature window\n(data knowable BEFORE)" as FW #E0F2FE
-circle "as_of_date\n(prediction moment)" as AOD #4F46E5
-rectangle "label window\n(outcome AFTER)" as LW #FEF3C7
-FW -right-> AOD
-AOD -right-> LW
-@enduml
+```mermaid
+flowchart LR
+  FW["feature window<br/>(data knowable BEFORE)"] --> AOD(("as_of_date<br/>(prediction moment)"))
+  AOD --> LW["label window<br/>(outcome AFTER)"]
 ```
 
 - **Feature window** — everything to the *left* of the `as_of_date`, filtered by

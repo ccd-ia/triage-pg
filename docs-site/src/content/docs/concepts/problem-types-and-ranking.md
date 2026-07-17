@@ -9,23 +9,10 @@ triage-pg is a **prioritization** system, and its whole architecture is a single
 spine. Whatever the dataset or the target, every experiment walks the same three
 steps:
 
-```plantuml
-@startuml
-left to right direction
-skinparam defaultTextAlignment center
-skinparam shadowing false
-skinparam rectangle {
-  BackgroundColor #EEF2FF
-  BorderColor #4F46E5
-  FontColor #1E293B
-}
-skinparam ArrowColor #64748B
-rectangle "① score\nmodel emits a\nnumber per entity" as S
-rectangle "② rank\norder entities\nby that score" as R
-rectangle "③ evaluate\na metric over\nthe ranking" as E
-S --> R
-R --> E
-@enduml
+```mermaid
+flowchart LR
+  S["① score<br/>model emits a<br/>number per entity"] --> R["② rank<br/>order entities<br/>by that score"]
+  R --> E["③ evaluate<br/>a metric over<br/>the ranking"]
 ```
 
 The `problem_type` on an Experiment selects a few **swaps** on that spine — how the

@@ -13,29 +13,13 @@ every gotcha — stops being arbitrary.
 
 Every experiment walks the same path, whatever the dataset or problem:
 
-```plantuml
-@startuml
-left to right direction
-skinparam defaultTextAlignment center
-skinparam shadowing false
-skinparam rectangle {
-  BackgroundColor #EEF2FF
-  BorderColor #4F46E5
-  FontColor #1E293B
-}
-skinparam ArrowColor #64748B
-rectangle "cohort\n(who, as of when)" as C
-rectangle "features\n(point-in-time)" as F
-rectangle "matrices\n(Parquet)" as M
-rectangle "train\n(per split)" as T
-rectangle "predict\n(append-only)" as P
-rectangle "evaluate\n(in Postgres)" as E
-C --> F
-F --> M
-M --> T
-T --> P
-P --> E
-@enduml
+```mermaid
+flowchart LR
+  C["cohort<br/>(who, as of when)"] --> F["features<br/>(point-in-time)"]
+  F --> M["matrices<br/>(Parquet)"]
+  M --> T["train<br/>(per split)"]
+  T --> P["predict<br/>(append-only)"]
+  P --> E["evaluate<br/>(in Postgres)"]
 ```
 
 You declare this once as an **Experiment** (an `experiment.yaml`); each **Run** is
