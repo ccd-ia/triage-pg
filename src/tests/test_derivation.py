@@ -181,3 +181,28 @@ def test_engine_versions_for_feature_group_needs_featurizer():
             engine_versions_for("feature_group")
     else:
         assert engine_versions_for("feature_group")["featurizer"] == featurizer_version
+
+
+def test_engine_versions_for_model_resolves_own_estimator_without_reverse_map(
+    monkeypatch,
+):
+    """packages_distributions() drops the import-package -> distribution reverse-map on
+    PEP 660 editable installs (a plain ``uv sync``, e.g. CI). A ``triage.*`` estimator
+    must still resolve — via the module-name fallback — and record the SAME versions the
+    mapped path would, so model identity is stable across install modes (regression for
+    the 'Cannot resolve a distribution for estimator module triage' crash)."""
+    monkeypatch.setattr(importlib.metadata, "packages_distributions", lambda: {})
+    versions = engine_versions_for(
+        "model",
+        "triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression",
+    )
+    v = importlib.metadata.version("triage")
+    assert versions == {"triage-pg": v, "triage": v}
+
+
+def test_engine_versions_for_model_still_raises_for_a_missing_module(monkeypatch):
+    """The module-name fallback resolves installed estimators by name but must not paper
+    over a genuinely absent distribution — that still fails loudly."""
+    monkeypatch.setattr(importlib.metadata, "packages_distributions", lambda: {})
+    with pytest.raises(ValueError, match="Cannot resolve a distribution"):
+        engine_versions_for("model", "totally_absent_pkg.Estimator")
