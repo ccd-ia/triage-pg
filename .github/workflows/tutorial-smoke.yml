@@ -52,6 +52,34 @@ jobs:
           db: food
           YAML
 
+      # `up --wait` only clears the container healthcheck (pg_isready over the local
+      # socket), which goes green while the postgres entrypoint is still running the
+      # /docker-entrypoint-initdb.d scripts against a socket-only temp server
+      # (listen_addresses=''). Host TCP 5440 isn't truly serving until init finishes
+      # and postgres restarts, so the first real connection can be dropped ("server
+      # closed the connection unexpectedly"). A human naturally waits (the tutorial's
+      # `pg_isready -h 127.0.0.1 -p 5440` gate fails during init); CI needs the same
+      # host-side gate — poll a real connection through the init→restart transition.
+      - name: Step 1c — wait for the DB to accept real connections (host TCP)
+        run: |
+          uv run python - <<'PY'
+          import time
+          import psycopg
+          dsn = "host=127.0.0.1 port=5440 user=food_user password=some_password dbname=food"
+          deadline = time.time() + 180
+          while True:
+              try:
+                  with psycopg.connect(dsn, connect_timeout=5) as conn:
+                      conn.execute("select 1")
+                  print("food DB is accepting real connections")
+                  break
+              except Exception as exc:
+                  if time.time() > deadline:
+                      raise
+                  print(f"waiting for the food DB to finish initdb... ({type(exc).__name__})")
+                  time.sleep(3)
+          PY
+
       - name: Step 2 — greenfield schema (idempotent alembic)
         run: uv run triage --dbfile dirtyduck-database.yaml db upgrade
 
