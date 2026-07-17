@@ -1,0 +1,394 @@
+#+TITLE: Methodology of the triage-pg Core Concepts
+#+AUTHOR: Adolfo De Unánue
+#+DATE: 2026-07-17
+#+KEYWORDS: point-in-time correctness, leakage, derivation DAG, content-addressing, ranking spine, problem_type, append-only, temporal machine learning
+#+LANGUAGE: en
+#+THEME: navy-gold
+#+OPTIONS: toc:1 tags:nil ^:nil ':t H:4 prop:nil todo:nil email:t num:3
+#+OPTIONS: eval:never-export
+#+PROPERTY: header-args :eval never-export :exports results
+#+SETUPFILE: ~/.config/org/export.setup
+#+SETUPFILE: ~/.config/org/babel-defaults.setup
+
+* Introduction
+:PROPERTIES:
+:CUSTOM_ID: sec:introduccion
+:END:
+
+triage-pg is a PostgreSQL-native framework for temporal machine learning on
+tabular public-policy data. Anyone can wire together a cohort query, some
+features, and a classifier; what is hard --- and what this document is about
+--- is making the resulting numbers *trustworthy* and *reproducible* enough to
+put in front of a partner agency and act on.
+
+Four design decisions carry that weight. They are documented tersely in the
+Architecture Decision Records (ADRs) as *what we decided*, and pedagogically on
+the docs site's Concepts pages as *how it works*. This companion is the third
+register: the *long why* --- the reasoning, the alternatives we rejected, and
+the failure modes each decision is defending against --- written for a mixed
+audience of partners, coworkers, and students who need to understand the
+approach, not just run it.
+
+The four foundations are:
+
+1. *Point-in-time correctness* and the imputation leakage boundary --- what
+   makes an offline metric honest.
+2. *Artifact identity and caching* --- a Guix-style derivation DAG that makes
+   every result reproducible and cacheable.
+3. *The ranking spine* --- treating the whole system as one
+   score → rank → evaluate pipeline that a ~problem_type~ discriminator
+   specializes.
+4. *The data model* --- one database per project plus a registry control
+   plane, append-only predictions, and matrices on object storage.
+
+The narrated, exhaustive reference for each lives on the docs site under
+/Concepts/; the terse decision boundary lives in the ADRs. This document
+explains why each was chosen over the alternatives.
+
+* Motivation --- why trustworthiness must be engineered
+:PROPERTIES:
+:CUSTOM_ID: sec:motivacion
+:END:
+
+A prioritization model that scores citizens, cases, or facilities is only
+useful if two properties hold that ordinary ML tooling does *not* give you for
+free:
+
+- *The offline estimate must predict the online reality.* The single most
+  common way this fails is *leakage*: the model is inadvertently shown, at
+  training time, information it could not possibly have at prediction time.
+  Leakage inflates cross-validation metrics and then collapses in production ---
+  the most expensive failure mode in applied ML because it is invisible until
+  deployment.
+- *A result must be reproducible and auditable.* Public-policy decisions are
+  contestable. "Model 42 said so" is not defensible unless one can answer, in
+  SQL, "exactly which inputs, code, and data versions produced Model 42, and
+  can we rebuild it bit-for-bit?"
+
+These are not features you bolt on afterward; they are properties of the
+substrate. The four foundations below each exist to guarantee one of them by
+construction, so that a correct pipeline is the path of least resistance and an
+incorrect one is hard to express.
+
+* Foundation 1 --- Point-in-time correctness and the imputation boundary
+:PROPERTIES:
+:CUSTOM_ID: sec:point-in-time
+:END:
+
+** The cardinal rule
+
+Every training and scoring example is a pair \((\text{entity}, \text{as\_of\_date})\).
+The *cardinal rule* is:
+
+#+begin_quote
+A feature computed for an ~as_of_date~ may use only data that was knowable
+*strictly before* that date.
+#+end_quote
+
+The subtlety is that "knowable before" is not "occurred before". A lab result
+dated last Tuesday may not have been *entered into the system* until this
+Friday. If a feature keys off the event date, it silently leaks the future. So
+triage-pg distinguishes the *knowledge date* --- when a fact became available
+--- from the *event date*, and every feature declares a ~knowledge_date_column~
+that must reflect the former. This is the difference between an honest backtest
+and a fantasy.
+
+** Why not a random train/test split?
+
+The default reflex from general ML --- shuffle the rows, hold out 20% --- is
+actively wrong here. A random split lets the model train on August to predict
+July; it learns from the future. Temporal problems require *temporal*
+validation: train on the past, test on a strictly later window. triage-pg's
+temporal splitting (inherited from ~timechop~) generates ~as_of_dates~ so that
+every split respects the arrow of time. The random split is not a weaker
+option; it is a different, wrong experiment.
+
+** The imputation leakage boundary
+
+Missing values are where leakage sneaks back in even after the split is
+correct. Imputing a missing feature with "the mean" is fitting a statistic ---
+and *if that mean is computed over the whole matrix, it has seen the test
+rows*. triage-pg therefore splits imputation into two regimes with a hard
+boundary between them (ADR-0009):
+
+#+latex: \rowcolors[]{1}{}{gray!10}
+#+attr_latex: :placement [H]
+#+attr_latex: :environment tabular :font \small :center t :booktabs t :rmlines t :align L{0.16\textwidth}|L{0.40\textwidth}|L{0.34\textwidth}
+#+caption: The two imputation regimes and the leakage boundary between them.
+#+name: tbl:imputation
+| Regime         | What it does                                                        | Where it runs                                    |
+|----------------+---------------------------------------------------------------------+--------------------------------------------------|
+| *Fit-free*     | Fill with a constant (0 for counts, a sentinel) + a ~*_imp~ missing-flag column | In the feature engine (featurizer); needs no data |
+| *Fit-based*    | Fill with a learned statistic (mean / median / mode)                | In the triage-pg adapter, *fitted on the training split only* |
+
+The rule that falls out is a single sentence a student can memorize: *never fit
+an imputation statistic over the full matrix.* The fit-based statistics are
+computed on the train split, persisted, and then *applied* --- never re-fitted
+--- to the test split. In the derivation DAG (Foundation 2) this shows up as an
+explicit edge: the test matrix takes the train matrix as a parent because it
+consumes the train-fitted statistics. The leakage boundary is not a coding
+convention one might forget; it is a structural property of the artifact graph.
+
+* Foundation 2 --- Artifact identity and caching
+:PROPERTIES:
+:CUSTOM_ID: sec:identity
+:END:
+
+** The requirement
+
+Every built artifact --- cohort, labels, feature group, matrix, model,
+predictions, evaluations --- must be able to answer, in SQL, "what exact inputs
+produced you?" and must be rebuilt bit-for-bit from those inputs. This is the
+reproducibility half of the motivation, and it is borrowed wholesale from
+functional package management: the Guix store (Courtès, 2013) gives a package a
+hash over its *complete build closure*, and four properties fall out for free.
+
+triage-pg applies the same idea to ML artifacts (ADR-0013 through ADR-0017). An
+artifact's identity --- its *Derivation* --- is a SHA-256 over four things,
+serialized as canonical JSON:
+
+#+begin_export latex
+\begin{align}
+\text{artifact\_id} = H\big(\; & \text{kind} \;\Vert\; \text{canonical}(\text{own\_config}) \nonumber \\
+   \;\Vert\; & \text{sorted}(\text{parent\_ids}) \;\Vert\; \text{sorted}(\text{source\_pins}) \;\Vert\; \text{sorted}(\text{engine\_versions}) \;\big) \label{eq:derivation}
+\end{align}
+#+end_export
+
+Because each parent's id is embedded, this is a *Merkle DAG*: a matrix's id
+embeds its cohort/label/feature ids, a model's id embeds its matrix id. Any
+upstream change ripples downward automatically. Four properties follow, exactly
+as in the Guix store:
+
+1. *Exact cache reuse* --- identical inputs yield an identical hash, so the
+   build is skipped.
+2. *Minimal incremental rebuilds* --- a changed input invalidates precisely its
+   downstream cone, nothing more.
+3. *Provenance* --- any artifact can report its full input closure in SQL.
+4. *Garbage collection by reachability* --- outputs unreachable from a retained
+   experiment root can be deleted (matters most for Parquet matrices on disk).
+
+** Why not hash the config text?
+
+The inherited DSSG triage hashes configuration *text*. That is fragile in both
+directions: a semantically identical config with reordered keys hashes
+differently (spurious cache misses), and --- worse --- two runs with the same
+config text but a *different code version or a different upstream data snapshot*
+hash identically (silent, dangerous cache *hits*). Hashing the full closure
+(equation \eqref{eq:derivation}) fixes both: ~source_pins~ (ADR-0014) fold the
+exact data snapshot into identity, and ~engine_versions~ (ADR-0016) fold the
+code into it.
+
+The estimator's own library version is part of *model* identity, because a
+model trained by ~scikit-learn~ 1.4 is not the same artifact as one trained by
+1.8. This is not academic: resolving that version robustly across installation
+modes was a real bug --- on an editable install the import-package-to-
+distribution map can be absent --- and the fix had to preserve identity exactly
+so that cache keys and published result hashes did not move.
+
+* Foundation 3 --- The ranking spine
+:PROPERTIES:
+:CUSTOM_ID: sec:ranking
+:END:
+
+triage-pg is, above all, a *prioritization* system: its job is to order
+entities so a limited intervention budget goes to the right ones. Its entire
+architecture is therefore one spine --- *produce a score → rank entities →
+evaluate the ranking* --- and the ~problem_type~ on an Experiment selects a few
+swaps on that spine (ADR-0010).
+
+#+latex: \rowcolors[]{1}{}{gray!10}
+#+attr_latex: :placement [H]
+#+attr_latex: :environment tabular :font \small :center t :booktabs t :rmlines t :align L{0.20\textwidth}|L{0.18\textwidth}|L{0.22\textwidth}|L{0.22\textwidth}
+#+caption: The four problem types as swaps on the score → rank → evaluate spine.
+#+name: tbl:problem-types
+| ~problem_type~       | score is…            | rank by…             | label columns              |
+|----------------------+----------------------+----------------------+----------------------------|
+| ~classification~     | \(P(y=1)\)           | descending probability | ~outcome~ (0/1)          |
+| ~regression_ranking~ | predicted value      | descending value       | ~outcome~ (continuous)   |
+| ~regression~         | predicted value      | descending value       | ~outcome~ (continuous)   |
+| ~survival~           | risk score           | descending risk        | ~duration, event_observed~ |
+
+Two consequences a practitioner must internalize. First, *the label columns
+follow the ~problem_type~* --- a hard contract the label query must satisfy
+(~outcome~ for most; the ~(duration, event_observed)~ pair for the survival
+path, ADR-0026). Second, ~problem_type~ is part of the Experiment's *identity*
+(ADR-0022): changing it is a *different problem*, not a new attempt at the same
+one.
+
+Orthogonal to all of this is ~task_framing~ (~early_warning~ /
+~resource_prioritization~ / ~visit_level~), which is identity-neutral metadata:
+it changes how one should *read* the numbers --- who gets a label and why ---
+not how they are computed.
+
+** Why one spine instead of per-problem pipelines?
+
+The alternative is a separate pipeline per problem type: a classification
+pipeline, a regression pipeline, a survival pipeline. That triples the surface
+area, triples the places a leakage or evaluation bug can hide, and makes
+cross-problem comparison incoherent. Collapsing everything to score → rank →
+evaluate means the temporal machinery, the imputation boundary, the identity
+DAG, and the evaluation code are written *once* and shared; only the three
+narrow swap points differ. The cost --- occasionally contorting a problem to
+fit the spine --- is far smaller than maintaining parallel stacks.
+
+* Foundation 4 --- The data model
+:PROPERTIES:
+:CUSTOM_ID: sec:data-model
+:END:
+
+** One database per project, plus a registry
+
+Each *Project* is one isolated PostgreSQL *database* in a shared cluster, and a
+dedicated *registry* database is the control plane holding projects, users,
+routing and connection info, permissions, and web-app auth (ADR-0002). Teardown
+is a single ~DROP DATABASE~; there is no risk of one project's rows bleeding
+into another's queries because cross-project SQL is, by construction, not
+native.
+
+The rejected alternative --- a single shared database with a ~project_id~
+column on every table (multi-tenancy by discriminator) --- is cheaper to set up
+and far more dangerous: every query must remember the ~WHERE project_id = …~
+filter, and the one that forgets silently mixes tenants. Isolation at the
+database boundary makes that class of bug impossible rather than merely
+discouraged.
+
+** What lives where
+
+Only *predictions* and *evaluations* live in Postgres. Matrices are Parquet and
+serialized models are binaries, both on the local filesystem or S3; the
+database holds only thin pointer rows. This keeps the database small and fast
+(metrics need only ~(entity_id, score, label)~, which is in Postgres regardless
+of where the matrices live) and lets large artifacts live on cheap object
+storage.
+
+#+latex: \rowcolors[]{1}{}{gray!10}
+#+attr_latex: :placement [H]
+#+attr_latex: :environment tabular :font \small :center t :booktabs t :rmlines t :align L{0.34\textwidth}|L{0.50\textwidth}
+#+caption: Where each kind of state lives.
+#+name: tbl:where
+| State                                     | Home                              |
+|-------------------------------------------+-----------------------------------|
+| predictions, evaluations, lineage         | the per-project ~triage~ schema (PostgreSQL) |
+| matrices, serialized models               | Parquet / binaries on local FS or S3 |
+| projects, users, routing, permissions     | the registry database             |
+
+** Append-only predictions: a score is not the latest score
+
+Every scoring run *inserts* prediction rows stamped with a ~scored_at~
+timestamp; nothing is ever overwritten (ADR-0006). The table is time-
+partitioned and kept forever by default. The consequence a reader must
+internalize is the counter-intuitive slogan: *a score is not the latest score.*
+A query that wants the "current" prediction for an entity must explicitly pick
+the row with the maximum ~scored_at~; the naive "select the score" returns a
+history, not a value.
+
+The rejected alternative --- upserting, so each entity has exactly one "current"
+score --- throws away the monitoring use case (drift, volume, calibration over
+time all need the history) and destroys auditability (one cannot reconstruct
+what the model said last quarter). Append-only is cheap insurance: storage is
+cheap, and the history is the raw material for monitoring.
+
+* Design choices at a glance
+:PROPERTIES:
+:CUSTOM_ID: sec:design-choices
+:END:
+
+#+latex: \rowcolors[]{1}{}{gray!10}
+#+attr_latex: :placement [H]
+#+attr_latex: :environment tabular :font \small :center t :booktabs t :rmlines t :align L{0.30\textwidth}|L{0.26\textwidth}|L{0.30\textwidth}
+#+caption: The four foundations as chosen-over-rejected decisions.
+#+name: tbl:choices
+| Decision                          | Chosen                          | Rejected (and why)                                   |
+|-----------------------------------+---------------------------------+------------------------------------------------------|
+| Validation split                  | temporal (train past → test future) | random split (learns from the future)            |
+| Imputation                        | fit-free + train-only fit-based | fit over the full matrix (leaks the test set)        |
+| Artifact identity                 | hash of the full input closure  | hash of config text (spurious misses, silent hits)   |
+| System shape                      | one score → rank → evaluate spine | per-problem pipelines (3× surface, incoherent comparison) |
+| Multi-project isolation           | one database per project        | shared DB + ~project_id~ filter (silent tenant mixing) |
+| Prediction storage                | append-only with ~scored_at~    | upsert (loses history + monitoring + audit)          |
+
+* Data and provenance
+:PROPERTIES:
+:CUSTOM_ID: sec:datos
+:END:
+
+The concepts above are not abstractions; they are enforced by specific code and
+schema. For readers who will maintain the system:
+
+- *Temporal splits* --- ~src/triage/component/timechop/~ turns a
+  ~temporal_config~ into the ~as_of_dates~ every split is built for.
+- *Imputation boundary* --- fit-free logic lives in the ~featurizer~ dependency;
+  fit-based logic in ~src/triage/adapters/{imputation,matrix}.py~, fitted on the
+  train split and persisted with the matrix.
+- *Derivation identity* --- ~src/triage/derivation.py~ (~engine_versions_for~,
+  the hashing) and ~src/triage/sources.py~ (source pinning); the schema lives in
+  ~artifacts~, ~artifact_inputs~, ~sources~, ~source_versions~.
+- *The ranking spine* --- ~src/triage/component/catwalk/~ (estimators, in-PG
+  evaluation) reads ~triage.prediction_ranks ⋈ triage.labels~.
+- *Append-only predictions* --- the ~predictions~ table, range-partitioned on
+  ~scored_at~; forward scoring is ~src/triage/adapters/forward.py~.
+- *Project isolation* --- ~src/triage/registry.py~ and
+  ~src/triage/project_lifecycle.py~ over the registry database.
+
+The full entity-relationship diagram is in [[file:erd.md][the ERD]]; the derivation DAG
+design is in [[file:derivation-dag.md][the derivation-DAG document]]; the schema rationale is in
+[[file:schema-design.md][the schema-design document]].
+
+* Assumptions and limitations
+:PROPERTIES:
+:CUSTOM_ID: sec:supuestos
+:END:
+
+- *Tabular, temporal data.* The whole apparatus assumes entities with dated
+  events. It is not a framework for images, free text, or non-temporal problems.
+- *Point-in-time correctness is only as good as the ~knowledge_date_column~.*
+  If a data provider back-dates records, or the declared knowledge date is
+  wrong, the framework cannot detect the resulting leakage --- it trusts the
+  declaration.
+- *Content-addressing assumes deterministic builds.* Non-deterministic feature
+  code or estimators (unseeded randomness) would produce identical hashes for
+  different outputs, breaking the cache-reuse guarantee. Seeds are recorded on
+  the run for this reason.
+- *Append-only storage grows without bound.* The default is keep-forever;
+  operators who score at high frequency must plan partition retention.
+- *One database per project* trades cross-project SQL for isolation. Genuinely
+  cross-project analysis must be done at the application layer, not in SQL.
+
+* Cross-references
+:PROPERTIES:
+:CUSTOM_ID: sec:referencias-cruzadas
+:END:
+
+- *Docs site --- Concepts* (the narrated "how"): =docs-site/src/content/docs/concepts/=
+  (point-in-time-correctness, identity-and-caching, problem-types-and-ranking,
+  the-data-model).
+- *Configuration reference* (every ~experiment.yaml~ key):
+  =docs-site/src/content/docs/reference/configuration.md=.
+- *Architecture Decision Records* (the terse "what"): ADR-0002 (database per
+  project), 0006 (append-only predictions), 0009 (imputation split), 0010
+  (ranking spine / survival labels), 0013--0017 (derivation identity, source
+  pins, node granularity, engine versions, GC), 0022 (experiment is the
+  problem), 0023 (feature groups), 0026 (survival + C-index) --- in
+  =docs/adr/=.
+- *Design documents*: [[file:derivation-dag.md][derivation-dag.md]], [[file:schema-design.md][schema-design.md]],
+  [[file:problem-types.md][problem-types.md]], [[file:erd.md][erd.md]].
+
+* Bibliography
+:PROPERTIES:
+:CUSTOM_ID: sec:referencias
+:END:
+
+- Courtès, L. (2013). "Functional Package Management with Guix". /European Lisp
+  Symposium (ELS)/. --- the content-addressed store whose closure-hashing idea
+  the derivation DAG adapts to ML artifacts.
+- Kanter, J. M. & Veeramachaneni, K. (2015). "Deep Feature Synthesis: Towards
+  Automating Data Science Endeavors". /IEEE International Conference on Data
+  Science and Advanced Analytics (DSAA)/, 1--10. --- the DFS method the feature
+  engine (featurizer) implements in SQL.
+- Bauman, M. J., Salomon, E., Walsh, J., et al. (2018). "Reducing Incarceration
+  through Prioritized Interventions". /ACM SIGCAS Conference on Computing and
+  Sustainable Societies (COMPASS)/. --- an application of the DSSG triage
+  methodology this project forks and simplifies.
+- Ghani, R. et al. Center for Data Science and Public Policy, University of
+  Chicago. /triage/ (software). https://github.com/dssg/triage --- the upstream
+  framework and the source of the temporal-validation and cohort methodology.
