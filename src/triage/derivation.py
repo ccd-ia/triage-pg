@@ -195,14 +195,23 @@ def engine_versions_for(
                 + " — the estimator library's version enters model identity (ADR-0016)"
             )
         top_module = estimator_class_path.split(".")[0]
+        # packages_distributions() reverse-maps an import package -> distribution via
+        # top_level.txt / RECORD, which PEP 660 editable installs (a plain `uv sync`
+        # of this project, e.g. in CI) frequently omit — so our own `triage.*`
+        # estimators resolve to nothing even though the distribution IS installed.
+        # Fall back to the module name as the distribution name (holds for triage,
+        # sklearn, sksurv, …); the resolved (name, version) match what
+        # packages_distributions() returns when the reverse-map is present, so model
+        # identity is unchanged across editable/non-editable installs.
         distributions = importlib.metadata.packages_distributions().get(top_module)
-        if not distributions:
+        name = distributions[0] if distributions else top_module
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
             raise ValueError(
                 f"Cannot resolve a distribution for estimator module {top_module!r}"
                 + f" (from {estimator_class_path!r}); is it installed?"
-            )
-        name = distributions[0]
-        versions[name] = importlib.metadata.version(name)
+            ) from None
     return versions
 
 
