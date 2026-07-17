@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: Docs Densification — Concepts, Config Reference, README, FAQ</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --fg: #0f172a;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --accent: #0f766e;      /* teal — Concepts (the "why") */
+  --accent-2: #4f46e5;    /* indigo — Config reference (the contracts) */
+  --accent-3: #b45309;    /* amber — README + FAQ (the front door) */
+  --muted: #64748b;
+  --ok: #15803d;
+  --warn: #b91c1c;
+  --code-bg: #f1f5f9;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.6 -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+}
+main { max-width: 980px; margin: 0 auto; padding: 40px 28px 120px; }
+h1 { font-size: 1.7rem; line-height: 1.25; letter-spacing: -0.02em; margin: 0 0 10px; }
+h2 {
+  font-size: 1.25rem; margin: 48px 0 12px; padding-bottom: 6px;
+  border-bottom: 2px solid var(--accent); letter-spacing: -0.01em;
+}
+h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+h4 { font-size: 0.95rem; margin: 20px 0 6px; color: #1e293b; }
+p { margin: 8px 0; }
+code {
+  font-family: var(--mono); font-size: 0.85em;
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; font-size: 0.85em;
+}
+pre code { background: none; border: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+figure { margin: 24px auto; text-align: center; }
+figure svg { max-width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: 0.85em; margin-top: 8px; }
+.meta { margin: 12px 0 4px; }
+.meta summary { cursor: pointer; color: var(--muted); font-size: 0.9em; }
+.meta dl {
+  display: grid; grid-template-columns: 130px 1fr; gap: 4px 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 18px; margin: 10px 0; font-size: 0.85em;
+}
+.meta dt { color: var(--muted); font-weight: 600; }
+.meta dd { margin: 0; font-family: var(--mono); font-size: 0.95em; word-break: break-all; }
+.tag {
+  display: inline-block; font-size: 0.72em; font-weight: 700; text-transform: uppercase;
+  border-radius: 4px; padding: 1px 7px; margin-right: 6px; letter-spacing: 0.03em;
+}
+.tag.existing { background: #e0f2fe; color: #075985; }
+.tag.new { background: #dcfce7; color: #166534; }
+.files ul { list-style: none; padding-left: 0; }
+.files li { margin: 5px 0; }
+.phase {
+  background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  border-radius: 10px; padding: 18px 24px; margin: 22px 0;
+}
+.phase.config { border-left-color: var(--accent-2); }
+.phase.frontdoor { border-left-color: var(--accent-3); }
+.phase h3 { margin-top: 0; }
+.checklist { list-style: none; padding-left: 6px; }
+.checklist li { margin: 7px 0; padding-left: 2px; }
+code.status {
+  background: #fff7ed; border-color: #fdba74; color: #9a3412;
+  font-weight: 700; min-width: 34px; display: inline-block; text-align: center;
+}
+.loop {
+  background: #fefce8; border: 1px solid #fde047; border-radius: 8px;
+  padding: 10px 14px; margin: 14px 0 4px; font-size: 0.9em;
+}
+details { margin: 10px 0; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
+details summary { cursor: pointer; font-weight: 600; }
+.qa-answer { color: #334155; }
+.callout {
+  border-left: 4px solid var(--accent-2); background: #eef2ff;
+  border-radius: 0 8px 8px 0; padding: 10px 16px; margin: 14px 0; font-size: 0.93em;
+}
+.callout.amber { border-left-color: var(--accent-3); background: #fffbeb; }
+.small { font-size: 0.85em; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: Docs Densification — Concepts, Config Reference, README, FAQ</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-07-17T11:38:00-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-17T11:38:00-06:00, 2026-07-17T11:56:00-06:00 (BUILT — all 4 phases; 6 new site pages + nav + README + drift test; site build + links-validator green; drift test passing; UNCOMMITTED pending review)</dd>
+        <dt>commits</dt>      <dd>6967382c (HEAD at planning + build; docs changes staged in the working tree, uncommitted pending maintainer review)</dd>
+        <dt>agent name</dt>   <dd>Opus 4.8 (1M context) (claude-opus-4-8[1m])</dd>
+        <dt>session id</dt>   <dd>2269219f-a14c-4ada-a75b-e55b67c89ad6</dd>
+        <dt>back refs</dt>    <dd>featurizer docs comparison (https://ccd-ia.github.io/featurizer/), CLAUDE.md (Common Gotchas), docs/adr/0001–0028, CONTEXT.md, docs/derivation-dag.md, docs/schema-design.md, src/triage/adapters/run.py (validate_experiment_config / _KNOWN_TOP_LEVEL_KEYS), specs/dssg-style-tutorials-github-pages.html</dd>
+        <dt>forward refs</dt> <dd>docs-site/src/content/docs/concepts/*, docs-site/src/content/docs/reference/configuration.md, docs-site/src/content/docs/faq.md, README.md, docs-site/astro.config.mjs</dd>
+      </dl>
+    </details>
+  </header>
+
+  <figure>
+    <svg viewBox="0 0 860 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four docs deliverables raise the site's depth to match the engine">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#64748b"/>
+        </marker>
+      </defs>
+      <rect x="20" y="18" width="196" height="38" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="1.5"/>
+      <text x="118" y="42" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="600" fill="#0f766e">Concepts (the why)</text>
+      <rect x="20" y="62" width="196" height="38" rx="8" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+      <text x="118" y="86" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="600" fill="#4f46e5">Config reference</text>
+      <rect x="20" y="106" width="196" height="38" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+      <text x="118" y="130" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="600" fill="#b45309">Richer README</text>
+      <rect x="20" y="150" width="196" height="38" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+      <text x="118" y="174" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="600" fill="#b45309">FAQ</text>
+      <line x1="216" y1="37" x2="330" y2="95" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="216" y1="81" x2="330" y2="100" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="216" y1="125" x2="330" y2="106" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="216" y1="169" x2="330" y2="111" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <rect x="340" y="74" width="200" height="58" rx="8" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+      <text x="440" y="99" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="600" fill="#0f172a">Astro Starlight site</text>
+      <text x="440" y="118" text-anchor="middle" font-family="var(--mono),monospace" font-size="12" fill="#64748b">tutorials-first, now deep</text>
+      <line x1="540" y1="103" x2="632" y2="103" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      <rect x="642" y="76" width="196" height="54" rx="27" fill="#0f766e"/>
+      <text x="740" y="100" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="#ffffff">depth ≈ the engine</text>
+      <text x="740" y="119" text-anchor="middle" font-family="var(--mono),monospace" font-size="12" fill="#ccfbf1">no page-count bloat</text>
+    </svg>
+    <figcaption>Four focused deliverables raise the published site's depth to match featurizer's — without abandoning the tutorial-first shape.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>Close the <strong>conceptual-depth gap</strong> between triage-pg's published docs
+    (<a href="https://ccd-ia.github.io/triage-pg/">ccd-ia.github.io/triage-pg</a>) and
+    featurizer's (<a href="https://ccd-ia.github.io/featurizer/">ccd-ia.github.io/featurizer</a>)
+    by adding four docs surfaces — a <strong>Concepts</strong> section, a
+    <strong>configuration reference</strong>, a <strong>richer README</strong>, and an
+    <strong>FAQ</strong> — authored as pages on the existing Astro Starlight site and sourced
+    entirely from durable artifacts already in the repo (ADRs, <code>CONTEXT.md</code>,
+    <code>docs/derivation-dag.md</code>, the config validator, and the CLAUDE.md "Common
+    Gotchas"). The bar is <em>depth, not page count</em>: triage-pg's tutorial-first shape is
+    correct for an application and stays; what's missing is the pedagogical "why" and the
+    contracts, which today live only in engineer-facing ADRs and scattered notes.</p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>Both projects use the <strong>same tooling</strong> (Astro Starlight, same maintainer),
+    so the density difference is not a stack advantage. It is structural + a real gap:</p>
+    <ul>
+      <li><strong>Structural (legitimate):</strong> featurizer is a <em>library</em> with a big,
+      stable API surface — 150 feature primitives, a config schema, extensibility registries,
+      output-format contracts. Libraries are reference-dense by nature; its README is ~2×
+      triage-pg's (26&nbsp;KB vs 14&nbsp;KB) and ~60% conceptual. triage-pg is an
+      <em>application/pipeline</em> whose value is the end-to-end flow via CLI + dashboard —
+      correctly tutorial-shaped.</li>
+      <li><strong>Real gap (to close):</strong> featurizer surfaces a <code>concepts/phi-theory</code>
+      page, an <code>engineering/internals</code> page, an FAQ, and a full config-schema
+      reference. triage-pg's deep "why" — point-in-time correctness, the derivation-DAG identity,
+      the fit-free/fit-based imputation boundary, the ranking spine + <code>problem_type</code>,
+      append-only predictions — lives <em>only</em> in the ADRs (decision records for engineers,
+      not learner pedagogy) and in CLAUDE.md gotchas. The published site has strong tutorials +
+      thin reference, but <strong>no concepts, no config reference, no FAQ</strong>.</li>
+    </ul>
+    <figure>
+      <svg viewBox="0 0 820 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="featurizer docs are deep; triage-pg docs have a concepts gap">
+        <text x="205" y="24" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="15" font-weight="700" fill="#0f172a">featurizer (deep)</text>
+        <rect x="40" y="36" width="330" height="30" rx="6" fill="#ccfbf1" stroke="#0f766e"/>
+        <text x="205" y="56" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#0f766e">Concepts · phi-theory</text>
+        <rect x="40" y="72" width="330" height="30" rx="6" fill="#e0e7ff" stroke="#4f46e5"/>
+        <text x="205" y="92" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#4f46e5">Reference · 150 primitives + config</text>
+        <rect x="40" y="108" width="330" height="30" rx="6" fill="#fef3c7" stroke="#b45309"/>
+        <text x="205" y="128" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#b45309">FAQ · Engineering internals</text>
+        <rect x="40" y="144" width="330" height="30" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+        <text x="205" y="164" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Notebooks · walkthrough</text>
+        <text x="615" y="24" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="15" font-weight="700" fill="#0f172a">triage-pg (today)</text>
+        <rect x="450" y="36" width="330" height="30" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+        <text x="615" y="56" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Tutorials · 4 verbatim (strong)</text>
+        <rect x="450" y="72" width="330" height="30" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+        <text x="615" y="92" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Reference · architecture/cli/dashboard/problems</text>
+        <rect x="450" y="108" width="330" height="66" rx="6" fill="#fff1f2" stroke="#b91c1c" stroke-dasharray="5 4"/>
+        <text x="615" y="134" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" font-weight="700" fill="#b91c1c">GAP: Concepts · Config ref · FAQ</text>
+        <text x="615" y="156" text-anchor="middle" font-size="12" font-family="-apple-system,sans-serif" fill="#b91c1c">"why" is buried in ADRs + gotchas</text>
+      </svg>
+      <figcaption>featurizer publishes its "why" and contracts as first-class pages; triage-pg's equivalent lives only in ADRs and CLAUDE.md.</figcaption>
+    </figure>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>Four self-contained docs deliverables, each a phase, all landing on the existing
+    <code>docs-site/</code> (Astro Starlight) and sourced from in-repo durable artifacts so no
+    new "truth" is invented — the plan is transcription + synthesis, not design:</p>
+    <ol>
+      <li><strong>Concepts section</strong> (the anchor) — a <code>concepts/</code> group of
+      focused pages turning the ADRs' short "why" into learner-facing pedagogy.</li>
+      <li><strong>Configuration reference</strong> — one authoritative <code>experiment.yaml</code>
+      page keyed to the validator's <code>_KNOWN_TOP_LEVEL_KEYS</code>, with a drift check.</li>
+      <li><strong>Richer README</strong> — inline the load-bearing contracts + link the Concepts
+      pages, mirroring featurizer's contract-forward README shape.</li>
+      <li><strong>FAQ</strong> — cheap, high-ROI Q/A built from real bug classes and gotchas
+      (including the editable-install fix shipped this session).</li>
+    </ol>
+    <p>English-first; the Spanish <code>/es/</code> mirror is handled per a decision in
+    <a href="#questionables">Questionables</a>. Navigation is updated in
+    <code>astro.config.mjs</code>; the whole thing is validated by the site build + its
+    links-validator (the same gate <code>docs-pages.yml</code> already enforces).</p>
+    <figure>
+      <svg viewBox="0 0 820 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="new sidebar groups slot into the existing Starlight nav">
+        <text x="180" y="22" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="#0f172a">Sidebar — before</text>
+        <rect x="60" y="34" width="240" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+        <text x="80" y="60" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Start here</text>
+        <text x="80" y="92" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Tutorials</text>
+        <text x="80" y="124" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Reference</text>
+        <text x="640" y="22" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="#0f172a">Sidebar — after</text>
+        <rect x="520" y="34" width="240" height="180" rx="8" fill="#ffffff" stroke="#0f766e"/>
+        <text x="540" y="58" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Start here · <tspan fill="#b45309" font-weight="700">FAQ</tspan></text>
+        <text x="540" y="86" font-size="13" font-family="-apple-system,sans-serif" fill="#0f766e" font-weight="700">Concepts (new)</text>
+        <text x="540" y="114" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Tutorials</text>
+        <text x="540" y="142" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">Reference · <tspan fill="#4f46e5" font-weight="700">Configuration</tspan></text>
+        <text x="540" y="186" font-size="11" font-family="var(--mono),monospace" fill="#94a3b8">README enriched (GitHub front page)</text>
+        <line x1="300" y1="110" x2="518" y2="110" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+      </svg>
+      <figcaption>Additive: a Concepts group + a Configuration reference + an FAQ entry slot into the current nav; no existing URLs move.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>docs-site/astro.config.mjs</code> — Starlight sidebar/locale config; add a "Concepts" group + an FAQ entry (with es label translations), matching the established <code>translations: { es: … }</code> pattern.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/reference/{architecture,cli,dashboard,problems}.md</code> — the reference-page pattern to imitate (frontmatter, tone, cross-links); <code>problems.md</code> already covers some conceptual ground and must be cross-linked, not duplicated.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/run.py</code> — <code>validate_experiment_config</code> + <code>_KNOWN_TOP_LEVEL_KEYS</code>: the <strong>source of truth</strong> for the config reference (and the drift-check target).</li>
+      <li><span class="tag existing">existing</span> <code>docs/adr/0001–0028</code>, <code>docs/adr-conformance.md</code> — the "short why" the Concepts pages translate into pedagogy (esp. 0002, 0006, 0009, 0010, 0013–0017, 0022, 0023, 0026).</li>
+      <li><span class="tag existing">existing</span> <code>CONTEXT.md</code> — the 24-term glossary; Concepts + Config pages must use these terms exactly and can link to it.</li>
+      <li><span class="tag existing">existing</span> <code>docs/derivation-dag.md</code>, <code>docs/schema-design.md</code>, <code>docs/problem-types.md</code>, <code>docs/monitoring.md</code> — deeper prose to distill (identity/caching, data model, ranking spine, append-only scoring).</li>
+      <li><span class="tag existing">existing</span> <code>CLAUDE.md</code> ("Common Gotchas") — the load-bearing contracts to inline into the README + seed the FAQ.</li>
+      <li><span class="tag existing">existing</span> <code>README.md</code> — the GitHub front page to enrich (Phase 3).</li>
+      <li><span class="tag existing">existing</span> <code>example/dirtyduck/*.yaml</code> — real, runnable configs the Config reference and FAQ cite as canonical examples.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/es/**</code> — the Spanish mirror; scope decided in Questionables.</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/concepts/index.md</code> — Concepts landing: the mental model + a map to the focused pages, ADRs, and CONTEXT.md.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/concepts/point-in-time-correctness.md</code> — the cardinal rule; knowledge-date vs event-date; the fit-free/fit-based imputation split as the leakage boundary (ADR-0009).</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/concepts/identity-and-caching.md</code> — the derivation DAG (Guix-style identity over the full input closure; ADRs 0013–0017), source pins + engine versions in the hash, cache reuse + GC.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/concepts/problem-types-and-ranking.md</code> — the score→rank→evaluate spine, the four <code>problem_type</code>s, label columns by problem type, <code>task_framing</code> (ADR-0010/0026).</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/concepts/the-data-model.md</code> — database-per-project + registry (ADR-0002), append-only predictions (ADR-0006), matrices-are-Parquet-not-PG; what lives where.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/reference/configuration.md</code> — the authoritative <code>experiment.yaml</code> schema reference.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/faq.md</code> — the FAQ.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/es/**</code> mirrors of the above — <em>conditional</em> on the es-parity decision (Questionables).</li>
+      <li><span class="tag new">new</span> <code>scripts/check_config_reference_drift.py</code> (or a pytest) — asserts every <code>_KNOWN_TOP_LEVEL_KEYS</code> entry is documented in <code>reference/configuration.md</code> (guards the reference against validator drift).</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <!-- ===== PHASE 1 — CONCEPTS ===== -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 1: Concepts section (the anchor)</h3>
+      <p>Turn the ADRs' short "why" into learner-facing pedagogy as a <code>concepts/</code>
+      group of focused pages. Each page is transcription + synthesis from cited artifacts —
+      no new design decisions. Use <code>CONTEXT.md</code> terms exactly; cross-link to the
+      relevant ADR for the "short why" and to <code>reference/</code> pages for the "how".</p>
+
+      <h4>1. Author <code>concepts/index.md</code> (the map)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Frontmatter (title "Concepts", sidebar order) matching the existing reference pages; a 2–3 paragraph mental model (cohort → features → matrices → train → predict → evaluate) that names each concept page.</li>
+        <li><code class="status">[x]</code> A short "how the docs are organized" note: Concepts = the why, Tutorials = do it, Reference = every knob, ADRs = the decision record. Link CONTEXT.md + docs/README.md.</li>
+      </ul>
+
+      <h4>2. Author <code>concepts/point-in-time-correctness.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> The cardinal rule: features for an <code>as_of_date</code> may use only data knowable <em>strictly before</em> it; knowledge-date vs event-date (the <code>knowledge_date_column</code> contract).</li>
+        <li><code class="status">[x]</code> The fit-free (featurizer) vs fit-based (triage-pg adapter, train-split-only) imputation split as the leakage boundary — cite ADR-0009; state "never fit a statistic over the full matrix".</li>
+        <li><code class="status">[x]</code> A worked timeline example (as_of_date, feature window, label window) — prose + one inline diagram; no runnable-command contract.</li>
+      </ul>
+
+      <h4>3. Author <code>concepts/identity-and-caching.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> The derivation DAG: Guix-style identity over the full input closure; what enters a node's hash (config, source pins, engine versions) per kind — distill <code>docs/derivation-dag.md</code> + ADRs 0013–0017.</li>
+        <li><code class="status">[x]</code> Cache reuse + GC (<code>triage gc</code>/<code>archive</code>): artifacts reused by identity; source pinning (ADR-0014) makes closures cacheable. Use the editable-install engine-version fix (this session's <code>0a4a7c55</code>) as a one-line concrete illustration of "engine version enters model identity" (ADR-0016).</li>
+      </ul>
+
+      <h4>4. Author <code>concepts/problem-types-and-ranking.md</code> and <code>concepts/the-data-model.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> ranking page: the score→rank→evaluate spine; the four <code>problem_type</code>s (classification / regression_ranking / regression / survival); <strong>label columns follow problem_type</strong> (<code>outcome</code> | <code>duration, event_observed</code>); <code>task_framing</code> is identity-neutral (ADR-0010, 0026; link docs/problem-types.md).</li>
+        <li><code class="status">[x]</code> data-model page: database-per-project + registry (ADR-0002); <strong>append-only predictions</strong> — "a score is not the latest score" (ADR-0006); matrices are Parquet on FS/S3, only predictions + evaluations live in PG. Link docs/schema-design.md + docs/erd.md.</li>
+        <li><code class="status">[x]</code> Register the Concepts group in <code>astro.config.mjs</code> (with <code>translations: { es: 'Conceptos' }</code>) between "Start here" and "Tutorials"; verify page order.</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>Prose pages carry no verbatim-command contract, so validation is the Starlight build
+      (which runs the links-validator that already gates <code>docs-pages.yml</code>) plus a
+      manual nav/scan check. Any ADR/CONTEXT/reference link must resolve.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>cd docs-site && npm ci && npm run build</code> — the site builds and the links-validator passes with the new Concepts pages + cross-links.</li>
+        <li><code class="status">[x]</code> <code>npm run build 2>&amp;1 | grep -i "broken\|missing\|error"</code> returns nothing — no dangling internal links from the Concepts pages.</li>
+        <li><code class="status">[x]</code> Manual: <code>just docs-site</code> preview shows the "Concepts" group with all 5 pages in order; each page's ADR/CONTEXT links open.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ===== PHASE 2 — CONFIG REFERENCE ===== -->
+    <div class="phase config">
+      <h3><code class="status">[x]</code> Phase 2: Configuration reference</h3>
+      <p>One authoritative <code>experiment.yaml</code> reference page, keyed to the validator so
+      it can't silently drift. This is the single biggest "reference-density" win and mirrors
+      featurizer's dedicated config-schema page.</p>
+
+      <h4>1. Author <code>reference/configuration.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> A top-level key table covering every entry of <code>_KNOWN_TOP_LEVEL_KEYS</code>: <code>problem_type, cohort_config, label_config, temporal_config, feature_config, grid_config, imputation_config, bias_config, evaluation, sources, task_framing, name, description, config_version</code> — for each: purpose · required/optional · shape · the contract.</li>
+        <li><code class="status">[x]</code> Document the query-placeholder contracts: cohort/subset queries need <code>{as_of_date}</code>; label queries need <code>{as_of_date}</code> + <code>{label_timespan}</code>; bias query needs <code>{as_of_date}</code> (mirror the validator's exact error strings).</li>
+        <li><code class="status">[x]</code> Document label columns by <code>problem_type</code>, grid <code>class_path</code>s (sklearn.* vs triage.*), imputation rules (fit-free vs fit-based → link Concepts), <code>feature_groups</code> nesting under <code>feature_config</code> (ADR-0023), subsets, and the <code>task_framing</code> enum.</li>
+        <li><code class="status">[x]</code> Cite the canonical examples (<code>example/dirtyduck/experiment.yaml</code> + the framing/problem-type siblings) and the <code>triage analyze-config</code> dry-run; cross-link the Concepts pages instead of re-explaining the why.</li>
+        <li><code class="status">[x]</code> It's a new file under <code>reference/</code> (autogenerated sidebar group) — confirm it lands in the Reference nav; add es label only if the es decision is "now".</li>
+      </ul>
+
+      <h4>2. Add the drift guard</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add <code>scripts/check_config_reference_drift.py</code> (or <code>src/tests/test_docs_config_reference.py</code>) that imports <code>_KNOWN_TOP_LEVEL_KEYS</code> and asserts each key appears verbatim in <code>reference/configuration.md</code> — so adding a config key later fails CI until documented.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>Correctness = "the page matches the validator". Validate mechanically (the drift check),
+      then via the site build.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run python scripts/check_config_reference_drift.py</code> (or <code>uv run pytest src/tests/test_docs_config_reference.py</code>) — every <code>_KNOWN_TOP_LEVEL_KEYS</code> entry is documented; exits 0.</li>
+        <li><code class="status">[x]</code> <code>uv run triage --dbfile dirtyduck-database.yaml analyze-config example/dirtyduck/experiment.yaml</code> — the example the page cites still validates clean (the page's contracts are real).</li>
+        <li><code class="status">[x]</code> <code>cd docs-site && npm run build</code> — builds, links-validator clean, Configuration appears under Reference.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ===== PHASE 3 — README ===== -->
+    <div class="phase frontdoor">
+      <h3><code class="status">[x]</code> Phase 3: Richer README</h3>
+      <p>Bring the GitHub front page toward featurizer's contract-forward shape by inlining the
+      load-bearing contracts (today only in CLAUDE.md gotchas) and linking the new Concepts pages.
+      README stays the repo front page — not a site page.</p>
+
+      <h4>1. Enrich <code>README.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add a "Core contracts / concepts at a glance" section inlining: point-in-time correctness; <em>a score is not the latest score</em> (append-only, pick max <code>scored_at</code>); matrices are Parquet not PG; label columns follow <code>problem_type</code>; the fit-free/fit-based imputation leakage boundary.</li>
+        <li><code class="status">[x]</code> Add a "Why triage-pg" framing + a docs map linking the new Concepts pages, the Configuration reference, and the FAQ (relative links that also work on GitHub and, where applicable, the site).</li>
+        <li><code class="status">[x]</code> Keep it lean — do NOT copy featurizer page-for-page; the goal is the contracts + pointers, not a second tutorial.</li>
+      </ul>
+
+      <h4>2. Testing Strategy</h4>
+      <p>README is Markdown rendered by GitHub; validate links resolve and the contracts match the ADRs.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run python -c "import re,sys,pathlib; [print('DEAD',m) for m in re.findall(r']\(([^)]+\.md[^)]*)\)', pathlib.Path('README.md').read_text()) if not pathlib.Path(m.split('#')[0]).exists()]"</code> — no README relative link points at a missing file (prints nothing).</li>
+        <li><code class="status">[x]</code> Manual: each inlined contract is traceable to its ADR (0006, 0009, 0010) / CONTEXT.md term; no claim without a source.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ===== PHASE 4 — FAQ ===== -->
+    <div class="phase frontdoor">
+      <h3><code class="status">[x]</code> Phase 4: FAQ</h3>
+      <p>A cheap, high-ROI <code>faq.md</code> built from real bug classes and gotchas — the
+      questions a user actually hits. Each answer cites a real ADR / commit / CLI so it stays
+      honest and maintainable.</p>
+
+      <h4>1. Author <code>faq.md</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> "Why did my run produce 0-entity matrices?" → cohort/labels identity must include <code>as_of_dates</code> (the fixed silent-partial-cache-reuse class); link Concepts › identity.</li>
+        <li><code class="status">[x]</code> "Why isn't my latest score the latest?" → append-only predictions; read the max <code>scored_at</code> (ADR-0006).</li>
+        <li><code class="status">[x]</code> "<code>Cannot resolve a distribution for estimator module 'triage'</code>" → the editable-install resolution fix (this session, <code>0a4a7c55</code>); update triage-pg / re-<code>uv sync</code>.</li>
+        <li><code class="status">[x]</code> "How do I add an estimator?" → grid <code>class_path</code>; <code>sklearn.*</code> vs <code>triage.*</code> (e.g. <code>ScaledLogisticRegression</code>); the version enters model identity.</li>
+        <li><code class="status">[x]</code> "My feature group is ignored" → top-level <code>feature_groups</code> must nest under <code>feature_config</code> (ADR-0023; the validator now warns).</li>
+        <li><code class="status">[x]</code> "<code>triage score</code> scattered Parquets into my cron dir" → it now defaults <code>--project-path</code> to the model's own artifact root; pass the flag only to redirect.</li>
+        <li><code class="status">[x]</code> Tutorial-DB gotchas: the git-ignored <code>dirtyduck-database.yaml</code> (create it) + waiting for the food DB to finish <code>initdb</code> before connecting (both surfaced by the tutorial-smoke fixes this session).</li>
+        <li><code class="status">[x]</code> Add FAQ to the "Start here" sidebar group (with <code>es</code> label if es-now); English-first otherwise.</li>
+      </ul>
+
+      <h4>2. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>cd docs-site && npm run build</code> — builds, links-validator clean, FAQ reachable from the sidebar.</li>
+        <li><code class="status">[x]</code> Manual: every answer names a real ADR / commit / CLI flag; no invented behavior.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these to validate the whole plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[x]</code> <code>cd docs-site && npm ci && npm run build</code> — the full site builds green with the links-validator clean (the same gate <code>.github/workflows/docs-pages.yml</code> enforces on deploy).</li>
+      <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_docs_config_reference.py</code> (or the script) — the config reference covers every <code>_KNOWN_TOP_LEVEL_KEYS</code> entry; no validator drift.</li>
+      <li><code class="status">[x]</code> <code>uv run triage --dbfile dirtyduck-database.yaml analyze-config example/dirtyduck/experiment.yaml</code> — the config example the reference cites still validates clean.</li>
+      <li><code class="status">[x]</code> Manual nav audit in <code>just docs-site</code>: Concepts group (5 pages) present, Configuration under Reference, FAQ under Start here; no existing URL moved.</li>
+      <li><code class="status">[x]</code> If es-now was chosen: es code blocks byte-identical to en (<code>diff</code> per page); Starlight builds both locales; else confirm untranslated pages fall back to the default locale (no 404).</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+    <figure>
+      <svg viewBox="0 0 760 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="the two forks: concepts surface and es parity timing">
+        <rect x="30" y="30" width="200" height="60" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+        <text x="130" y="56" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" font-weight="700" fill="#0f766e">Site pages</text>
+        <text x="130" y="76" text-anchor="middle" font-size="11" font-family="-apple-system,sans-serif" fill="#64748b">closes the compared surface ✓</text>
+        <text x="300" y="64" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#94a3b8">vs</text>
+        <rect x="360" y="30" width="200" height="60" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="4 4"/>
+        <text x="460" y="56" text-anchor="middle" font-size="13" font-family="-apple-system,sans-serif" fill="#475569">metodologia .org</text>
+        <text x="460" y="76" text-anchor="middle" font-size="11" font-family="-apple-system,sans-serif" fill="#94a3b8">later PDF companion</text>
+        <rect x="600" y="30" width="130" height="60" rx="8" fill="#fffbeb" stroke="#b45309" stroke-width="1.5"/>
+        <text x="665" y="56" text-anchor="middle" font-size="12" font-family="-apple-system,sans-serif" font-weight="700" fill="#b45309">es: defer</text>
+        <text x="665" y="76" text-anchor="middle" font-size="11" font-family="-apple-system,sans-serif" fill="#b45309">en-first</text>
+      </svg>
+      <figcaption>The two decisions that shape scope: where Concepts live, and whether Spanish parity happens now.</figcaption>
+    </figure>
+
+    <details open>
+      <summary>Concepts as Starlight site pages, or <code>docs/metodologia_*.org</code>?</summary>
+      <p class="qa-answer"><strong>Recommend: site pages.</strong> The gap being closed is the
+      <em>published site</em> (that's what's compared to featurizer's <code>phi-theory</code> page).
+      The <code>metodologia</code> skill (→ <code>docs/metodologia_*.org</code>, per CLAUDE.md) is
+      the "long pedagogical why" for partners/students as a PDF — a valuable <em>complementary</em>
+      artifact that can be seeded from the Concepts prose later, but it is a different surface and
+      does not make the site denser. Site pages now; metodologia in Notes as future work.</p>
+    </details>
+
+    <details>
+      <summary>Spanish <code>/es/</code> parity now, or English-first?</summary>
+      <p class="qa-answer"><strong>Recommend: English-first, defer es.</strong> The site's
+      es mirror carries a byte-identical-code-block contract (verified last session) that roughly
+      doubles authoring cost. Starlight renders the default-locale page for untranslated routes, so
+      partial coverage does not 404 (<strong>verify this behavior in the build during Phase 1</strong> —
+      if fallback is off, either enable it or accept es as a fast-follow). Land en, then mirror es in a
+      dedicated follow-up (same 4-agent pattern used for the existing 10 pages).</p>
+    </details>
+
+    <details>
+      <summary>Concepts: one dense page (like phi-theory) or several focused pages?</summary>
+      <p class="qa-answer"><strong>Recommend: 4 focused pages + an index.</strong> featurizer has
+      essentially one big idea (DFS/φ). triage-pg has several genuinely distinct concepts
+      (point-in-time correctness, identity/caching, the ranking spine, the data model) that map
+      cleanly to separate ADRs and read better split — matching the existing multi-page
+      <code>reference/</code> pattern. Keep it to ~4 to avoid sprawl.</p>
+    </details>
+
+    <details>
+      <summary>Config reference: hand-authored or generated from the validator?</summary>
+      <p class="qa-answer"><strong>Recommend: hand-authored now, guarded by a drift check.</strong>
+      A generated schema page (from a pydantic/JSON-schema model) is more robust but the config is
+      currently validated procedurally in <code>run.py</code>, not via a single declarative schema —
+      generating it is its own project. Hand-author with the <code>_KNOWN_TOP_LEVEL_KEYS</code> drift
+      test so it can't silently rot; note full generation as future work.</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <div class="callout">
+      <strong>Anti-goal — do not chase page count.</strong> featurizer's density is largely earned:
+      it's a consumed library with a 150-primitive API. triage-pg is an application; its tutorial-first
+      shape is <em>correct</em>. Success here is <em>conceptual depth + one config reference + an FAQ</em>,
+      not matching featurizer surface-for-surface. Resist adding a notebooks section or an internals
+      page unless a real need appears.
+    </div>
+
+    <h3>Source-of-truth map (each new page → where its content already exists)</h3>
+    <table>
+      <tr><th>New page</th><th>Distilled from</th></tr>
+      <tr><td>point-in-time-correctness</td><td>ADR-0009; CLAUDE.md "point-in-time" + "knowledge date" gotchas; adapter docstrings (imputation split)</td></tr>
+      <tr><td>identity-and-caching</td><td>docs/derivation-dag.md; ADRs 0013–0017; <code>triage gc</code>/<code>archive</code>; this session's <code>0a4a7c55</code> as the worked example</td></tr>
+      <tr><td>problem-types-and-ranking</td><td>docs/problem-types.md; ADR-0010, 0026; migration 0019 (task_framing)</td></tr>
+      <tr><td>the-data-model</td><td>ADR-0002 (db-per-project); ADR-0006 (append-only); docs/schema-design.md; docs/erd.md; CONTEXT.md (Matrix, Prediction, Forward score)</td></tr>
+      <tr><td>reference/configuration</td><td><code>src/triage/adapters/run.py</code> (<code>validate_experiment_config</code>, <code>_KNOWN_TOP_LEVEL_KEYS</code>); <code>example/dirtyduck/*.yaml</code></td></tr>
+      <tr><td>faq</td><td>CLAUDE.md gotchas; TODO.org bug log; this session's commits (<code>0a4a7c55</code>, <code>3e34a4db</code>, <code>735f17c0</code>, score-fix <code>1c878335</code>, validator warning <code>dbcd10bd</code>)</td></tr>
+    </table>
+
+    <h3>Dependencies &amp; guardrails</h3>
+    <ul>
+      <li>No new runtime deps. Docs-only + one small check script/test (stdlib / pytest).</li>
+      <li>Content pages are prose → they do <em>not</em> carry the tutorials' verbatim-verification contract, but any CLI/config snippet must be accurate (cite a real file/flag). The Config reference's drift test is the one mechanical guard.</li>
+      <li><code>docs-pages.yml</code> is path-filtered to <code>docs-site/**</code> and gated by the links-validator; a README-only change (Phase 3) won't trigger it — validate README links locally.</li>
+      <li>Ordering: Phase 1 (Concepts) first because Phases 2–4 link into it. Phases 2–4 are independent and could parallelize (one agent each) if built via <code>plan-team</code>.</li>
+    </ul>
+
+    <h3>Future work (out of this plan's scope)</h3>
+    <ul>
+      <li>A <code>docs/metodologia_concepts.org</code> long-form pedagogical companion (PDF, teaching register) seeded from the Concepts pages.</li>
+      <li>An <code>engineering/internals</code> page (the adapter seam, artifact store, SSE progress) if/when contributors need it — featurizer has one; triage-pg can wait.</li>
+      <li>Generating <code>reference/configuration.md</code> from a declarative config schema once the validator is refactored toward one.</li>
+      <li>Spanish parity for the new pages (if deferred above).</li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <details open>
+      <summary>2026-07-17T11:56 — BUILT (all 4 phases; validated; uncommitted)</summary>
+      <p>Executed via the Build Plan workflow. <strong>Phase 1:</strong> authored
+      <code>concepts/index.md</code> + <code>point-in-time-correctness</code>,
+      <code>identity-and-caching</code>, <code>problem-types-and-ranking</code>,
+      <code>the-data-model</code> (4 parallel agents + the index by hand); wired the
+      "Concepts" sidebar group in <code>astro.config.mjs</code>. <strong>Phase 2:</strong>
+      <code>reference/configuration.md</code> covering all 14 <code>_KNOWN_TOP_LEVEL_KEYS</code>
+      verbatim + a drift-guard test <code>src/tests/test_docs_config_reference.py</code>.
+      <strong>Phase 3:</strong> a "Core contracts" section + Concepts/Config/FAQ pointers in
+      <code>README.md</code>. <strong>Phase 4:</strong> <code>faq.md</code> (7 grounded Q/As) +
+      an FAQ entry in the "Start here" sidebar.</p>
+      <p><strong>Deviation (recorded):</strong> the plan told agents mermaid renders on the site —
+      it does <em>not</em> (no mermaid integration in <code>astro.config.mjs</code>). Diagrams were
+      authored/converted to ASCII (```text``` fences); the README keeps mermaid (GitHub renders it).
+      <strong>Validation:</strong> <code>npm run build</code> → "✓ All internal links are valid"
+      (35 pages, es fallback works); drift test passes; the cited <code>example/dirtyduck/experiment.yaml</code>
+      still validates clean (hash <code>b9e38fd8</code>); README relative links resolve; new test
+      basedpyright-clean. Changes left <strong>uncommitted</strong> for maintainer review (house rule).</p>
+    </details>
+  </section>
+
+</main>
+</body>
+</html>
