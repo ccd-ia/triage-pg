@@ -39,6 +39,19 @@ jobs:
         run: |
           docker compose -f dirtyduck/docker-compose.yml up -d --build --wait food_db
 
+      # The tutorial has the reader create this dbfile (it is git-ignored — local dev
+      # config holding the tutorial's throwaway credentials, .gitignore). A fresh
+      # checkout does not carry it, so the smoke run must create it the same way.
+      - name: Step 1b — point triage at the tutorial DB (the dbfile the tutorial creates)
+        run: |
+          cat > dirtyduck-database.yaml <<'YAML'
+          host: 127.0.0.1
+          user: food_user
+          pass: some_password
+          port: 5440
+          db: food
+          YAML
+
       - name: Step 2 — greenfield schema (idempotent alembic)
         run: uv run triage --dbfile dirtyduck-database.yaml db upgrade
 

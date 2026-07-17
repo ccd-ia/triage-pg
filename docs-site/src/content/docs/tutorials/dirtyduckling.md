@@ -54,6 +54,19 @@ port 5440 is taken — set another port and re-run:
 adjust `dirtyduck-database.yaml` accordingly). First build takes a few minutes;
 `just tutorial-logs` shows progress.
 
+Now tell the CLI how to reach it. Create the connection file (it's git-ignored —
+local config holding the tutorial's throwaway credentials):
+
+```bash
+cat > dirtyduck-database.yaml <<'YAML'
+host: 127.0.0.1
+user: food_user
+pass: some_password
+port: 5440
+db: food
+YAML
+```
+
 ## Step 3 — the results schema exists
 
 ```bash

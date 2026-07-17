@@ -54,6 +54,19 @@ puerto 5440 está ocupado — asigna otro puerto y vuelve a ejecutar:
 `dirtyduck-database.yaml` en consecuencia). La primera build tarda unos minutos;
 `just tutorial-logs` muestra el progreso.
 
+Ahora indícale a la CLI cómo conectarse. Crea el archivo de conexión (está en
+`.gitignore` — config local con las credenciales desechables del tutorial):
+
+```bash
+cat > dirtyduck-database.yaml <<'YAML'
+host: 127.0.0.1
+user: food_user
+pass: some_password
+port: 5440
+db: food
+YAML
+```
+
 ## Paso 3 — el esquema de resultados existe
 
 ```bash
