@@ -3,10 +3,13 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 import starlightLinksValidator from 'starlight-links-validator'
+import remarkPlantuml from './plugins/remark-plantuml.mjs'
 
 export default defineConfig({
   site: 'https://ccd-ia.github.io',
   base: '/triage-pg',
+  // ```plantuml fences render to inline SVG at build via the local plantuml CLI.
+  markdown: { remarkPlugins: [remarkPlantuml] },
   integrations: [
     starlight({
       title: 'triage-pg',

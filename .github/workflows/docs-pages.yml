@@ -34,6 +34,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # PlantUML (+ Java + Graphviz) renders the ```plantuml concept diagrams to
+      # inline SVG at build (plugins/remark-plantuml.mjs). Rendered locally — no
+      # Kroki / external service.
+      - run: sudo apt-get update && sudo apt-get install -y plantuml graphviz
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -25,21 +25,23 @@ The state that *can't* live inside any one project — the list of projects
 themselves, who may see them, where each one routes — lives in a dedicated
 **registry** database, the control plane:
 
-```text
-              registry DB
-   projects · users · routing · auth · submissions
-        │            │            │
-    routes│      routes│      routes│
-        ▼            ▼            ▼
-  project:      project:      project:
-  inspections   permits       311
-  (triage        (triage       (triage
-   schema)        schema)       schema)
-        │            │            │
-        └────────────┼────────────┘
-                     ▼
-              object storage
-        Parquet matrices · model binaries
+```plantuml
+@startuml
+skinparam defaultTextAlignment center
+skinparam shadowing false
+skinparam ArrowColor #64748B
+rectangle "registry DB\nprojects · users · routing · auth · submissions" as REG #FDE4F2
+rectangle "project: inspections\n(triage schema)" as A #EEF2FF
+rectangle "project: permits\n(triage schema)" as B #EEF2FF
+rectangle "project: 311\n(triage schema)" as C #EEF2FF
+database "object storage\nParquet matrices · model binaries" as S #E7F6E7
+REG ..> A : routes
+REG ..> B : routes
+REG ..> C : routes
+A --> S
+B --> S
+C --> S
+@enduml
 ```
 
 The registry holds projects, users, per-project routing/connection info,

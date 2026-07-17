@@ -13,3 +13,20 @@
   --sl-color-accent: #2aa198;
   --sl-color-accent-high: #a7e0da;
 }
+
+/* PlantUML diagrams (rendered to inline SVG at build by plugins/remark-plantuml.mjs) */
+figure.plantuml {
+  margin: 1.5rem auto;
+  text-align: center;
+  overflow-x: auto;
+}
+figure.plantuml svg {
+  max-width: 100%;
+  height: auto;
+}
+/* PlantUML bakes a white canvas into the SVG; keep diagrams legible in dark mode. */
+:root[data-theme='dark'] figure.plantuml {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+}
