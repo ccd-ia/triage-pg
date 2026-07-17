@@ -64,6 +64,18 @@ erDiagram
 
 `problem_type` (`classification` · `regression_ranking` · `regression` · `survival`) and `artifact_kind` (`cohort` · `labels` · `feature_group` · `matrix` · `model`) are Postgres enums. The full ERD — every foreign-key edge with its `ON DELETE` behavior (CASCADE / RESTRICT to enforce append-only history / SET NULL) — is in [`docs/erd.md`](docs/erd.md); the design rationale (registry + per-project split, resolved decisions) is in [`docs/schema-design.md`](docs/schema-design.md).
 
+## Core contracts
+
+A handful of rules make triage-pg's numbers trustworthy — internalize them before your first run. The [Concepts](https://ccd-ia.github.io/triage-pg/concepts/) pages explain the *why*; the short version:
+
+- **Point-in-time correctness is the cardinal rule.** Features for an `as_of_date` may use only data knowable *strictly before* it — and a feature's knowledge date is when the data *became known*, not when the event occurred. Leakage silently inflates offline metrics and then fails in production.
+- **The imputation split is a leakage boundary (ADR-0009).** Fit-free imputation (zero/constant + an `*_imp` missing-flag) runs in featurizer; fit-based imputation (mean/median/mode) is fitted on the *training split only*, in the triage-pg adapter. Never fit a statistic over the full matrix.
+- **A score is not the latest score (ADR-0006).** Predictions are append-only — stamped with `scored_at`, never overwritten; a read that wants "current" must pick the latest `scored_at`.
+- **Matrices are Parquet, not Postgres.** Only predictions and evaluations live in the project database; matrices and serialized models live on local FS / S3.
+- **Label columns follow `problem_type`.** `outcome` for classification/regression; `duration, event_observed` for the survival path.
+
+Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/reference/configuration/) documents every `experiment.yaml` key, and the [FAQ](https://ccd-ia.github.io/triage-pg/faq/) covers the errors people actually hit.
+
 ## What you get
 
 | Capability | The triage-pg shape |

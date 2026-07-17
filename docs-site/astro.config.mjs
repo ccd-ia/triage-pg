@@ -31,12 +31,18 @@ export default defineConfig({
           translations: { es: 'Empieza aquí' },
           items: [
             { label: 'Welcome', translations: { es: 'Bienvenida' }, slug: 'index' },
+            { label: 'FAQ', translations: { es: 'Preguntas frecuentes' }, slug: 'faq' },
             // The two published artifacts are static passthrough pages (public/),
             // linked absolutely so the links-validator does not treat them as
             // routes. They exist in English only.
             { label: 'Onboarding one-pager', link: 'https://ccd-ia.github.io/triage-pg/onboarding.html' },
             { label: 'vs DSSG triage', link: 'https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html' },
           ],
+        },
+        {
+          label: 'Concepts',
+          translations: { es: 'Conceptos' },
+          autogenerate: { directory: 'concepts' },
         },
         {
           label: 'Tutorials',
