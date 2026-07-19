@@ -44,6 +44,7 @@ Each dataset README has the full end-to-end run recipe (start DB → `alembic up
 | [adapter-spec.md](adapter-spec.md) | The triage-pg ↔ featurizer seam: timechop `temporal_config`, the featurizer ER-graph + cohort→target mapping, imputation policy wiring. |
 | [derivation-dag.md](derivation-dag.md) | The Guix-style artifact derivation DAG: content-addressed identity over the full input closure (ADRs 0013–0017). |
 | [featurizer-scale.md](featurizer-scale.md) | The scale validation for featurizer (ADR-0008): per-as_of_date cost is constant-to-sub-linear. |
+| [featurizer-0.9-features.md](featurizer-0.9-features.md) | featurizer v0.9.x text/graph feature families + native `graph_relationships`, and how triage-pg reaches them via config passthrough (ADR-0008). |
 | [read-dashboard-spec.md](read-dashboard-spec.md) | The read-only dashboard: in-PG views → FastAPI JSON + SSE (ADR-0012/0021). |
 | [cloud-profile-spec.md](cloud-profile-spec.md) | The cloud profile: RDS/IAM auth + S3 storage + AWS Batch execution (ADRs 0003–0005). |
 | [cloud-runbook.md](cloud-runbook.md) | The gated live path: `terraform apply` (`infra/terraform/`) → role bootstrap → image push → a Batch experiment → observe. |
