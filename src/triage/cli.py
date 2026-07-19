@@ -1112,6 +1112,13 @@ def score_command(
 @app.command("analyze-config")
 def analyze_config(
     config: str = typer.Argument(..., help="Experiment config to inspect."),
+    plot: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--plot",
+        help="Also render the temporal cross-validation blocks to this image file"
+        " (format from the extension: .png/.svg/.pdf) — Timechop's train/test"
+        " matrices, as_of dates and label windows across time, one panel per split.",
+    ),
 ) -> None:
     config_data = load_experiment_config(config)
     temporal = config_data.get("temporal_config")
@@ -1164,6 +1171,20 @@ def analyze_config(
         title="Cohort Configuration",
     )
     console.print(cohort_panel)
+
+    if plot is not None:
+        # Lazy import: matplotlib/plotly load only when a plot is actually requested.
+        # Dispatch by extension — .html gives the interactive (plotly) view, everything else a
+        # static image (matplotlib).
+        if plot.suffix.lower() == ".html":
+            from triage.component.timechop.plotting import visualize_chops_plotly
+
+            visualize_chops_plotly(chopper, save_target=str(plot))
+        else:
+            from triage.component.timechop.plotting import visualize_chops
+
+            visualize_chops(chopper, save_target=str(plot))
+        console.print(f"[green]Temporal validation plot saved to[/green] {plot}")
 
 
 @db_app.command("upgrade")

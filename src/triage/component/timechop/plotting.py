@@ -1,455 +1,324 @@
+"""Temporal cross-validation visualization for a ``temporal_config`` (Timechop).
+
+Renders the train/validation blocks a temporal config produces — each split's as-of dates, their
+label windows, and the matrix spans — on a shared time axis, **one compact lane per split, most
+recent on top**. Two backends share one design language:
+
+* :func:`visualize_chops` — matplotlib, static (PNG/SVG/PDF). ``triage analyze-config --plot
+  blocks.png``.
+* :func:`visualize_chops_plotly` — plotly, interactive (hover for exact dates), a self-contained
+  HTML. ``triage analyze-config --plot blocks.html`` (also embeddable in the dashboard).
+
+The upstream DSSG plot stacked one subplot per split and drew train + validation in the *same*
+random per-split color, which made it hard to read. This rewrite:
+
+* gives **train and validation fixed, distinct, colorblind-safe colors** (Okabe–Ito), consistent
+  across every split;
+* uses **one lane per split** (train on the upper half-lane, validation on the lower), so a whole
+  temporal design fits in one glance;
+* draws each matrix's **as-of-date span** as a solid bar with per-as-of-date ticks, and its
+  **label window** (the outcome lookahead) as a lighter extension — so the point-in-time boundary
+  (no label leakage from validation back into train) is visible, not implied;
+* marks the **feature-availability start** and keeps the axis to plain year/month ticks.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Sequence
+
 import matplotlib
-import matplotlib.dates as md
-import numpy as np
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
 
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # headless: render to files, never a GUI window
 
-from datetime import datetime
-from plotly.subplots import make_subplots
-from triage.util.conf import convert_str_to_relativedelta
+import matplotlib.dates as mdates  # noqa: E402  (after backend selection)
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
+
+from triage.util.conf import convert_str_to_relativedelta  # noqa: E402
+
+if TYPE_CHECKING:
+    from triage.component.timechop.timechop import Timechop
+
+# Fixed, colorblind-safe colors (Okabe–Ito), the same in every split so the eye tracks roles.
+TRAIN_COLOR = "#0072B2"  # blue      — training matrix
+TEST_COLOR = "#D55E00"  # vermillion  — validation (test) matrix
+FEATURE_COLOR = "#009E73"  # green    — feature-availability boundary
+_HALF = 0.34  # half-lane offset (train above the split centerline, validation below)
+_BAR = 0.30  # bar thickness
 
 
-FIG_SIZE = (32, 16)
+def _label_horizon(as_of_times: Sequence[Any], timespan: str):
+    """Where the label window reaching from the *last* as-of date ends (the outcome horizon)."""
+    return max(as_of_times) + convert_str_to_relativedelta(timespan)
+
+
+def _bar(ax, start, end, y, color, *, alpha=1.0):
+    """A horizontal bar from ``start`` to ``end`` (datetimes) centered on lane ``y``."""
+    x0, x1 = mdates.date2num(start), mdates.date2num(end)
+    ax.barh(
+        y, x1 - x0, left=x0, height=_BAR, color=color, alpha=alpha, edgecolor="none"
+    )
+
+
+def _ticks(ax, dates, y, color):
+    """Per-as-of-date markers: white-filled, color-ringed circles so they read both ON a solid
+    span bar AND on empty background (a single-date validation matrix has a zero-width bar).
+    """
+    ax.plot(
+        [mdates.date2num(d) for d in dates],
+        [y] * len(dates),
+        marker="o",
+        linestyle="none",
+        markersize=4,
+        markerfacecolor="white",
+        markeredgecolor=color,
+        markeredgewidth=1.0,
+    )
 
 
 def visualize_chops(
-    chopper, show_as_of_times=True, show_boundaries=True, save_target=None
-):
-    """Visualize time chops of a given Timechop object using matplotlib
+    chopper: "Timechop",
+    *,
+    save_target=None,
+    show_label_windows: bool = True,
+) -> None:
+    """Render a Timechop config's temporal cross-validation blocks with matplotlib.
 
     Args:
-        chopper (triage.component.timechop.Timechop): A fully-configured Timechop object
-        show_as_of_times (bool): Whether or not to draw horizontal lines
-            for as-of-times
-        show_boundaries (bool): Whether or not to show a rectangle around matrices
-            and dashed lines around feature/label boundaries
-        save_target (str or file-like object): A save target for matplotlib to save
-            the figure to. Defaults to None, which won't save anything
+        chopper: a configured :class:`~triage.component.timechop.timechop.Timechop`.
+        save_target: path/file to save to (format from the extension). ``None`` → interactive show.
+        show_label_windows: draw the label-window lookahead bars (the outcome horizon).
     """
-    chops = chopper.chop_time()
+    chops = list(chopper.chop_time())
+    chops.reverse()  # most recent split on top
+    n = len(chops)
 
-    chops.reverse()
+    fig, ax = plt.subplots(figsize=(14, 1.5 * n + 1.6))
 
-    fig, ax = plt.subplots(
-        nrows=len(chops), sharex=True, sharey=True, squeeze=False, figsize=FIG_SIZE
+    for row, chop in enumerate(chops):
+        y = n - 1 - row  # row 0 (most recent) at the top
+        train, test = chop["train_matrix"], chop["test_matrices"][0]
+        train_aost, test_aost = train["as_of_times"], test["as_of_times"]
+        train_span = train["training_label_timespan"]
+        test_span = test["test_label_timespan"]
+
+        y_train, y_test = y + _HALF / 2, y - _HALF / 2
+
+        # as-of-date spans (solid) + per-date ticks
+        _bar(ax, min(train_aost), max(train_aost), y_train, TRAIN_COLOR)
+        _bar(ax, min(test_aost), max(test_aost), y_test, TEST_COLOR)
+        _ticks(ax, train_aost, y_train, TRAIN_COLOR)
+        _ticks(ax, test_aost, y_test, TEST_COLOR)
+
+        # label-window lookahead (lighter extension past the last as-of date)
+        if show_label_windows:
+            _bar(
+                ax,
+                max(train_aost),
+                _label_horizon(train_aost, train_span),
+                y_train,
+                TRAIN_COLOR,
+                alpha=0.25,
+            )
+            _bar(
+                ax,
+                max(test_aost),
+                _label_horizon(test_aost, test_span),
+                y_test,
+                TEST_COLOR,
+                alpha=0.25,
+            )
+
+        # feature-availability start (where knowable data begins for this split)
+        ax.axvline(
+            float(mdates.date2num(chop["feature_start_time"])),
+            color=FEATURE_COLOR,
+            linestyle=":",
+            linewidth=1.0,
+            alpha=0.7,
+        )
+
+        ax.text(
+            float(mdates.date2num(min(train_aost))),
+            y + _HALF + 0.06,
+            f"Split {row + 1}",
+            va="bottom",
+            ha="left",
+            fontsize=9,
+            color="#333333",
+        )
+        ax.text(
+            float(mdates.date2num(_label_horizon(test_aost, test_span))),
+            y,
+            f"  train label {train_span} · val label {test_span}  ·  "
+            f"{len(train_aost)} train / {len(test_aost)} val as-of dates",
+            va="center",
+            ha="left",
+            fontsize=7.5,
+            color="#777777",
+        )
+
+    ax.set_yticks([])
+    ax.set_ylim(-0.7, n - 0.1)
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax.grid(axis="x", which="major", color="#e6e6e6", linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.set_xlabel("time")
+    ax.set_title(
+        "Timechop — temporal cross-validation blocks (most recent split on top)"
     )
 
-    for idx, chop in enumerate(chops):
-        train_as_of_times = chop["train_matrix"]["as_of_times"]
-        test_as_of_times = chop["test_matrices"][0]["as_of_times"]
+    handles = [
+        Patch(color=TRAIN_COLOR, label="Train matrix (as-of dates)"),
+        Patch(color=TRAIN_COLOR, alpha=0.25, label="Train label window"),
+        Patch(color=TEST_COLOR, label="Validation matrix (as-of dates)"),
+        Patch(color=TEST_COLOR, alpha=0.25, label="Validation label window"),
+        Line2D([0], [0], color=FEATURE_COLOR, linestyle=":", label="Feature start"),
+    ]
+    ax.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.005, 1.0),
+        fontsize=8,
+        frameon=False,
+    )
+    fig.tight_layout()
 
-        test_label_timespan = chop["test_matrices"][0]["test_label_timespan"]
-        training_label_timespan = chop["train_matrix"]["training_label_timespan"]
-
-        color_rgb = np.random.random(3)
-
-        if show_as_of_times:
-            # Train matrix (as_of_times)
-            ax[idx][0].hlines(
-                [x for x in range(len(train_as_of_times))],
-                [x.date() for x in train_as_of_times],
-                [
-                    x.date() + convert_str_to_relativedelta(training_label_timespan)
-                    for x in train_as_of_times
-                ],
-                linewidth=3,
-                color=color_rgb,
-                label=f"train_{idx}",
-            )
-
-            # Test matrix
-            ax[idx][0].hlines(
-                [x for x in range(len(test_as_of_times))],
-                [x.date() for x in test_as_of_times],
-                [
-                    x.date() + convert_str_to_relativedelta(test_label_timespan)
-                    for x in test_as_of_times
-                ],
-                linewidth=3,
-                color=color_rgb,
-                label=f"test_{idx}",
-            )
-
-        if show_boundaries:
-            # Limits: train
-            ax[idx][0].axvspan(
-                chop["train_matrix"]["first_as_of_time"],
-                chop["train_matrix"]["last_as_of_time"],
-                color=color_rgb,
-                alpha=0.3,
-            )
-
-            ax[idx][0].axvline(
-                chop["train_matrix"]["matrix_info_end_time"], color="k", linestyle="--"
-            )
-
-            # Limits: test
-            ax[idx][0].axvspan(
-                chop["test_matrices"][0]["first_as_of_time"],
-                chop["test_matrices"][0]["last_as_of_time"],
-                color=color_rgb,
-                alpha=0.3,
-            )
-
-            ax[idx][0].axvline(
-                chop["feature_start_time"], color="k", linestyle="--", alpha=0.2
-            )
-            ax[idx][0].axvline(
-                chop["feature_end_time"], color="k", linestyle="--", alpha=0.2
-            )
-            ax[idx][0].axvline(
-                chop["label_start_time"], color="k", linestyle="--", alpha=0.2
-            )
-            ax[idx][0].axvline(
-                chop["label_end_time"], color="k", linestyle="--", alpha=0.2
-            )
-
-            ax[idx][0].axvline(
-                chop["test_matrices"][0]["matrix_info_end_time"],
-                color="k",
-                linestyle="--",
-            )
-
-        ax[idx][0].yaxis.set_major_locator(plt.NullLocator())
-        ax[idx][0].yaxis.set_label_position("right")
-        ax[idx][0].set_ylabel(
-            f"Label timespan \n {test_label_timespan} (test), {training_label_timespan} (training)",
-            rotation="vertical",
-            labelpad=30,
-        )
-
-        ax[idx][0].xaxis.set_major_formatter(md.DateFormatter("%Y"))
-        ax[idx][0].xaxis.set_major_locator(md.YearLocator())
-        ax[idx][0].xaxis.set_minor_locator(md.MonthLocator())
-
-    ax[0][0].set_title("Timechop: Temporal cross-validation blocks")
-    fig.subplots_adjust(hspace=0)
-    plt.setp([a.get_xticklabels() for a in fig.axes[:-1]], visible=False)
     if save_target:
-        plt.savefig(save_target)
-    plt.show()
-
-
-def visualize_chops_plotly(
-    chopper,
-    selected_splits=None,
-    show_label_timespans=True,
-    show_boxes=True,
-    show_annotations=True,
-):
-    """Visualize time chops of a given Timechop object using plotly, to get an interactive output
-    Args:
-        chopper (triage.component.timechop.Timechop): A fully-configured Timechop object
-        selected_splits (list): Indices of train-val sets to plot. E.g. [0, 1, 2] plots the 3 most recent splits, [0,-1] plots the first and last splits.
-            Defaults to None, which plots all splits.
-        show_label_timespans (bool): Whether or not to draw horizontal lines to show label timespan
-            for as-of-times
-        show_boxes (bool): Whether or not to show a rectangle highlighting train-test matrices
-        show_annotations (bool): Whether or not to add annotations on the latest split, showing what each of the timechop parameters mean
-    """
-    chops = chopper.chop_time()
-    chops.reverse()  # reverse to get the most recent set first
-
-    # Subset to relevant splits if arg specified, and generate titles for each split
-    if selected_splits is not None:
-        chops = [chops[i] for i in selected_splits]
-        titles = tuple(f"Train-Validation Split {i + 1}" for i in selected_splits)
+        fig.savefig(save_target, bbox_inches="tight", dpi=150)
+        plt.close(fig)
     else:
-        titles = tuple(f"Train-Validation Split {i + 1}" for i in range(len(chops)))
+        plt.show()
 
-    fig = make_subplots(
-        rows=len(chops),
-        cols=1,
-        shared_xaxes=True,
-        shared_yaxes=True,
-        # vertical_spacing=0.05,
-        subplot_titles=titles,
-    )  # adds titles for each subplot
 
-    # For each train-val split
-    for idx, chop in enumerate(chops):
-        train_as_of_times = chop["train_matrix"]["as_of_times"]
-        test_as_of_times = chop["test_matrices"][0]["as_of_times"]
+def visualize_chops_plotly(chopper: "Timechop", *, save_target=None):
+    """Interactive version of :func:`visualize_chops` (plotly).
 
-        test_label_timespan = chop["test_matrices"][0]["test_label_timespan"]
-        training_label_timespan = chop["train_matrix"]["training_label_timespan"]
+    Same one-lane-per-split design with hover tooltips for exact dates. ``save_target`` ending in
+    ``.html`` writes a self-contained page (embeddable in the dashboard); otherwise ``fig.show()``.
+    """
+    import plotly.graph_objects as go
 
-        # Colors for train/test
-        train_color = "rgba(3, 37, 126"  # dark blue (left open because we add an opacity argument below)
-        test_color = "rgba(139, 0, 0"  # magenta (left open because we add an opacity argument below)
-        as_of_date_marker_opacity = (
-            ", 1)"  # the extra ', 1)' defines opacity. 100% solid for markers
+    chops = list(chopper.chop_time())
+    chops.reverse()
+    n = len(chops)
+    fig = go.Figure()
+
+    def _shape(x0, x1, y, color, opacity):
+        fig.add_shape(
+            type="rect",
+            x0=x0,
+            x1=x1,
+            y0=y - _BAR / 2,
+            y1=y + _BAR / 2,
+            fillcolor=color,
+            opacity=opacity,
+            line_width=0,
+            layer="below",
         )
-        label_line_opacity = ", 0.3)"  # 30% opacity for the label lines
-        rectangle_fill_opacity = ", 0.15)"  # 15% opacity for rectangle fill
 
-        train_as_of_date_color = train_color + as_of_date_marker_opacity
-        train_label_period_color = train_color + label_line_opacity
-        train_rectangle_fill = train_color + rectangle_fill_opacity
-        test_as_of_date_color = test_color + as_of_date_marker_opacity
-        test_label_period_color = test_color + label_line_opacity
-        test_rectangle_fill = test_color + rectangle_fill_opacity
+    for row, chop in enumerate(chops):
+        y = n - 1 - row
+        train, test = chop["train_matrix"], chop["test_matrices"][0]
+        train_aost, test_aost = train["as_of_times"], test["as_of_times"]
+        train_span = train["training_label_timespan"]
+        test_span = test["test_label_timespan"]
+        y_train, y_test = y + _HALF / 2, y - _HALF / 2
 
-        # Show legend only if idx = 0 (i.e. first train-val set we are displaying)
-        if idx == 0:
-            # Train set as-of-date markers
-            fig.add_trace(
-                go.Scatter(
-                    x=[x.date() for x in train_as_of_times],
-                    y=[x for x in range(len(train_as_of_times))],
-                    mode="markers",
-                    marker=dict(color=train_as_of_date_color),
-                    name="Training as-of-date",
-                    showlegend=True,
-                    hovertemplate="%{x}<extra></extra>",  # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
+        _shape(min(train_aost), max(train_aost), y_train, TRAIN_COLOR, 1.0)
+        _shape(
+            max(train_aost),
+            _label_horizon(train_aost, train_span),
+            y_train,
+            TRAIN_COLOR,
+            0.25,
+        )
+        _shape(min(test_aost), max(test_aost), y_test, TEST_COLOR, 1.0)
+        _shape(
+            max(test_aost),
+            _label_horizon(test_aost, test_span),
+            y_test,
+            TEST_COLOR,
+            0.25,
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=list(train_aost),
+                y=[y_train] * len(train_aost),
+                mode="markers",
+                marker=dict(
+                    color="white",
+                    size=7,
+                    symbol="circle",
+                    line=dict(color=TRAIN_COLOR, width=1.5),
                 ),
-                row=idx
-                + 1,  # row and column of the subplots to add this trace object to
-                col=1,
+                name="Train as-of date",
+                legendgroup="train",
+                showlegend=(row == 0),
+                hovertemplate="Split %d · train as-of %%{x|%%Y-%%m-%%d}<extra></extra>"
+                % (row + 1),
             )
-            # Validation set as-of-date markers
-            fig.add_trace(
-                go.Scatter(
-                    x=[x for x in test_as_of_times],
-                    y=[x for x in range(len(test_as_of_times))],
-                    mode="markers",
-                    name="Validation as-of-date",
-                    showlegend=True,
-                    marker=dict(color=test_as_of_date_color),
-                    hovertemplate="%{x}<extra></extra>",
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=list(test_aost),
+                y=[y_test] * len(test_aost),
+                mode="markers",
+                marker=dict(
+                    color="white",
+                    size=7,
+                    symbol="circle",
+                    line=dict(color=TEST_COLOR, width=1.5),
                 ),
-                row=idx + 1,
-                col=1,
+                name="Validation as-of date",
+                legendgroup="val",
+                showlegend=(row == 0),
+                hovertemplate="Split %d · val as-of %%{x|%%Y-%%m-%%d}<extra></extra>"
+                % (row + 1),
             )
-        # Suppress legend if not the first subplot; only difference with above is showlegend=False (note, anytime we add a trace, we have to set showlegend=False to suppress useless info in the legend)
-        else:
-            # Train set as-of-date markers
-            fig.add_trace(
-                go.Scatter(
-                    x=[x.date() for x in train_as_of_times],
-                    y=[x for x in range(len(train_as_of_times))],
-                    mode="markers",
-                    marker=dict(color=train_as_of_date_color),
-                    name="Training as-of-date",
-                    showlegend=False,
-                    hovertemplate="%{x}<extra></extra>",  # the extra extra tag gets rid of a default 'trace' line in the hover output and just shows 'x', the date
-                ),
-                row=idx
-                + 1,  # row and column of the subplots to add this trace object to
-                col=1,
+        )
+        fig.add_annotation(
+            x=min(train_aost),
+            y=y + _HALF + 0.05,
+            text=f"Split {row + 1}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="bottom",
+            font=dict(size=10, color="#333333"),
+        )
+
+    # legend proxies for the matrix bars (shapes don't appear in the legend)
+    for name, color, group in [
+        ("Train matrix", TRAIN_COLOR, "train"),
+        ("Validation matrix", TEST_COLOR, "val"),
+    ]:
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(color=color, size=10, symbol="square"),
+                name=name,
+                legendgroup=group,
             )
+        )
 
-            # Validation set as-of-date markers
-            fig.add_trace(
-                go.Scatter(
-                    x=[x for x in test_as_of_times],
-                    y=[x for x in range(len(test_as_of_times))],
-                    mode="markers",
-                    name="Validation as-of-date",
-                    showlegend=False,
-                    marker=dict(color=test_as_of_date_color),
-                    hovertemplate="%{x}<extra></extra>",
-                ),
-                row=idx + 1,
-                col=1,
-            )
+    fig.update_layout(
+        title="Timechop — temporal cross-validation blocks (most recent split on top)",
+        height=140 * n + 140,
+        width=1000,
+        template="plotly_white",
+        yaxis=dict(showticklabels=False, range=[-0.7, n - 0.1]),
+        xaxis=dict(title="time"),
+    )
 
-        # Add test_durations annotation if option selected
-        if idx == 0 and show_annotations == True:
-            # Add a dashed line to show test_durations span
-            x0 = test_as_of_times[0]
-            x1 = test_as_of_times[-1]
-            x_mid = x0 + (x1 - x0) / 2
-            y = -1  # place the test durations labeling below the graph
-            fig.add_shape(
-                type="line",
-                x0=x0,
-                x1=x1,
-                y0=y,
-                y1=y,
-                line={"color": "green"},
-                row=idx + 1,
-                col=1,
-            )
-            fig.add_annotation(
-                x=x_mid,
-                y=y - 1,
-                text=f"Test duration: {chop['test_matrices'][0]['test_duration']}",
-                showarrow=False,
-            )
-
-        # Add label timespan lines if option selected
-        if show_label_timespans is True:
-            # For training as_of_dates
-            for i in range(len(train_as_of_times)):
-                fig.add_trace(
-                    go.Scatter(
-                        x=[
-                            train_as_of_times[i].date(),
-                            train_as_of_times[i].date()
-                            + convert_str_to_relativedelta(training_label_timespan),
-                        ],
-                        y=[i, i],
-                        marker=dict(
-                            color=train_label_period_color,
-                            line=dict(color=train_label_period_color),
-                        ),
-                        hovertemplate="%{x}<extra></extra>",
-                        showlegend=False,
-                    ),
-                    row=idx + 1,
-                    col=1,
-                )
-
-                # Add annotation showing train label timespan on first bar in first train-val set (if option specified)
-                if (
-                    i == len(train_as_of_times) - 1
-                    and idx == 0
-                    and show_annotations == True
-                ):
-                    # Have the x in between the label timespan
-                    x0 = train_as_of_times[i].date()
-                    x1 = train_as_of_times[i].date() + convert_str_to_relativedelta(
-                        training_label_timespan
-                    )
-                    x_pos = x0 + (x1 - x0) / 2
-
-                    # Position at a y-value above the bar
-                    y_pos = i
-                    fig.add_annotation(
-                        x=x_pos,
-                        y=y_pos,
-                        text="Label timespan",
-                        showarrow=True,
-                        arrowhead=1,
-                        row=idx + 1,
-                        col=1,
-                    )
-
-            # For test as_of_dates
-            for i in range(len(test_as_of_times)):
-                fig.add_trace(
-                    go.Scatter(
-                        x=[
-                            test_as_of_times[i].date(),
-                            test_as_of_times[i].date()
-                            + convert_str_to_relativedelta(test_label_timespan),
-                        ],
-                        y=[i, i],
-                        marker=dict(
-                            color=test_label_period_color,
-                            line=dict(color=test_label_period_color),
-                        ),
-                        showlegend=False,
-                        hovertemplate="%{x}<extra></extra>",
-                    ),
-                    row=idx + 1,
-                    col=1,
-                )
-
-                # Add annotation showing test label timespan on first bar in first train-val set (if option specified)
-                if (
-                    i == len(test_as_of_times) - 1
-                    and idx == 0
-                    and show_annotations == True
-                ):
-                    # Have the x in between the label timespan
-                    x0 = test_as_of_times[i].date()
-                    x1 = test_as_of_times[i].date() + convert_str_to_relativedelta(
-                        test_label_timespan
-                    )
-                    x_pos = x0 + (x1 - x0) / 2
-
-                    # Position at a y-value above the bar
-                    y_pos = i
-                    fig.add_annotation(
-                        x=x_pos,
-                        y=y_pos,
-                        text="Label timespan",
-                        showarrow=True,
-                        arrowhead=1,
-                        row=idx + 1,
-                        col=1,
-                    )
-
-        # Add rectangles/boxes to mark train-test matrices
-        if show_boxes is True:
-            # Training matrix rectangle
-            # Rectangle params
-            x0 = min(train_as_of_times).date()
-            x1 = max(train_as_of_times).date() + convert_str_to_relativedelta(
-                training_label_timespan
-            )
-            y = max(len(test_as_of_times), len(train_as_of_times))
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[x0, x0, x1, x1, x0],
-                    y=[0, y, y, 0, 0],
-                    fill="toself",
-                    fillcolor=train_rectangle_fill,
-                    showlegend=False,
-                    marker=dict(
-                        color="rgba(0,255,0,0)", line=dict(color="rgba(0,255,0,0)")
-                    ),  # setting 0 opacity so we don't see the lines or markers
-                    hoverinfo="skip",
-                ),
-                row=idx + 1,
-                col=1,
-            )
-
-            # #Add annotated text to the middle of the training set rectangle -> this code works, but the positioning is a bit weird, so need to tweak
-            # middle_index = round(len(train_as_of_times)/2)
-            # x_middle = train_as_of_times[middle_index].date() + convert_str_to_relativedelta(training_label_timespan)
-            # fig.add_trace(
-            #     go.Scatter(x =[x_middle], y=[y-1],
-            #               mode='text',
-            #               text="Training Data",
-            #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines
-            #               hoverinfo='skip'),
-            #     row=idx+1,
-            #     col=1,
-            # )
-
-            # Test set rectangle
-
-            # Rectangle params
-            x0 = min(test_as_of_times).date()
-            x1 = max(test_as_of_times).date() + convert_str_to_relativedelta(
-                test_label_timespan
-            )
-            y = max(len(test_as_of_times), len(train_as_of_times))
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[x0, x0, x1, x1, x0],
-                    y=[0, y, y, 0, 0],
-                    fill="toself",
-                    fillcolor=test_rectangle_fill,
-                    showlegend=False,
-                    marker=dict(
-                        color="rgba(0,255,0,0)", line=dict(color="rgba(0,255,0,0)")
-                    ),  # setting 0 opacity so we don't see the lines
-                    hoverinfo="skip",
-                ),
-                row=idx + 1,
-                col=1,
-            )
-
-            # #Add annotated text to the test set rectangle
-            # middle_index = round(len(test_as_of_times)/2)
-            # x_middle = test_as_of_times[middle_index].date() + convert_str_to_relativedelta(test_label_timespan)
-            # fig.add_trace(
-            #     go.Scatter(x =[x_middle], y=[y-1],
-            #               mode='text',
-            #               text="Test Data",
-            #               marker=dict(color='rgba(0,255,0,0)', line=dict(color='rgba(0,255,0,0)')), # setting 0 opacity so we don't see the lines
-            #               hoverinfo='skip'),
-            #     row=idx+1,
-            #     col=1,
-            # )
-
-    fig.update_layout(height=150 * len(chops), width=800, showlegend=True)
-    fig.show()
+    if save_target and str(save_target).lower().endswith(".html"):
+        fig.write_html(str(save_target), include_plotlyjs=True, full_html=True)
+    elif save_target:
+        fig.write_image(str(save_target))
+    else:
+        fig.show()
