@@ -94,7 +94,9 @@ def visualize_chops(
     chops.reverse()  # most recent split on top
     n = len(chops)
 
-    fig, ax = plt.subplots(figsize=(14, 1.5 * n + 1.6))
+    # Compact figure — tight per-split height so the plot isn't sparse and the fonts read at a
+    # normal size relative to it (matching the dashboard panel's proportions).
+    fig, ax = plt.subplots(figsize=(12, 0.95 * n + 1.3))
 
     for row, chop in enumerate(chops):
         y = n - 1 - row  # row 0 (most recent) at the top
@@ -151,11 +153,11 @@ def visualize_chops(
         ax.text(
             float(mdates.date2num(_label_horizon(test_aost, test_span))),
             y,
-            f"  train label {train_span} · val label {test_span}  ·  "
-            f"{len(train_aost)} train / {len(test_aost)} val as-of dates",
+            f"  {len(train_aost)} train / {len(test_aost)} val as-of"
+            f"  ·  label {train_span} / {test_span}",
             va="center",
             ha="left",
-            fontsize=7.5,
+            fontsize=8,
             color="#777777",
         )
 
@@ -166,22 +168,38 @@ def visualize_chops(
     ax.xaxis.set_minor_locator(mdates.MonthLocator())
     ax.grid(axis="x", which="major", color="#e6e6e6", linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.set_xlabel("time")
+    ax.tick_params(axis="x", labelsize=9)
+    ax.set_xlabel("time", fontsize=9)
     ax.set_title(
-        "Timechop — temporal cross-validation blocks (most recent split on top)"
+        "Timechop — temporal cross-validation blocks (most recent split on top)",
+        fontsize=11,
     )
 
     handles = [
-        Patch(color=TRAIN_COLOR, label="Train matrix (as-of dates)"),
+        Patch(color=TRAIN_COLOR, label="Train matrix"),
         Patch(color=TRAIN_COLOR, alpha=0.25, label="Train label window"),
-        Patch(color=TEST_COLOR, label="Validation matrix (as-of dates)"),
+        Patch(color=TEST_COLOR, label="Validation matrix"),
         Patch(color=TEST_COLOR, alpha=0.25, label="Validation label window"),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="none",
+            markerfacecolor="white",
+            markeredgecolor="#555555",
+            markeredgewidth=1.0,
+            markersize=5,
+            label="As-of date",
+        ),
         Line2D([0], [0], color=FEATURE_COLOR, linestyle=":", label="Feature start"),
     ]
+    # Legend below the plot so it never collides with the per-split annotations, which extend
+    # into the right margin for the most recent split.
     ax.legend(
         handles=handles,
-        loc="upper left",
-        bbox_to_anchor=(1.005, 1.0),
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.16),
+        ncol=3,
         fontsize=8,
         frameon=False,
     )
