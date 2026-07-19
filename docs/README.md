@@ -42,6 +42,7 @@ Each dataset README has the full end-to-end run recipe (start DB → `alembic up
 | [schema-design.md](schema-design.md) | The greenfield results schema: registry control plane + per-project `triage` schema (§8 records resolved decisions). |
 | [erd.md](erd.md) | Entity-relationship diagram of the per-project `triage` schema (mermaid). |
 | [adapter-spec.md](adapter-spec.md) | The triage-pg ↔ featurizer seam: timechop `temporal_config`, the featurizer ER-graph + cohort→target mapping, imputation policy wiring. |
+| [temporal-viz.md](temporal-viz.md) | The temporal cross-validation viz — `analyze-config --plot` (static/interactive) and the dashboard *Temporal configuration* panel. |
 | [derivation-dag.md](derivation-dag.md) | The Guix-style artifact derivation DAG: content-addressed identity over the full input closure (ADRs 0013–0017). |
 | [featurizer-scale.md](featurizer-scale.md) | The scale validation for featurizer (ADR-0008): per-as_of_date cost is constant-to-sub-linear. |
 | [featurizer-0.9-features.md](featurizer-0.9-features.md) | featurizer v0.9.x text/graph feature families + native `graph_relationships`, and how triage-pg reaches them via config passthrough (ADR-0008). |
