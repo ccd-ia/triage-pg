@@ -10,15 +10,15 @@ credentials ever cross the wire.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from triage.util.db import DictRowPool
-
 from triage.derivation import canonical_json
 from triage.logging import get_logger
 from triage.profiles.protocols import StorageAdapter
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
 
@@ -68,7 +68,7 @@ class InProcessExecution:
 
     def run(
         self,
-        pool: DictRowPool,
+        pool: DictRowPool | None,
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,
@@ -77,6 +77,7 @@ class InProcessExecution:
     ) -> RunHandle:
         from triage.adapters.run import run_experiment
 
+        assert pool is not None, "local execution requires an open pool"
         result = run_experiment(
             pool,
             experiment_config,
@@ -113,7 +114,9 @@ class BatchExecution:
 
     def run(
         self,
-        pool: DictRowPool,  # noqa: ARG002 — unused in cloud (the job opens its own pool)
+        pool: (
+            DictRowPool | None
+        ),  # noqa: ARG002 — unused in cloud (the job opens its own pool)
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,
@@ -131,16 +134,27 @@ class BatchExecution:
         #    ``triage run --profile cloud --config <config_uri>`` (parameters consumed by the
         #    job definition's command template). NO credentials are passed — the task role grants
         #    RDS-IAM-connect + S3 access.
-        batch = boto3.client("batch", region_name=self._region)
-        response = batch.submit_job(
-            jobName="triage-experiment",
-            jobQueue=self._job_queue,
-            jobDefinition=self._job_definition,
-            parameters={
+        #    Per-project identity (TRIAGE_RDS_DB / TRIAGE_RDS_USER, ADR-0002/0004) rides as
+        #    submit-time container overrides — the job definition bakes only the cluster-level
+        #    vars (host/port/bucket/region), so the same infra serves every project.
+        override_env = [
+            {"name": name, "value": os.environ[name]}
+            for name in ("TRIAGE_RDS_DB", "TRIAGE_RDS_USER")
+            if os.environ.get(name)
+        ]
+        submit_kwargs: dict[str, Any] = {
+            "jobName": "triage-experiment",
+            "jobQueue": self._job_queue,
+            "jobDefinition": self._job_definition,
+            "parameters": {
                 "config_uri": self._config_uri,
                 "profile": self._profile_name,
             },
-        )
+        }
+        if override_env:
+            submit_kwargs["containerOverrides"] = {"environment": override_env}
+        batch = boto3.client("batch", region_name=self._region)
+        response = batch.submit_job(**submit_kwargs)
         job_id = response["jobId"]
         logger.info(
             f"Submitted Batch job {job_id} (queue={self._job_queue},"

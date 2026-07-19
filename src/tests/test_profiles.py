@@ -378,6 +378,32 @@ def test_load_profile_cloud_fail_fasts_on_missing_env(monkeypatch):
         load_profile("cloud")
 
 
+def test_load_profile_cloud_inside_batch_job_runs_in_process(monkeypatch):
+    """Inside a Batch job (AWS_BATCH_JOB_ID set) the cloud profile runs the experiment IN-PROCESS
+    against RDS via IAM — it must NOT build a BatchExecution (which would re-submit the job).
+    """
+    _set_cloud_env(monkeypatch)
+    monkeypatch.setenv("AWS_BATCH_JOB_ID", "abc-123")
+    profile = load_profile("cloud", token_provider=lambda: "TOKEN")
+
+    assert isinstance(profile.execution, InProcessExecution)
+    assert isinstance(profile.auth, CloudAuth)  # the worker opens its own IAM pool
+    assert isinstance(profile.storage, S3Storage)
+
+
+def test_load_profile_cloud_inside_batch_job_needs_no_batch_names(monkeypatch):
+    """The container's env deliberately omits TRIAGE_BATCH_* (the job def bakes only cluster
+    vars); the in-process worker path must not require them — only the submit path does.
+    """
+    _set_cloud_env(monkeypatch)
+    monkeypatch.setenv("AWS_BATCH_JOB_ID", "abc-123")
+    monkeypatch.delenv("TRIAGE_BATCH_QUEUE")
+    monkeypatch.delenv("TRIAGE_BATCH_JOB_DEF")
+
+    profile = load_profile("cloud", token_provider=lambda: "TOKEN")
+    assert isinstance(profile.execution, InProcessExecution)
+
+
 def test_load_profile_rejects_unknown_name():
     with pytest.raises(ValueError, match="unknown profile"):
         load_profile("onprem", dburl="postgresql://u@h/d")

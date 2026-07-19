@@ -40,7 +40,7 @@ from triage.component.results_schema import (
 )
 from triage.component.timechop import Timechop
 from triage.logging import configure_logging, get_logger
-from triage.profiles import load_profile
+from triage.profiles import InProcessExecution, load_profile
 from triage.sources import (
     bump_source,
     check_drift,
@@ -401,13 +401,21 @@ def run_command(
     locally, or one AWS Batch job submitted (returning the ``job_id`` immediately) in cloud.
     """
     profile_obj = load_profile(
+        # cloud builds its auth from TRIAGE_RDS_* env, not a dburl — don't require one
+        # (the operator submit needs no DB config at all).
         profile,
-        dburl=require_db_url(ctx),
+        dburl=require_db_url(ctx) if profile == "local" else None,
         storage_root=str(project_path) if profile == "local" else None,
     )
     config_data = load_experiment_config(config)
 
-    pool = profile_obj.auth.open_pool()
+    # Open a DB pool only when we run the experiment in THIS process: local always, and cloud
+    # when we ARE the Batch worker (load_profile returns InProcessExecution inside the job — it
+    # opens its own IAM pool in-VPC). The cloud *submit* seat gets BatchExecution and no pool:
+    # it never touches the DB, and forcing a pool here would demand operator RDS reachability the
+    # design avoids (the operator may only reach a private RDS through a bastion tunnel).
+    runs_in_process = isinstance(profile_obj.execution, InProcessExecution)
+    pool = profile_obj.auth.open_pool() if runs_in_process else None
     try:
         handle = profile_obj.execution.run(
             pool,
@@ -419,7 +427,8 @@ def run_command(
             cache_policy=cache_policy,
         )
     finally:
-        pool.close()
+        if pool is not None:
+            pool.close()
 
     if handle.batch_job_id is not None:
         console.print(

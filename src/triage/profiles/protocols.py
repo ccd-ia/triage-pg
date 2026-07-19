@@ -48,7 +48,7 @@ class ExecutionAdapter(Protocol):
 
     def run(
         self,
-        pool: DictRowPool,
+        pool: DictRowPool | None,
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,

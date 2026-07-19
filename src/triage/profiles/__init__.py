@@ -15,6 +15,7 @@ Where each adapter touches the flow (minimal blast radius on the tested core, sp
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from triage.logging import get_logger
@@ -82,7 +83,7 @@ def load_profile(
     dburl: str | None = None,
     storage_root: str | None = None,
     config_uri: str | None = None,
-    token_provider=None,
+    token_provider: Callable[[], str] | None = None,
 ) -> Profile:
     """Build a :class:`Profile` from ``--profile`` + the environment.
 
@@ -121,32 +122,42 @@ def load_profile(
         dbname = _require_env("TRIAGE_RDS_DB")
         user = _require_env("TRIAGE_RDS_USER")
         bucket = _require_env("TRIAGE_S3_BUCKET")
-        job_queue = _require_env("TRIAGE_BATCH_QUEUE")
-        job_def = _require_env("TRIAGE_BATCH_JOB_DEF")
 
         root = storage_root if storage_root is not None else f"s3://{bucket}"
         storage = S3Storage(region=region)
         cfg_uri = (
             config_uri if config_uri is not None else storage.join(root, "config.json")
         )
+        auth = CloudAuth(
+            host=host,
+            port=port,
+            dbname=dbname,
+            user=user,
+            region=region,
+            token_provider=token_provider,
+        )
+
+        # Inside a Batch job (AWS_BATCH_JOB_ID is injected by Batch) we ARE the worker: run the
+        # experiment in THIS process, authenticating to RDS via the IAM pool. On the operator
+        # seat that variable is absent, so we SUBMIT one Batch job instead — and only the submit
+        # path needs the queue / job-definition names (the container never re-submits, and the
+        # job definition deliberately does not bake TRIAGE_BATCH_* into the container's env).
+        execution: ExecutionAdapter
+        if os.environ.get("AWS_BATCH_JOB_ID"):
+            execution = InProcessExecution()
+        else:
+            execution = BatchExecution(
+                region=region,
+                job_queue=_require_env("TRIAGE_BATCH_QUEUE"),
+                job_definition=_require_env("TRIAGE_BATCH_JOB_DEF"),
+                config_uri=cfg_uri,
+            )
 
         return Profile(
             name="cloud",
-            auth=CloudAuth(
-                host=host,
-                port=port,
-                dbname=dbname,
-                user=user,
-                region=region,
-                token_provider=token_provider,
-            ),
+            auth=auth,
             storage=storage,
-            execution=BatchExecution(
-                region=region,
-                job_queue=job_queue,
-                job_definition=job_def,
-                config_uri=cfg_uri,
-            ),
+            execution=execution,
             storage_root=root,
         )
 
