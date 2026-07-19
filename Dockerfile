@@ -32,6 +32,13 @@ RUN apt-get update && \
         postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
+# Amazon RDS global CA bundle — CloudAuth forces sslmode=verify-full for IAM-token connections
+# (ADR-0004), so the container must ship the RDS root chain at the path
+# triage.profiles.auth._DEFAULT_RDS_CA_BUNDLE expects. The all-regions bundle validates any RDS
+# endpoint; refreshed periodically by AWS, so rebuild picks up rotations.
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+    /etc/ssl/certs/rds-combined-ca-bundle.pem
+
 # Non-root runtime user (Docker hard rule: the image must not force root).
 # Compose authors mount host paths with --user $(id -u):$(id -g); this default
 # user is for non-mounted / interactive use.
