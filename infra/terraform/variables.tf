@@ -25,12 +25,26 @@ variable "operator_cidr_blocks" {
   default     = []
 }
 
+variable "create_vpc_endpoints" {
+  description = "Create ECR/logs interface endpoints so Fargate can pull images without a NAT (throwaway/no-egress footprints). Prod BYO networks with a working NAT leave this false."
+  type        = bool
+  default     = false
+}
+
+variable "endpoint_s3_route_table_ids" {
+  description = "Route tables to attach an S3 gateway endpoint to (ECR layer blobs). Empty = skip (the VPC already has an S3 gateway, as in the validation footprint)."
+  type        = list(string)
+  default     = []
+}
+
 # ------------------------------------------------------------------ RDS (ADR-0004)
 
 variable "rds_engine_version" {
+  # RDS deprecates old minors over time (16.6 was pulled — min available is 16.9);
+  # 16.14 is the current latest 16.x. Bump when RDS retires it.
   description = "PostgreSQL engine version (plain PG — no extensions required, ADR-0003)."
   type        = string
-  default     = "16.6"
+  default     = "16.14"
 }
 
 variable "rds_instance_class" {
@@ -75,4 +89,28 @@ variable "image_tag" {
   description = "The triage-pg image tag the job definition points at (pushed to the ECR repo this module creates)."
   type        = string
   default     = "latest"
+}
+
+# --- Throwaway-validation knobs: production-safe defaults; test footprint flips them so
+# --- `terraform destroy` removes 100% (no deletion-protection block, no surviving snapshot,
+# --- no non-empty bucket/repo). Set in the gitignored terraform.tfvars for the test.
+variable "rds_deletion_protection" {
+  description = "RDS deletion protection. Prod-safe default true; false for throwaway footprints."
+  type        = bool
+  default     = true
+}
+variable "rds_skip_final_snapshot" {
+  description = "Skip the RDS final snapshot on destroy. Prod default false; true for throwaway footprints."
+  type        = bool
+  default     = false
+}
+variable "s3_force_destroy" {
+  description = "Let terraform empty + delete the artifacts bucket on destroy. Prod false; true for throwaway."
+  type        = bool
+  default     = false
+}
+variable "ecr_force_delete" {
+  description = "Let terraform delete the ECR repo even with images present. Prod false; true for throwaway."
+  type        = bool
+  default     = false
 }

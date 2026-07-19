@@ -5,6 +5,7 @@
 resource "aws_ecr_repository" "triage" {
   name                 = "${var.name_prefix}-pg"
   image_tag_mutability = "MUTABLE"
+  force_delete         = var.ecr_force_delete
 
   image_scanning_configuration {
     scan_on_push = true

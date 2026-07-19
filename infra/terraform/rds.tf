@@ -56,8 +56,8 @@ resource "aws_db_instance" "triage" {
   vpc_security_group_ids              = [aws_security_group.rds.id]
   multi_az                            = false
   publicly_accessible                 = false
-  deletion_protection                 = true
-  skip_final_snapshot                 = false
-  final_snapshot_identifier           = "${var.name_prefix}-pg-final"
+  deletion_protection                 = var.rds_deletion_protection
+  skip_final_snapshot                 = var.rds_skip_final_snapshot
+  final_snapshot_identifier           = var.rds_skip_final_snapshot ? null : "${var.name_prefix}-pg-final"
   backup_retention_period             = 7
 }

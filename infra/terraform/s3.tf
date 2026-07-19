@@ -4,7 +4,8 @@
 # a lifecycle rule deleting artifacts would silently break cache-hit rebuild guarantees).
 
 resource "aws_s3_bucket" "artifacts" {
-  bucket = "${var.name_prefix}-artifacts-${data.aws_caller_identity.current.account_id}"
+  bucket        = "${var.name_prefix}-artifacts-${data.aws_caller_identity.current.account_id}"
+  force_destroy = var.s3_force_destroy
 }
 
 resource "aws_s3_bucket_versioning" "artifacts" {

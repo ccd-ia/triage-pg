@@ -59,5 +59,10 @@ donorschoose-database.yaml
 chicago311/chi311_db/real/
 chicago311-database.yaml
 
-# Terraform local state/providers (infra/terraform; the lock file IS committed)
+# Terraform local state/providers (infra/terraform; the lock file IS committed).
+# State + plan files carry resolved ARNs / secret references / resource ids — never commit them.
 .terraform/
+infra/terraform/terraform.tfvars
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/tfplan*
