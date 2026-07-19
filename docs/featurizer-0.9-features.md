@@ -1,7 +1,9 @@
 # featurizer v0.9.x feature families in triage-pg
 
-**Status:** current pin `featurizer[parquet] @ v0.9.1` (`pyproject.toml`, ADR-0008/0016).
-**Date:** 2026-07-18.
+**Status:** current pin `featurizer[parquet] @ v1.0.0` (`pyproject.toml`, ADR-0008/0016) — the
+featurizer **stability release**: the 0.9.x families below are unchanged, but the public config
+schema + `Featurizer` surface are now frozen under featurizer's own API-stability commitment, and
+the families are validated at realistic scale. **Date:** 2026-07-19.
 
 featurizer v0.9.0/v0.9.1 add the **text and graph feature families** (the taxonomy's former
 `[GAP]` substrates) plus one native engine addition. Everything is **additive** — v0.9.1 is
