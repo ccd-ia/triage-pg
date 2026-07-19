@@ -4,15 +4,18 @@
  * temporal configuration, the model grid, the feature config, and the cohort/label queries —
  * plus a build summary (built vs reused models) and a timeline of the experiment's runs.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../api/client'
 import type {
   ExperimentAttempt,
   ExperimentConfig,
   ExperimentSummary,
   ModelReuse,
   RunListItem,
+  TemporalSplit,
 } from '../api/types'
 import { StatusBadge } from './StatusBadge'
+import { TemporalConfigChart } from './TemporalConfigChart'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
@@ -55,6 +58,59 @@ function Collapsible({ title, body }: { title: string; body: string }) {
 
 function leaf(classPath: string): string {
   return classPath.split('.').pop() ?? classPath
+}
+
+/** Fetches a config's temporal cross-validation blocks and renders the chart (self-contained). */
+function TemporalBlocks({ config }: { config: Record<string, unknown> }) {
+  // Key on the temporal_config only, so this refetches when it changes — not every render.
+  const temporalKey = JSON.stringify(config.temporal_config ?? null)
+  const [state, setState] = useState<{
+    key: string
+    splits: TemporalSplit[] | null
+    error: string | null
+  }>({ key: '', splits: null, error: null })
+
+  useEffect(() => {
+    let alive = true
+    api
+      .temporalViz({ config })
+      .then((r) => alive && setState({ key: temporalKey, splits: r.splits, error: null }))
+      .catch(
+        (e) =>
+          alive &&
+          setState({
+            key: temporalKey,
+            splits: null,
+            error: e instanceof Error ? e.message : 'could not compute blocks',
+          }),
+      )
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [temporalKey])
+
+  // Derived (no setState-in-effect): a key mismatch means the current fetch hasn't resolved yet.
+  if (state.key !== temporalKey) {
+    return (
+      <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+        Computing temporal blocks…
+      </div>
+    )
+  }
+  if (state.error) {
+    return (
+      <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+        Temporal preview unavailable: {state.error}
+      </div>
+    )
+  }
+  if (!state.splits || !state.splits.length) return null
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <TemporalConfigChart splits={state.splits} />
+    </div>
+  )
 }
 
 export function ConfigPanel({
@@ -115,6 +171,7 @@ export function ConfigPanel({
             <b>Temporal configuration</b>
             <span className="src">config.temporal_config</span>
           </div>
+          <TemporalBlocks config={c} />
           <KvGrid obj={temporal} />
         </section>
       ) : null}

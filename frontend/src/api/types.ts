@@ -1169,3 +1169,25 @@ export interface SubmissionResult {
     status?: string
   }
 }
+
+/** One matrix (train or validation) inside a temporal split — ISO date strings. */
+export interface TemporalMatrixBlock {
+  first_as_of: string
+  last_as_of: string
+  /** last as-of date + the label timespan (the outcome-lookahead horizon). */
+  label_end: string
+  as_of_dates: string[]
+  label_timespan: string
+  n_as_of: number
+}
+
+/** One train/validation split of a temporal_config (POST /api/temporal-viz). */
+export interface TemporalSplit {
+  train: TemporalMatrixBlock
+  validation: TemporalMatrixBlock
+  feature_start: string
+}
+
+export interface TemporalVizResult {
+  splits: TemporalSplit[]
+}

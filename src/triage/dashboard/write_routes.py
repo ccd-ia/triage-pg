@@ -25,7 +25,6 @@ from typing import Any, Optional
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from triage.util.db import DictRowPool
 from pydantic import BaseModel, Field
 
 from triage import project_lifecycle, registry
@@ -39,6 +38,7 @@ from triage.dashboard.auth import (
 from triage.dashboard.project_routing import pool_for_slug, project_dburl
 from triage.logging import get_logger
 from triage.profiles.execution import RunHandle
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
 
@@ -300,6 +300,80 @@ def post_validate_config(
                 "warnings": [],
             }
     return validate_experiment_config(config)
+
+
+def _temporal_blocks(temporal: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compute a temporal_config's cross-validation blocks as plain ISO dates for the SPA.
+
+    Builds Timechop and returns, per split, the train/validation as-of-date spans, the
+    per-as-of-date list, and the label-window horizon (last as-of + label timespan) — all as
+    ISO date strings, so the frontend renders with no server-side plotting and no timespan math.
+    """
+    from triage.component.timechop import Timechop
+    from triage.util.conf import convert_str_to_relativedelta
+
+    def _matrix(m: dict[str, Any], span_key: str) -> dict[str, Any]:
+        aost = m["as_of_times"]
+        last = max(aost)
+        span = m[span_key]
+        return {
+            "first_as_of": min(aost).date().isoformat(),
+            "last_as_of": last.date().isoformat(),
+            "label_end": (last + convert_str_to_relativedelta(span)).date().isoformat(),
+            "as_of_dates": [d.date().isoformat() for d in aost],
+            "label_timespan": span,
+            "n_as_of": len(aost),
+        }
+
+    chopper = Timechop(**temporal)
+    blocks: list[dict[str, Any]] = []
+    for chop in chopper.chop_time():
+        blocks.append(
+            {
+                "train": _matrix(chop["train_matrix"], "training_label_timespan"),
+                "validation": _matrix(chop["test_matrices"][0], "test_label_timespan"),
+                "feature_start": chop["feature_start_time"].date().isoformat(),
+            }
+        )
+    return blocks
+
+
+@write_router.post("/temporal-viz")
+def post_temporal_viz(
+    body: ConfigPayload,
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    """A config's temporal cross-validation blocks, for the dashboard temporal-config viz.
+
+    Same input contract as ``/validate-config`` (a ``config`` object or ``config_text``).
+    Nothing persisted, nothing run — just Timechop over the ``temporal_config``.
+    """
+    if (body.config is None) == (body.config_text is None):
+        raise HTTPException(
+            status_code=400,
+            detail="provide exactly one of 'config' (object) or 'config_text' (YAML/JSON text)",
+        )
+    if body.config is not None:
+        config = body.config
+    else:
+        try:
+            parsed = yaml.safe_load(body.config_text or "")
+            if not isinstance(parsed, dict):
+                raise ValueError("config_text must parse to a mapping")
+            config = parsed
+        except (yaml.YAMLError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"not valid YAML/JSON: {exc}")
+    temporal = config.get("temporal_config")
+    if not isinstance(temporal, dict) or not temporal:
+        raise HTTPException(
+            status_code=422, detail="config has no temporal_config block"
+        )
+    try:
+        return {"splits": _temporal_blocks(temporal)}
+    except (ValueError, KeyError, TypeError) as exc:
+        # Timechop config errors (bad dates, impossible windows) -> a 422 the UI renders inline.
+        logger.warning(f"temporal-viz: invalid temporal_config: {exc}")
+        raise HTTPException(status_code=422, detail=f"invalid temporal_config: {exc}")
 
 
 @write_router.get("/example-configs")

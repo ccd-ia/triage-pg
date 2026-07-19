@@ -219,3 +219,36 @@ def test_submission_rejects_ambiguous_config_forms(client):
         headers=HEADERS,
     )
     assert r.status_code == 400
+
+
+# ------------------------------------------------------------------ temporal-viz
+
+
+def test_temporal_viz_returns_blocks_for_a_real_config(client):
+    """A committed config yields Timechop splits as plain ISO dates for the dashboard chart."""
+    c, _ = client
+    r = c.post(
+        "/api/temporal-viz",
+        json={"config_text": CHI311_YAML.read_text(encoding="utf-8")},
+        headers=HEADERS,
+    )
+    assert r.status_code == 200
+    splits = r.json()["splits"]
+    assert len(splits) >= 1
+    for s in splits:
+        assert set(s) == {"train", "validation", "feature_start"}
+        for m in (s["train"], s["validation"]):
+            assert m["as_of_dates"] and m["n_as_of"] == len(m["as_of_dates"])
+            # label_end is the last as-of date + the label timespan → strictly after it
+            assert m["label_end"] >= m["last_as_of"] >= m["first_as_of"]
+
+
+def test_temporal_viz_422_without_temporal_config(client):
+    c, _ = client
+    r = c.post(
+        "/api/temporal-viz",
+        json={"config": {"problem_type": "classification"}},
+        headers=HEADERS,
+    )
+    assert r.status_code == 422
+    assert "temporal_config" in r.json()["detail"]

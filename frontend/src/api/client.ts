@@ -45,6 +45,7 @@ import type {
   Submission,
   SubmissionResult,
   SummaryResponse,
+  TemporalVizResult,
   ValidateConfigResult,
 } from './types'
 import * as fixture from '../fixtures'
@@ -158,6 +159,36 @@ function metricQuery(metric?: string, parameter?: string, rule?: string): string
   if (rule) q.set('rule', rule)
   const qs = q.toString()
   return qs ? `?${qs}` : ''
+}
+
+/** Two synthetic splits so fixture/dev mode shows a real temporal preview without a backend. */
+function fxTemporalViz(): TemporalVizResult {
+  const mk = (first: string, last: string, labelEnd: string, asOf: string[]) => ({
+    first_as_of: first,
+    last_as_of: last,
+    label_end: labelEnd,
+    as_of_dates: asOf,
+    label_timespan: '6month',
+    n_as_of: asOf.length,
+  })
+  return {
+    splits: [
+      {
+        feature_start: '2014-01-01',
+        train: mk('2015-01-01', '2016-01-01', '2016-07-01', [
+          '2015-01-01',
+          '2015-07-01',
+          '2016-01-01',
+        ]),
+        validation: mk('2016-07-01', '2016-07-01', '2017-01-01', ['2016-07-01']),
+      },
+      {
+        feature_start: '2014-01-01',
+        train: mk('2015-01-01', '2015-07-01', '2016-01-01', ['2015-01-01', '2015-07-01']),
+        validation: mk('2016-01-01', '2016-01-01', '2016-07-01', ['2016-01-01']),
+      },
+    ],
+  }
 }
 
 export const api = {
@@ -443,6 +474,15 @@ export const api = {
   }): Promise<ValidateConfigResult> {
     if (USE_FIXTURE) return fake(fixture.fxValidateConfig(body.config_text))
     return post<ValidateConfigResult>('/validate-config', body)
+  },
+
+  /** A config's temporal cross-validation blocks (for the temporal-config viz). */
+  temporalViz(body: {
+    config?: Record<string, unknown>
+    config_text?: string
+  }): Promise<TemporalVizResult> {
+    if (USE_FIXTURE) return fake(fxTemporalViz())
+    return post<TemporalVizResult>('/temporal-viz', body)
   },
 
   /** The committed example configs, for the submit-form picker. */
