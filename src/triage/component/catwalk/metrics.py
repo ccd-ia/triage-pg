@@ -18,9 +18,9 @@ Functions defined here are meant to be used in ModelEvaluator.available_metrics
 
 """
 
+import numpy as np
 from sklearn import metrics
 from sklearn.metrics import confusion_matrix
-import numpy as np
 
 
 class Metric:
@@ -142,3 +142,24 @@ class UnknownMetricError(ValueError):
     """Signifies that a metric name was passed, but no matching computation
     function is available
     """
+
+
+def pinball_loss(y_true, y_pred, quantile):
+    """Pinball (quantile) loss for a τ-quantile forecast — lower is better (v1.0.1, Phase 5).
+
+    The numpy parity of ``triage.regression_metric``'s ``pinball@<tau>`` branch (migration 0020):
+    ``mean( τ·(y−ŷ) when y ≥ ŷ, (1−τ)·(ŷ−y) when y < ŷ )``. Used to cross-check the in-PG SQL.
+
+    Args:
+        y_true: ground-truth continuous targets.
+        y_pred: the τ-quantile forecast (the model's ``score``).
+        quantile: τ in (0, 1).
+
+    Returns:
+        float: the mean pinball loss.
+    """
+    tau = float(quantile)
+    if not 0.0 < tau < 1.0:
+        raise ValueError(f"pinball quantile must be in (0, 1), got {quantile!r}")
+    diff = np.asarray(y_true, dtype=float) - np.asarray(y_pred, dtype=float)
+    return float(np.mean(np.where(diff >= 0, tau * diff, (tau - 1) * diff)))

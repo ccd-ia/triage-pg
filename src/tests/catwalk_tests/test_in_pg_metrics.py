@@ -20,6 +20,7 @@ from triage.component.catwalk.in_pg_evaluation import (
     compute_bias_in_db,
     evaluate_in_db,
 )
+from triage.component.catwalk.metrics import pinball_loss
 from triage.component.results_schema import downgrade_db, upgrade_db
 
 LABEL_TIMESPAN = "6 months"
@@ -296,6 +297,101 @@ def test_regression_metrics_match_sklearn(greenfield_engine):
     assert rmse["value_worst"] is None
     assert rmse["num_positive"] is None
     assert rmse["num_labeled"] == 10
+
+
+# regression preds/actual reused by the pinball tests (Phase 5).
+_PINBALL_PREDS = [2.5, 0.0, 2.0, 8.0, 1.5, 3.0, 5.5, 7.0, 4.0, 6.0]
+_PINBALL_ACTUAL = [3.0, -0.5, 2.0, 7.0, 1.0, 2.5, 6.0, 6.5, 4.5, 5.5]
+
+
+def test_pinball_matches_numpy_parity(greenfield_engine):
+    """In-PG ``pinball@τ`` == the numpy ``pinball_loss`` to 1e-9 for every default quantile."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(
+        engine, model_id, _PINBALL_PREDS, _PINBALL_ACTUAL, ENTITY_IDS
+    )
+
+    evaluate_in_db(
+        engine,
+        model_id,
+        AS_OF_DATE,
+        LABEL_TIMESPAN,
+        metric_config={
+            "regression_metrics": ["pinball@0.5", "pinball@0.8", "pinball@0.95"]
+        },
+    )
+
+    for tau in (0.5, 0.8, 0.95):
+        row = _eval_row(engine, model_id, f"pinball@{tau}", "")
+        assert row is not None, f"no evaluation row for pinball@{tau}"
+        assert row["value"] == pytest.approx(
+            pinball_loss(_PINBALL_ACTUAL, _PINBALL_PREDS, tau), abs=1e-9
+        )
+        assert row["num_labeled"] == 10
+    # τ=0.5 pinball is exactly half the MAE
+    assert pinball_loss(_PINBALL_ACTUAL, _PINBALL_PREDS, 0.5) == pytest.approx(
+        skmetrics.mean_absolute_error(_PINBALL_ACTUAL, _PINBALL_PREDS) / 2
+    )
+
+
+def test_pinball_is_lower_is_better_and_surfaces_in_catalog(greenfield_engine):
+    """pinball is a loss: ``higher_is_better('pinball@τ')`` is false, and once an evaluation
+    exists the ``metric_catalog`` view surfaces it with ``higher_is_better = false`` — which is
+    what audition ranks on (ascending)."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(
+        engine, model_id, _PINBALL_PREDS, _PINBALL_ACTUAL, ENTITY_IDS
+    )
+    evaluate_in_db(
+        engine,
+        model_id,
+        AS_OF_DATE,
+        LABEL_TIMESPAN,
+        metric_config={"regression_metrics": ["pinball@0.9"]},
+    )
+
+    with engine.connection() as conn:
+        hib = conn.execute(
+            "select triage.higher_is_better('pinball@0.9') as h"
+        ).fetchone()["h"]
+        cat = conn.execute(
+            "select higher_is_better from triage.metric_catalog where metric = 'pinball@0.9'"
+        ).fetchone()
+
+    assert hib is False
+    assert cat is not None and cat["higher_is_better"] is False
+
+
+def test_migration_0020_round_trips(db_pool_greenfield, db_url):
+    """0020 downgrades (pinball@ rejected as unknown) and re-upgrades (accepted) cleanly —
+    the migration is reversible."""
+    engine = db_pool_greenfield
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(
+        engine, model_id, _PINBALL_PREDS, _PINBALL_ACTUAL, ENTITY_IDS
+    )
+
+    downgrade_db(dburl=db_url, revision="0019_task_framing")
+    with pytest.raises(Exception, match="unknown regression metric"):
+        evaluate_in_db(
+            engine,
+            model_id,
+            AS_OF_DATE,
+            LABEL_TIMESPAN,
+            metric_config={"regression_metrics": ["pinball@0.9"]},
+        )
+
+    upgrade_db(dburl=db_url, revision="head")
+    written = evaluate_in_db(
+        engine,
+        model_id,
+        AS_OF_DATE,
+        LABEL_TIMESPAN,
+        metric_config={"regression_metrics": ["pinball@0.9"]},
+    )
+    assert written == 1
 
 
 # ------------------------------------------------------------------------- bias

@@ -73,6 +73,13 @@ evaluation:
   regression_metrics:
     - rmse
     - mae
+    - r2
+    # pinball@τ (v1.0.1, migration 0020): the quantile-loss floor a τ-quantile forecaster
+    # minimizes. Computed for every model so audition can rank them per quantile (lower is
+    # better). A DummyRegressor(strategy='quantile', quantile=τ) is the trivial τ-quantile floor.
+    - pinball@0.5
+    - pinball@0.8
+    - pinball@0.95
 
 # featurizer ER-graph: facilities are the target entity, inspections are child events.
 # Aggregation windows are ISO-8601 (featurizer format, not timechop format).

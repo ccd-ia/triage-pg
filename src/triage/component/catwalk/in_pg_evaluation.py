@@ -28,7 +28,18 @@ DEFAULT_CLASSIFICATION_CONFIG = {
     "thresholds": ["100_abs", "10_pct"],
 }
 DEFAULT_REGRESSION_CONFIG = {
-    "regression_metrics": ["rmse", "mae", "r2"],
+    # rmse/mae/r2 score a point forecast; pinball@τ scores a τ-quantile forecast (v1.0.1,
+    # migration 0020) — the metric a quantile baseline (DummyRegressor(quantile=τ), Croston,
+    # ETS intervals) must be judged on. Default quantiles: median + two upper tails for
+    # resource-prioritization. Stored as metric='pinball@0.9', parameter='' (lower is better).
+    "regression_metrics": [
+        "rmse",
+        "mae",
+        "r2",
+        "pinball@0.5",
+        "pinball@0.8",
+        "pinball@0.95",
+    ],
 }
 DEFAULT_SURVIVAL_CONFIG = {
     "survival_metrics": ["c_index"],
