@@ -237,6 +237,34 @@ def test_constant_score_mass_ties_are_stable(greenfield_engine):
     assert first == [(1, 1), (3, 2), (5, 3), (7, 4), (9, 5)]
 
 
+def test_nan_score_is_omitted(greenfield_engine):
+    """A NaN score means the model abstains on that entity (a baseline with no target history) —
+    the row is omitted, so it never poisons the in-PG aggregate metrics (one 'NaN' in ``avg()``
+    would make the whole metric NaN). Only the finite-score entity is written."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    n = record_predictions(
+        engine,
+        model_id,
+        "test",
+        [
+            {"entity_id": 1, "as_of_date": AS_OF_DATE, "score": float("nan")},
+            {"entity_id": 2, "as_of_date": AS_OF_DATE, "score": 0.7},
+        ],
+    )
+    assert n == 1  # only the finite score was recorded
+    with engine.connection() as conn:
+        rows = {
+            r["entity_id"]: r["score"]
+            for r in conn.execute(
+                "select entity_id, score from triage.predictions where model_id = %(m)s",
+                {"m": model_id},
+            ).fetchall()
+        }
+    assert 1 not in rows  # abstained — omitted
+    assert float(rows[2]) == 0.7
+
+
 def test_ranks_partitioned_by_as_of_date(greenfield_engine):
     """Ranking partitions by (model_id, as_of_date): each date ranks
     independently from rank_abs = 1."""

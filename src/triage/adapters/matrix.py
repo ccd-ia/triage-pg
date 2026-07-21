@@ -829,13 +829,22 @@ def _canonical_featurizer(featurizer_config: Mapping[str, Any]) -> dict[str, Any
 def _attach_reserved(design, reserved):
     """Left-join reserved target-history columns onto ``design`` on ``(entity_id, as_of_date)``.
 
-    Casts the reserved frame's ``entity_id`` to the design's dtype so the polars join keys match;
-    a reserved frame with no data rows (only its key schema) is a no-op.
+    Casts the reserved frame's ``entity_id`` to the design's dtype so the polars join keys match.
+    Crucially, when the reserved frame has the columns but **no data rows** (e.g. the earliest
+    as_of_dates have no admissible prior labels — cold start at the start of history), the
+    columns are still attached as all-NULL so the estimator seam finds them (ADR-0030) rather
+    than crashing; the baseline then forecasts NaN for those rows. A reserved frame carrying no
+    non-key columns at all (nothing to attach) is a genuine no-op.
     """
     import polars as pl
 
-    if reserved.height == 0:
+    reserved_cols = [c for c in reserved.columns if c not in ("entity_id", _AS_OF_COL)]
+    if not reserved_cols:
         return design
+    if reserved.height == 0:
+        return design.with_columns(
+            pl.lit(None).cast(pl.Float64).alias(c) for c in reserved_cols
+        )
     reserved = reserved.with_columns(
         pl.col("entity_id").cast(design.schema["entity_id"]),
         pl.col(_AS_OF_COL).cast(pl.Date),

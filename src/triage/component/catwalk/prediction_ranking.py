@@ -41,11 +41,27 @@ call; until then it stands alone with its own validation test.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
 from triage.util.db import DictRowPool
+
+
+def _finite_or_none(value) -> float | None:
+    """A finite float, or ``None`` for a NaN/inf score (the caller drops the row).
+
+    psycopg3 would store Python ``NaN`` as PostgreSQL ``'NaN'`` (CLAUDE.md gotcha), and a single
+    ``'NaN'`` poisons the in-PG aggregates — ``avg()`` over a set containing NaN returns NaN, so
+    one cold-start row would make an entire model's RMSE/pinball NaN. Since ``predictions.score``
+    is NOT NULL, a non-finite score means the model *abstains* on that entity (a baseline with no
+    target history to forecast from): ``record_predictions`` simply omits the row, and the metric
+    is computed over the entities it could score (the labeled-ranks inner join skips the rest).
+    """
+    f = float(value)
+    return f if math.isfinite(f) else None
+
 
 from triage.logging import get_logger
 
@@ -94,17 +110,28 @@ def record_predictions(
             "(triage.split_kind enum, 0001 migration)"
         )
 
-    rows = [
-        {
-            "model_id": int(model_id),
-            "entity_id": int(s["entity_id"]),
-            "as_of_date": s["as_of_date"],
-            "split_kind": split_kind,
-            "score": float(s["score"]),
-            "matrix_uuid": matrix_uuid,
-        }
-        for s in scores
-    ]
+    rows = []
+    abstained = 0
+    for s in scores:
+        score = _finite_or_none(s["score"])
+        if score is None:
+            abstained += 1
+            continue  # model abstains on this entity (non-finite score) — omit the row
+        rows.append(
+            {
+                "model_id": int(model_id),
+                "entity_id": int(s["entity_id"]),
+                "as_of_date": s["as_of_date"],
+                "split_kind": split_kind,
+                "score": score,
+                "matrix_uuid": matrix_uuid,
+            }
+        )
+    if abstained:
+        logger.debug(
+            f"record_predictions: model {model_id} abstained on {abstained} entity(ies) "
+            "with a non-finite score (e.g. a baseline with no target history) — rows omitted"
+        )
     if not rows:
         logger.debug(
             f"record_predictions called for model {model_id} with no scores; nothing inserted"
