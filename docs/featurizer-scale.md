@@ -8,7 +8,7 @@ pin bumped to **v0.9.1** (2026-07-18) then **v1.0.0** (2026-07-19, the featurize
 stability release) — **not re-benchmarked** (v0.9.x is additive: text/graph
 φ-bridges + an opt-in native `graph_relationships` pass, no DFS-planner change,
 and 1.0.0 adds no families, so the verdict carries;
-[`featurizer-0.9-features.md`](featurizer-0.9-features.md)) ·
+[`featurizer-passthrough-features.md`](featurizer-passthrough-features.md)) ·
 **Verdict:** (a) scalable as-is for our realistic volumes, with a known
 featurizer-side optimization filed for later if volumes grow. · **Benchmark:**
 [`benchmarks/featurizer_scale.py`](../benchmarks/featurizer_scale.py)
