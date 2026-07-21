@@ -72,9 +72,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from triage.util.db import DictRowPool
 
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
+from triage.adapters.target_history import TARGET_LAG_PREFIX
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import (
     FEATURE_GROUP_OUTPUT_REF,
@@ -89,6 +89,7 @@ from triage.derivation import Derivation, as_uuid, derive, engine_versions_for
 from triage.logging import get_logger
 from triage.profiles.protocols import StorageAdapter
 from triage.profiles.storage import write_parquet
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
 
@@ -277,11 +278,22 @@ def _merge_arrow_groups(groups, target_id_col: str):
 
 
 def _feature_columns(column_names: Sequence[str], target_id_col: str) -> list[str]:
-    """Feature columns = everything that is neither a key nor a ``__missing`` flag."""
+    """Feature columns = everything that is neither a key, a ``__missing`` flag, nor a reserved
+    ``_target_lag_*`` column.
+
+    The target-history lags (ADR-0030) are joined into the matrix for the time-series baselines
+    ONLY; excluding the reserved prefix here keeps them out of the feature set — so no real model
+    trains on the label's own lags, and the fit-based/fit-free imputation passes (which run over
+    the feature columns) never touch the structurally-missing history (ADR-0009).
+    """
     keys = {_AS_OF_COL, target_id_col}
     suffix = _missing_suffix()
     return [
-        name for name in column_names if name not in keys and not name.endswith(suffix)
+        name
+        for name in column_names
+        if name not in keys
+        and not name.endswith(suffix)
+        and not name.startswith(TARGET_LAG_PREFIX)
     ]
 
 
