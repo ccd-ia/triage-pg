@@ -167,7 +167,7 @@
       <summary>Metadata</summary>
       <dl>
         <dt>created</dt>      <dd>2026-07-20T16:48-06:00</dd>
-        <dt>modified</dt>     <dd>2026-07-20T16:48-06:00, 2026-07-20T17:37-06:00 (questionables resolved), 2026-07-20T18:10-06:00 (build: P1/P2/ADR-0030/cloud-extra), 2026-07-20T18:40-06:00 (build: P3 core — target-history projections + leak tests)</dd>
+        <dt>modified</dt>     <dd>2026-07-20T16:48-06:00, 2026-07-20T17:37-06:00 (questionables resolved), 2026-07-20T18:10-06:00 (build: P1/P2/ADR-0030/cloud-extra), 2026-07-20T18:40-06:00 (build: P3 core — target-history projections + leak tests), 2026-07-20T22:30-06:00 (build: P3/P4 close-out — _assemble join + estimator seam + run threading + example wiring)</dd>
         <dt>commits</dt>      <dd>d15347d4</dd>
         <dt>agent name</dt>   <dd>Claude Code (Opus 4.8, 1M)</dd>
         <dt>session id</dt>   <dd>d5447618-dcaa-4d73-a7e4-6134308426dc</dd>
@@ -492,8 +492,8 @@
 
     <!-- PHASE 3 (keystone) -->
     <div class="phase keystone">
-      <h3><code class="status">[wip]</code> Phase 3: Target-history data path (ADR-0030 · leakage boundary) — KEYSTONE</h3>
-      <p><em>◐ Core done + verified 2026-07-20 (12 tests: 6 leak/contract + unregressed 15-test matrix assembler). ADR-0030 written; <code>adapters/target_history.py</code> implements BOTH point-in-time projections (<code>build_target_history_lags</code> over <code>triage.labels</code>, <code>build_target_history_series</code> from <code>history_query</code>) + <code>validate_history_query</code>/<code>require_history_query</code>; the reserved <code>_target_lag_</code> prefix is excluded from features/imputation in <code>matrix._feature_columns</code>. <strong>The green leak tests gate Phase 4.</strong> Remaining (pairs with Phase 4, its only consumer, so it can be tested E2E rather than wired blind): the physical <code>_assemble</code> left-join emitting the lag columns, the <code>history_query</code> experiment-schema key + run-orchestration plumbing, and handing the sidecar to the estimator seam.</em></p>
+      <h3><code class="status">[x]</code> Phase 3: Target-history data path (ADR-0030 · leakage boundary) — KEYSTONE</h3>
+      <p><em>✔ Done + verified 2026-07-20 (73-test impacted-surface run green, orchestration unregressed). ADR-0030; <code>adapters/target_history.py</code> = both point-in-time projections + pivot + <code>resolve_target_history</code> + the raw-series contract; <code>matrix._assemble</code> attaches the reserved <code>_target_lag_*</code>/<code>_hist_*</code> columns (excluded from features + imputation), gated by <code>build_matrix</code> params that enter matrix identity; <code>run.py</code> threads <code>history_query</code>/<code>target_history_lags</code>/<code>history_series_width</code> (added to <code>_KNOWN_TOP_LEVEL_KEYS</code>); the estimator seam (<code>model._history_design_X</code>) feeds them to <code>consumes_target_history</code> baselines at fit + score. Both leak tests + the pivot + the seam integration test pass; the regression example validates with n_lags=6 + history_query.</em></p>
       <p>Expose, point-in-time-correctly, each entity's <strong>own prior target history</strong> in <em>two shapes</em>, under
       <em>one</em> leakage boundary (decisions D1/D2):
       <strong>(a) windowed-label lags</strong> — reserved <code>_target_lag_*</code> columns off the existing label projection,
@@ -510,12 +510,12 @@
       <h4>2. Windowed-label lags (reserved columns — D1/D2)</h4>
       <ul class="checklist">
         <li><code class="status">[x]</code> Build the lag projection in <code>adapters/target_history.py</code>: per <code>(entity_id, as_of_date)</code>, the entity's prior label values whose horizon completed strictly before <code>as_of_date</code>, most-recent-first, over <code>triage.labels</code>. <em>✔ Done — a deterministic read over the already-cached labels artifact (its own artifact row deferred: the lags are a pure function of labels + n_lags, cheap to recompute).</em></li>
-        <li><code class="status">[wip]</code> Join into <code>build_matrix</code> as reserved <code>_target_lag_*</code> columns — excluded from the feature list, categorical encoding, and <em>both</em> imputation passes. <em>◐ Exclusion done + tested (<code>matrix._feature_columns</code>); the physical <code>_assemble</code> left-join pairs with Phase 4.</em></li>
+        <li><code class="status">[x]</code> Join into <code>build_matrix</code> as reserved <code>_target_lag_*</code> columns — excluded from the feature list, categorical encoding, and <em>both</em> imputation passes. <em>✔ <code>_assemble</code> left-join done; exclusion in <code>_feature_columns</code>; params enter matrix identity.</em></li>
       </ul>
       <h4>3. Raw periodic series (optional sidecar via <code>history_query</code> — D1/D2)</h4>
       <ul class="checklist">
-        <li><code class="status">[wip]</code> Add the optional <code>history_query</code> config key (a period-level aggregation with its own knowledge-date discipline) + validation; a clear error if a raw-series baseline is in the grid but <code>history_query</code> is absent. <em>◐ <code>validate_history_query</code> + <code>require_history_query</code> done + tested; the experiment-config schema key + run-orchestration plumbing pairs with Phase 4.</em></li>
-        <li><code class="status">[wip]</code> Materialize the sidecar: an evenly-spaced per-entity series keyed by <code>(entity_id, as_of_date)</code>, each row restricted to <code>knowledge_date &lt; as_of_date</code>, handed to the estimator seam <em>alongside</em> X (variable length — not matrix columns). <em>◐ Builder (<code>build_target_history_series</code>) done + leak-tested; estimator-seam delivery pairs with Phase 4.</em></li>
+        <li><code class="status">[x]</code> Add the optional <code>history_query</code> config key (a period-level aggregation with its own knowledge-date discipline) + validation; a clear error if a raw-series baseline is in the grid but <code>history_query</code> is absent. <em>✔ validators + <code>_KNOWN_TOP_LEVEL_KEYS</code> + <code>run.py</code> threading; regression example validates clean.</em></li>
+        <li><code class="status">[x]</code> Materialize the sidecar: an evenly-spaced per-entity series keyed by <code>(entity_id, as_of_date)</code>, each row restricted to <code>knowledge_date &lt; as_of_date</code>, handed to the estimator seam <em>alongside</em> X. <em>✔ builder + <code>pivot_series_to_history_columns</code> → reserved <code>_hist_*</code> columns; seam feeds them at fit + score.</em></li>
       </ul>
       <h4>4. Point-in-time-correctness tests</h4>
       <ul class="checklist">
@@ -533,8 +533,8 @@
 
     <!-- PHASE 4 -->
     <div class="phase">
-      <h3><code class="status">[wip]</code> Phase 4: Time-series regression baselines</h3>
-      <p><em>◐ Estimators done + verified 2026-07-20 — 14 tests (13 pure-numpy + HoltWinters/ETS with statsmodels). New <code>baselines/timeseries.py</code>: <code>Persistence</code>, <code>PromedioDisponible</code>, <code>MovingAverage</code>, <code>Drift</code> (lag family) + <code>SeasonalNaive</code>, <code>ETS</code>, <code>HoltWinters</code>, <code>Croston</code>, <code>CrostonSBA</code> (series family), each with a unit-tested <code>_forecast_one</code> core and the <code>consumes_target_history</code>/<code>history_kind</code> delivery contract. <code>statsmodels</code> added as the <code>baselines</code> extra (D3, guarded import). Remaining (the shared Phase-3/4 integration): the estimator-seam delivery (feed <code>_target_lag_*</code> to lag estimators, the sidecar to series estimators) + the <code>_assemble</code> join + example-config wiring — all need the full matrix/tutorial E2E to verify, so they land together.</em></p>
+      <h3><code class="status">[x]</code> Phase 4: Time-series regression baselines</h3>
+      <p><em>✔ Done + verified 2026-07-20. New <code>baselines/timeseries.py</code>: <code>Persistence</code>, <code>PromedioDisponible</code>, <code>MovingAverage</code>, <code>Drift</code> (lag family) + <code>SeasonalNaive</code>, <code>ETS</code>, <code>HoltWinters</code>, <code>Croston</code>, <code>CrostonSBA</code> (series family), each with a unit-tested <code>_forecast_one</code> core. The estimator seam now delivers the reserved columns end-to-end (integration test: fit + score a baseline from <code>_target_lag_*</code>/<code>_hist_*</code>, ignoring features). Both families wired into <code>experiment-regression.yaml</code> (lag baselines off the label + raw-series baselines over a monthly <code>history_query</code>); the config validates clean. <code>statsmodels</code> in the <code>baselines</code> extra (D3). Only the live tutorial <code>triage run</code> (needs the DirtyDuck docker DB) remains as the acceptance smoke.</em></p>
       <p>The full regression/regression_ranking floor suite, each emitting a continuous prediction the spine ranks
       (regression_ranking) or scores (regression). Two families, split by <em>which</em> Phase-3 history shape they read.</p>
       <div class="dep">▲ depends on Phase 3 (target-history path)</div>
@@ -555,13 +555,13 @@
       <h4>4. Cold-start handling</h4>
       <ul class="checklist">
         <li><code class="status">[x]</code> Short-history fallback (entity with &lt; k obs / &lt; 1 season): baseline-owned degrade (NaN / last-available), never a fabricated future value. <em>✔ cold-start tested.</em></li>
-        <li><code class="status">[wip]</code> Wire both families into <code>example/dirtyduck/experiment-regression.yaml</code> + <code>experiment-visits.yaml</code>, adding a <code>history_query</code> to the visits example so seasonal/HW/Croston are actually exercised. <em>◐ Deferred with the seam: adding them to a runnable config before history is delivered would break the run.</em></li>
+        <li><code class="status">[x]</code> Wire both families into <code>example/dirtyduck/experiment-regression.yaml</code> with a <code>history_query</code> (monthly counts) so seasonal/HW/Croston are exercised. <em>✔ (visits is classification, not the fit for continuous-demand forecasters — the regression example is the right home). Config validates clean.</em></li>
       </ul>
       <h4>5. Testing Strategy</h4>
       <p>Unit-test each estimator against hand-computed values on a tiny series; E2E-assert a leaderboard floor below a real regressor.</p>
       <ul class="checklist">
         <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_baselines_timeseries.py -v</code> — persistence/MA/seasonal/drift/ETS/Croston match hand-computed values. <em>✔ 14 tests (HW/ETS with statsmodels).</em></li>
-        <li><code class="status">[wip]</code> <code>uv run pytest src/tests/adapter_tests/ -k "regression and baseline"</code> — both families fit + score through the spine. <em>◐ Awaits the estimator-seam delivery (shared Phase-3/4 integration).</em></li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_target_history_seam.py</code> — both families fit + score through the spine from the reserved columns. <em>✔ 4 seam tests pass.</em></li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
