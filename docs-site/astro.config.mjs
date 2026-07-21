@@ -20,22 +20,13 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/ccd-ia/triage-pg' },
       ],
-      // i18n: English lives at the root (published URLs unchanged); Spanish is a
-      // full translation under /es/ (content in src/content/docs/es/**, mirroring
-      // the tree). Starlight ships its own es UI strings; the language picker
-      // appears once a second locale exists.
-      defaultLocale: 'root',
-      locales: {
-        root: { label: 'English', lang: 'en' },
-        es: { label: 'Español', lang: 'es' },
-      },
+      // English-only site (the Spanish /es/ translation was dropped 2026-07-21).
       sidebar: [
         {
           label: 'Start here',
-          translations: { es: 'Empieza aquí' },
           items: [
-            { label: 'Welcome', translations: { es: 'Bienvenida' }, slug: 'index' },
-            { label: 'FAQ', translations: { es: 'Preguntas frecuentes' }, slug: 'faq' },
+            { label: 'Welcome', slug: 'index' },
+            { label: 'FAQ', slug: 'faq' },
             // The two published artifacts are static passthrough pages (public/),
             // linked absolutely so the links-validator does not treat them as
             // routes. They exist in English only.
@@ -45,17 +36,14 @@ export default defineConfig({
         },
         {
           label: 'Concepts',
-          translations: { es: 'Conceptos' },
           autogenerate: { directory: 'concepts' },
         },
         {
           label: 'Tutorials',
-          translations: { es: 'Tutoriales' },
           autogenerate: { directory: 'tutorials' },
         },
         {
           label: 'Reference',
-          translations: { es: 'Referencia' },
           autogenerate: { directory: 'reference' },
         },
       ],
