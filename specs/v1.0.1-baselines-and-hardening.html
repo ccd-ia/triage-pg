@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: triage-pg v1.0.1 — Baselines for Every problem_type + Cloud/Release Hardening</title>
+<style>
+  :root {
+    /* ---- palette: "metric floor over a temporal grid" ---- */
+    --bg:        #fbfaf8;
+    --surface:   #ffffff;
+    --surface-2: #f4f1ec;
+    --ink:       #1e2733;
+    --muted:     #5b6673;
+    --line:      #e6e2da;
+    --floor:     #c2410c;   /* amber — the baseline floor line            */
+    --floor-2:   #ea8a4b;
+    --signal:    #0d8f83;   /* teal  — the real model / signal            */
+    --boundary:  #d81f5a;   /* rose  — the leakage / point-in-time bound  */
+    --ok:        #15803d;
+    --shadow:    0 1px 2px rgba(20,30,45,.06), 0 6px 20px rgba(20,30,45,.06);
+    --radius: 12px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    --maxw: 68rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #0f141a;
+      --surface:   #161d26;
+      --surface-2: #1c2530;
+      --ink:       #e8edf2;
+      --muted:     #9aa7b4;
+      --line:      #263140;
+      --floor:     #f59e5b;
+      --floor-2:   #c2410c;
+      --signal:    #2dd4bf;
+      --boundary:  #fb6aa0;
+      --ok:        #4ade80;
+      --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.62;
+    font-size: 16px; -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--maxw); margin: 0 auto; padding: 2.4rem 1.4rem 6rem; }
+  header h1 {
+    font-size: clamp(1.5rem, 2.4vw, 2.15rem); line-height: 1.2;
+    margin: 0 0 .6rem; letter-spacing: -.02em;
+  }
+  header h1::before {
+    content: "v1.0.1"; display: inline-block; margin-right: .6rem;
+    font: 600 .62em var(--mono); color: var(--floor);
+    border: 1px solid var(--floor); border-radius: 999px;
+    padding: .1em .6em; vertical-align: middle; letter-spacing: 0;
+  }
+  h2 {
+    font-size: 1.3rem; margin: 2.6rem 0 .8rem; letter-spacing: -.01em;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--line);
+  }
+  h3 { font-size: 1.08rem; margin: 1.6rem 0 .5rem; }
+  h4 { font-size: .98rem; margin: 1.1rem 0 .35rem; color: var(--ink); }
+  p { margin: .55rem 0; }
+  a { color: var(--signal); }
+  code { font-family: var(--mono); font-size: .86em; }
+  p code, li code {
+    background: var(--surface-2); padding: .08em .38em; border-radius: 5px;
+    border: 1px solid var(--line);
+  }
+  section { margin-top: 1rem; }
+
+  /* metadata */
+  details.meta { margin: .4rem 0 0; }
+  details.meta summary {
+    cursor: pointer; font: 600 .8rem var(--mono); color: var(--muted);
+    user-select: none;
+  }
+  details.meta dl {
+    display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1.1rem;
+    margin: .7rem 0 0; padding: .9rem 1.1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+    font-size: .84rem;
+  }
+  details.meta dt { color: var(--muted); font-family: var(--mono); }
+  details.meta dd { margin: 0; word-break: break-word; }
+
+  /* figures */
+  figure {
+    margin: 1.4rem 0; padding: 1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); text-align: center;
+  }
+  figure svg { width: 100%; height: auto; max-width: 100%; display: block; }
+  figcaption {
+    margin-top: .7rem; font-size: .82rem; color: var(--muted);
+    font-style: italic;
+  }
+
+  /* callouts + tags */
+  .tag {
+    display: inline-block; font: 600 .66rem var(--mono); text-transform: uppercase;
+    letter-spacing: .04em; padding: .12em .5em; border-radius: 5px; vertical-align: middle;
+  }
+  .tag.existing { background: color-mix(in srgb, var(--signal) 15%, transparent); color: var(--signal); border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent); }
+  .tag.new      { background: color-mix(in srgb, var(--floor) 15%, transparent);  color: var(--floor);  border: 1px solid color-mix(in srgb, var(--floor) 40%, transparent); }
+
+  .files ul { list-style: none; padding: 0; }
+  .files li { padding: .3rem 0; border-bottom: 1px dashed var(--line); }
+
+  /* phases */
+  .phase {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 4px solid var(--floor); border-radius: var(--radius);
+    padding: 1.1rem 1.3rem 1.3rem; margin: 1.1rem 0; box-shadow: var(--shadow);
+  }
+  .phase h3 { margin-top: .2rem; }
+  .phase.keystone { border-left-color: var(--boundary); }
+  ul.checklist { list-style: none; padding-left: 0; margin: .4rem 0 .8rem; }
+  ul.checklist li { padding: .22rem 0 .22rem 0; }
+  code.status {
+    font-family: var(--mono); font-weight: 700; color: var(--muted);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 .25em; margin-right: .45em;
+  }
+  .loop {
+    margin-top: .7rem; padding: .7rem .9rem; font-size: .88rem;
+    background: color-mix(in srgb, var(--floor) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--floor) 30%, transparent);
+    border-radius: 8px;
+  }
+  .dep {
+    font: 600 .74rem var(--mono); color: var(--boundary);
+    display: inline-block; margin: .1rem 0 .3rem;
+  }
+
+  /* questionables + amendments */
+  #questionables details, #amendments details {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: .6rem .9rem; margin: .55rem 0; box-shadow: var(--shadow);
+  }
+  #questionables summary, #amendments summary { cursor: pointer; font-weight: 600; }
+  .qa-answer { color: var(--muted); margin: .6rem 0 .1rem; font-size: .93rem; }
+
+  /* notes */
+  #notes table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .88rem; }
+  #notes th, #notes td { border: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  #notes th { background: var(--surface-2); }
+  .pill { font: 600 .72rem var(--mono); padding: .1em .5em; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); }
+  blockquote {
+    margin: 1rem 0; padding: .5rem 1rem; border-left: 3px solid var(--signal);
+    background: var(--surface); color: var(--muted);
+  }
+  hr { border: none; border-top: 1px solid var(--line); margin: 2rem 0; }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Baselines for Every <code>problem_type</code> + Cloud/Release Hardening</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-07-20T16:48-06:00</dd>
+        <dt>modified</dt>     <dd>2026-07-20T16:48-06:00, 2026-07-20T17:37-06:00 (questionables resolved), 2026-07-20T18:10-06:00 (build: P1/P2/ADR-0030/cloud-extra), 2026-07-20T18:40-06:00 (build: P3 core — target-history projections + leak tests)</dd>
+        <dt>commits</dt>      <dd>d15347d4</dd>
+        <dt>agent name</dt>   <dd>Claude Code (Opus 4.8, 1M)</dd>
+        <dt>session id</dt>   <dd>d5447618-dcaa-4d73-a7e4-6134308426dc</dd>
+        <dt>back refs</dt>    <dd>TODO.org (v1.0.1 milestone), docs/adr/0010, docs/adr/0026, docs/adr/0009, docs/adr/0029</dd>
+        <dt>forward refs</dt> <dd>docs/adr/0030 (target-history, to be written), docs/baselines.md (to be written), docs-site heavy "Baselines" section (GitHub Pages, Phase 5)</dd>
+      </dl>
+    </details>
+  </header>
+
+  <!-- Hero image — synced to the :root visual identity -->
+  <figure>
+    <svg viewBox="0 0 920 300" role="img" aria-label="A metric floor for every problem_type">
+      <defs>
+        <style>
+          .lane   { fill: var(--surface-2); stroke: var(--line); }
+          .lbl    { font: 600 13px var(--mono); fill: var(--ink); }
+          .sub    { font: 11px var(--sans); fill: var(--muted); }
+          .floorl { stroke: var(--floor); stroke-width: 2.5; stroke-dasharray: 7 5; fill: none; }
+          .modell { stroke: var(--signal); stroke-width: 2.5; fill: none; }
+          .cap    { font: 700 16px var(--sans); fill: var(--ink); }
+          .leg    { font: 11px var(--sans); fill: var(--muted); }
+        </style>
+      </defs>
+      <text x="24" y="34" class="cap">A metric floor under every model — one floor per <tspan style="fill:var(--floor)">problem_type</tspan></text>
+      <!-- four lanes -->
+      <g>
+        <!-- lane template repeated 4x -->
+        <g transform="translate(24,58)">
+          <rect class="lane" x="0" y="0" width="205" height="86" rx="8"/>
+          <text x="12" y="22" class="lbl">classification</text>
+          <text x="12" y="38" class="sub">precision@k · recall@k · auc</text>
+          <path class="floorl" d="M12,70 H193"/>
+          <path class="modell" d="M12,66 C60,50 120,40 193,30"/>
+        </g>
+        <g transform="translate(253,58)">
+          <rect class="lane" x="0" y="0" width="205" height="86" rx="8"/>
+          <text x="12" y="22" class="lbl">regression</text>
+          <text x="12" y="38" class="sub">rmse · mae · r²</text>
+          <path class="floorl" d="M12,70 H193"/>
+          <path class="modell" d="M12,68 C70,58 130,44 193,34"/>
+        </g>
+        <g transform="translate(482,58)">
+          <rect class="lane" x="0" y="0" width="205" height="86" rx="8"/>
+          <text x="12" y="22" class="lbl">regression_ranking</text>
+          <text x="12" y="38" class="sub">precision@k over score→rank</text>
+          <path class="floorl" d="M12,70 H193"/>
+          <path class="modell" d="M12,64 C60,52 120,36 193,28"/>
+        </g>
+        <g transform="translate(711,58)">
+          <rect class="lane" x="0" y="0" width="185" height="86" rx="8"/>
+          <text x="12" y="22" class="lbl">survival</text>
+          <text x="12" y="38" class="sub">c-index (concordance)</text>
+          <path class="floorl" d="M12,70 H173"/>
+          <path class="modell" d="M12,67 C55,55 110,42 173,32"/>
+        </g>
+      </g>
+      <!-- legend -->
+      <g transform="translate(24,182)">
+        <line x1="0" y1="8" x2="34" y2="8" class="floorl"/>
+        <text x="42" y="12" class="leg">baseline floor — "does the ML earn its complexity?"</text>
+        <line x1="360" y1="8" x2="394" y2="8" class="modell"/>
+        <text x="402" y="12" class="leg">a real model, evaluated on the same in-PG spine (ADR-0010)</text>
+      </g>
+      <text x="24" y="232" class="sub" style="font-size:12px">One score → rank → evaluate spine. A baseline is just another estimator that produces predictions.</text>
+    </svg>
+    <figcaption>Every <code>problem_type</code> gets a trivial-model floor so leaderboards can answer "does the ML earn its complexity?"</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>
+      Ship <strong>triage-pg v1.0.1</strong>: give <em>every</em> <code>problem_type</code> a metric floor — a
+      trivial/naive model whose score→rank→evaluate output (ADR-0010) sets the bar a real model must clear —
+      and land the carried-over cloud/release hardening. Today only <strong>classification</strong> has baselines
+      (<code>catwalk/baselines/</code>: <code>BaselineRankMultiFeature</code>, <code>LinearRanker</code>,
+      <code>SimpleThresholder</code>). This milestone builds the missing floors for regression /
+      regression_ranking / survival, plus the point-in-time-correct <strong>target-history data path</strong> the
+      time-series baselines need — a real leakage boundary that earns its own ADR.
+    </p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>
+      The score→rank→evaluate spine is already <code>problem_type</code>-agnostic and the in-PG metrics already
+      cover all types (<code>in_pg_evaluation.py</code>: <code>precision@/recall@/auc</code>,
+      <code>rmse/mae/r2</code>, <code>c_index</code>). So a baseline is "just another estimator." The catch: the
+      most valuable regression baselines (persistence, moving average, seasonal naive, drift, Holt–Winters,
+      Croston/SBA) all consume the entity's <strong>own prior target values</strong> — and the cross-sectional
+      matrix (features + <em>one</em> forward label per <code>(entity_id, as_of_date)</code>) does not carry them.
+      Exposing that history is a genuine point-in-time boundary: a target realized at date <code>t</code> over a
+      label horizon <code>w</code> is only <em>knowable</em> at <code>t + w</code>. Feed it in one row too early and
+      you leak the future into the "floor" — the exact failure the ADR-0009 fit-free/fit-based split exists to
+      prevent, reappearing on the label side.
+    </p>
+    <figure>
+      <svg viewBox="0 0 920 300" role="img" aria-label="Target-history leakage boundary">
+        <defs>
+          <style>
+            .axis   { stroke: var(--line); stroke-width: 1.5; }
+            .tick   { font: 12px var(--mono); fill: var(--muted); }
+            .known  { fill: color-mix(in srgb, var(--ok) 18%, transparent); stroke: var(--ok); stroke-width: 1.5; }
+            .future { fill: color-mix(in srgb, var(--boundary) 14%, transparent); stroke: var(--boundary); stroke-width: 1.5; stroke-dasharray: 4 4; }
+            .bnd    { stroke: var(--boundary); stroke-width: 2.5; }
+            .bndl   { font: 700 12px var(--sans); fill: var(--boundary); }
+            .okl    { font: 700 12px var(--sans); fill: var(--ok); }
+            .note   { font: 12px var(--sans); fill: var(--ink); }
+            .hz     { font: 11px var(--mono); fill: var(--muted); }
+          </style>
+        </defs>
+        <!-- timeline axis -->
+        <line class="axis" x1="40" y1="150" x2="880" y2="150"/>
+        <polygon points="880,150 868,145 868,155" fill="var(--line)"/>
+        <text x="820" y="176" class="tick">time →</text>
+
+        <!-- past label window t1 .. t1+w  (KNOWN before as_of_date) -->
+        <rect class="known" x="90" y="120" width="150" height="30" rx="4"/>
+        <text x="90" y="112" class="hz">t₁ ── horizon w ──▶ t₁+w</text>
+        <text x="96" y="140" class="okl">realized outcome</text>
+
+        <!-- second past window t2 .. t2+w  (completes AFTER as_of_date → FUTURE) -->
+        <rect class="future" x="470" y="120" width="170" height="30" rx="4"/>
+        <text x="470" y="112" class="hz">t₂ ─── horizon w ───▶ t₂+w</text>
+        <text x="486" y="140" class="bndl">not yet knowable</text>
+
+        <!-- as_of_date boundary -->
+        <line class="bnd" x1="560" y1="60" x2="560" y2="230"/>
+        <text x="560" y="52" class="bndl" text-anchor="middle">as_of_date (NOW)</text>
+        <text x="560" y="250" class="bnd bndl" text-anchor="middle">point-in-time cut</text>
+
+        <!-- usable vs leak arrows -->
+        <path d="M165,205 Q360,205 555,175" fill="none" stroke="var(--ok)" stroke-width="2" marker-end="url(#a)"/>
+        <text x="250" y="222" class="okl">t₁+w ≤ as_of_date  →  USABLE history</text>
+
+        <path d="M625,95 Q600,80 566,92" fill="none" stroke="var(--boundary)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#b)"/>
+        <text x="648" y="90" class="bndl">t₂+w &gt; as_of_date → LEAK</text>
+
+        <defs>
+          <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ok)"/></marker>
+          <marker id="b" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--boundary)"/></marker>
+        </defs>
+      </svg>
+      <figcaption>The leakage boundary: a prior target is admissible as an input only once its horizon has fully elapsed (<code>t + w ≤ as_of_date</code>). This rule is ADR-0030.</figcaption>
+    </figure>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>
+      Land the work in eight phases ordered by <em>risk × dependency</em>. Phases&nbsp;1–2 ship cross-sectional
+      trivial floors (sklearn <code>Dummy*</code> + marginal survival) with <strong>no new data path</strong> — fast,
+      low-risk wins that immediately give all four <code>problem_type</code>s <em>a</em> floor. Phase&nbsp;3 is the
+      keystone: the point-in-time-correct target-history path (windowed-label lags + a raw-series sidecar) +
+      <strong>ADR-0030</strong>. Phase&nbsp;4 builds the time-series regression baselines on top of it. Phase&nbsp;5 adds
+      the pinball/quantile-loss metric so audition can honestly rank the quantile floors. Phase&nbsp;6 wires floors into
+      the example grids and ships the heavy GitHub-Pages docs. Phases&nbsp;7–8 are the independent cloud/release-hardening
+      and cosmetics tracks (parallelizable at any time). Every new baseline reuses the existing estimator seam
+      (<code>_fit_estimator</code>/<code>_score_column</code> in <code>adapters/model.py</code>) and the existing
+      in-PG metrics — no schema migration required.
+    </p>
+    <figure>
+      <svg viewBox="0 0 920 320" role="img" aria-label="Phase dependency graph">
+        <defs>
+          <style>
+            .node  { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; rx: 8; }
+            .keyn  { fill: color-mix(in srgb, var(--boundary) 12%, transparent); stroke: var(--boundary); stroke-width: 2; }
+            .pn    { font: 700 12px var(--sans); fill: var(--ink); }
+            .pd    { font: 10.5px var(--sans); fill: var(--muted); }
+            .edge  { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+            .keyedge { stroke: var(--boundary); stroke-width: 2; fill: none; }
+            .track { font: 600 10px var(--mono); fill: var(--signal); }
+          </style>
+          <marker id="e" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--muted)"/></marker>
+          <marker id="ek" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--boundary)"/></marker>
+        </defs>
+
+        <!-- row 1: trivial floors -->
+        <g transform="translate(20,30)"><rect class="node" width="180" height="52" rx="8"/><text x="12" y="22" class="pn">1 · Trivial floors</text><text x="12" y="40" class="pd">Dummy classifier + regressor</text></g>
+        <g transform="translate(20,110)"><rect class="node" width="180" height="52" rx="8"/><text x="12" y="22" class="pn">2 · Survival marginal</text><text x="12" y="40" class="pd">KM · Nelson–Aalen · 1-cov Cox</text></g>
+
+        <!-- keystone -->
+        <g transform="translate(300,70)"><rect class="keyn" width="200" height="60" rx="8"/><text x="14" y="26" class="pn">3 · Target-history path</text><text x="14" y="44" class="pd">ADR-0030 · leakage boundary</text></g>
+
+        <!-- row: time-series -->
+        <g transform="translate(515,66)"><rect class="node" width="150" height="60" rx="8"/><text x="10" y="26" class="pn">4 · Time-series</text><text x="10" y="44" class="pd">MA · ETS · Croston</text></g>
+
+        <!-- pinball metric -->
+        <g transform="translate(700,66)"><rect class="node" width="200" height="60" rx="8"/><text x="12" y="26" class="pn">5 · Pinball metric</text><text x="12" y="44" class="pd">quantile loss → audition</text></g>
+
+        <!-- docs -->
+        <g transform="translate(560,168)"><rect class="node" width="200" height="52" rx="8"/><text x="12" y="22" class="pn">6 · Docs + heavy pages</text><text x="12" y="40" class="pd">floor-vs-model · GitHub Pages</text></g>
+
+        <!-- independent tracks -->
+        <g transform="translate(20,235)"><rect class="node" width="240" height="52" rx="8"/><text x="12" y="22" class="pn">7 · Cloud / release hardening</text><text x="12" y="40" class="pd">SSO creds · cloud extra · GH Actions</text></g>
+        <g transform="translate(300,235)"><rect class="node" width="200" height="52" rx="8"/><text x="12" y="22" class="pn">8 · Cosmetics</text><text x="12" y="40" class="pd">featurizer doc rename</text></g>
+        <text x="780" y="255" class="track">↕ independent</text>
+
+        <!-- edges -->
+        <path class="edge" d="M200,56 Q250,56 298,86" marker-end="url(#e)"/>
+        <path class="edge" d="M200,136 Q250,136 298,112" marker-end="url(#e)"/>
+        <path class="keyedge" d="M500,100 H511" marker-end="url(#ek)"/>
+        <path class="edge" d="M665,96 H696" marker-end="url(#e)"/>
+        <path class="edge" d="M590,126 Q600,150 658,166" marker-end="url(#e)"/>
+      </svg>
+      <figcaption>Dependency graph. Phase 3 (rose) is the keystone that unblocks Phase 4; Phases 6–7 are independent, parallelizable tracks.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/baselines/rankers.py</code> — the classification-baseline pattern to mirror (<code>fit</code>/<code>predict_proba</code>, <code>feature_importances_</code>).</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/baselines/thresholders.py</code> — <code>SimpleThresholder</code>; second existing-baseline exemplar.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/estimators/survival.py</code> — <code>ScaledCoxPHSurvivalAnalysis</code>; the <code>is_survival_estimator = True</code> marker + risk-score <code>predict</code> contract to reuse for survival baselines.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/model.py</code> — the estimator seam: <code>_fit_estimator</code> (outcome vs survival fit branch), <code>_is_survival_estimator</code>, <code>_score_column</code> (predict_proba→decision_function→predict). New baselines must satisfy this contract; a guard here protects the ADR-0011 importance persistence for importance-less estimators.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/matrix.py</code> — <code>build_matrix</code>; where the target-history projection is joined into the design matrix as reserved columns.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/labels.py</code> — <code>_label_projection</code>/<code>build_labels</code>; the projection reused to derive prior realized outcomes at earlier as_of_dates.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/in_pg_evaluation.py</code> — exposes <code>DEFAULT_REGRESSION_CONFIG</code> (rmse/mae/r2), <code>DEFAULT_SURVIVAL_CONFIG</code> (c_index), and <code>AUDITION_RULES</code>; Phase 5 adds <code>pinball@τ</code> to the regression set + its in-PG SQL here.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/metrics.py</code> — numpy metric impls (<code>greater_is_better</code> convention); the pinball/quantile-loss parity function lands here (Phase 5).</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/grid.py</code> — <code>flatten_grid_config</code> + <code>NO_FEATURE_IMPORTANCE</code>; how <code>grid_config</code> class-paths become trainable estimators.</li>
+      <li><span class="tag existing">existing</span> <code>example/dirtyduck/experiment-regression.yaml</code>, <code>experiment-survival.yaml</code>, <code>experiment.yaml</code>, <code>experiment-visits.yaml</code> — per-<code>problem_type</code> grids to add a baseline row to.</li>
+      <li><span class="tag existing">existing</span> <code>pyproject.toml</code> — deps + optional-dependency extras (<code>survival</code>, <code>oidc</code>, <code>dashboard</code>); add <code>cloud</code> + <code>baselines</code> extras here.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/profiles/execution.py</code>, <code>profiles/auth.py</code> — the cloud submit path (boto3 <code>Session(profile_name="cloud")</code>, RDS IAM token); target of the SSO-creds change.</li>
+      <li><span class="tag existing">existing</span> <code>.github/workflows/ci.yml</code>, <code>release.yml</code>, <code>tutorial-smoke.yml</code>, <code>docs-pages.yml</code> — pin bumps for the Node-20 deprecation.</li>
+      <li><span class="tag existing">existing</span> <code>docs/featurizer-0.9-features.md</code> — to be renamed (content now spans 0.9.x–1.0.0).</li>
+      <li><span class="tag existing">existing</span> <code>docs/adr-conformance.md</code>, <code>docs/cloud-runbook.md</code> — updated to reference ADR-0030 and the SSO/creds change.</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>docs/adr/0030-target-history-point-in-time-path.md</code> — the leakage-boundary decision (ADR next-number is 0030; last is 0029).</li>
+      <li><span class="tag new">new</span> <code>src/triage/adapters/target_history.py</code> — the point-in-time-correct per-entity prior-outcome projection (derivation-DAG artifact).</li>
+      <li><span class="tag new">new</span> <code>src/triage/component/catwalk/baselines/dummies.py</code> — thin <code>Dummy*</code> wrappers if the raw sklearn estimators need adapting to the importance/score contract (else this file is unnecessary — decide in Phase 1).</li>
+      <li><span class="tag new">new</span> <code>src/triage/component/catwalk/baselines/survival.py</code> — KM, Nelson–Aalen, marginal-hazard/base-rate, single-covariate Cox baselines (<code>is_survival_estimator = True</code>).</li>
+      <li><span class="tag new">new</span> <code>src/triage/component/catwalk/baselines/timeseries.py</code> — persistence, promedio disponible, moving-average(k), drift, seasonal-naive, Holt–Winters/ETS, Croston/SBA.</li>
+      <li><span class="tag new">new</span> <code>src/tests/catwalk_tests/test_baselines_survival.py</code>, <code>test_baselines_timeseries.py</code> — unit tests for the new estimators.</li>
+      <li><span class="tag new">new</span> <code>src/tests/adapter_tests/test_target_history.py</code> — the point-in-time-correctness tests (the <code>t+w ≤ as_of_date</code> boundary).</li>
+      <li><span class="tag new">new</span> <code>src/triage/component/results_schema/alembic/versions/0020_pinball_metric_catalog.py</code> — register <code>pinball@τ</code> (lower-is-better) in <code>triage.metric_catalog</code> so audition ranks on it (Phase 5; migrations currently end at 0019).</li>
+      <li><span class="tag new">new</span> <code>docs/baselines.md</code> — the baseline catalog per <code>problem_type</code> + the "does the ML earn its complexity?" comparison methodology.</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <!-- PHASE 1 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 1: Trivial cross-sectional floors (classification + regression)</h3>
+      <p><em>✔ Done 2026-07-20 — 14 tests pass. No production change needed: <code>_feature_importance_values</code> already returns <code>None</code> for importance-less estimators (ADR-0011), and <code>prediction_ranks</code> already breaks ties by <code>entity_id</code> (D6). Added <code>DummyClassifier</code>/<code>DummyRegressor</code> to the example grids + <code>test_baselines_dummy.py</code> + a constant-score mass-tie test.</em></p>
+      <p>Deliver the fastest, lowest-risk floor: sklearn <code>DummyClassifier</code>/<code>DummyRegressor</code> via
+      <code>grid_config</code> class-paths — no new data path, no new dependency. A <code>DummyRegressor(mean|median|quantile)</code>
+      predicts a constant (RMSE floor = std of <code>y</code>; a degenerate ranking); <code>DummyClassifier(prior|stratified|most_frequent)</code>
+      is the trivial classification floor beside the existing feature-rankers/thresholder.</p>
+
+      <h4>1. DummyClassifier floor</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm <code>sklearn.dummy.DummyClassifier</code> flows through <code>_fit_estimator</code> → <code>_score_column</code> (it has <code>predict_proba</code> → constant positive-class proba; <code>classes_</code> present).</li>
+        <li><code class="status">[]</code> Decide: raw class-path in <code>grid_config</code> vs. a thin wrapper in <code>baselines/dummies.py</code> (only if the importance/seed contract needs adapting).</li>
+      </ul>
+      <h4>2. DummyRegressor floor</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm <code>sklearn.dummy.DummyRegressor</code> (no <code>predict_proba</code>) lands on the <code>predict</code> branch of <code>_score_column</code> → constant continuous score the spine ranks/scores.</li>
+        <li><code class="status">[]</code> Verify <code>regression</code> vs <code>regression_ranking</code> both consume it correctly (RMSE floor vs precision@k over the degenerate rank).</li>
+      </ul>
+      <h4>3. Importance-persistence safety (ADR-0011)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm the train-time importance persistence tolerates estimators with neither <code>feature_importances_</code> nor <code>coef_</code> (Dummy); add a guard using the existing <code>NO_FEATURE_IMPORTANCE</code> path if it currently raises.</li>
+      </ul>
+      <h4>4. Deterministic tie-breaking (decision D6)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Constant-score baselines produce mass ties; verify <code>prediction_ranking.py</code> breaks them deterministically — assert precision@k is byte-identical across two runs of a Dummy baseline (reproducibility, ADR-0016). Fix the tie-order if not. (Re-checked in Phase 2 for marginal survival.)</li>
+      </ul>
+      <h4>5. Testing Strategy</h4>
+      <p>Unit-test the score contract; run a tiny E2E per type against a pytest-postgresql fixture and assert the baseline appears with a sane floor metric.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/ -k dummy</code> — Dummy estimators satisfy the score contract.</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/test_model.py -k baseline</code> — Dummy fits + scores + persists (no importance crash).</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/ -k tie_determinism</code> — constant-score precision@k is stable across runs.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- PHASE 2 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 2: Survival marginal baselines</h3>
+      <p><em>✔ Done 2026-07-20 — 7 tests pass (sksurv present). New <code>baselines/survival.py</code>: <code>KaplanMeierBaseline</code>, <code>NelsonAalenBaseline</code>, <code>MarginalHazardBaseline</code> (constant risk → C-index ≈ 0.5), <code>SingleFeatureCox</code> (discriminates). Wired into <code>experiment-survival.yaml</code>. No new dep.</em></p>
+      <p>Marginal (covariate-free) survival floors + the single-covariate analog of rank-by-one-feature. <code>scikit-survival</code>
+      is already a dependency (the <code>survival</code> extra), so no new dep. Each estimator declares
+      <code>is_survival_estimator = True</code>, fits on the <code>(duration, event_observed)</code> pair, and returns a per-entity
+      RISK score (higher = event sooner) — exactly the contract <code>_fit_survival_estimator</code> already expects. The in-PG
+      C-index (<code>survival_metrics</code>) needs no new code.</p>
+      <div class="dep">◇ no upstream dependency — can run in parallel with Phase 1</div>
+
+      <h4>1. Kaplan–Meier &amp; Nelson–Aalen marginal baselines</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Implement <code>baselines/survival.py</code>: KM (population survival curve) and Nelson–Aalen (cumulative hazard) → a single population-level risk score broadcast to every entity (degenerate ranking → C-index ≈ 0.5 floor). Prefer <code>sksurv.nonparametric</code> to avoid a lifelines dep.</li>
+      </ul>
+      <h4>2. Marginal-hazard / base-rate baseline</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Implement the event-rate/base-rate floor (constant risk = marginal event probability).</li>
+      </ul>
+      <h4>3. Single-covariate Cox baseline</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Implement a single-feature Cox (survival analog of <code>LinearRanker</code>/rank-by-one-feature): select one column, then fit the existing <code>ScaledCoxPHSurvivalAnalysis</code> — thin wrapper, reuse the scaler/overflow fix.</li>
+        <li><code class="status">[]</code> Wire the three baselines into <code>example/dirtyduck/experiment-survival.yaml</code> <code>grid_config</code> alongside <code>ScaledCoxPHSurvivalAnalysis</code>/<code>RandomSurvivalForest</code>.</li>
+      </ul>
+      <h4>4. Testing Strategy</h4>
+      <p>Unit-test each estimator's fit/predict + risk-score monotonicity; assert the in-PG C-index runs and marginal baselines score ≈ 0.5.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/test_baselines_survival.py</code> — new estimators fit + predict risk scores.</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/ -k survival</code> — the survival fit branch + in-PG C-index accept the baselines.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- PHASE 3 (keystone) -->
+    <div class="phase keystone">
+      <h3><code class="status">[wip]</code> Phase 3: Target-history data path (ADR-0030 · leakage boundary) — KEYSTONE</h3>
+      <p><em>◐ Core done + verified 2026-07-20 (12 tests: 6 leak/contract + unregressed 15-test matrix assembler). ADR-0030 written; <code>adapters/target_history.py</code> implements BOTH point-in-time projections (<code>build_target_history_lags</code> over <code>triage.labels</code>, <code>build_target_history_series</code> from <code>history_query</code>) + <code>validate_history_query</code>/<code>require_history_query</code>; the reserved <code>_target_lag_</code> prefix is excluded from features/imputation in <code>matrix._feature_columns</code>. <strong>The green leak tests gate Phase 4.</strong> Remaining (pairs with Phase 4, its only consumer, so it can be tested E2E rather than wired blind): the physical <code>_assemble</code> left-join emitting the lag columns, the <code>history_query</code> experiment-schema key + run-orchestration plumbing, and handing the sidecar to the estimator seam.</em></p>
+      <p>Expose, point-in-time-correctly, each entity's <strong>own prior target history</strong> in <em>two shapes</em>, under
+      <em>one</em> leakage boundary (decisions D1/D2):
+      <strong>(a) windowed-label lags</strong> — reserved <code>_target_lag_*</code> columns off the existing label projection,
+      for the cheap baselines (persistence/MA/drift/promedio), admissible only where <code>t + w ≤ as_of_date</code>; and
+      <strong>(b) a raw periodic series</strong> — a sidecar keyed by <code>(entity_id, as_of_date)</code> built from a new
+      <em>optional</em> <code>history_query</code>, for seasonal-naive / Holt–Winters / Croston, restricted to
+      <code>knowledge_date &lt; as_of_date</code>. Both bypass the feature set + fit-based imputation (ADR-0009); both are
+      derivation-DAG artifacts (ADRs 0013–0017). ADR-0030 is written <strong>first</strong> (D5).</p>
+
+      <h4>1. Write ADR-0030 (before any consumer — D5)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Author <code>docs/adr/0030-target-history-point-in-time-path.md</code>: the <code>t + w ≤ as_of_date</code> lag boundary <em>and</em> the <code>knowledge_date &lt; as_of_date</code> raw-series boundary, why both are leakage boundaries analogous to ADR-0009, the reserved-column + sidecar contract, and that <code>history_query</code> is optional (required only by the raw-series baseline family). Dispatch via the <code>adr-writer</code> agent. <em>✔ written 2026-07-20.</em></li>
+      </ul>
+      <h4>2. Windowed-label lags (reserved columns — D1/D2)</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Build the lag projection in <code>adapters/target_history.py</code>: per <code>(entity_id, as_of_date)</code>, the entity's prior label values whose horizon completed strictly before <code>as_of_date</code>, most-recent-first, over <code>triage.labels</code>. <em>✔ Done — a deterministic read over the already-cached labels artifact (its own artifact row deferred: the lags are a pure function of labels + n_lags, cheap to recompute).</em></li>
+        <li><code class="status">[wip]</code> Join into <code>build_matrix</code> as reserved <code>_target_lag_*</code> columns — excluded from the feature list, categorical encoding, and <em>both</em> imputation passes. <em>◐ Exclusion done + tested (<code>matrix._feature_columns</code>); the physical <code>_assemble</code> left-join pairs with Phase 4.</em></li>
+      </ul>
+      <h4>3. Raw periodic series (optional sidecar via <code>history_query</code> — D1/D2)</h4>
+      <ul class="checklist">
+        <li><code class="status">[wip]</code> Add the optional <code>history_query</code> config key (a period-level aggregation with its own knowledge-date discipline) + validation; a clear error if a raw-series baseline is in the grid but <code>history_query</code> is absent. <em>◐ <code>validate_history_query</code> + <code>require_history_query</code> done + tested; the experiment-config schema key + run-orchestration plumbing pairs with Phase 4.</em></li>
+        <li><code class="status">[wip]</code> Materialize the sidecar: an evenly-spaced per-entity series keyed by <code>(entity_id, as_of_date)</code>, each row restricted to <code>knowledge_date &lt; as_of_date</code>, handed to the estimator seam <em>alongside</em> X (variable length — not matrix columns). <em>◐ Builder (<code>build_target_history_series</code>) done + leak-tested; estimator-seam delivery pairs with Phase 4.</em></li>
+      </ul>
+      <h4>4. Point-in-time-correctness tests</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Lag leak test: no label with <code>t + w &gt; as_of_date</code> appears in <code>_target_lag_*</code>. <em>✔</em></li>
+        <li><code class="status">[x]</code> Raw-series leak test: no period with <code>knowledge_date ≥ as_of_date</code> appears in the sidecar. <em>✔</em></li>
+        <li><code class="status">[x]</code> Cold-start (insufficient history → NULL / short series) + caching stability under re-run. <em>✔</em></li>
+      </ul>
+      <h4>5. Testing Strategy</h4>
+      <p>A synthetic fixture with known realized dates so <em>both</em> boundaries are checkable by construction.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_target_history.py -v</code> — both leak tests + cold-start + caching pass. <em>✔ 6 passed.</em></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> This is the correctness keystone — a green leak test gates Phase 4.</div>
+    </div>
+
+    <!-- PHASE 4 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 4: Time-series regression baselines</h3>
+      <p>The full regression/regression_ranking floor suite, each emitting a continuous prediction the spine ranks
+      (regression_ranking) or scores (regression). Two families, split by <em>which</em> Phase-3 history shape they read.</p>
+      <div class="dep">▲ depends on Phase 3 (target-history path)</div>
+
+      <h4>1. Reserved-column baselines (windowed-label lags — no <code>history_query</code> needed)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Implement in <code>baselines/timeseries.py</code>: persistence (<code>_target_lag_1</code>), promedio disponible (mean of available lags), moving-average 3/6/12, drift (last lag + mean trend) — pure numpy, reading the reserved columns. These work out of the box off the label; no <code>history_query</code> required.</li>
+      </ul>
+      <h4>2. Raw-series baselines: seasonal-naive + Holt–Winters/ETS (require the sidecar)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> seasonal-naive (<code>y_{t-season}</code>) + Holt–Winters/ETS (trend + seasonality) over the raw periodic sidecar, then aggregate the forecast to the label window. <code>statsmodels</code> behind the new <code>baselines</code> extra (D3), guarded import.</li>
+        <li><code class="status">[]</code> Raise a clear config error if any raw-series baseline is in the grid without a <code>history_query</code> (the Phase-3 contract).</li>
+      </ul>
+      <h4>3. Croston / SBA (raw-series, intermittent demand)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Implement Croston + SBA over the sidecar for intermittent/lumpy targets; emit the demand-per-period point (and its quantile, for pinball — Phase 5).</li>
+      </ul>
+      <h4>4. Cold-start handling</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Short-history fallback (entity with &lt; k obs / &lt; 1 season): documented degrade to promedio (baseline-owned, <em>not</em> matrix imputation); never fabricate a future value.</li>
+        <li><code class="status">[]</code> Wire both families into <code>example/dirtyduck/experiment-regression.yaml</code> + <code>experiment-visits.yaml</code>, adding a <code>history_query</code> to the visits example so seasonal/HW/Croston are actually exercised.</li>
+      </ul>
+      <h4>5. Testing Strategy</h4>
+      <p>Unit-test each estimator against hand-computed values on a tiny series; E2E-assert a leaderboard floor below a real regressor.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/test_baselines_timeseries.py -v</code> — persistence/MA/seasonal/drift/ETS/Croston match hand-computed values.</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/ -k "regression and baseline"</code> — both families fit + score through the spine.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- PHASE 5 (pinball metric) -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 5: Pinball / quantile-loss regression metric (audition-ready)</h3>
+      <p>Give audition an honest way to rank the <em>quantile</em> forecasts the new baselines emit. RMSE/MAE score a point
+      forecast; <code>DummyRegressor(strategy="quantile")</code>, Croston/SBA, and ETS prediction intervals produce
+      <em>quantile</em> predictions that only <strong>pinball (quantile) loss</strong> scores correctly. Pinball is a trivial
+      in-PG expression (ADR-0007: metrics are PL/pgSQL over the predictions table) and, like rmse/mae, is lower-is-better —
+      so audition's existing selection rules (<code>audition_pick()</code>) work once it is registered in
+      <code>triage.metric_catalog</code>.</p>
+      <div class="dep">▲ pairs with Phase 4 (quantile-emitting baselines); consumed by audition + the Phase 6 docs</div>
+
+      <h4>1. In-PG pinball metric</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Add pinball to <code>DEFAULT_REGRESSION_CONFIG</code> in <code>in_pg_evaluation.py</code>, parameterized by quantile τ (<code>"pinball@"</code> with default params <code>["0.5","0.8","0.95"]</code> — median + two tails for resource-prioritization; mirroring the <code>precision@</code> + thresholds convention), plus the SQL: mean over rows of <code>τ·(y−ŷ)</code> when <code>y ≥ ŷ</code> else <code>(1−τ)·(ŷ−y)</code>.</li>
+        <li><code class="status">[]</code> Add a numpy parity implementation in <code>catwalk/metrics.py</code> (<code>greater_is_better=False</code>) for unit-test cross-checks.</li>
+      </ul>
+      <h4>2. Register with audition</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> New migration <code>0020</code>: register <code>pinball@τ</code> in <code>triage.metric_catalog</code> as lower-is-better so <code>audition_pick()</code> / leaderboard / distance-from-best rank on it; confirm the dashboard strategy panel + <code>triage audition</code> pick it up.</li>
+      </ul>
+      <h4>3. Quantile-forecast contract (ADR-0006)</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm one-quantile-per-model on the append-only predictions: a <code>DummyRegressor(quantile=0.9)</code> <em>is</em> the 0.9-quantile forecaster, scored by <code>pinball@0.9</code> — no predictions-schema change. Multiple quantiles = multiple models in the grid.</li>
+      </ul>
+      <h4>4. Testing Strategy</h4>
+      <p>Cross-check the in-PG SQL against the numpy parity impl on a known series; assert audition ranks a better quantile forecaster above a worse one.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/ -k pinball</code> — in-PG pinball == numpy parity to 1e-9.</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/ -k "audition and regression"</code> — audition selects on <code>pinball@τ</code> end-to-end.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- PHASE 6 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 6: Docs + example grids ("does the ML earn its complexity?")</h3>
+      <p>Make the floors visible and pedagogical: every example grid pairs a baseline with a real model, and a doc explains
+      how to read the floor-vs-model gap (the way classification already shows ~0.57 AUC vs its baseline).</p>
+
+      <h4>1. Baseline catalog doc</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Write <code>docs/baselines.md</code>: the catalog per <code>problem_type</code>, each estimator's class-path + params, and the comparison methodology.</li>
+      </ul>
+      <h4>2. Example grids per problem_type</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm a baseline row sits beside a real model in each of the classification / regression / regression_ranking (visits) / survival example configs.</li>
+      </ul>
+      <h4>3. Heavy GitHub-Pages documentation (maintainer request — do this once the baselines are built)</h4>
+      <p>Not a stub reference page — a <strong>thorough, standalone Astro Starlight section</strong> on the live docs
+      site (<a href="https://ccd-ia.github.io/triage-pg/">ccd-ia.github.io/triage-pg</a>). Written <em>after</em>
+      Phases 1–4 land so every claim is verbatim-verified against a real run, not aspirational.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> A "Baselines" landing page: what a metric floor is, why every <code>problem_type</code> needs one, and the score→rank→evaluate spine framing (ADR-0010).</li>
+        <li><code class="status">[]</code> One subsection per <code>problem_type</code> (classification / regression / regression_ranking / survival): the full estimator catalog with class-paths, params, when to reach for each, and the interpretation of its floor metric.</li>
+        <li><code class="status">[]</code> A dedicated "Target history &amp; the leakage boundary" page explaining the <code>t + w ≤ as_of_date</code> rule (link ADR-0030) with the timeline diagram — the concept most likely to be misused.</li>
+        <li><code class="status">[]</code> A worked "does the ML earn its complexity?" walkthrough: real leaderboard output showing a model's lift over its floor per <code>problem_type</code>, copied verbatim from a tutorial run.</li>
+        <li><code class="status">[]</code> Cross-link from the existing tutorials + reference pages; add it to the docs-site nav.</li>
+      </ul>
+      <h4>4. Testing Strategy</h4>
+      <p>Run each example E2E and confirm the baseline lands on the leaderboard below the real model; verify the heavy docs build and every code/output block is a verbatim copy from a real run.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>just tutorial-up</code> then <code>triage run example/dirtyduck/experiment-regression.yaml</code> — baseline appears under the real regressor on <code>triage leaderboard</code>.</li>
+        <li><code class="status">[]</code> <code>just docs-site</code> builds with no broken links; every baselines subsection + the target-history page render in the nav.</li>
+        <li><code class="status">[]</code> Spot-check: each documented leaderboard/CLI block is byte-for-byte reproducible from the commands shown (verbatim-verified, the house docs standard).</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- PHASE 7 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 7: Cloud / release hardening (carry-overs)</h3>
+      <p>Independent track — the v1.0.0-session cloud/release carry-overs. None of it blocks the baselines work.</p>
+      <div class="dep">◇ independent — run anytime</div>
+
+      <h4>1. Kill the static AWS key</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Replace the static AWS key in <code>.secrets</code> with SSO/role creds; document the SSO profile the boto3 <code>Session(profile_name="cloud")</code> submit path (<code>profiles/execution.py</code>) resolves. (Secrets edited by the maintainer via direnv — never printed.)</li>
+      </ul>
+      <h4>2. Cloud extra</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add a <code>cloud</code> optional-dependency extra with <code>awscrt</code> / <code>botocore[crt]</code> so the SSO submit path works out of the box. <em>✔ Done 2026-07-20 — <code>uv lock</code> resolves (awscrt v0.29.2, 162 pkgs).</em></li>
+      </ul>
+      <h4>3. GH Actions off Node-20</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Bump <code>actions/checkout</code>, <code>actions/setup-python</code>, <code>upload/download-artifact</code> to current (Node-24) majors across <code>ci.yml</code>/<code>release.yml</code>/<code>tutorial-smoke.yml</code>/<code>docs-pages.yml</code>.</li>
+      </ul>
+      <h4>4. Optional bootstrap simplifications</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> (Optional) Fold the runbook §4.4 matview-ownership grant into <code>triage project create --owner &lt;role&gt;</code>.</li>
+        <li><code class="status">[]</code> (Optional) Confirm/automate the anonymous GHCR-pull smoke for the release image; optional nightly tutorial-smoke.</li>
+      </ul>
+      <h4>5. Testing Strategy</h4>
+      <p>Offline-validate the extras + workflows; the live Batch E2E remains gated on the AWS go (separate from this milestone).</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv sync --extra cloud</code> resolves; <code>uv run python -c "import awscrt"</code> imports.</li>
+        <li><code class="status">[]</code> <code>actionlint .github/workflows/*.yml</code> (or CI dry-run) — no deprecation annotations.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If a step is blocked on the AWS go, mark it <code>[f]</code> and move on.</div>
+    </div>
+
+    <!-- PHASE 8 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 8: Cosmetics</h3>
+      <p>Low-risk housekeeping; fully independent.</p>
+      <div class="dep">◇ independent — run anytime</div>
+
+      <h4>1. Rename the featurizer doc</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>git mv docs/featurizer-0.9-features.md docs/featurizer-passthrough-features.md</code> (content now spans 0.9.x–1.0.0); update every reference (grep <code>docs/</code>, CLAUDE.md, docs-site links).</li>
+      </ul>
+      <h4>2. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>just docs-site</code> builds; no dangling links to the old filename.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[]</code> <code>just test</code> — full suite green (new baseline + target-history tests included).</li>
+      <li><code class="status">[]</code> <code>uv run ruff check src/</code> — lint clean.</li>
+      <li><code class="status">[]</code> <code>just typecheck</code> — no <em>new</em> basedpyright errors from the added modules.</li>
+      <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/test_target_history.py -v</code> — the point-in-time leak test passes (correctness gate).</li>
+      <li><code class="status">[]</code> <code>triage run</code> on one example per <code>problem_type</code> — a baseline appears below a real model on <code>triage leaderboard</code> for classification, regression, regression_ranking, and survival.</li>
+      <li><code class="status">[]</code> <code>triage audition</code> on a regression experiment ranks models by <code>pinball@τ</code> (registered in <code>triage.metric_catalog</code>, migration 0020).</li>
+      <li><code class="status">[]</code> <code>test -f docs/adr/0030-target-history-point-in-time-path.md</code> and <code>docs/adr-conformance.md</code> references it.</li>
+      <li><code class="status">[]</code> <code>uv sync --extra cloud</code> resolves and <code>just docs-site</code> builds (featurizer doc rename intact).</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== RESOLVED DECISIONS (was Questionables — all resolved 2026-07-20) ===== -->
+  <section id="questionables">
+    <h2>Resolved Decisions</h2>
+    <p>All six open questions were resolved with the maintainer on 2026-07-20. Recorded here as the settled contract the build follows; ADR-0030 (Phase 3) is the durable home for D1/D2/D5.</p>
+
+    <details open>
+      <summary>D1 — History source: reuse label projection for lags <em>+</em> a dedicated optional <code>history_query</code> for the raw series</summary>
+      <p class="qa-answer"><strong>Decision:</strong> the cheap lag baselines reuse <code>labels._label_projection</code> at prior as_of_dates (free, correct-by-construction). The raw periodic series that Holt–Winters/Croston/seasonal-naive need is a genuinely <em>different</em> quantity (period-level counts), so it gets its own optional <code>history_query</code> config key with its own knowledge-date discipline — decoupled from the forward label.</p>
+    </details>
+    <details open>
+      <summary>D2 — Exposure: reserved <code>_target_lag_*</code> columns for lags + a sidecar for the raw series</summary>
+      <p class="qa-answer"><strong>Decision:</strong> lags ride as reserved columns excluded from features, encoding, and both imputation passes (airtight ADR-0009 boundary; no real model trains on the label's own lags). The variable-length raw series rides as a sidecar keyed by <code>(entity_id, as_of_date)</code> handed to the estimator alongside X — columns would be a variable-width kludge. Regular-feature exposure was rejected (breaks the honest floor + corrupts structurally-missing history via imputation).</p>
+    </details>
+    <details open>
+      <summary>D3 — ETS/Croston dependency: <code>statsmodels</code> behind a new <code>baselines</code> extra</summary>
+      <p class="qa-answer"><strong>Decision:</strong> <code>triage[baselines]</code> optional extra with a guarded import; a missing extra raises "install triage[baselines]". persistence/MA/drift/promedio + Croston-core stay pure-numpy.</p>
+    </details>
+    <details open>
+      <summary>D4 — Activation: opt-in via <code>grid_config</code></summary>
+      <p class="qa-answer"><strong>Decision:</strong> baselines are authored as class-paths in <code>grid_config</code>, exactly like today's classification baselines. No config-schema change beyond the optional <code>history_query</code>. Auto-injection (<code>baselines: true</code>) deferred to a later minor.</p>
+    </details>
+    <details open>
+      <summary>D5 — ADR ordering: ADR-0030 written first</summary>
+      <p class="qa-answer"><strong>Decision:</strong> write the decision boundary before building consumers (Phase 3 task 1). The target-history path is a hard-to-reverse data path; documenting it first prevents a leaky provisional shape from calcifying.</p>
+    </details>
+    <details open>
+      <summary>D6 — Constant-score ties: verify deterministic tie-breaking in Phase 1/2</summary>
+      <p class="qa-answer"><strong>Decision:</strong> actively assert precision@k is byte-identical across two runs of a constant-score baseline (Phase 1 task 4; re-checked for marginal survival in Phase 2). Fix the tie-order in <code>prediction_ranking.py</code> if not — an unstable floor metric would silently undermine the floor-vs-model comparison (ADR-0016 reproducibility).</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>Why this is mostly "wrapping onto an existing spine"</h3>
+    <p>ADR-0010 made score→rank→evaluate <code>problem_type</code>-agnostic, and <code>in_pg_evaluation.py</code>
+    already declares <code>regression_metrics</code> and <code>survival_metrics</code>. So ~all of the baseline work is
+    (a) new estimator classes satisfying the <code>fit</code>/<code>predict[_proba]</code> contract and (b) config wiring.
+    The one genuinely new mechanism is the Phase-3 target-history path — everything else is additive.</p>
+
+    <h3>New dependencies</h3>
+    <table>
+      <tr><th>Dep</th><th>Where</th><th>Why</th></tr>
+      <tr><td><code>statsmodels</code></td><td><span class="pill">baselines</span> extra (new)</td><td>Holt–Winters/ETS (Phase 4). Guarded import; core stays lean.</td></tr>
+      <tr><td><code>awscrt</code> / <code>botocore[crt]</code></td><td><span class="pill">cloud</span> extra (new)</td><td>SSO submit path OOTB (Phase 6).</td></tr>
+      <tr><td><code>scikit-survival</code></td><td><span class="pill">survival</span> extra (existing)</td><td>Already present — survival baselines add <em>no</em> new dep.</td></tr>
+    </table>
+
+    <h3>Rejected / deferred approaches</h3>
+    <ul>
+      <li><strong>lifelines for KM/Nelson–Aalen</strong> — rejected; <code>sksurv.nonparametric</code> is already a dependency and avoids a second survival library.</li>
+      <li><strong>Auto-injecting baselines into every experiment</strong> — deferred to a later minor (config-schema surface; Q4).</li>
+      <li><strong>A separate query for the windowed-label lags</strong> — rejected; the cheap lag baselines reuse the label projection (D1). <em>But</em> a dedicated optional <code>history_query</code> <strong>is</strong> added for the raw periodic series (D1), because that series is a genuinely different quantity (period-level counts) than the forward label — the case that justifies its own PIT-managed query.</li>
+      <li><strong>SHAP-level interpretability</strong> — explicitly out of scope for v1.0.1 (deferred to v1.1 in TODO.org); not a baseline.</li>
+    </ul>
+
+    <h3>Sharpest risks</h3>
+    <blockquote>
+      The target-history leak is the single highest-severity correctness risk in this milestone. A baseline that
+      quietly sees the future would <em>lower</em> the bar deceptively (an inflated floor), which is worse than no
+      floor. The Phase-3 leak test (<code>t + w ≤ as_of_date</code>, checked against a synthetic fixture with known
+      realized dates) is the gate — treat a red leak test as a hard stop on Phase 4.
+    </blockquote>
+    <ul>
+      <li><strong>Constant-score ties</strong> (Dummy, marginal survival) → confirm deterministic tie-breaking in the ranking spine (Q6), else precision@k floors wobble across runs.</li>
+      <li><strong>Cold start</strong> — entities with &lt; k history observations must degrade to a documented fallback, never a fabricated value.</li>
+      <li><strong>Config-schema stability</strong> — keeping baselines opt-in via <code>grid_config</code> avoids touching the validated config surface at a patch release.</li>
+    </ul>
+
+    <h3>Housekeeping conventions to honor</h3>
+    <ul>
+      <li>Commit/push/tag happen only on the maintainer's ask (house rule); this plan does not self-commit.</li>
+      <li>ADR next-number is <strong>0030</strong> (last committed is 0029); dispatch it through the <code>adr-writer</code> agent.</li>
+      <li>Update <code>docs/adr-conformance.md</code> once ADR-0030 lands.</li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <p style="color:var(--muted);font-size:.9rem">Append-only; populated by the Update Plan / Update References workflows after first execution. None yet.</p>
+  </section>
+
+</main>
+</body>
+</html>
