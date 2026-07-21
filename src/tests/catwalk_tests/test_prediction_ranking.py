@@ -209,6 +209,34 @@ def test_score_ties_break_on_entity_id(greenfield_engine):
     assert [r["rank_abs"] for r in ranks] == [1, 2, 3, 4]
 
 
+def test_constant_score_mass_ties_are_stable(greenfield_engine):
+    """A constant-score baseline (Dummy, marginal survival — v1.0.1) assigns EVERY
+    entity the same score, so the whole cohort is one tie group. rank_abs must then be
+    a stable, deterministic entity_id ordering — identical across repeated reads — or a
+    floor's precision@k would wobble run to run (decision D6; ADR-0016 reproducibility).
+    """
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    scores = [
+        {"entity_id": e, "as_of_date": AS_OF_DATE, "score": 0.5}
+        for e in (7, 3, 9, 1, 5)
+    ]
+    record_predictions(engine, model_id, "test", scores)
+
+    first = [
+        (r["entity_id"], r["rank_abs"])
+        for r in fetch_ranks(engine, model_id, AS_OF_DATE)
+    ]
+    second = [
+        (r["entity_id"], r["rank_abs"])
+        for r in fetch_ranks(engine, model_id, AS_OF_DATE)
+    ]
+
+    assert first == second  # stable across reads — no random sort seed
+    # the entire tie group is ordered by entity_id ascending
+    assert first == [(1, 1), (3, 2), (5, 3), (7, 4), (9, 5)]
+
+
 def test_ranks_partitioned_by_as_of_date(greenfield_engine):
     """Ranking partitions by (model_id, as_of_date): each date ranks
     independently from rank_abs = 1."""

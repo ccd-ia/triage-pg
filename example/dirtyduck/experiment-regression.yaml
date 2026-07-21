@@ -172,6 +172,11 @@ grid_config:
     min_samples_split: [50]
   'sklearn.linear_model.Ridge':
     alpha: [0.1, 1.0]
+  # Baseline floor (v1.0.1): a trivial constant regressor (predicts a fixed statistic of
+  # the training target). RMSE floor = std(y); a degenerate constant ranking. mean/median
+  # are deterministic. The 0.5/0.8/0.95 quantiles pair with pinball@τ (Phase 5).
+  'sklearn.dummy.DummyRegressor':
+    strategy: ['mean', 'median']
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).

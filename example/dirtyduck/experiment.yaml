@@ -164,6 +164,11 @@ grid_config:
     C: [0.01, 1.0]
     penalty: ['l2']
     max_iter: [1000]
+  # Baseline floor (v1.0.1): a trivial constant-prior classifier. Its precision@k is
+  # the bar a real model must clear ("does the ML earn its complexity?"). 'prior' is
+  # deterministic (no random_state) so the floor is reproducible run to run.
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).
