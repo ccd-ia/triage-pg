@@ -197,7 +197,12 @@ Five things worth 60 seconds each:
 
 - The full [**DirtyDuck case study**](/triage-pg/tutorials/dirtyduck/) — same
   data, the whole discussion: early warning vs resource prioritization,
-  leakage, fairness, model selection.
+  leakage, fairness, model selection, and the **baseline floor** (a
+  `DummyClassifier` in the grid) that turns "0.58 AUC" into "0.58 vs the 0.50
+  floor — the ML earns its keep").
+- The [**Baselines reference**](/triage-pg/reference/baselines/) — a metric
+  floor for every `problem_type` (Dummy, time-series, marginal survival) and
+  how to read the floor-vs-model gap.
 - The [onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html)
   for the system-at-a-glance view.
 - `just tutorial-down` stops the database; `just tutorial-clean` removes it

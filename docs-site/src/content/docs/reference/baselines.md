@@ -124,9 +124,11 @@ grid_config:
   '…baselines.timeseries.Croston': {}
 ```
 
-**Cold start.** An entity with too little history (fewer than `window` /
-one season) degrades to a documented fallback (mean-of-available or NaN) — a
-baseline never fabricates a future value.
+**Cold start.** An entity with no usable history (e.g. the earliest as_of_dates,
+before any label window has closed) can't be forecast — the baseline **abstains**:
+it emits no prediction for that entity, so the metric is computed over the rows it
+*could* score (a baseline never fabricates a future value). This is why a baseline's
+`num_labeled` on the leaderboard can be slightly below a real model's.
 
 ## Survival
 
@@ -174,6 +176,26 @@ The workflow is the same for every `problem_type`:
 3. On the leaderboard, read the **gap**: real-model metric minus baseline metric.
 4. A small gap means the features / model aren't earning their keep — simplify,
    or find better features, before shipping complexity.
+
+### A worked example (DirtyDuck)
+
+Running the classification and regression configs against the tutorial data gives
+two opposite — and equally useful — verdicts:
+
+```
+classification (experiment.yaml)            regression (experiment-regression.yaml)
+model                    prec@100  AUC       model              RMSE   pinball@0.95
+ScaledLogisticRegression   0.388  0.584      Ridge              4.325     1.358
+RandomForestClassifier     0.338  0.568      DummyRegressor     4.462     1.675
+DummyClassifier (floor)    0.260  0.500      Persistence        5.332     1.585
+```
+
+Classification's best model clears the constant-prior floor by ~49% (0.388 vs
+0.260) with AUC well above 0.500 — the ML **earns its complexity**. Regression's
+Ridge barely beats the constant floor (4.325 vs 4.462) and the time-series
+baselines are *worse* — the target's own history isn't predictive here, so the
+ML earns very little. Note the quantile nuance: at the 0.95 tail Ridge (1.358)
+beats the `DummyRegressor` (1.675), even though the dummy wins at the median.
 
 Baselines are **opt-in** — you add them to `grid_config` deliberately (there is
 no auto-injection). See the [configuration reference](/triage-pg/reference/configuration/)

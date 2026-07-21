@@ -140,6 +140,22 @@ Two habits this dataset rewards:
   DirtyDuck's inspections case (0.277 base, moderate lift) and 311's
   structural signal (0.87+). Three datasets, three signal regimes: that
   calibration of expectations is the real deliverable of this series.
+- **Make the base rate a competitor, not a footnote.** Drop a constant-prior
+  baseline into the grid so the floor is *on the leaderboard*, ranked next to
+  your models:
+
+  ```yaml
+  grid_config:
+    # ... your real estimators ...
+    'sklearn.dummy.DummyClassifier':
+      strategy: ['prior']
+  ```
+
+  On a diffuse-signal problem this is the most important line in the config —
+  the gap between your best model and the `DummyClassifier` is precisely "does
+  the ML earn its complexity?". The full catalog (every `problem_type`, the
+  time-series and survival floors) is the
+  [**Baselines reference**](/triage-pg/reference/baselines/).
 
 ## Where this differs from DSSG triage
 

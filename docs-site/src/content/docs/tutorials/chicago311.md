@@ -109,6 +109,22 @@ just serve 8001        # cp chicago311-database.yaml database.yaml first
 Expect 5 model groups × 4 splits = 20 models, ~58,000 predictions, and a
 leaderboard whose top AUCs sit in the high .80s–low .90s per split.
 
+With AUCs that high, is the signal real or is the base rate just favorable? Add a
+floor and see — drop a constant-prior baseline into the grid:
+
+```yaml
+grid_config:
+  # ... your real estimators ...
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+```
+
+The gap between the top model's precision@k and the `DummyClassifier`'s is the
+honest measure of what the backlog-pressure features bought you. Every
+`problem_type` has such a floor — the survival variant below has marginal
+Kaplan–Meier / Nelson–Aalen floors at C-index ≈ 0.5. See the
+[**Baselines reference**](/triage-pg/reference/baselines/) for the full catalog.
+
 ## Fairness — geography as the protected attribute
 
 311 responsiveness has a long civil-rights history: response times that differ

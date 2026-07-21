@@ -48,7 +48,7 @@ problem type is a **different** experiment.
 
 ## Every top-level key
 
-The validator knows exactly these fourteen keys (`_KNOWN_TOP_LEVEL_KEYS`).
+The validator knows exactly these seventeen keys (`_KNOWN_TOP_LEVEL_KEYS`).
 Anything else is dead weight the pipeline silently skips — so the validator
 emits a warning to surface a typo or a misplacement instead of letting it pass.
 
@@ -65,6 +65,9 @@ emits a warning to surface a typo or a misplacement instead of letting it pass.
 | `evaluation` | optional | no | Metric selection + cohort subsets. |
 | `sources` | optional | no | Declared input tables, pinned into the derivation DAG. |
 | `task_framing` | optional | no | The observation regime (how to *read* the numbers). |
+| `target_history_lags` | optional | yes (matrix) | How many `_target_lag_*` columns to attach for lag baselines (ADR-0030). |
+| `history_query` | optional | yes (matrix) | The raw periodic series for the raw-series baselines (ADR-0030). |
+| `history_series_width` | optional | yes (matrix) | Max `_hist_*` width for the raw series. |
 | `name` | optional | no | Cosmetic experiment label. |
 | `description` | optional | no | Cosmetic free text. |
 | `config_version` | optional | no | Recognized but not enforced; reserved. |
@@ -367,7 +370,9 @@ bias_config:
 
 **Optional.** Defaults by problem type: classification →
 `metrics: [precision@, recall@, auc_roc, average_precision]`,
-`thresholds: [100_abs, 10_pct]`; the regression family → `[rmse, mae, r2]`;
+`thresholds: [100_abs, 10_pct]`; the regression family →
+`[rmse, mae, r2, pinball@0.5, pinball@0.8, pinball@0.95]` (pinball@τ is the
+quantile-loss metric a τ-quantile forecaster minimizes, migration 0020);
 survival → `[c_index]`.
 
 **Shape.** The `triage.evaluate_model` jsonb shape
@@ -394,6 +399,59 @@ evaluation:
   and a `query` returning `entity_id`. **Each subset query must contain the
   `{as_of_date}` placeholder.** A subset is re-ranked within itself — its
   precision@k is the top-k of the subset's own ranking.
+
+## `target_history_lags`, `history_query`, `history_series_width`
+
+**Purpose.** Expose each entity's own prior target values, point-in-time-correctly,
+for the [time-series baselines](/triage-pg/reference/baselines/) (ADR-0030). See
+[target history](/triage-pg/concepts/target-history/) for the leakage boundary.
+All three enter **matrix identity** (a change rebuilds the matrix).
+
+**Optional.** Resolved automatically from `grid_config`: a **lag-family** baseline
+(`Persistence`, `PromedioDisponible`, `MovingAverage`, `Drift`) turns on the lags;
+a **raw-series** baseline (`SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`,
+`CrostonSBA`) **requires** a `history_query` (a hard error at run start otherwise).
+
+**Shape.**
+
+- `target_history_lags` (int, default 12 when a lag baseline is present) — how many
+  reserved `_target_lag_*` columns (windowed-label lags, admissible where
+  `t + w ≤ as_of_date`) to attach.
+- `history_query` (SQL, no default) — a period-level aggregation returning
+  `entity_id, period, value`, with an `{as_of_date}` placeholder and its own
+  knowledge-date discipline (`where knowledge_date < {as_of_date}`). Pivoted into
+  reserved `_hist_*` columns.
+- `history_series_width` (int, default 24) — the max `_hist_*` width.
+
+```yaml
+problem_type: regression_ranking
+
+target_history_lags: 6
+history_series_width: 24
+history_query: |
+  select entity_id, date_trunc('month', date)::date as period, count(*) as value
+  from ontology.events
+  where date < {as_of_date}          -- point-in-time correct (ADR-0030)
+  group by 1, 2
+
+grid_config:
+  'sklearn.ensemble.RandomForestRegressor': { n_estimators: [100] }
+  # lag floors (read _target_lag_*; no history_query needed):
+  'triage.component.catwalk.baselines.timeseries.Persistence': {}
+  'triage.component.catwalk.baselines.timeseries.MovingAverage': { window: [3, 6] }
+  # raw-series floors (need history_query above; HoltWinters needs triage[baselines]):
+  'triage.component.catwalk.baselines.timeseries.SeasonalNaive': { season: [12] }
+  'triage.component.catwalk.baselines.timeseries.HoltWinters': {}
+  'triage.component.catwalk.baselines.timeseries.Croston': {}
+
+evaluation:
+  regression_metrics: [rmse, mae, r2, pinball@0.5, pinball@0.9]
+```
+
+**Contract.** The reserved `_target_lag_*` / `_hist_*` columns are excluded from
+the feature set and imputation; a baseline that has no history for an entity
+(cold start) *abstains* — it emits no prediction for that row, so the metric is
+computed over the entities it could score.
 
 ## `sources`
 

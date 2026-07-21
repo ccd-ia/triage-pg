@@ -206,19 +206,42 @@ grid_config:
     strategy: ['prior']
 ```
 
-Re-run and read the **gap** on the leaderboard: if the forest's precision@100 is
-0.57 and the constant-prior baseline is 0.55, the ML bought you almost nothing —
-the features aren't separating failing facilities from the rest. A wide gap is
-the evidence that the modeling earns its keep.
+Re-run and read the **gap** on the leaderboard. On this data the classification
+floor is clearly beaten — the ML earns its complexity:
 
-Every `problem_type` has a floor. The regression config
-(`experiment-regression.yaml`) ships **time-series** baselines — persistence,
-moving-average, seasonal-naive, Holt–Winters, Croston — that forecast each
+| model | precision@100 | AUC |
+| --- | --- | --- |
+| ScaledLogisticRegression | **0.388** | 0.584 |
+| RandomForestClassifier | 0.338 | 0.568 |
+| DecisionTreeClassifier | 0.335 | 0.561 |
+| `DummyClassifier` (floor) | 0.260 | 0.500 |
+
+The best model's precision@100 (0.388) is ~49% above the constant-prior floor
+(0.260), and its AUC (0.584) clears the coin-flip 0.500 — the features *are*
+separating failing facilities from the rest.
+
+The **regression** variant (`experiment-regression.yaml`) tells the opposite,
+equally useful story. It ships **time-series** baselines that forecast each
 facility's next-window violation count from its *own* prior counts
-([target history](/triage-pg/concepts/target-history/), point-in-time correct),
-scored by RMSE and **pinball@τ**; the survival config ships marginal
-Kaplan–Meier / Nelson–Aalen floors at C-index ≈ 0.5. The full catalog — every
-class path, its parameters, and how to read each floor metric — is the
+([target history](/triage-pg/concepts/target-history/), point-in-time correct):
+
+| model | RMSE | pinball@0.5 | pinball@0.95 |
+| --- | --- | --- | --- |
+| Ridge | **4.325** | 1.535 | 1.358 |
+| `DummyRegressor` (floor) | 4.462 | 1.489 | 1.675 |
+| `Persistence` / `MovingAverage` | 5.1–5.3 | ~1.7 | ~1.6 |
+| `Drift` | 6.562 | — | — |
+
+Here Ridge (RMSE 4.325) barely beats the constant floor (4.462), and the
+persistence/moving-average baselines are *worse* — the target's own history
+isn't predictive for violation counts. That's a real finding: on this problem
+the ML earns very little. Note the quantile story pinball tells — `DummyRegressor`
+wins at the median (0.5) but Ridge wins at the upper tail (0.95: 1.358 vs 1.675),
+because Ridge minimizes squared error and captures more of the distribution's top.
+
+The survival config adds marginal Kaplan–Meier / Nelson–Aalen floors at
+C-index ≈ 0.5. The full catalog — every class path, its parameters, and how to
+read each floor metric — is the
 [**Baselines reference**](/triage-pg/reference/baselines/).
 
 ## Fairness and subsets — one identity-neutral block away
