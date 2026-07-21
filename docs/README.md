@@ -18,6 +18,7 @@ glossary — use those terms exactly).
 | [`../CONTEXT.md`](../CONTEXT.md) | The glossary: Project, Registry, Profile, as_of_date, Cohort, Matrix, **Experiment**, **Run**, Feature engine, Adapter, Prediction. |
 | [experiment-and-run.md](experiment-and-run.md) | The single most important model: an **Experiment is a problem**, a **Run is one attempt** (ADR-0022/0023). Caching, leaderboards, monitoring all follow from this. |
 | [problem-types.md](problem-types.md) | The score→rank→evaluate **spine** and the `problem_type` switch — classification / regression-as-ranking / pure regression / survival (ADR-0010). |
+| [baselines.md](baselines.md) | A **metric floor for every problem_type** — the trivial models a real model must beat (Dummy, marginal survival, time-series), the target-history path (ADR-0030), and pinball@τ (migration 0020). |
 
 ## Tutorials — three runnable datasets
 

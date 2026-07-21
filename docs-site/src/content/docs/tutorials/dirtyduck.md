@@ -191,6 +191,36 @@ threshold curve answers the operational question — "if we can inspect the
 top k, what precision/recall do we get?" — which is the actual decision an
 inspections team makes.
 
+## Does the ML earn its complexity? — add a baseline
+
+Before you trust that random forest, ask what it beats. Drop a trivial
+**baseline** into the same grid — it runs through the same pipeline and lands on
+the same leaderboard, setting the *floor* a real model must clear:
+
+```yaml
+grid_config:
+  'sklearn.tree.DecisionTreeClassifier': { max_depth: [3, 5] }
+  'sklearn.ensemble.RandomForestClassifier': { n_estimators: [100] }
+  # the floor: does the tree beat a constant base-rate guess?
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+```
+
+Re-run and read the **gap** on the leaderboard: if the forest's precision@100 is
+0.57 and the constant-prior baseline is 0.55, the ML bought you almost nothing —
+the features aren't separating failing facilities from the rest. A wide gap is
+the evidence that the modeling earns its keep.
+
+Every `problem_type` has a floor. The regression config
+(`experiment-regression.yaml`) ships **time-series** baselines — persistence,
+moving-average, seasonal-naive, Holt–Winters, Croston — that forecast each
+facility's next-window violation count from its *own* prior counts
+([target history](/triage-pg/concepts/target-history/), point-in-time correct),
+scored by RMSE and **pinball@τ**; the survival config ships marginal
+Kaplan–Meier / Nelson–Aalen floors at C-index ≈ 0.5. The full catalog — every
+class path, its parameters, and how to read each floor metric — is the
+[**Baselines reference**](/triage-pg/reference/baselines/).
+
 ## Fairness and subsets — one identity-neutral block away
 
 Append this to either config (it observes the problem, it doesn't define it —
