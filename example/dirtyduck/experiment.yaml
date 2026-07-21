@@ -169,6 +169,23 @@ grid_config:
   # deterministic (no random_state) so the floor is reproducible run to run.
   'sklearn.dummy.DummyClassifier':
     strategy: ['prior']
+  # DSSG-original "expert heuristic" baselines (ported verbatim from dssg/triage): instead of
+  # a constant, they rank/flag facilities by a single raw feature — "just sort by the obvious
+  # column". A stronger floor than the constant prior: a real model has to beat sorting by prior
+  # inspection activity. Both read one matrix column, so the feature name must match the
+  # featurizer DFS name EXACTLY. The grid value is double-nested because sklearn ParameterGrid
+  # treats each value as a list of candidate settings — the inner list is the single `rules`
+  # argument, the outer list is "one candidate".
+  #   BaselineRankMultiFeature — rank by COUNT(inspections.result) descending
+  #   (low_value_high_score:false ⇒ more prior inspections → higher risk score).
+  'triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature':
+    rules:
+      - - feature: 'COUNT(inspections.result)'
+          low_value_high_score: false
+  #   SimpleThresholder — flag facilities with more than 5 prior inspection results (binary floor).
+  'triage.component.catwalk.baselines.thresholders.SimpleThresholder':
+    rules:
+      - - 'COUNT(inspections.result) > 5'
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).

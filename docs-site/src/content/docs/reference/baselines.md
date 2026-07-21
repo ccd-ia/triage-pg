@@ -183,19 +183,27 @@ Running the classification and regression configs against the tutorial data give
 two opposite — and equally useful — verdicts:
 
 ```
-classification (experiment.yaml)            regression (experiment-regression.yaml)
-model                    prec@100  AUC       model              RMSE   pinball@0.95
-ScaledLogisticRegression   0.388  0.584      Ridge              4.325     1.358
-RandomForestClassifier     0.338  0.568      DummyRegressor     4.462     1.675
-DummyClassifier (floor)    0.260  0.500      Persistence        5.332     1.585
+classification (experiment.yaml)              regression (experiment-regression.yaml)
+model                        prec@100  AUC     model            RMSE  pinball@0.95
+BaselineRankMultiFeature        0.403  0.546   Ridge            4.325     1.358
+ScaledLogisticRegression        0.388  0.584   DummyRegressor   4.462     1.675
+SimpleThresholder               0.340  0.517   Persistence      5.332     1.585
+RandomForestClassifier          0.338  0.568
+DecisionTreeClassifier          0.335  0.561
+DummyClassifier (floor)         0.260  0.500
 ```
 
-Classification's best model clears the constant-prior floor by ~49% (0.388 vs
-0.260) with AUC well above 0.500 — the ML **earns its complexity**. Regression's
-Ridge barely beats the constant floor (4.325 vs 4.462) and the time-series
-baselines are *worse* — the target's own history isn't predictive here, so the
-ML earns very little. Note the quantile nuance: at the 0.95 tail Ridge (1.358)
-beats the `DummyRegressor` (1.675), even though the dummy wins at the median.
+Classification tells the subtler story. Every model clears the constant-prior
+`DummyClassifier` (0.260 / 0.500), so the features carry signal — but the
+DSSG-original `BaselineRankMultiFeature`, which does nothing but rank facilities
+by their prior inspection count, **beats the ML on precision@100** (0.403 vs
+0.388). The model only wins on **AUC** (0.584 vs 0.546): it ranks the whole list
+better, not the operational top-k. That is exactly the humility these heuristic
+floors are for. Regression's Ridge barely beats the constant floor (4.325 vs
+4.462) and the time-series baselines are *worse* — the target's own history isn't
+predictive here, so the ML earns very little. Note the quantile nuance: at the
+0.95 tail Ridge (1.358) beats the `DummyRegressor` (1.675), even though the dummy
+wins at the median.
 
 Baselines are **opt-in** — you add them to `grid_config` deliberately (there is
 no auto-injection). See the [configuration reference](/triage-pg/reference/configuration/)

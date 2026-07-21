@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from six import string_types
 
 from triage.component.catwalk.exceptions import BaselineFeatureNotInMatrix
 
@@ -51,6 +50,10 @@ class SimpleThresholder:
     where rules and operators that combine them can be nested).
     """
 
+    # Selects feature columns by name → the model adapter hands it a pandas DataFrame, not the
+    # numpy design matrix (triage.adapters.model._design_X seam).
+    consumes_named_features = True
+
     def __init__(self, rules, logical_operator="or", random_state=42):
         self.random_state = random_state
         self.rules = rules
@@ -80,7 +83,7 @@ class SimpleThresholder:
 
         converted_rules = []
         for rule in rules:
-            if isinstance(rule, string_types):
+            if isinstance(rule, str):
                 converted_rules.append(self._convert_string_rule_to_dict(rule))
             else:
                 if not isinstance(rule, dict):

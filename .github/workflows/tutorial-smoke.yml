@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
       - run: uv python install 3.12
@@ -95,8 +95,9 @@ jobs:
 
       - name: Step 5 — the tutorial's published outcomes hold
         # The PASS block in dirtyduckling.md: hash b9e38fd8… (the problem identity,
-        # ADR-0022) and 20 models / 268,860 predictions / 120 evaluations — all
-        # deterministic on the baked tutorial data.
+        # ADR-0022) and 32 models / 430,176 predictions / 192 evaluations — all
+        # deterministic on the baked tutorial data. (8 grid groups × 4 splits: the
+        # real estimators + the constant-prior dummy + the two DSSG-original baselines.)
         run: |
           psql_food() {
             docker compose -f dirtyduck/docker-compose.yml \
@@ -110,9 +111,9 @@ jobs:
           case "$hash" in b9e38fd8*) ;; *)
             echo "::error::experiment_hash drifted: $hash (expected b9e38fd8…)"; exit 1;;
           esac
-          [ "$models" = "20" ] || { echo "::error::models=$models (expected 20)"; exit 1; }
-          [ "$preds" = "268860" ] || { echo "::error::predictions=$preds (expected 268860)"; exit 1; }
-          [ "$evals" = "120" ] || { echo "::error::evaluations=$evals (expected 120)"; exit 1; }
+          [ "$models" = "32" ] || { echo "::error::models=$models (expected 32)"; exit 1; }
+          [ "$preds" = "430176" ] || { echo "::error::predictions=$preds (expected 430176)"; exit 1; }
+          [ "$evals" = "192" ] || { echo "::error::evaluations=$evals (expected 192)"; exit 1; }
 
       - name: Step 6 — the leaderboard answers
         run: uv run triage --dbfile dirtyduck-database.yaml leaderboard b9e38fd8

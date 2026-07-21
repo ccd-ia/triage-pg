@@ -13,6 +13,10 @@ REQUIRED_KEYS = frozenset(["feature", "low_value_high_score"])
 
 
 class PercentileRankOneFeature:
+    # Selects feature columns by name → the model adapter hands it a pandas DataFrame, not the
+    # numpy design matrix (triage.adapters.model._design_X seam).
+    consumes_named_features = True
+
     def __init__(
         self, feature, low_value_high_score=None, descend=None, random_state=42
     ):
@@ -117,6 +121,10 @@ class PercentileRankOneFeature:
 
 
 class BaselineRankMultiFeature:
+    # Selects feature columns by name → the model adapter hands it a pandas DataFrame, not the
+    # numpy design matrix (triage.adapters.model._design_X seam).
+    consumes_named_features = True
+
     def __init__(self, rules, random_state=42):
         if not isinstance(rules, list):
             rules = [rules]
@@ -213,6 +221,10 @@ class LinearRanker:
     Returns:
         scores (array): Numpy array of shape (n, 2) where n is the number of rows in X.
     """
+
+    # Selects feature columns by name → the model adapter hands it a pandas DataFrame, not the
+    # numpy design matrix (triage.adapters.model._design_X seam).
+    consumes_named_features = True
 
     def __init__(self, features, weights, random_state=42):
         self.features = features

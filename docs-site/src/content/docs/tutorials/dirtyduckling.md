@@ -126,9 +126,9 @@ trains a small grid, appends predictions, and evaluates in-database.
 **PASS:** the terminal ends with exactly this shape:
 
 ```text
-Experiment b9e38fd8f366… completed: 1 run(s), 20 model(s), 268860 prediction(s),
-120 evaluation(s).
-  run <your-run-id>… (all-features): 20 model(s), 268860 prediction(s), 120
+Experiment b9e38fd8f366… completed: 1 run(s), 32 model(s), 430176 prediction(s),
+192 evaluation(s).
+  run <your-run-id>… (all-features): 32 model(s), 430176 prediction(s), 192
 evaluation(s).
 storage: /tmp/dirtyduck-run
 ```
@@ -151,17 +151,23 @@ content-addressed and cache-hit, so a re-run resumes instead of redoing.
 uv run triage --dbfile dirtyduck-database.yaml leaderboard b9e38fd8
 ```
 
-**PASS:** a ranked table — 5 model groups × 4 test splits (as-of dates
+**PASS:** a ranked table — 8 model groups × 4 test splits (as-of dates
 2015-07 → 2017-01), `auc_roc` by default, logistic regressions and tree
-ensembles trading places at the top:
+ensembles trading places at the top, the baselines below them:
 
 ```text
   Group   Model   Algorithm              Metric    As-of        Value
-  5       20      ScaledLogisticRegre…   auc_roc   2017-01-01   0.5751
-  4       19      ScaledLogisticRegre…   auc_roc   2017-01-01   0.5748
-  3       18      RandomForestClassif…   auc_roc   2017-01-01   0.5612
+  5       29      ScaledLogisticRegre…   auc_roc   2017-01-01   0.5751
+  4       28      ScaledLogisticRegre…   auc_roc   2017-01-01   0.5748
+  3       27      RandomForestClassif…   auc_roc   2017-01-01   0.5612
+  7       31      BaselineRankMultiFe…   auc_roc   2017-01-01   0.5521
   …
 ```
+
+**The floor is on the same board:** the `DummyClassifier` baseline sits at
+`auc_roc` 0.500 while the top model reaches 0.575 (2017-01 split) — every real
+model clears the floor, so the features are earning their keep. That gap is the
+whole point of shipping baselines in the grid.
 
 Hash prefixes work everywhere the CLI takes a hash, git-style.
 

@@ -451,6 +451,10 @@ def _fit_estimator(
     # Target-history baselines (ADR-0030) fit on the reserved history columns, not the features.
     if getattr(estimator, "consumes_target_history", False):
         x, feature_columns = _history_design_X(frame, estimator)
+    # Feature-name baselines (the DSSG rankers/thresholders) select feature columns BY NAME, so
+    # they need a pandas DataFrame with named columns rather than the numpy design matrix.
+    elif getattr(estimator, "consumes_named_features", False):
+        x = frame.select(feature_columns).to_pandas()
 
     # Survival estimators (ADR-0010/0026): a scikit-survival estimator consumes the structured
     # (event_observed, duration) label pair instead of `outcome`. Detected by the estimator's
@@ -1033,6 +1037,9 @@ def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]
     # Target-history baselines (ADR-0030) score from the reserved history columns, not features.
     if getattr(estimator, "consumes_target_history", False):
         x, _ = _history_design_X(frame, estimator)
+    # Feature-name baselines score from named columns — hand them the pandas frame (see _fit).
+    elif getattr(estimator, "consumes_named_features", False):
+        x = frame.select(_feature_columns).to_pandas()
     scores = _score_column(estimator, x)
     entity_ids = frame.get_column("entity_id").to_list()
     as_of_dates = frame.get_column("as_of_date").to_list()

@@ -87,7 +87,8 @@ uv run triage --dbfile donorschoose-database.yaml run \
   example/donorschoose/experiment.yaml --project-path /tmp/donors-run
 ```
 
-(5 model groups × 4 splits = 20 models on the baked subset; base rate ≈ 0.32.)
+(6 model groups × 4 splits = 24 models on the baked subset — the five real
+estimators plus the constant-prior `DummyClassifier` floor; base rate ≈ 0.32.)
 
 Now the chapter this dataset exists for. Uncomment the `feature_groups` block
 in the config (it ships commented, inside `feature_config`):
@@ -105,11 +106,11 @@ does not change (features are the *attempt*, not the *problem*), so their
 leaderboards are directly comparable:
 
 ```text
-  run 0cb379da… (all):                            20 model(s)
-  run 3f32af45… (leave-one-out:projects):         20 model(s)
-  run 49c1d0ce… (leave-one-out:resources):        20 model(s)
-  run bf24745c… (leave-one-out:school_history):   20 model(s)
-  run d644f9d9… (leave-one-out:teacher_history):  20 model(s)
+  run 0cb379da… (all):                            24 model(s)
+  run 3f32af45… (leave-one-out:projects):         24 model(s)
+  run 49c1d0ce… (leave-one-out:resources):        24 model(s)
+  run bf24745c… (leave-one-out:school_history):   24 model(s)
+  run d644f9d9… (leave-one-out:teacher_history):  24 model(s)
 ```
 
 Each `leave-one-out:X` run trains without family X. Read the comparison in
@@ -140,22 +141,40 @@ Two habits this dataset rewards:
   DirtyDuck's inspections case (0.277 base, moderate lift) and 311's
   structural signal (0.87+). Three datasets, three signal regimes: that
   calibration of expectations is the real deliverable of this series.
-- **Make the base rate a competitor, not a footnote.** Drop a constant-prior
-  baseline into the grid so the floor is *on the leaderboard*, ranked next to
-  your models:
+- **Make the base rate a competitor, not a footnote.** The committed grid ships
+  the constant-prior `DummyClassifier` on the leaderboard next to your models —
+  the floor a real model must clear:
 
-  ```yaml
-  grid_config:
-    # ... your real estimators ...
-    'sklearn.dummy.DummyClassifier':
-      strategy: ['prior']
-  ```
+```yaml
+grid_config:
+  # ... your real estimators ...
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+```
 
-  On a diffuse-signal problem this is the most important line in the config —
-  the gap between your best model and the `DummyClassifier` is precisely "does
-  the ML earn its complexity?". The full catalog (every `problem_type`, the
-  time-series and survival floors) is the
-  [**Baselines reference**](/triage-pg/reference/baselines/).
+On a diffuse-signal problem this is the most important row in the grid
+(per-algorithm averages across the 4 splits):
+
+| model | AUC | AP | precision@100 |
+| --- | --- | --- | --- |
+| RandomForestClassifier | 0.597 | 0.413 | 0.330 |
+| DecisionTreeClassifier | 0.596 | 0.424 | 0.332 |
+| ScaledLogisticRegression | 0.575 | 0.421 | 0.331 |
+| `DummyClassifier` (constant floor) | 0.500 | 0.379 | 0.327 |
+
+The real models clear the floor only narrowly — AP 0.42 vs 0.38, and every
+precision@100 sits right at the ≈ 0.33 base rate. Honest work on a hard problem,
+not a triumph.
+
+The DSSG-original **`BaselineRankMultiFeature`** is worth a look too. Rank projects
+by the size of their ask (`COUNT(resources.date)`) and the plausible story —
+"bigger asks are harder to fully fund" — turns out **anti-predictive** on this
+subset: AUC **0.442**, *below* the coin-flip floor. A rule can be worse than
+nothing, and you only find out by scoring it. (It ranks on a `resources` column,
+so don't pair it with a `feature_groups` leave-one-out that drops that group — its
+feature must be in the matrix.) The full catalog (every `problem_type`, the
+time-series and survival floors) is the
+[**Baselines reference**](/triage-pg/reference/baselines/).
 
 ## Where this differs from DSSG triage
 

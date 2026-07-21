@@ -197,6 +197,20 @@ grid_config:
     C: [0.01, 1.0]
     penalty: ['l2']
     max_iter: [1000]
+  # Baseline floors (v1.0.1) — the same treatment DirtyDuck ships (see the Baselines reference).
+  # Constant-prior floor: does a real model beat a base-rate guess?
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+  # DSSG-original "expert heuristic" floor — rank by neighbourhood load instead of learning:
+  # "just escalate the requests in the busiest areas". Reads one matrix column BY NAME, so the
+  # feature must match the featurizer DFS name exactly (grid value double-nested for ParameterGrid).
+  # (No SimpleThresholder here: with only three community areas a single count-threshold flags a
+  # whole area at once, so it collapses to the base rate — see the DirtyDuck grid for a thresholder
+  # over a feature with enough spread to actually split the cohort.)
+  'triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature':
+    rules:
+      - - feature: 'COUNT(area_backlog.date)'
+          low_value_high_score: false
 
 # Declare the data sources so the derivation DAG can pin them (version_label static ⇒ idempotent re-runs).
 sources:

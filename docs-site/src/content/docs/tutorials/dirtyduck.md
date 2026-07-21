@@ -174,8 +174,9 @@ over the full matrix.
 ## The grid, the run, the leaderboard
 
 The committed grid is deliberately small — two decision trees, a random
-forest, two scaled logistic regressions (5 groups × 4 splits = 20 models) —
-because this tutorial is about the *problem*, not hyperparameters. Read the
+forest, two scaled logistic regressions, a constant-prior dummy, and two
+DSSG-original heuristic baselines (8 groups × 4 splits = 32 models) — because
+this tutorial is about the *problem*, not hyperparameters. Read the
 results three ways:
 
 ```bash
@@ -191,34 +192,47 @@ threshold curve answers the operational question — "if we can inspect the
 top k, what precision/recall do we get?" — which is the actual decision an
 inspections team makes.
 
-## Does the ML earn its complexity? — add a baseline
+## Does the ML earn its complexity? — the baselines ship in the grid
 
-Before you trust that random forest, ask what it beats. Drop a trivial
-**baseline** into the same grid — it runs through the same pipeline and lands on
-the same leaderboard, setting the *floor* a real model must clear:
+Before you trust that random forest, ask what it beats. The committed grid
+already carries three **baselines** next to the real estimators — each runs
+through the same pipeline and lands on the same leaderboard, setting a *floor* a
+real model must clear:
 
 ```yaml
 grid_config:
-  'sklearn.tree.DecisionTreeClassifier': { max_depth: [3, 5] }
-  'sklearn.ensemble.RandomForestClassifier': { n_estimators: [100] }
-  # the floor: does the tree beat a constant base-rate guess?
+  # ... the real estimators (trees, forest, scaled logistic regressions) ...
+  # constant-prior floor: does a real model beat a base-rate guess?
   'sklearn.dummy.DummyClassifier':
     strategy: ['prior']
+  # DSSG-original "expert heuristic" floors — rank/flag by the obvious feature
+  # instead of learning: "just sort facilities by their prior inspection count".
+  'triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature':
+    rules: [[{feature: 'COUNT(inspections.result)', low_value_high_score: false}]]
+  'triage.component.catwalk.baselines.thresholders.SimpleThresholder':
+    rules: [['COUNT(inspections.result) > 5']]
 ```
 
-Re-run and read the **gap** on the leaderboard. On this data the classification
-floor is clearly beaten — the ML earns its complexity:
+Read the **gap** on the leaderboard (per-algorithm averages across the 4 splits):
 
 | model | precision@100 | AUC |
 | --- | --- | --- |
-| ScaledLogisticRegression | **0.388** | 0.584 |
+| `BaselineRankMultiFeature` (heuristic) | **0.403** | 0.546 |
+| ScaledLogisticRegression | 0.388 | **0.584** |
+| `SimpleThresholder` (heuristic) | 0.340 | 0.517 |
 | RandomForestClassifier | 0.338 | 0.568 |
 | DecisionTreeClassifier | 0.335 | 0.561 |
-| `DummyClassifier` (floor) | 0.260 | 0.500 |
+| `DummyClassifier` (constant floor) | 0.260 | 0.500 |
 
-The best model's precision@100 (0.388) is ~49% above the constant-prior floor
-(0.260), and its AUC (0.584) clears the coin-flip 0.500 — the features *are*
-separating failing facilities from the rest.
+Two floors, two lessons. Every real model clears the constant-prior
+`DummyClassifier` (0.260 / 0.500), so the features carry signal. But the
+DSSG-original `BaselineRankMultiFeature` — which does nothing but rank facilities
+by their prior inspection count — actually **edges out the ML on precision@100**
+(0.403 vs 0.388). The model only pulls ahead on **AUC** (0.584 vs 0.546): it
+ranks the *whole list* better, not its top. That is the honest verdict these
+heuristic baselines exist to deliver — at the operational top-k, "sort by the
+obvious column" is hard to beat here, and the ML earns its complexity in overall
+ranking quality, not at precision@100.
 
 The **regression** variant (`experiment-regression.yaml`) tells the opposite,
 equally useful story. It ships **time-series** baselines that forecast each

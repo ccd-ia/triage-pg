@@ -106,23 +106,40 @@ uv run triage --dbfile chicago311-database.yaml leaderboard <hash-prefix>
 just serve 8001        # cp chicago311-database.yaml database.yaml first
 ```
 
-Expect 5 model groups × 4 splits = 20 models, ~58,000 predictions, and a
+Expect 7 model groups × 4 splits = 28 models, ~81,000 predictions, and a
 leaderboard whose top AUCs sit in the high .80s–low .90s per split.
 
-With AUCs that high, is the signal real or is the base rate just favorable? Add a
-floor and see — drop a constant-prior baseline into the grid:
+With AUCs that high, is the signal real or is the base rate just favorable? The
+committed grid already ships two **baselines** next to the real estimators — the
+constant-prior `DummyClassifier` and the DSSG-original `BaselineRankMultiFeature`,
+which does nothing but rank requests by their neighbourhood's prior request count
+("just escalate the busiest areas"):
 
 ```yaml
 grid_config:
   # ... your real estimators ...
   'sklearn.dummy.DummyClassifier':
     strategy: ['prior']
+  'triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature':
+    rules: [[{feature: 'COUNT(area_backlog.date)', low_value_high_score: false}]]
 ```
 
-The gap between the top model's precision@k and the `DummyClassifier`'s is the
-honest measure of what the backlog-pressure features bought you. Every
-`problem_type` has such a floor — the survival variant below has marginal
-Kaplan–Meier / Nelson–Aalen floors at C-index ≈ 0.5. See the
+On the leaderboard (per-algorithm averages across the 4 splits):
+
+| model | AUC | precision@100 |
+| --- | --- | --- |
+| DecisionTreeClassifier | 0.871 | 0.804 |
+| ScaledLogisticRegression | 0.868 | 0.856 |
+| RandomForestClassifier | 0.866 | 0.818 |
+| `BaselineRankMultiFeature` (heuristic) | 0.570 | 0.343 |
+| `DummyClassifier` (constant floor) | 0.500 | 0.253 |
+
+Here the verdict is unambiguous: the real models (AUC ≈ 0.87) *crush* both the
+neighbourhood-load heuristic (0.570) and the constant floor (0.500). Unlike
+DirtyDuck — where "sort by the obvious feature" was competitive at the top of the
+list — on Chicago 311 the backlog-pressure features genuinely earn their
+complexity. Every `problem_type` has such a floor — the survival variant below has
+marginal Kaplan–Meier / Nelson–Aalen floors at C-index ≈ 0.5. See the
 [**Baselines reference**](/triage-pg/reference/baselines/) for the full catalog.
 
 ## Fairness — geography as the protected attribute

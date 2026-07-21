@@ -235,6 +235,13 @@ grid_config:
     C: [0.01, 1.0]
     penalty: ['l2']
     max_iter: [1000]
+  # Baseline floor (v1.0.1) — the constant-prior floor (see the Baselines reference). We ship only
+  # the feature-FREE DummyClassifier here because this tutorial's centrepiece is the feature_groups
+  # fan-out: a feature-specific ranker/thresholder (e.g. BaselineRankMultiFeature over a resources
+  # column) would raise BaselineFeatureNotInMatrix under a leave-one-out run that drops that group.
+  # The DSSG-original ranker is shown as an opt-in aside in the tutorial instead.
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
 
 # Declare the data sources so the derivation DAG can pin them (version_label static ⇒ idempotent re-runs).
 sources:
