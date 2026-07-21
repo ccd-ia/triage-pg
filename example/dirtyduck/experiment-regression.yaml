@@ -13,6 +13,22 @@
 
 problem_type: regression_ranking
 
+# Target-history (ADR-0030) for the time-series baseline floors below.
+# target_history_lags: how many windowed-label lags to attach as reserved _target_lag_* columns
+#   (persistence / moving-average / drift / promedio read these).
+# history_query: the RAW periodic series the seasonal / Holt-Winters / Croston baselines forecast
+#   over — per-facility MONTHLY inspection counts, point-in-time correct (only events KNOWN
+#   strictly before {as_of_date}). It is pivoted into reserved _hist_* columns (width below).
+target_history_lags: 6
+history_series_width: 24
+history_query: |
+  select entity_id,
+         date_trunc('month', date)::date as period,
+         count(*) as value
+  from ontology.events
+  where date < {as_of_date}
+  group by 1, 2
+
 temporal_config:
   feature_start_time: '2014-01-01'
   feature_end_time: '2017-07-01'
@@ -177,6 +193,22 @@ grid_config:
   # are deterministic. The 0.5/0.8/0.95 quantiles pair with pinball@τ (Phase 5).
   'sklearn.dummy.DummyRegressor':
     strategy: ['mean', 'median']
+  # Time-series baseline floors (v1.0.1, ADR-0030): each forecasts a facility's next-window
+  # target from its OWN prior windowed-label values — the reserved _target_lag_* columns the
+  # matrix attaches (target_history_lags below). No history_query needed (they read the label's
+  # own lags). The gap between these and a real regressor is "does the ML earn its complexity?".
+  'triage.component.catwalk.baselines.timeseries.Persistence': {}
+  'triage.component.catwalk.baselines.timeseries.PromedioDisponible': {}
+  'triage.component.catwalk.baselines.timeseries.MovingAverage':
+    window: [3, 6]
+  'triage.component.catwalk.baselines.timeseries.Drift': {}
+  # Raw-series baseline floors (v1.0.1, ADR-0030): forecast the next window over the raw
+  # monthly series (history_query above), then rank. These REQUIRE history_query — enforced at
+  # run start. Holt-Winters pulls statsmodels (the `baselines` extra: uv sync --extra baselines).
+  'triage.component.catwalk.baselines.timeseries.SeasonalNaive':
+    season: [12]
+  'triage.component.catwalk.baselines.timeseries.HoltWinters': {}
+  'triage.component.catwalk.baselines.timeseries.Croston': {}
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).

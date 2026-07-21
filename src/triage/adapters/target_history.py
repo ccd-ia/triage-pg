@@ -33,17 +33,34 @@ logger = get_logger(__name__)
 
 __all__ = [
     "TARGET_LAG_PREFIX",
+    "HISTORY_SERIES_PREFIX",
+    "DEFAULT_TARGET_HISTORY_LAGS",
+    "DEFAULT_HISTORY_SERIES_WIDTH",
     "RAW_SERIES_BASELINE_CLASSES",
+    "LAG_BASELINE_CLASSES",
     "build_target_history_lags",
     "build_target_history_series",
+    "pivot_series_to_history_columns",
+    "history_columns_in_order",
+    "is_reserved_history_column",
+    "resolve_target_history",
     "validate_history_query",
     "require_history_query",
     "HistoryQueryRequired",
 ]
 
-# Reserved column namespace for the windowed-label lags (ADR-0030 / decision D2). Matrix
-# assembly excludes anything with this prefix from the feature set + imputation.
+# Reserved column namespaces (ADR-0030 / decision D2). Matrix assembly excludes anything with
+# these prefixes from the feature set + imputation; the estimator seam feeds them to a
+# consumes_target_history estimator by its history_kind ("lags" -> _target_lag_*, "series" ->
+# _hist_*).
 TARGET_LAG_PREFIX = "_target_lag_"
+HISTORY_SERIES_PREFIX = "_hist_"
+
+# Defaults when a target-history baseline is in the grid: how many windowed-label lags to
+# attach, and the max width the raw periodic series is padded/truncated to (both overridable
+# via experiment_config: target_history_lags / history_series_width).
+DEFAULT_TARGET_HISTORY_LAGS = 12
+DEFAULT_HISTORY_SERIES_WIDTH = 24
 
 # The Phase-4 raw-series baseline class paths — the estimators that consume the periodic
 # sidecar and therefore REQUIRE a ``history_query`` (ADR-0030). Kept here (not in the
@@ -56,6 +73,17 @@ RAW_SERIES_BASELINE_CLASSES = frozenset(
         "triage.component.catwalk.baselines.timeseries.ETS",
         "triage.component.catwalk.baselines.timeseries.Croston",
         "triage.component.catwalk.baselines.timeseries.CrostonSBA",
+    }
+)
+
+# The lag-family baselines — they read the reserved _target_lag_* columns (windowed-label
+# lags), so a matrix built for them must carry those lags (n_lags > 0). No history_query needed.
+LAG_BASELINE_CLASSES = frozenset(
+    {
+        "triage.component.catwalk.baselines.timeseries.Persistence",
+        "triage.component.catwalk.baselines.timeseries.PromedioDisponible",
+        "triage.component.catwalk.baselines.timeseries.MovingAverage",
+        "triage.component.catwalk.baselines.timeseries.Drift",
     }
 )
 
@@ -253,3 +281,94 @@ def require_history_query(
             + " 'history_query' is configured. Add a history_query (a period-level aggregation"
             + " with 'where knowledge_date < {as_of_date}') or drop those estimators (ADR-0030)."
         )
+
+
+# ----------------------------------------------------------------- reserved-column plumbing
+
+
+def is_reserved_history_column(name: str) -> bool:
+    """True for a reserved target-history column (lag or raw-series), excluded from features."""
+    return name.startswith(TARGET_LAG_PREFIX) or name.startswith(HISTORY_SERIES_PREFIX)
+
+
+def history_columns_in_order(frame_columns, history_kind: str) -> list[str]:
+    """The reserved history columns an estimator reads, ordered CHRONOLOGICALLY (oldest ->
+    newest) so ``timeseries`` forecasters' ``_forecast_one`` sees a chronological series.
+
+    * ``"lags"`` -> ``_target_lag_*`` reversed (``_target_lag_n`` is oldest, ``_target_lag_1``
+      is the most recent).
+    * ``"series"`` -> ``_hist_0 .. _hist_{m-1}`` in index order (``_hist_0`` is oldest).
+    """
+    if history_kind == "lags":
+        cols = [c for c in frame_columns if c.startswith(TARGET_LAG_PREFIX)]
+        cols.sort(key=lambda c: int(c[len(TARGET_LAG_PREFIX) :]))
+        return list(reversed(cols))
+    if history_kind == "series":
+        cols = [c for c in frame_columns if c.startswith(HISTORY_SERIES_PREFIX)]
+        cols.sort(key=lambda c: int(c[len(HISTORY_SERIES_PREFIX) :]))
+        return cols
+    raise ValueError(
+        f"unknown history_kind {history_kind!r} (expected 'lags' | 'series')"
+    )
+
+
+def pivot_series_to_history_columns(series_frame, width: int):
+    """Pivot the long raw-series sidecar into reserved ``_hist_0 .. _hist_{width-1}`` columns.
+
+    ``series_frame`` is the long ``(entity_id, as_of_date, period, value)`` frame from
+    :func:`build_target_history_series`. Within each ``(entity_id, as_of_date)`` the periods are
+    ranked chronologically and the last ``width`` kept (most recent history), left-padded so
+    ``_hist_{width-1}`` is always the newest; shorter histories leave the older slots NULL. The
+    estimator seam reads these as one chronological series (NaN = missing).
+    """
+    import polars as pl
+
+    if series_frame.height == 0:
+        return pl.DataFrame(schema={"entity_id": pl.Int64, "as_of_date": pl.Date})
+    # Rank periods newest-first within each (entity, as_of_date); keep the last `width`. The
+    # newest kept period lands in slot width-1, the oldest kept in a lower slot -> left-padded,
+    # so _hist_0.._hist_{width-1} reads oldest -> newest with missing older slots left NULL.
+    ranked = series_frame.with_columns(
+        pl.col("period")
+        .rank("ordinal", descending=True)
+        .over(["entity_id", "as_of_date"])
+        .alias("rk")
+    )
+    ranked = ranked.filter(pl.col("rk") <= width).with_columns(
+        (width - pl.col("rk")).cast(pl.Int64).alias("slot")
+    )
+    wide = ranked.pivot(
+        values="value",
+        index=["entity_id", "as_of_date"],
+        on="slot",
+        aggregate_function="first",
+    )
+    rename = {
+        str(s): f"{HISTORY_SERIES_PREFIX}{s}"
+        for s in range(width)
+        if str(s) in wide.columns
+    }
+    return wide.rename(rename)
+
+
+def resolve_target_history(
+    grid_config: Mapping[str, Any], experiment_config: Mapping[str, Any]
+) -> tuple[int, str | None]:
+    """Resolve ``(n_lags, history_query)`` for the matrix build from the experiment config.
+
+    Enforces the ADR-0030 contract (:func:`require_history_query`) and validates the query when
+    present. ``n_lags > 0`` iff a lag-family baseline is in the grid (default
+    :data:`DEFAULT_TARGET_HISTORY_LAGS`, overridable via ``experiment_config['target_history_lags']``);
+    ``history_query`` is required iff a raw-series baseline is in the grid.
+    """
+    history_query = experiment_config.get("history_query")
+    require_history_query(grid_config, history_query)
+    if history_query:
+        validate_history_query(history_query)
+    has_lag = any(c in LAG_BASELINE_CLASSES for c in grid_config)
+    n_lags = (
+        int(experiment_config.get("target_history_lags", DEFAULT_TARGET_HISTORY_LAGS))
+        if has_lag
+        else 0
+    )
+    return n_lags, history_query

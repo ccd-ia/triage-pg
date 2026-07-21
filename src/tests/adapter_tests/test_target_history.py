@@ -129,6 +129,41 @@ def _seed_events(pool, rows):
             )
 
 
+def test_pivot_series_left_pads_chronologically():
+    """The long sidecar pivots to reserved ``_hist_*`` columns: newest period in the highest
+    slot, shorter histories left-padded (older slots NULL) — a chronological series."""
+    from triage.adapters.target_history import (
+        HISTORY_SERIES_PREFIX,
+        pivot_series_to_history_columns,
+    )
+
+    series = pl.DataFrame(
+        {
+            "entity_id": [1, 1, 1, 2, 2],
+            "as_of_date": [date(2015, 1, 1)] * 5,
+            "period": [
+                date(2014, 1, 1),
+                date(2014, 2, 1),
+                date(2014, 3, 1),
+                date(2014, 2, 1),
+                date(2014, 3, 1),
+            ],
+            "value": [10.0, 20.0, 30.0, 5.0, 6.0],
+        }
+    )
+
+    wide = pivot_series_to_history_columns(series, width=4)
+
+    row1 = wide.filter(pl.col("entity_id") == 1).to_dicts()[0]
+    assert row1[f"{HISTORY_SERIES_PREFIX}3"] == 30.0  # newest (Mar) in the highest slot
+    assert row1[f"{HISTORY_SERIES_PREFIX}2"] == 20.0  # Feb
+    assert row1[f"{HISTORY_SERIES_PREFIX}1"] == 10.0  # Jan (oldest of 3)
+    row2 = wide.filter(pl.col("entity_id") == 2).to_dicts()[0]
+    assert row2[f"{HISTORY_SERIES_PREFIX}3"] == 6.0  # newest
+    assert row2[f"{HISTORY_SERIES_PREFIX}2"] == 5.0
+    assert row2[f"{HISTORY_SERIES_PREFIX}1"] is None  # left-padded (only 2 periods)
+
+
 def test_raw_series_excludes_future_knowledge(db_pool_greenfield):
     """No period whose ``knowledge_date >= as_of_date`` may appear in the sidecar — leak test."""
     pool = db_pool_greenfield

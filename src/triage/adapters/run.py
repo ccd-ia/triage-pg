@@ -71,6 +71,10 @@ from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.subsets import register_subsets, validate_subsets_config
+from triage.adapters.target_history import (
+    DEFAULT_HISTORY_SERIES_WIDTH,
+    resolve_target_history,
+)
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import _notify_run_progress, record_use
 from triage.component.timechop import Timechop
@@ -226,6 +230,11 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "name",
         "description",
         "config_version",
+        # Target-history knobs (ADR-0030): optional raw-series query + reserved-column widths
+        # for the time-series baselines. Consumed by resolve_target_history at build time.
+        "history_query",
+        "target_history_lags",
+        "history_series_width",
     }
 )
 
@@ -630,7 +639,9 @@ def _create_experiment_and_run(
     # USER env var is the documented fallback when neither is available).
     try:
         author = getpass.getuser()
-    except Exception:  # noqa: BLE001 - getuser() can raise on an unconfigured passwd/env
+    except (
+        Exception
+    ):  # noqa: BLE001 - getuser() can raise on an unconfigured passwd/env
         author = os.environ.get("USER")
     with db_engine.connection() as conn:
         conn.execute(
@@ -776,7 +787,9 @@ def _refresh_leaderboard(db_engine: DictRowPool) -> None:
         with db_engine.connection() as conn:
             conn.execute("refresh materialized view triage.leaderboard")
         logger.info("Refreshed triage.leaderboard")
-    except Exception as exc:  # noqa: BLE001 - leaderboard is a read convenience, never fatal
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - leaderboard is a read convenience, never fatal
         logger.warning(f"Could not refresh triage.leaderboard (non-fatal): {exc}")
 
 
@@ -827,6 +840,9 @@ def _build_split(
     storage: StorageAdapter,
     storage_root: str,
     source_pins: Mapping[str, str | None],
+    target_history_lags: int = 0,
+    history_query: str | None = None,
+    history_series_width: int = 0,
 ) -> tuple[MatrixResult, MatrixResult, list[date], list[date], str, str]:
     """Build a split's train + test matrices; return both + their dates + label timespans.
 
@@ -868,6 +884,9 @@ def _build_split(
         storage_root=storage_root,
         lookback=lookback,
         source_pins=source_pins,
+        target_history_lags=target_history_lags,
+        history_query=history_query,
+        history_series_width=history_series_width,
     )
     test_matrix = build_matrix(
         db_engine,
@@ -884,6 +903,9 @@ def _build_split(
         storage_root=storage_root,
         train_matrix_artifact_id=train_matrix.matrix_artifact_id,
         source_pins=source_pins,
+        target_history_lags=target_history_lags,
+        history_query=history_query,
+        history_series_width=history_series_width,
     )
     return (
         train_matrix,
@@ -1081,6 +1103,23 @@ def run_experiment(
 
         grid = _grid_specs(grid_config)
 
+        # Target-history (ADR-0030): if the grid has time-series baselines, the matrices must
+        # carry the reserved lag / raw-series columns those estimators read. Resolve once —
+        # enforcing the raw-series-baseline-needs-history_query contract — and thread the knobs
+        # into every split's matrix build (they also enter matrix identity).
+        target_history_lags, history_query = resolve_target_history(
+            grid_config, experiment_config
+        )
+        history_series_width = (
+            int(
+                experiment_config.get(
+                    "history_series_width", DEFAULT_HISTORY_SERIES_WIDTH
+                )
+            )
+            if history_query
+            else 0
+        )
+
         # Build the FULL (all-features) matrices once per split, under the first run. featurizer
         # runs here; every feature-group subset is then a column PROJECTION of these same Parquet
         # files (ADR-0023) — no featurizer re-run, no projected copies. feature_names come from
@@ -1098,6 +1137,9 @@ def run_experiment(
                 storage=storage,
                 storage_root=storage_root,
                 source_pins=frozen_pins,
+                target_history_lags=target_history_lags,
+                history_query=history_query,
+                history_series_width=history_series_width,
             )
             for split in splits
         ]

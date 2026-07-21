@@ -74,7 +74,12 @@ from typing import Any
 import yaml
 
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
-from triage.adapters.target_history import TARGET_LAG_PREFIX
+from triage.adapters.target_history import (
+    build_target_history_lags,
+    build_target_history_series,
+    is_reserved_history_column,
+    pivot_series_to_history_columns,
+)
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import (
     FEATURE_GROUP_OUTPUT_REF,
@@ -293,7 +298,7 @@ def _feature_columns(column_names: Sequence[str], target_id_col: str) -> list[st
         for name in column_names
         if name not in keys
         and not name.endswith(suffix)
-        and not name.startswith(TARGET_LAG_PREFIX)
+        and not is_reserved_history_column(name)
     ]
 
 
@@ -580,6 +585,9 @@ def build_matrix(
     train_matrix_artifact_id: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
     policy: str = "exact",
+    target_history_lags: int = 0,
+    history_query: str | None = None,
+    history_series_width: int = 0,
 ) -> MatrixResult:
     """Assemble (or reuse) a Parquet design matrix and register it in the artifact DAG.
 
@@ -662,6 +670,11 @@ def build_matrix(
         "label_timespan": label_timespan,
         "as_of_dates": sorted(d.isoformat() for d in as_of_dates),
         "lookback": lookback,
+        # Target-history (ADR-0030) enters identity: attaching reserved lag/series columns
+        # changes the Parquet, so a matrix with them must hash distinctly from one without.
+        "target_history_lags": target_history_lags,
+        "history_query": history_query,
+        "history_series_width": history_series_width,
     }
     matrix_parent_derivs = [fg_derivation, cohort_deriv, labels_deriv]
     if train_matrix_artifact_id is not None:
@@ -748,6 +761,9 @@ def build_matrix(
             matrix_artifact_id=matrix_derivation.id,
             storage=storage,
             storage_root=storage_root,
+            target_history_lags=target_history_lags,
+            history_query=history_query,
+            history_series_width=history_series_width,
         )
         if not fg_built:
             mark_built(
@@ -810,6 +826,23 @@ def _canonical_featurizer(featurizer_config: Mapping[str, Any]) -> dict[str, Any
     return cfg
 
 
+def _attach_reserved(design, reserved):
+    """Left-join reserved target-history columns onto ``design`` on ``(entity_id, as_of_date)``.
+
+    Casts the reserved frame's ``entity_id`` to the design's dtype so the polars join keys match;
+    a reserved frame with no data rows (only its key schema) is a no-op.
+    """
+    import polars as pl
+
+    if reserved.height == 0:
+        return design
+    reserved = reserved.with_columns(
+        pl.col("entity_id").cast(design.schema["entity_id"]),
+        pl.col(_AS_OF_COL).cast(pl.Date),
+    )
+    return design.join(reserved, on=["entity_id", _AS_OF_COL], how="left")
+
+
 def _assemble(
     db_engine: DictRowPool,
     featurizer_config: Mapping[str, Any],
@@ -823,6 +856,9 @@ def _assemble(
     matrix_artifact_id: str,
     storage: StorageAdapter,
     storage_root: str,
+    target_history_lags: int = 0,
+    history_query: str | None = None,
+    history_series_width: int = 0,
 ) -> MatrixResult:
     """The assembly itself: features ⋈ cohort ⋈ labels, impute, write Parquet."""
     import polars as pl
@@ -890,6 +926,24 @@ def _assemble(
     # count-like zero-fill — closes the recency/tenure NULL gap (ADR-0009). Leakage-safe.
     design = _apply_fit_free(design, feature_columns, imputation_policy)
     _check_no_nulls_remain(design, feature_columns, imputation_policy)
+
+    # Target-history (ADR-0030): attach the reserved columns the time-series baselines read.
+    # Joined AFTER feature_columns/imputation, so they are never features, never imputed, and
+    # never checked for NULLs (their missingness is structural, baseline-owned) — but they DO
+    # land in the written Parquet for the estimator seam (model._history_design_X) to read.
+    if target_history_lags and target_history_lags > 0:
+        lags = build_target_history_lags(
+            db_engine,
+            labels_artifact_id,
+            as_of_dates,
+            label_timespan,
+            target_history_lags,
+        )
+        design = _attach_reserved(design, lags)
+    if history_query:
+        series = build_target_history_series(db_engine, history_query, as_of_dates)
+        hist = pivot_series_to_history_columns(series, history_series_width)
+        design = _attach_reserved(design, hist)
 
     storage_uri = storage.join(storage_root, f"{as_uuid(matrix_artifact_id)}.parquet")
     write_parquet(storage, storage_uri, design)

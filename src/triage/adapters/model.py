@@ -53,8 +53,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from triage.util.db import DictRowPool, returned_row
-
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import (
     begin_artifact,
@@ -74,6 +72,7 @@ from triage.derivation import Derivation, as_uuid, derive, engine_versions_for
 from triage.logging import get_logger
 from triage.profiles.protocols import StorageAdapter
 from triage.profiles.storage import read_parquet
+from triage.util.db import DictRowPool, returned_row
 
 logger = get_logger(__name__)
 
@@ -406,6 +405,29 @@ def _design_X(matrix_result: MatrixResult, storage: StorageAdapter | None = None
     return x, feature_columns, frame
 
 
+def _history_design_X(frame, estimator):
+    """Build the estimator's design matrix from the reserved target-history columns (ADR-0030).
+
+    A ``consumes_target_history`` estimator reads the reserved ``_target_lag_*``
+    (``history_kind='lags'``) or ``_hist_*`` (``history_kind='series'``) columns, ordered
+    chronologically, instead of the feature columns. Nulls materialize to NaN (the forecasters
+    treat NaN as missing). Raises if the matrix carries none — the run must enable
+    ``target_history_lags`` / ``history_query`` so ``build_matrix`` attaches them.
+    """
+    from triage.adapters.target_history import history_columns_in_order
+
+    cols = history_columns_in_order(
+        frame.columns, getattr(estimator, "history_kind", "lags")
+    )
+    if not cols:
+        raise ValueError(
+            f"{type(estimator).__name__} consumes target history but the matrix carries no"
+            + " reserved history columns — enable target_history_lags / history_query so"
+            + " build_matrix attaches them (ADR-0030)"
+        )
+    return frame.select(cols).to_numpy(), cols
+
+
 def _fit_estimator(
     train_matrix_result: MatrixResult,
     class_path: str,
@@ -425,6 +447,10 @@ def _fit_estimator(
     estimator = _instantiate(estimator_cls, hyperparameters, random_seed)
 
     x, feature_columns, frame = _design_X(train_matrix_result, storage)
+
+    # Target-history baselines (ADR-0030) fit on the reserved history columns, not the features.
+    if getattr(estimator, "consumes_target_history", False):
+        x, feature_columns = _history_design_X(frame, estimator)
 
     # Survival estimators (ADR-0010/0026): a scikit-survival estimator consumes the structured
     # (event_observed, duration) label pair instead of `outcome`. Detected by the estimator's
@@ -1004,6 +1030,9 @@ def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]
             + " its as_of_dates) — nothing to score; skipping predictions for it"
         )
         return []
+    # Target-history baselines (ADR-0030) score from the reserved history columns, not features.
+    if getattr(estimator, "consumes_target_history", False):
+        x, _ = _history_design_X(frame, estimator)
     scores = _score_column(estimator, x)
     entity_ids = frame.get_column("entity_id").to_list()
     as_of_dates = frame.get_column("as_of_date").to_list()
