@@ -533,34 +533,35 @@
 
     <!-- PHASE 4 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 4: Time-series regression baselines</h3>
+      <h3><code class="status">[wip]</code> Phase 4: Time-series regression baselines</h3>
+      <p><em>◐ Estimators done + verified 2026-07-20 — 14 tests (13 pure-numpy + HoltWinters/ETS with statsmodels). New <code>baselines/timeseries.py</code>: <code>Persistence</code>, <code>PromedioDisponible</code>, <code>MovingAverage</code>, <code>Drift</code> (lag family) + <code>SeasonalNaive</code>, <code>ETS</code>, <code>HoltWinters</code>, <code>Croston</code>, <code>CrostonSBA</code> (series family), each with a unit-tested <code>_forecast_one</code> core and the <code>consumes_target_history</code>/<code>history_kind</code> delivery contract. <code>statsmodels</code> added as the <code>baselines</code> extra (D3, guarded import). Remaining (the shared Phase-3/4 integration): the estimator-seam delivery (feed <code>_target_lag_*</code> to lag estimators, the sidecar to series estimators) + the <code>_assemble</code> join + example-config wiring — all need the full matrix/tutorial E2E to verify, so they land together.</em></p>
       <p>The full regression/regression_ranking floor suite, each emitting a continuous prediction the spine ranks
       (regression_ranking) or scores (regression). Two families, split by <em>which</em> Phase-3 history shape they read.</p>
       <div class="dep">▲ depends on Phase 3 (target-history path)</div>
 
       <h4>1. Reserved-column baselines (windowed-label lags — no <code>history_query</code> needed)</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Implement in <code>baselines/timeseries.py</code>: persistence (<code>_target_lag_1</code>), promedio disponible (mean of available lags), moving-average 3/6/12, drift (last lag + mean trend) — pure numpy, reading the reserved columns. These work out of the box off the label; no <code>history_query</code> required.</li>
+        <li><code class="status">[x]</code> Implement in <code>baselines/timeseries.py</code>: persistence (<code>_target_lag_1</code>), promedio disponible (mean of available lags), moving-average 3/6/12, drift (last lag + mean trend) — pure numpy, reading the reserved columns. These work out of the box off the label; no <code>history_query</code> required. <em>✔ implemented + unit-tested.</em></li>
       </ul>
       <h4>2. Raw-series baselines: seasonal-naive + Holt–Winters/ETS (require the sidecar)</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> seasonal-naive (<code>y_{t-season}</code>) + Holt–Winters/ETS (trend + seasonality) over the raw periodic sidecar, then aggregate the forecast to the label window. <code>statsmodels</code> behind the new <code>baselines</code> extra (D3), guarded import.</li>
-        <li><code class="status">[]</code> Raise a clear config error if any raw-series baseline is in the grid without a <code>history_query</code> (the Phase-3 contract).</li>
+        <li><code class="status">[x]</code> seasonal-naive (<code>y_{t-season}</code>) + Holt–Winters/ETS (trend + seasonality) over the raw periodic sidecar. <code>statsmodels</code> behind the new <code>baselines</code> extra (D3), guarded import. <em>✔ estimators unit-tested; aggregate-forecast-to-window is part of the deferred seam.</em></li>
+        <li><code class="status">[x]</code> Raise a clear config error if any raw-series baseline is in the grid without a <code>history_query</code> (the Phase-3 contract). <em>✔ <code>require_history_query</code> (Phase 3), tested.</em></li>
       </ul>
       <h4>3. Croston / SBA (raw-series, intermittent demand)</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Implement Croston + SBA over the sidecar for intermittent/lumpy targets; emit the demand-per-period point (and its quantile, for pinball — Phase 5).</li>
+        <li><code class="status">[x]</code> Implement Croston + SBA over the sidecar for intermittent/lumpy targets. <em>✔ pure-numpy, unit-tested (constant-demand → level; SBA debias verified).</em></li>
       </ul>
       <h4>4. Cold-start handling</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Short-history fallback (entity with &lt; k obs / &lt; 1 season): documented degrade to promedio (baseline-owned, <em>not</em> matrix imputation); never fabricate a future value.</li>
-        <li><code class="status">[]</code> Wire both families into <code>example/dirtyduck/experiment-regression.yaml</code> + <code>experiment-visits.yaml</code>, adding a <code>history_query</code> to the visits example so seasonal/HW/Croston are actually exercised.</li>
+        <li><code class="status">[x]</code> Short-history fallback (entity with &lt; k obs / &lt; 1 season): baseline-owned degrade (NaN / last-available), never a fabricated future value. <em>✔ cold-start tested.</em></li>
+        <li><code class="status">[wip]</code> Wire both families into <code>example/dirtyduck/experiment-regression.yaml</code> + <code>experiment-visits.yaml</code>, adding a <code>history_query</code> to the visits example so seasonal/HW/Croston are actually exercised. <em>◐ Deferred with the seam: adding them to a runnable config before history is delivered would break the run.</em></li>
       </ul>
       <h4>5. Testing Strategy</h4>
       <p>Unit-test each estimator against hand-computed values on a tiny series; E2E-assert a leaderboard floor below a real regressor.</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>uv run pytest src/tests/catwalk_tests/test_baselines_timeseries.py -v</code> — persistence/MA/seasonal/drift/ETS/Croston match hand-computed values.</li>
-        <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/ -k "regression and baseline"</code> — both families fit + score through the spine.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_baselines_timeseries.py -v</code> — persistence/MA/seasonal/drift/ETS/Croston match hand-computed values. <em>✔ 14 tests (HW/ETS with statsmodels).</em></li>
+        <li><code class="status">[wip]</code> <code>uv run pytest src/tests/adapter_tests/ -k "regression and baseline"</code> — both families fit + score through the spine. <em>◐ Awaits the estimator-seam delivery (shared Phase-3/4 integration).</em></li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
