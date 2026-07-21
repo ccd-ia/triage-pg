@@ -91,6 +91,12 @@ dashboard = [
 survival = [
     "scikit-survival>=0.27.0",
 ]
+# Time-series baseline floors (v1.0.1, ADR-0010/0030): Holt-Winters/ETS need statsmodels.
+# persistence / moving-average / drift / promedio / Croston stay pure-numpy in core; only the
+# exponential-smoothing family pulls this extra, behind a guarded import (decision D3).
+baselines = [
+    "statsmodels>=0.14",
+]
 oidc = [
     "authlib>=1.7.2",
     "httpx>=0.28.1",
