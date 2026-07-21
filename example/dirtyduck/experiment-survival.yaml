@@ -170,6 +170,14 @@ grid_config:
     n_estimators: [10]
     max_depth: [3]
     min_samples_split: [50]
+  # Baseline floors (v1.0.1): marginal survival models with no covariate discrimination —
+  # their in-PG C-index sits at ≈ 0.5, the bar a real survival model must clear.
+  'triage.component.catwalk.baselines.survival.KaplanMeierBaseline': {}
+  'triage.component.catwalk.baselines.survival.NelsonAalenBaseline': {}
+  'triage.component.catwalk.baselines.survival.MarginalHazardBaseline': {}
+  # Survival analog of rank-by-one-feature: Cox proportional hazards on a single covariate.
+  'triage.component.catwalk.baselines.survival.SingleFeatureCox':
+    feature_index: [0]
 
 # Declare the data sources so the derivation DAG can pin them.
 # version_label is static so repeated runs are idempotent (no re-bump on re-run).
