@@ -93,7 +93,7 @@ Point-in-time correctness would be easy if features never had gaps. They always
 do, and **every feature needs an explicit imputation rule** — a tree that
 tolerates NaN will silently absorb a missing value rather than fail, so
 triage-pg refuses to score a matrix with any un-imputed NULL. But *how* you fill
-a gap is itself a place leakage hides, so ADR-0009 splits imputation along a
+a gap is itself a place leakage hides, so triage-pg splits imputation along a
 hard boundary:
 
 **Fit-free imputation** computes nothing from the data. A `zero` or `constant`

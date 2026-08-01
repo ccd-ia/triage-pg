@@ -7,7 +7,7 @@ sidebar:
 ---
 
 The CLI is not a companion to the dashboard — it's the **complete product**
-(ADR-0012: headless-complete core). Everything below reads the same SQL views
+(headless-complete core). Everything below reads the same SQL views
 the dashboard renders. All output shown is real, captured against the
 tutorial databases.
 
@@ -24,7 +24,7 @@ Two ergonomics used throughout:
 
 ```console
 $ uv run triage --version
-triage-pg 1.0.0
+triage-pg 1.1.0
 ```
 
 ## Set up a project database
@@ -121,7 +121,7 @@ Crosstabs answer "what characterizes the top-k?"; `triage postmodel
 error-tree <id>` fits a shallow interpretable tree on the model's mistakes
 ("where does it fail?"); `triage postmodel compare <a> <b>` computes list
 overlap. Computed once from the matrix, persisted to PostgreSQL, readable
-everywhere (ADR-0011).
+everywhere.
 
 ## Operate
 
@@ -130,7 +130,7 @@ $ triage score 20 2019-12-01
 Forward-scored model 20 at 2019-12-01 (append-only).
 ```
 
-The monitoring entrypoint (ADR-0027) — schedule it with cron or EventBridge;
+The monitoring entrypoint — schedule it with cron or EventBridge;
 each invocation appends `scored_at`-stamped predictions and the monitoring
 views (drift, volume, realized outcomes) accumulate. Bookkeeping surfaces:
 `triage source list` (version pins), `triage archive <hash>` (soft-archive an

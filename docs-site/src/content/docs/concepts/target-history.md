@@ -1,6 +1,6 @@
 ---
 title: Target history & the leakage boundary
-description: How the time-series baselines see each entity's own prior target values point-in-time-correctly — two shapes, two boundaries, one reserved-column contract (ADR-0030).
+description: How the time-series baselines see each entity's own prior target values point-in-time-correctly — two shapes, two boundaries, one reserved-column contract.
 sidebar:
   order: 5
 ---
@@ -15,7 +15,7 @@ label-side twin of the fit-free/fit-based imputation split. Get it wrong and a
 "floor" quietly sees the future, which is *worse* than no floor — it lowers the
 bar deceptively.
 
-This is **ADR-0030**. The history is exposed in **two shapes**, under **one**
+The history is exposed in **two shapes**, under **one**
 leakage boundary, both excluded from the feature set and from imputation.
 
 ## Shape 1 — windowed-label lags
@@ -81,6 +81,4 @@ so the baseline sees the history and nothing else sees the label's lags.
 | `history_series_width` | 24 | Shape 2 — max `_hist_*` width. |
 
 All three enter the matrix's content-addressed identity, so changing them
-rebuilds the matrix rather than silently reusing a mismatched one. The decision
-and its trade-offs are recorded in
-[ADR-0030](https://github.com/ccd-ia/triage-pg/blob/main/docs/adr/0030-target-history-point-in-time-path.md).
+rebuilds the matrix rather than silently reusing a mismatched one.

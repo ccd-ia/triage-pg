@@ -7,7 +7,7 @@ sidebar:
 ---
 
 The dashboard is a deliberately thin window: every number you'll see is a
-`SELECT` over the views and functions in the `triage` schema (ADR-0012 — no
+`SELECT` over the views and functions in the `triage` schema (no
 business logic in the UI), so anything shown here is equally scriptable from
 [the CLI](/triage-pg/reference/cli/) or `psql`. Start it with `just serve`
 against any project database.
@@ -16,7 +16,7 @@ against any project database.
 
 ![The experiments list: one row per experiment with problem type, framing, groups, models, base rate, last run](../../../assets/tutorials/experiments-list.png)
 
-One row per **experiment** (= prediction problem, ADR-0022): problem type,
+One row per **experiment** (= prediction problem): problem type,
 observation-regime pill (`early warning` / `resource prioritization` /
 `visit level`), model/group counts, base rate, last run status. The question
 it answers: *what problems does this project attack, and are they healthy?*
@@ -68,7 +68,7 @@ family your intervention actually implicates.
 ![The model-groups table: avg ± σ, max regret, fit time per group](../../../assets/tutorials/model-groups-table.png)
 
 The hyperparameter-family rollup (avg ± σ, max regret, fit time) — and where
-feature-group ablation runs (ADR-0023) become comparable side by side.
+feature-group ablation runs become comparable side by side.
 
 ## Monitoring
 

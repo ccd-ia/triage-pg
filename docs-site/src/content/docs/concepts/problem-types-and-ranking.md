@@ -19,7 +19,7 @@ The `problem_type` on an Experiment selects a few **swaps** on that spine — ho
 score is produced, how entities are ranked, which metric judges the ranking, and
 what shape the label takes. Everything else stays fixed. Pick the wrong
 `problem_type` and the machinery still runs, but you are answering a different
-question than the one you meant to ask (ADR-0010).
+question than the one you meant to ask.
 
 **Why a ranking spine at all?** Public-policy ML is almost always *"we can act on
 the top **k** — which entities?"*: which slow 311 requests to escalate, which
@@ -46,13 +46,13 @@ emits a positive-class probability; entities rank by that probability. The score
 time, not baked into training. All three tutorial datasets ship a classification
 config.
 
-**`regression_ranking`** is the primary mode for continuous targets (ADR-0010).
+**`regression_ranking`** is the primary mode for continuous targets.
 When the target is a quantity — dollars at risk, days to resolution, demand units —
 but the decision is still "act on the top **k**", you rank by the predicted value
 and train on the richer continuous signal instead of a binarized version of it.
 Note that it does **not** default to `precision@k`: threshold metrics presume a
 binary outcome the continuous target lacks, so declare them explicitly when the
-outcome semantics support a top-k cut (ADR-0026).
+outcome semantics support a top-k cut.
 
 **`regression`** (pure) is for when you genuinely need the point estimate — a
 forecasted cost, a caseload — and no ordering. Same continuous label as
@@ -60,7 +60,7 @@ forecasted cost, a caseload — and no ordering. Same continuous label as
 Declaring `regression` says "the magnitude is the product"; `regression_ranking`
 says "the ordering is the product".
 
-**`survival`** graduated from a future bolt-on to a fully runnable path (ADR-0026).
+**`survival`** graduated from a future bolt-on to a fully runnable path.
 The model emits a **risk score** — higher means the event is expected sooner — which
 rides the same score → rank → evaluate spine. It is evaluated by the **concordance
 index** (`c_index`), a PL/pgSQL function that matches scikit-survival's
@@ -81,7 +81,7 @@ contract, not a convention:
 
 The greenfield label schema carries all three columns at once — `outcome`, plus the
 nullable `(duration, event_observed)` pair — so survival needed no schema migration
-(ADR-0010). Non-survival experiments simply leave the survival pair `NULL`. Getting
+. Non-survival experiments simply leave the survival pair `NULL`. Getting
 the columns wrong is a config-time error: a `survival` experiment without a
 `duration` fails validation before any model is fit.
 

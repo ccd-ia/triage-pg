@@ -16,13 +16,13 @@ this page is the guided tour.
 
 A triage-pg deployment is a small **registry** control-plane database
 (projects, users, submissions, per-project routing) plus **one isolated
-PostgreSQL database per Project**, each holding a `triage` schema (ADR-0002).
+PostgreSQL database per Project**, each holding a `triage` schema.
 Teardown is `DROP DATABASE`; cross-project SQL is deliberately not native.
 The dashboard's project switcher routes each request to the right project
 pool via the registry; single-project use needs no registry at all — the
 write surface simply reports itself read-only.
 
-Plain PostgreSQL is a hard constraint (ADR-0003): no proprietary extensions,
+Plain PostgreSQL is a hard constraint: no proprietary extensions,
 so the same schema, PL/pgSQL functions, and views run identically on a
 laptop, in Docker, self-hosted, or on RDS.
 
@@ -43,11 +43,11 @@ Three edges carry the design:
   collection are all the same mechanism — a re-run cache-hits any node whose
   closure is unchanged, and `triage gc` deletes exactly what no root reaches.
 - **`predictions` (RESTRICT, append-only)** — a score is never *the* score;
-  it's a row with a `scored_at` timestamp (ADR-0006). Monitoring falls out of
+  it's a row with a `scored_at` timestamp. Monitoring falls out of
   this for free: drift, volume, and realized-outcome views are just SQL over
   the accumulating history.
 - **`experiments` → `runs`** — an experiment *is the prediction problem*
-  (cohort + label + temporal config; ADR-0022): features, grids, and
+  (cohort + label + temporal config): features, grids, and
   imputation belong to the run, so adding features is a new *attempt*, not a
   new problem, and leaderboards stay comparable across attempts.
 
@@ -60,7 +60,7 @@ the design rationale in
 
 ![The pipeline: cohort+labels → features (DFS, as-of joins) → matrices → train+predict → in-database evaluation](../../../assets/tutorials/pipeline-5box.svg)
 
-One pass of `triage run` (ADR-0012 — the CLI is the complete product; no UI
+One pass of `triage run` (the CLI is the complete product; no UI
 holds business logic):
 
 1. **Experiment + run rows**, then **source pinning** — every declared source
@@ -69,9 +69,9 @@ holds business logic):
    the union of dates;
 3. **features** — featurizer's PostgreSQL-native Deep Feature Synthesis over
    the config's entity graph, point-in-time-correct via as-of joins
-   (ADR-0008);
+;
 4. **matrices** per split (Parquet; fit-based imputation fitted on the train
-   split only — the ADR-0009 leakage boundary);
+   split only — the leakage boundary);
 5. **train × grid**, then **append predictions** and **evaluate in-database**
    (precision@k, AUC, regression metrics, survival C-index — PL/pgSQL,
    matching their scikit references to 1e-9).
@@ -82,7 +82,7 @@ rather than redoing.
 ## How it runs on AWS
 
 The `local`/`cloud` split is a seam of three adapters — auth, storage,
-execution (ADR-0003/0004/0005) — not a fork of the pipeline:
+execution — not a fork of the pipeline:
 
 ![The cloud profile: EventBridge or an operator submits one AWS Batch job per experiment; the container uses RDS IAM tokens and S3; the dashboard reads the project databases](../../../assets/reference/aws-profile.svg)
 
@@ -99,10 +99,12 @@ The Terraform for all of it lives in
 [`infra/terraform/`](https://github.com/ccd-ia/triage-pg/tree/main/infra/terraform)
 with the operator's walkthrough in
 [`docs/cloud-runbook.md`](https://github.com/ccd-ia/triage-pg/blob/main/docs/cloud-runbook.md).
-**Honesty note**: the cloud profile is authored and offline-validated
-(`terraform validate`, unit-tested seams); the live Batch end-to-end is the
-open gate between `v1.0.0-rc` and `v1.0.0`. Nothing on this page pretends
-otherwise.
+**Honesty note**: the cloud profile has been validated live, not just on paper —
+one AWS Batch job ran an experiment end to end against RDS (20 models, 268,860
+predictions, 120 evaluations; matrices and models on S3, predictions and
+evaluations in the project database), which is what gated the `v1.0.0` release.
+The footprint was torn down afterwards, so running it again means a
+`terraform apply` first.
 
 ## Where next
 

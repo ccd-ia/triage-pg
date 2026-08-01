@@ -14,11 +14,11 @@ files it only points at.
 ## A database per project, plus a registry
 
 Each **Project** is one isolated PostgreSQL **database** inside a shared
-cluster (ADR-0002). Isolation is at the database level, not a `project_id`
+cluster. Isolation is at the database level, not a `project_id`
 column, so a project database *is* the tenant boundary — there are no
 `project_id` columns anywhere inside it, and teardown is a single
 `DROP DATABASE`. Everything a project builds lives in one `triage` schema in
-that database (ADR-0003 keeps it plain PostgreSQL, so the identical schema runs
+that database (keeps it plain PostgreSQL, so the identical schema runs
 on a laptop, in Docker, self-hosted, or on RDS).
 
 The state that *can't* live inside any one project — the list of projects
@@ -41,9 +41,9 @@ permissions, and the webapp's auth — plus an append-only **Submission** audit
 row for every experiment sent through the write webapp (who submitted which
 config, to which project, under which profile). What it deliberately does *not*
 hold is database credentials: the cloud profile mints short-lived RDS IAM
-tokens per project (ADR-0004), the local profile reads the environment. The
+tokens per project, the local profile reads the environment. The
 dashboard's project switcher asks the registry where a request should go and
-routes it to the right project pool (ADR-0025).
+routes it to the right project pool.
 
 One consequence is worth stating plainly: **cross-project SQL is not native**.
 A query spanning several projects — a teacher's leaderboard over every
@@ -59,12 +59,12 @@ holds append-only [predictions](/triage-pg/concepts/problem-types-and-ranking/),
 in-database evaluations, fairness metrics, feature importances, and the full
 lineage of experiments, runs, and content-addressed artifacts. That is exactly
 the set the in-Postgres metrics need to read — precision@k, AUC, C-index,
-bias group-bys are all SQL over these tables (ADR-0007).
+bias group-bys are all SQL over these tables.
 
 **Matrices are Parquet, never in Postgres.** A [Matrix](/triage-pg/concepts/point-in-time-correctness/)
 is the `(entity_id, as_of_date)`-keyed feature table for a split; the bytes
 live as a Parquet file on the local filesystem (local profile) or S3 (cloud
-profile), addressed by the artifact hash (ADR-0005). Trained **models** are
+profile), addressed by the artifact hash. Trained **models** are
 serialized artifacts — joblib binaries — on that same storage, beside the
 matrices. What the project database *does* keep is a thin pointer row: the
 `matrices` and `models` tables each carry a `storage_uri` and some metadata,
@@ -80,7 +80,7 @@ design in one sentence.
 
 ## Predictions are append-only
 
-Every scoring run **inserts** rows; it never updates them (ADR-0006). Each
+Every scoring run **inserts** rows; it never updates them. Each
 prediction row carries a `scored_at` wall-clock timestamp alongside its
 `as_of_date`, and the table is range-partitioned on `scored_at` — quarterly,
 keep-forever by default. A model scored on the same entities twice produces two

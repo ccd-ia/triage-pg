@@ -17,6 +17,12 @@ export default defineConfig({
       description:
         'PostgreSQL-native, deliberately simplified fork of DSSG triage for temporal ML on tabular public-policy data.',
       customCss: ['./src/styles/house.css'],
+      // PostgreSQL-style: say plainly which release these pages describe, on every page.
+      // Starlight's own <Banner> renders only when a page sets `banner` frontmatter, so
+      // this override makes it unconditional. It reads pyproject.toml itself.
+      components: {
+        Banner: './src/components/VersionBanner.astro',
+      },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/ccd-ia/triage-pg' },
       ],

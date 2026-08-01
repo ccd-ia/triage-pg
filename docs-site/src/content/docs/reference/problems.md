@@ -24,7 +24,7 @@ rather than enumerating the combinations — at the end you'll see why no
 matrix is needed.
 
 Shared background for everything below: whatever the problem type, triage-pg
-runs the same **score → rank → evaluate** spine (ADR-0010). The model emits a
+runs the same **score → rank → evaluate** spine. The model emits a
 per-entity score; entities are ranked by it; evaluation reads the ranked,
 append-only predictions in the database. The problem types differ in what the
 score *means* and which evaluation functions apply.
@@ -129,7 +129,7 @@ classification.
 **Estimators.** sklearn regressors by class path
 (`sklearn.ensemble.RandomForestRegressor`, linear models, …).
 
-**Characteristics — when to choose it.** ADR-0010 makes this the **primary
+**Characteristics — when to choose it.** This is the **primary
 path for continuous targets**: it keeps the ranked-list deliverable policy
 teams act on, while training on the richer continuous signal instead of a
 binarized version of it.
@@ -220,7 +220,7 @@ magnitude *and* the difference between "didn't happen" and "hadn't happened
 yet when we stopped looking".
 
 **Label shape.** Two columns per entity — `(duration, event_observed)`
-(ADR-0010's survival-ready label schema). `event_observed = false` is
+(the survival-ready label schema). `event_observed = false` is
 **censoring**: the window closed first, so `duration` is a *lower bound*, not
 a miss. From the Chicago 311 survival config:
 
@@ -247,7 +247,7 @@ not a probability or a duration.
 **Evaluation.** The **concordance index** (`c_index`) — of all comparable
 pairs, how often does the higher-risk entity experience the event first? —
 computed by a PL/pgSQL function that matches scikit-survival's
-`concordance_index_censored` to 1e-9 (ADR-0026). Censored rows participate
+`concordance_index_censored` to 1e-9. Censored rows participate
 exactly as far as they're comparable, which is the entire point.
 
 **Estimators.** scikit-survival behind the `survival` extra

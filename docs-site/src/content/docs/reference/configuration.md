@@ -15,7 +15,7 @@ before committing to a run:
   checks below, touches no database, and prints the derived shape (split count,
   grid size, the label card). See [the CLI reference](/triage-pg/reference/cli/).
 - **`POST /api/validate-config`** — the write webapp's submission-form check, a
-  thin wrapper over the same function (ADR-0012: validation is core logic, not
+  thin wrapper over the same function (validation is core logic, not
   UI logic).
 
 Both return the same structured result:
@@ -32,8 +32,7 @@ soon as the four identity keys are present, even when deeper checks fail.
 
 ## Identity vs. attempt (read this first)
 
-An **Experiment** is a *problem*; a **Run** is one *attempt* at it (ADR-0022,
-see [identity and caching](/triage-pg/concepts/identity-and-caching/)). Only
+An **Experiment** is a *problem*; a **Run** is one *attempt* at it (see [identity and caching](/triage-pg/concepts/identity-and-caching/)). Only
 four keys define the problem — its `experiment_hash` is a SHA-256 over their
 canonical form:
 
@@ -65,8 +64,8 @@ emits a warning to surface a typo or a misplacement instead of letting it pass.
 | `evaluation` | optional | no | Metric selection + cohort subsets. |
 | `sources` | optional | no | Declared input tables, pinned into the derivation DAG. |
 | `task_framing` | optional | no | The observation regime (how to *read* the numbers). |
-| `target_history_lags` | optional | yes (matrix) | How many `_target_lag_*` columns to attach for lag baselines (ADR-0030). |
-| `history_query` | optional | yes (matrix) | The raw periodic series for the raw-series baselines (ADR-0030). |
+| `target_history_lags` | optional | yes (matrix) | How many `_target_lag_*` columns to attach for lag baselines. |
+| `history_query` | optional | yes (matrix) | The raw periodic series for the raw-series baselines. |
 | `history_series_width` | optional | yes (matrix) | Max `_hist_*` width for the raw series. |
 | `name` | optional | no | Cosmetic experiment label. |
 | `description` | optional | no | Cosmetic free text. |
@@ -99,7 +98,7 @@ problem_type: classification   # | regression_ranking | regression | survival
 - `survival` additionally requires the survival extra (scikit-survival). If
   `sksurv` is not importable the validator fails with
   `problem_type 'survival' requires the survival extra (scikit-survival) — install with 'uv sync --extra survival'`
-  (ADR-0026).
+.
 - It dictates the label columns — see `label_config` below.
 
 ## `cohort_config`
@@ -173,7 +172,7 @@ label_config:
 ## `temporal_config`
 
 **Purpose.** The train/test split windows. This is the typed front door to the
-inherited timechop engine (ADR-0010); the number of splits it produces is
+inherited timechop engine; the number of splits it produces is
 `n_splits` in the validator's result.
 
 **Required.** Part of experiment identity.
@@ -219,11 +218,11 @@ temporal_config:
 
 **Purpose.** The featurizer ER-graph — entities, variables, relationships, and
 aggregation intervals — that Deep Feature Synthesis turns into feature columns.
-triage concepts never leak into featurizer (ADR-0008).
+triage concepts never leak into featurizer.
 
 **Required.** **Not** in identity — it belongs to the Run's attempt.
 
-**Shape.** A non-empty mapping. `feature_groups` (ADR-0023) nests **under**
+**Shape.** A non-empty mapping. `feature_groups` nests **under**
 `feature_config`:
 
 ```yaml
@@ -245,7 +244,7 @@ feature_config:
     - parent: { entity: facilities, key: entity_id }
       child:  { entity: inspections, key: entity_id }
       temporal: { mode: as_of }
-  # optional — expands ONE experiment into several runs (ADR-0023):
+  # optional — expands ONE experiment into several runs:
   feature_groups:
     group_by: source_entity
     strategies: [all, leave-one-out, leave-one-in, all-combinations]
@@ -299,7 +298,7 @@ grid_config:
 ## `imputation_config`
 
 **Purpose.** Per-metric imputation rules. Every feature needs an explicit rule;
-the fit-free / fit-based split is a leakage boundary (ADR-0009).
+the fit-free / fit-based split is a leakage boundary.
 
 **Optional.** Defaults to `{"all": {"type": "zero"}}`. Not in identity (it does
 enter the matrix's derivation hash).
@@ -331,7 +330,7 @@ imputation_config:
 ## `bias_config`
 
 **Purpose.** Drives the in-Postgres fairness audit — ingests protected
-attributes and pins the top-k cut it audits at (ADR-0007). Identity-neutral: it
+attributes and pins the top-k cut it audits at. Identity-neutral: it
 observes the problem, it does not define it.
 
 **Optional.**
@@ -403,7 +402,7 @@ evaluation:
 ## `target_history_lags`, `history_query`, `history_series_width`
 
 **Purpose.** Expose each entity's own prior target values, point-in-time-correctly,
-for the [time-series baselines](/triage-pg/reference/baselines/) (ADR-0030). See
+for the [time-series baselines](/triage-pg/reference/baselines/). See
 [target history](/triage-pg/concepts/target-history/) for the leakage boundary.
 All three enter **matrix identity** (a change rebuilds the matrix).
 
@@ -431,7 +430,7 @@ history_series_width: 24
 history_query: |
   select entity_id, date_trunc('month', date)::date as period, count(*) as value
   from ontology.events
-  where date < {as_of_date}          -- point-in-time correct (ADR-0030)
+  where date < {as_of_date}          -- point-in-time correct
   group by 1, 2
 
 grid_config:
@@ -478,7 +477,7 @@ sources:
 
 - The validator does not reject a missing `sources` block, but it **warns**:
   `no sources declared — every derivation is volatile (never a cache hit) and
-  inputs are unpinned (ADR-0014)`. A source without a `version_label` is
+  inputs are unpinned`. A source without a `version_label` is
   volatile and forces a rebuild every run.
 
 ## `task_framing`
@@ -542,7 +541,7 @@ Warnings never make a config invalid — they surface silent misbehavior:
 
 - A misplaced `feature_groups` at the top level:
   `top-level 'feature_groups' is ignored — nest it under
-  feature_config.feature_groups (ADR-0023) to get the fan-out`.
+  feature_config.feature_groups to get the fan-out`.
 - Any other unrecognized top-level key:
   `unknown top-level key '<x>' is ignored` (this is how a typo like
   `label_confg` surfaces instead of being silently skipped).

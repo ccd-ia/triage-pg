@@ -35,7 +35,7 @@ See [identity and caching](/triage-pg/concepts/identity-and-caching/) and
 
 ## Why isn't my latest score the latest?
 
-Because predictions are **append-only** (ADR-0006). Every scoring run *inserts*
+Because predictions are **append-only**. Every scoring run *inserts*
 rows carrying a `scored_at` wall-clock timestamp; nothing is ever overwritten,
 and the table is time-partitioned. Re-scoring the same model at the same
 `as_of_date` doesn't replace the old row — it adds a new one. So `(model,
@@ -60,7 +60,7 @@ and become a `GROUP BY` later, with no migration. See
 
 ## I get `ValueError: Cannot resolve a distribution for estimator module 'triage'`
 
-The estimator library's version enters **model identity** (ADR-0016), so
+The estimator library's version enters **model identity**, so
 `engine_versions_for('model', …)` has to reverse-map the estimator's import
 package to its installed distribution. It does that via
 `importlib.metadata.packages_distributions()`, which reads `top_level.txt` /
@@ -104,7 +104,7 @@ game — the class path is resolved at train time. See the
 
 ## My feature group is being ignored.
 
-`feature_groups` must be **nested under `feature_config`** (ADR-0023). A
+`feature_groups` must be **nested under `feature_config`**. A
 top-level `feature_groups:` key at the root of the experiment config is not read
 by the adapter — it's silently ignored, so you get today's default behaviour (one
 implicit group, one Run) with no error. The config validator now emits a warning
@@ -121,7 +121,7 @@ feature_config:
 
 The adapter strips `feature_groups` back out before featurizer (or the
 `feature_group` node identity) ever sees it — featurizer stays group-agnostic
-(ADR-0008); grouping is a triage-pg concern over featurizer's columns. See the
+; grouping is a triage-pg concern over featurizer's columns. See the
 [configuration reference](/triage-pg/reference/configuration/).
 
 ---

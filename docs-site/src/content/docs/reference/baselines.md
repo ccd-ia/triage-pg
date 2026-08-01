@@ -54,7 +54,7 @@ above it, the features aren't separating the classes.
 ## Regression & regression_ranking
 
 The target is continuous (a count, a duration, a demand). `regression_ranking`
-(ADR-0010's primary continuous path) ranks entities by the predicted value;
+(the primary continuous path) ranks entities by the predicted value;
 `regression` scores it directly with **rmse / mae / r2 / [pinball@τ](#pinball--quantile-loss)**.
 There are two families of regression baseline, split by *which* history they
 read.
@@ -69,7 +69,7 @@ read.
 ### Time-series floors (per-entity target history)
 
 These forecast each entity's next-window target from its **own prior target
-values** ([target history](/triage-pg/concepts/target-history/), ADR-0030). Two
+values** ([target history](/triage-pg/concepts/target-history/)). Two
 sub-families by which history shape they read.
 
 > In the tables and snippets below, `…` abbreviates `triage.component.catwalk` —

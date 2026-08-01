@@ -1,0 +1,48 @@
+---
+// Overrides Starlight's <Banner>, which normally renders only when a page sets
+// `banner` in its frontmatter. We want it on EVERY page: a reader landing mid-site
+// from a search result should not have to guess which release these pages describe
+// (PostgreSQL's docs do the same thing, for the same reason).
+//
+// The version is read from pyproject.toml at build time rather than written here,
+// because a literal drifts — this site advertised v1.0.0-rc2 two releases after
+// v1.0.0 shipped, and printed `triage-pg 1.0.0` as captured CLI output well after
+// that stopped being true. src/tests/test_docs_version_reference.py guards the
+// prose; this component is why the banner itself cannot rot.
+import { readFileSync } from 'node:fs'
+
+const pyproject = readFileSync(new URL('../../../pyproject.toml', import.meta.url), 'utf8')
+const versionMatch = pyproject.match(/^version = "([^"]+)"/m)
+if (!versionMatch) {
+  throw new Error(
+    'docs-site: could not read `version` from pyproject.toml — the version banner has no source of truth'
+  )
+}
+const version = versionMatch[1]
+const releaseUrl = `https://github.com/ccd-ia/triage-pg/releases/tag/v${version}`
+---
+
+<div class="version-banner">
+  Documentation for <strong>triage-pg {version}</strong> — the current stable release.
+  <a href={releaseUrl}>Release notes</a>
+</div>
+
+<style>
+  .version-banner {
+    --sl-banner-text: var(--sl-color-white);
+    padding: 0.5rem var(--sl-nav-pad-x);
+    background-color: var(--sl-color-bg-nav);
+    border-bottom: 1px solid var(--sl-color-hairline-shade);
+    color: var(--sl-color-gray-2);
+    line-height: 1.4;
+    text-align: center;
+    text-wrap: balance;
+    font-size: var(--sl-text-sm);
+  }
+  .version-banner strong {
+    color: var(--sl-color-white);
+  }
+  .version-banner a {
+    color: var(--sl-color-text-accent);
+  }
+</style>

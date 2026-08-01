@@ -10,7 +10,7 @@ matrix, a model — carries an **identity**: a hash over its *complete input
 closure*, computed à la Guix. Two builds with the same closure get the same
 hash, so the second one is a cache hit. This is the mechanism that replaces
 the inherited `replace=True` flag, whose hashes covered config text only and
-missed the data, the code, and the upstream artifacts entirely (ADR-0013).
+missed the data, the code, and the upstream artifacts entirely.
 
 Four properties fall out of this, exactly as they do in the Guix store:
 
@@ -23,7 +23,7 @@ Four properties fall out of this, exactly as they do in the Guix store:
   be collected; matters most for Parquet matrices on disk or S3.
 
 Predictions are the deliberate exception: they are append-only **events** with
-lineage columns, not cache entries, and are never deduplicated (ADR-0006).
+lineage columns, not cache entries, and are never deduplicated.
 The cached DAG stops at models.
 
 ## What enters a node's hash
@@ -35,8 +35,8 @@ serialized as canonical JSON (sorted keys, normalized scalars):
 artifact_id = H( kind
               ∥ canonical(own_config)         -- this artifact's config slice
               ∥ sorted(parent_artifact_ids)   -- upstream artifacts (Merkle DAG)
-              ∥ sorted(source_pins)            -- (source, version) pairs, ADR-0014
-              ∥ sorted(engine_versions) )      -- triage-pg, featurizer, …, ADR-0016
+              ∥ sorted(source_pins)            -- (source, version) pairs
+              ∥ sorted(engine_versions) )      -- triage-pg, featurizer, …
 ```
 
 Because each parent's id is embedded, this is a **Merkle DAG**: a matrix's id
@@ -52,18 +52,18 @@ flowchart LR
   C["cohort<br/>@(config, dates)"] --> MT["matrix<br/>(train)"]
   L["labels<br/>@(config, dates)"] --> MT
   F["feature_group<br/>@(dates)"] --> MT
-  MT -->|"consumes train-fitted<br/>imputation (ADR-0009)"| MX["matrix<br/>(test)"]
+  MT -->|"consumes train-fitted<br/>imputation"| MX["matrix<br/>(test)"]
   MX --> MD["model"]
 ```
 
 The test matrix takes the train matrix as a parent: it consumes the
-train-fitted imputation statistics, so the leakage boundary (ADR-0009) is an
+train-fitted imputation statistics, so the leakage boundary is an
 explicit DAG edge, not a convention.
 
 ## Source pins make the closure cacheable
 
 A Postgres table has no cheap content hash, so a **Source** enters identity as
-a *declared pin*, not by hashing its rows (ADR-0014). Cohort, label, and
+a *declared pin*, not by hashing its rows. Cohort, label, and
 feature configs declare the tables they read — SQL is never parsed to discover
 them; an undeclared input does not exist for identity purposes. A registry
 records a `version_label` per load, bumped by the ETL or by `triage source
@@ -86,7 +86,7 @@ fingerprints — row count, `max(knowledge_date_column)` — are captured
 
 A version enters identity if and only if it can change the artifact's **output
 bytes given identical config and inputs** — the compiler-versus-runtime
-criterion (ADR-0016). Engines are *compilers*: featurizer maps config to SQL
+criterion. Engines are *compilers*: featurizer maps config to SQL
 (a window-boundary fix moves events in or out, changing feature values);
 scikit-learn gives different coefficients for the same matrix, hyperparameters,
 and seed across releases and guarantees no cross-version equivalence. So the
@@ -139,9 +139,9 @@ design exists to provide. Because every closure is pinned, a deleted output is
 **re-derivable** (the Guix substitute property). So `triage gc` deletes the
 **outputs** unreachable from a retained root and flips their rows to
 `status='collected'`; a cache lookup only returns `'built'`, so a collected
-artifact transparently rebuilds on next demand (ADR-0017). This is deletion of
+artifact transparently rebuilds on next demand. This is deletion of
 dead *outputs*, not of history — row deletion is a separate, rarely-needed
-`--purge` (project teardown is already `DROP DATABASE`, ADR-0002).
+`--purge` (project teardown is already `DROP DATABASE`).
 
 Roots are the artifacts used by runs of **non-archived** experiments, plus any
 **predicted model** (append-only predictions pin their model regardless of

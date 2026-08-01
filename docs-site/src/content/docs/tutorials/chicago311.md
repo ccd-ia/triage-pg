@@ -217,7 +217,7 @@ scoring) — never overwrites — so day after day the history accumulates and t
 
 ![The monitoring view: score drift chips, scoring-volume heartbeat, realized outcomes](../../../assets/tutorials/monitoring-view.png)
 
-Append-only is the design decision that makes all of this cheap (ADR-0006):
+Append-only is the design decision that makes all of this cheap:
 a score is never "the" score, it's a row with a timestamp; "current" is just
 `max(scored_at)`.
 
