@@ -61,3 +61,45 @@ jobs:
           files: |
             docs/onboarding.html
             docs/triage-pg-vs-dssg-triage.html
+
+  # GHCR packages default to PRIVATE even when the repo is public — visibility is a
+  # separate, manual flip. Nothing in the build catches a regression there, so the
+  # failure would surface as a stranger's first `docker pull` failing, reported by a
+  # user rather than by CI. This job is the smoke test: a runner with no registry
+  # credentials pulls the tag just published and runs the CLI out of it.
+  verify-anonymous-pull:
+    runs-on: ubuntu-latest
+    needs: release
+    timeout-minutes: 15
+    steps:
+      # Deliberately NO docker/login-action here. A fresh runner holds no GHCR
+      # credentials; the explicit logout guards against an inherited config.json.
+      - name: Drop any registry credentials
+        run: docker logout ghcr.io || true
+      - name: Pull the published image anonymously
+        run: |
+          image="ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+          # GHCR can lag a few seconds behind the push before a tag resolves.
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$image"; then
+              echo "pulled ${image} with no credentials"
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; retrying in 15s"
+            sleep 15
+          done
+          echo "::error::${image} is not anonymously pullable — the GHCR package is most" \
+               "likely PRIVATE. Flip it to public under the repo's Packages settings."
+          exit 1
+      - name: The image actually runs, and reports this version
+        run: |
+          image="ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+          reported="$(docker run --rm "$image" triage --version)"
+          echo "container reports: ${reported}"
+          expected="${GITHUB_REF_NAME#v}"
+          expected="${expected%%-*}"
+          case "$reported" in
+            *"$expected"*) echo "matches the tagged version ${expected}" ;;
+            *) echo "::error::image reports '${reported}', expected version ${expected}"
+               exit 1 ;;
+          esac
