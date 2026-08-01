@@ -1419,11 +1419,23 @@ def project_create(
     database_name: Optional[str] = typer.Option(
         None, "--database-name", help="Target database name (defaults to the slug)."
     ),
+    owner: Optional[str] = typer.Option(
+        None,
+        "--owner",
+        help=(
+            "Existing PG role to grant the database and hand matview ownership to"
+            " (the cloud profile's per-project IAM login). Omit for the local profile."
+        ),
+    ),
 ) -> None:
     """Create a project end-to-end: registry row → CREATE DATABASE → triage schema (head).
 
     Needs TRIAGE_REGISTRY_URL (the control plane) and a maintenance connection —
     TRIAGE_MAINT_URL, else the registry cluster's 'postgres' database (ADR-0002).
+
+    With --owner, also applies the cloud-runbook §4.4 grants: database + schema + table
+    privileges, default privileges for future objects, and OWNERSHIP of every matview in
+    the triage schema (REFRESH is owner-only in PostgreSQL — no grant can substitute).
     """
     from triage import project_lifecycle
 
@@ -1436,16 +1448,66 @@ def project_create(
             maint_url=maint_url,
             display_name=display_name,
             database_name=database_name,
+            owner=owner,
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     finally:
         pool.close()
+    granted = (
+        f" Role [cyan]{owner}[/cyan] granted + owns the triage matviews."
+        if owner
+        else ""
+    )
     console.print(
         f"[green]Project '{project['slug']}' created:[/green] database"
         f" [cyan]{project['database_name']}[/cyan] provisioned + triage schema at head."
+        f"{granted}"
         " Run experiments against it with PG*/DATABASE_URL pointed at that database."
+    )
+
+
+@project_app.command("grant")
+def project_grant(
+    slug: str = typer.Argument(..., help="Project whose database to (re-)grant."),
+    owner: str = typer.Option(
+        ...,
+        "--owner",
+        help="Existing PG role to grant the database and hand matview ownership to.",
+    ),
+) -> None:
+    """Re-apply the per-project role grants + matview ownership (cloud-runbook §4.4).
+
+    Idempotent, and the right repair after a migration that drops+recreates a matview:
+    ownership resets to whoever ran the migration, so REFRESH starts failing (non-fatally,
+    which is why it goes unnoticed — the leaderboard just quietly stops updating).
+    """
+    from triage import project_lifecycle, registry
+    from triage.util.db import swap_dbname
+
+    registry_url, pool = _registry_pool_from_env()
+    try:
+        project = registry.get_project(pool, slug)
+        if project is None:
+            console.print(f"[red]no registry project with slug '{slug}'[/red]")
+            raise typer.Exit(code=1)
+        db_name = project["database_name"]
+        maint_url = project_lifecycle.maintenance_url(registry_url)
+        project_url = swap_dbname(maint_url, db_name)
+        statements = project_lifecycle.grant_project_role(
+            project_url, owner=owner, database_name=db_name
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    finally:
+        pool.close()
+    for statement in statements:
+        console.print(f"  [dim]{statement}[/dim]")
+    console.print(
+        f"[green]Granted[/green] [cyan]{owner}[/cyan] on [cyan]{db_name}[/cyan]"
+        f" ({len(statements)} statements)."
     )
 
 

@@ -125,3 +125,97 @@ def test_database_ready_probe_is_false_not_raise(db_url):
     )
     # a database that exists but has no triage schema (the bare test DB itself)
     assert project_lifecycle.database_ready(db_url) is False
+
+
+OWNER_SLUG = "lifecycle_owned"
+OWNER_ROLE = "triage_lifecycle_owned"
+
+
+@pytest.fixture
+def project_role(db_url):
+    """A password-less login role standing in for the cloud profile's per-project IAM user.
+
+    Cluster-global like the databases, so it is dropped on the way out.
+    """
+    with psycopg.connect(libpq_conninfo(db_url), autocommit=True) as conn:
+        conn.execute(f'create role "{OWNER_ROLE}" with login')
+    yield OWNER_ROLE
+    with psycopg.connect(libpq_conninfo(db_url), autocommit=True) as conn:
+        conn.execute(f'drop role if exists "{OWNER_ROLE}"')
+
+
+def test_create_with_owner_hands_over_matview_ownership(registry_db, project_role):
+    """The §4.4 fold-in: --owner makes the project role own every triage matview.
+
+    REFRESH MATERIALIZED VIEW is owner-only in PostgreSQL (there is no grantable REFRESH
+    privilege), so ownership — not a grant — is what makes the pipeline's post-run refresh
+    work under the cloud profile's per-project role (ADR-0004).
+    """
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool, slug=OWNER_SLUG, maint_url=db_url, owner=project_role
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with psycopg.connect(libpq_conninfo(project_url)) as conn:
+            matviews = conn.execute(
+                "select matviewname, matviewowner from pg_matviews"
+                " where schemaname = 'triage'"
+            ).fetchall()
+            granted = conn.execute(
+                "select has_table_privilege(%s, 'triage.experiments', 'insert')",
+                (project_role,),
+            ).fetchone()
+
+        # the schema really does ship a matview — otherwise this test proves nothing
+        assert matviews, "expected at least one matview in the triage schema"
+        assert {name for name, _ in matviews} >= {"leaderboard"}
+        # ...and every one of them belongs to the project role, not the creating master
+        assert all(owner == project_role for _, owner in matviews), matviews
+        # grants landed too (tables are grantable; the matview is the one that is not)
+        assert granted is not None and granted[0] is True
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_grant_project_role_is_idempotent(registry_db, project_role):
+    """Re-applying is a no-op — it is the documented repair after a migration resets ownership."""
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool, slug=OWNER_SLUG, maint_url=db_url, owner=project_role
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        first = project_lifecycle.grant_project_role(
+            project_url, owner=project_role, database_name=OWNER_SLUG
+        )
+        second = project_lifecycle.grant_project_role(
+            project_url, owner=project_role, database_name=OWNER_SLUG
+        )
+        assert first == second
+        assert any("alter materialized view" in s for s in first), first
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_create_without_owner_leaves_matviews_with_the_creator(registry_db):
+    """The local profile is untouched: no --owner, no grants, no ownership churn."""
+    db_url, pool = registry_db
+    project_lifecycle.create_project(pool, slug=OWNER_SLUG, maint_url=db_url)
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with psycopg.connect(libpq_conninfo(project_url)) as conn:
+            owners = conn.execute(
+                "select distinct matviewowner from pg_matviews where schemaname = 'triage'"
+            ).fetchall()
+            current = conn.execute("select current_user").fetchone()
+        assert current is not None
+        assert [row[0] for row in owners] == [current[0]]
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )

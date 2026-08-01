@@ -129,6 +129,41 @@ default `*.amazonaws.com` names resolve to the endpoint ENIs).
 
 ## 4. Bootstrap the control plane, the project, and its role
 
+### 4.0 Why there are two database roles
+
+The local profile has one user — you — who owns everything and never meets any of this. The cloud
+profile has **two**, and the split is forced by the ADRs rather than chosen for its own sake:
+
+| Role | Who uses it | How it authenticates | What it can do |
+|---|---|---|---|
+| `triage_admin` (**master**) | you, at the operator seat, at bootstrap only | password from Secrets Manager | `CREATE DATABASE`, `CREATE USER`, DDL |
+| `triage_<project>` (**project role**) | the Batch job, unattended, forever | short-lived RDS IAM token, no password ever | run the pipeline against one project database |
+
+Two things justify the second role. **ADR-0004**: nothing in the running system stores a database
+password — a job running unattended for hours cannot hold a credential that expires, and should not
+hold one that doesn't; IAM tokens rotate themselves. **ADR-0002**: per-project isolation is only
+real if project A's runtime role cannot `DROP DATABASE` project B. The master can. So the process
+that runs unattended deliberately gets the smaller role. The task role's `rds-db:connect` is scoped
+to `triage_*`, which is why the naming convention in §4.2 is load-bearing.
+
+**The consequence that bites.** `triage project create` applies the migrations over the *maintenance*
+connection — as the master. In PostgreSQL, whoever executes `CREATE MATERIALIZED VIEW` owns it, so
+the master owns every object the migrations created. That is fine for tables: the pipeline only
+INSERTs and SELECTs, and both are grantable. It is **not** fine for `triage.leaderboard`, because
+`REFRESH MATERIALIZED VIEW` is **owner-only** — PostgreSQL has no grantable REFRESH privilege the way
+it has SELECT or INSERT. It sits in the same class as `ALTER` and `DROP`: the owner, a member of the
+owning role, or a superuser. `GRANT REFRESH ON …` does not exist.
+
+So a project role holding every grant in the catalog still cannot refresh the leaderboard. Ownership
+has to move, which is what `--owner` does in §4.3. It is exactly one object in the whole schema —
+`triage.leaderboard` is the only matview — and the failure is a single non-fatal log line, which is
+why it went unnoticed long enough to become a manual runbook step.
+
+(`ALTER … OWNER TO` additionally requires the master to be a *member* of the target role — also a
+PostgreSQL rule, not a triage invention. `--owner` issues that membership grant for you.)
+
+---
+
 The master password lives in Secrets Manager and is used **only here**, from the operator seat:
 
 ```bash
@@ -164,23 +199,59 @@ grant rds_iam to triage_myproject;
 ```bash
 export TRIAGE_REGISTRY_URL="postgresql://triage_admin:<pw>@localhost:54321/registry"
 export TRIAGE_MAINT_URL="postgresql://triage_admin:<pw>@localhost:54321/postgres"
-uv run triage project create myproject --display-name "My Project"
+uv run triage project create myproject --display-name "My Project" \
+  --owner triage_myproject
 # -> registry row + CREATE DATABASE myproject + the triage schema at alembic head
+#    + the §4.0 grants and matview ownership for triage_myproject
 ```
 
-### 4.4 Grant the project role its database — and give it OWNERSHIP it actually needs
+`--owner` names the role from §4.2 (it must already exist — this does not create it). It applies,
+as the master, on the new database:
 
-`triage project create` runs the migrations **as the master**, so the master owns the schema
-objects. A plain `GRANT usage, create` is enough for tables, but **not** for
-`REFRESH MATERIALIZED VIEW`: the pipeline refreshes `triage.leaderboard` after every run, and
-`REFRESH` requires **ownership** — a GRANT cannot confer it. Hand the matview to the project role:
+- `connect, create, temporary` on the database
+- `usage, create` on schema `triage`, plus `select/insert/update/delete` on its tables and
+  `usage/select` on its sequences
+- the same privileges as **default privileges**, so objects a *later* migration creates are
+  granted automatically
+- membership of the project role, then `ALTER MATERIALIZED VIEW … OWNER TO` for **every** matview
+  in the `triage` schema — not just `leaderboard` by name, so a matview added by a future
+  migration is covered without anyone remembering this step exists
+
+Omit `--owner` in the local profile, where you already own everything you create.
+
+Re-apply it any time with `triage project grant`. It is idempotent, and it is the correct repair
+after a migration that drops and recreates a matview — ownership resets to whoever ran the
+migration, and `REFRESH` silently starts failing again:
+
+```bash
+uv run triage project grant myproject --owner triage_myproject
+```
+
+Your own data schemas still need their grants; the CLI only manages `triage`:
+
+```sql
+grant usage, create on schema raw, clean, ontology to triage_myproject;  -- as your data needs
+```
+
+### 4.4 The same thing by hand (fallback)
+
+`--owner` / `triage project grant` do all of this for you — this section is here for when you are
+repairing a database without the CLI, or want to see exactly what those commands issue. The
+reasoning behind it is §4.0.
 
 ```sql
 -- as master:
-grant all on database myproject to triage_myproject;
+grant connect, create, temporary on database myproject to triage_myproject;
 
 \c myproject
 grant usage, create on schema triage to triage_myproject;
+grant select, insert, update, delete on all tables in schema triage to triage_myproject;
+grant usage, select on all sequences in schema triage to triage_myproject;
+alter default privileges in schema triage
+  grant select, insert, update, delete on tables to triage_myproject;
+alter default privileges in schema triage
+  grant usage, select on sequences to triage_myproject;
+
 grant usage, create on schema raw, clean, ontology to triage_myproject;  -- as your data needs
 
 -- Ownership transfer so the per-project role can REFRESH its matview (the leaderboard, ADR-0007).
@@ -189,11 +260,12 @@ grant triage_myproject to triage_admin;
 alter materialized view triage.leaderboard owner to triage_myproject;
 ```
 
-> Without this the run still **succeeds**, but logs a non-fatal
+> Without the ownership transfer the run still **succeeds**, but logs a non-fatal
 > `Could not refresh triage.leaderboard (non-fatal): must be owner of materialized view` and the
-> leaderboard read view goes stale until someone with ownership refreshes it. If a future schema
-> migration drops+recreates the matview, re-run the `alter … owner` (ownership resets to whoever
-> ran the migration). Any *new* refreshed matview added later needs the same one-liner.
+> leaderboard read view goes stale until someone with ownership refreshes it — a stale leaderboard
+> looks exactly like a correct one, which is what makes this worth automating. If a future schema
+> migration drops+recreates the matview, ownership resets to whoever ran the migration: re-run
+> `triage project grant`, which reassigns every matview in the schema rather than a named one.
 
 ### 4.5 Load source data
 
@@ -382,8 +454,10 @@ The RDS CA bundle is missing at `/etc/ssl/certs/rds-combined-ca-bundle.pem` (Clo
 `sslmode=verify-full`). Rebuild from the current Dockerfile, which bakes the all-regions bundle.
 
 **`Could not refresh triage.leaderboard (non-fatal): must be owner of materialized view`.**
-The project role doesn't own the matview. Apply the ownership transfer in §4.4. Non-fatal: the
-run still writes all predictions/evaluations.
+The project role doesn't own the matview — `REFRESH` is owner-only and no grant substitutes (§4.0).
+Fix with `triage project grant <slug> --owner <role>`; §4.4 is the same thing by hand. Non-fatal: the
+run still writes all predictions/evaluations, but the leaderboard stops updating. Expect this after a
+migration that recreates the matview, since ownership reverts to whoever ran it.
 
 **Job can't reach the DB even though ECR pull worked.**
 A VPC/SG problem, never a reason to tunnel from the job (§1.3). Check: Batch subnets are in the

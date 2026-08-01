@@ -16,6 +16,14 @@ _Avoid_: catalog, metadata DB, master DB
 A deployment configuration selecting the auth/storage/execution adapters — `local` (standalone PG + password + local FS + in-process) or `cloud` (RDS+IAM + S3 + AWS Batch).
 _Avoid_: mode, environment, backend
 
+**Master role**:
+The cluster-level PostgreSQL role (`triage_admin`) used only at bootstrap, from the operator seat, to `CREATE DATABASE` / `CREATE USER` / run migrations. Its password lives in Secrets Manager and never reaches app config. Exists in the cloud profile only; the local profile has a single user who is both roles. Distinct from the Registry (a database, not a role).
+_Avoid_: admin user, superuser, root, master DB
+
+**Project role**:
+The per-project PostgreSQL login role (`triage_<project>`) the pipeline runs as. Password-less: it authenticates with a short-lived RDS IAM token minted by the Batch task role (ADR-0004), and the task role's `rds-db:connect` is scoped to `triage_*`, so the naming is load-bearing. Because the Master role runs the migrations, it owns the objects they create — so the Project role must be *given ownership* of `triage.leaderboard`, since `REFRESH MATERIALIZED VIEW` is owner-only and no grant confers it (`triage project create --owner` / `triage project grant`).
+_Avoid_: app user, service account, IAM user (the IAM principal is a separate thing)
+
 **as_of_date**:
 The point in time at which a prediction is made; features for that row may use only data knowable strictly before it.
 _Avoid_: prediction date, snapshot date, reference date

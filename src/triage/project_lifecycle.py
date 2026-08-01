@@ -29,11 +29,10 @@ from typing import Any, Optional
 
 import psycopg
 from psycopg import sql
-from triage.util.db import DictRowPool
 
 from triage import registry
 from triage.logging import get_logger
-from triage.util.db import libpq_conninfo, swap_dbname
+from triage.util.db import DictRowPool, libpq_conninfo, swap_dbname
 
 logger = get_logger(__name__)
 
@@ -47,6 +46,7 @@ __all__ = [
     "database_ready",
     "create_project",
     "drop_project",
+    "grant_project_role",
 ]
 
 
@@ -100,6 +100,91 @@ def database_exists(maint_url: str, database_name: str) -> bool:
     return row is not None
 
 
+def grant_project_role(
+    project_url: str,
+    *,
+    owner: str,
+    database_name: str,
+) -> list[str]:
+    """Give the per-project role what the pipeline actually needs — including *ownership*.
+
+    Runs as the master (``project_url`` is the maintenance connection pointed at the project
+    database), and is idempotent: re-running it is a no-op, so it is safe to re-apply after a
+    migration.
+
+    Grants are enough for every object the pipeline touches *except one*.
+    ``REFRESH MATERIALIZED VIEW`` is owner-only — PostgreSQL has no grantable REFRESH
+    privilege, the way it has SELECT or INSERT — so a role that merely holds every grant in the
+    catalog still cannot refresh ``triage.leaderboard`` (ADR-0007). Since ``create_project``
+    applies the migrations as the master, the master owns every object they created, matviews
+    included. The only fix is to hand the matview over.
+
+    We reassign **every** matview in the ``triage`` schema rather than naming ``leaderboard``,
+    so a matview added by a future migration is covered without anyone remembering this
+    function exists. Ownership transfer additionally requires the master to be a *member* of
+    the target role (a PostgreSQL rule for ``ALTER … OWNER TO``), which is why the membership
+    grant comes first.
+
+    Returns the statements executed, in order — the caller logs them so the operator can see
+    exactly what was changed, and can replay them by hand if they need to.
+    """
+    executed: list[str] = []
+    with _maint_connection(project_url) as conn:
+        role = sql.Identifier(owner)
+        statements: list[sql.Composed] = [
+            sql.SQL("grant connect, create, temporary on database {} to {}").format(
+                sql.Identifier(database_name), role
+            ),
+            sql.SQL("grant usage, create on schema triage to {}").format(role),
+            sql.SQL(
+                "grant select, insert, update, delete on all tables in schema triage to {}"
+            ).format(role),
+            sql.SQL(
+                "grant usage, select on all sequences in schema triage to {}"
+            ).format(role),
+            # Objects a LATER migration creates would otherwise land ungranted.
+            sql.SQL(
+                "alter default privileges in schema triage"
+                " grant select, insert, update, delete on tables to {}"
+            ).format(role),
+            sql.SQL(
+                "alter default privileges in schema triage"
+                " grant usage, select on sequences to {}"
+            ).format(role),
+        ]
+        for statement in statements:
+            conn.execute(statement)
+            executed.append(statement.as_string(conn))
+
+        # ALTER … OWNER TO requires membership in the target role. Skip when the master IS the
+        # role (the local profile's single-user case) — granting a role to itself is an error.
+        current_user = conn.execute("select current_user").fetchone()
+        if current_user is not None and current_user[0] != owner:
+            membership = sql.SQL("grant {} to current_user").format(role)
+            conn.execute(membership)
+            executed.append(membership.as_string(conn))
+
+        matviews = conn.execute(
+            "select schemaname, matviewname from pg_matviews where schemaname = 'triage'"
+            " order by matviewname"
+        ).fetchall()
+        for schema_name, matview_name in matviews:
+            transfer = sql.SQL("alter materialized view {}.{} owner to {}").format(
+                sql.Identifier(schema_name), sql.Identifier(matview_name), role
+            )
+            conn.execute(transfer)
+            executed.append(transfer.as_string(conn))
+
+    logger.info(
+        "granted project role %s on %s (%d statements, %d matview(s) reassigned)",
+        owner,
+        database_name,
+        len(executed),
+        len(matviews),
+    )
+    return executed
+
+
 def create_project(
     registry_pool: DictRowPool,
     *,
@@ -107,6 +192,7 @@ def create_project(
     maint_url: str,
     display_name: Optional[str] = None,
     database_name: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create a project end-to-end: registry row → ``CREATE DATABASE`` → triage schema at head.
 
@@ -114,6 +200,10 @@ def create_project(
     error (a half-provisioned or foreign database must be inspected by a human, not silently
     claimed). If the schema migration fails after the database was created, the error says
     exactly what exists and how to proceed — no cleanup is attempted behind the caller's back.
+
+    ``owner`` names a pre-existing PostgreSQL role (the cloud profile's per-project IAM login,
+    ADR-0004) to be granted the database and handed ownership of the refreshed matviews. Omit
+    it in the local profile, where the caller already owns everything it creates.
     """
     existing = registry.get_project(registry_pool, slug)
     if existing is not None:
@@ -153,6 +243,17 @@ def create_project(
             f" 'triage project drop {slug} --confirm {slug}'."
         ) from exc
     logger.info("applied triage schema (head) to %s", db_name)
+
+    if owner:
+        try:
+            grant_project_role(project_url, owner=owner, database_name=db_name)
+        except Exception as exc:
+            raise RuntimeError(
+                f"project {slug!r}: the database {db_name!r} was created and migrated, but"
+                f" granting role {owner!r} failed — the role must already exist"
+                " ('create user … ; grant rds_iam to …', cloud-runbook §4.2). Fix the cause,"
+                f" then re-run 'triage project grant {slug} --owner {owner}'."
+            ) from exc
     return dict(project)
 
 

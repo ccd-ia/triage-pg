@@ -35,8 +35,14 @@ Database upgraded.
 ```
 
 (`triage db history|stamp|downgrade` for the rest of the alembic surface;
-`triage project create|drop|list` for registry-managed one-database-per-project
+`triage project create|grant|drop|list` for registry-managed one-database-per-project
 lifecycles.)
+
+`project create --owner <role>` and `project grant <slug> --owner <role>` are cloud-profile
+only: they grant a per-project PostgreSQL role the database and hand it **ownership** of the
+`triage` matviews, which `REFRESH MATERIALIZED VIEW` requires and no grant can confer. The
+local profile needs neither — you already own what you create. See
+[the cloud runbook §4.0](https://github.com/ccd-ia/triage-pg/blob/main/docs/cloud-runbook.md).
 
 ## Validate before running
 
