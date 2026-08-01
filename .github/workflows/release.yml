@@ -19,6 +19,20 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
+      # Fail fast if the tag and pyproject.toml disagree — otherwise a mistyped tag
+      # publishes a GHCR image and a Release whose `triage --version` contradicts the
+      # version people installed by. Prerelease suffixes are stripped before comparing:
+      # v1.0.0-rc1 is cut to 1.0.0, matching how the rc tags were actually cut.
+      - name: Guard - tag matches pyproject version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          tag_base="${tag_version%%-*}"
+          proj_version="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          if [ "$tag_base" != "$proj_version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} implies version ${tag_base}, but pyproject.toml declares ${proj_version}"
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches pyproject.toml version ${proj_version}"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
