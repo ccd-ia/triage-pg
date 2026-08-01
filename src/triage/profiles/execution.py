@@ -114,9 +114,7 @@ class BatchExecution:
 
     def run(
         self,
-        pool: (
-            DictRowPool | None
-        ),  # noqa: ARG002 — unused in cloud (the job opens its own pool)
+        pool: (DictRowPool | None),  # noqa: ARG002 — unused in cloud (the job opens its own pool)
         experiment_config: Mapping[str, Any],
         *,
         storage: StorageAdapter,

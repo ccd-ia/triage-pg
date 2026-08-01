@@ -98,9 +98,7 @@ class Timechop:
             training_as_of_date_frequencies
         )
 
-        self.test_as_of_date_frequencies = convert_to_list(
-            test_as_of_date_frequencies
-        )
+        self.test_as_of_date_frequencies = convert_to_list(test_as_of_date_frequencies)
 
         self.max_training_histories = convert_to_list(max_training_histories)
 

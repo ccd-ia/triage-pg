@@ -26,9 +26,9 @@ _CONFIG_REFERENCE = (
 
 
 def test_config_reference_documents_every_known_top_level_key():
-    assert (
-        _CONFIG_REFERENCE.exists()
-    ), f"configuration reference missing at {_CONFIG_REFERENCE}"
+    assert _CONFIG_REFERENCE.exists(), (
+        f"configuration reference missing at {_CONFIG_REFERENCE}"
+    )
     text = _CONFIG_REFERENCE.read_text(encoding="utf-8")
     undocumented = sorted(key for key in _KNOWN_TOP_LEVEL_KEYS if key not in text)
     assert not undocumented, (
