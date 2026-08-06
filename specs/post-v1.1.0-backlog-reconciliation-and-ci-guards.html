@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: Post-v1.1.0 — Backlog Reconciliation, CI Format Guard, Data-Schema Grants</title>
+<style>
+  :root {
+    /* ---- palette: "the checklist and the tree disagree" ---- */
+    --bg:        #fbfaf8;
+    --surface:   #ffffff;
+    --surface-2: #f4f1ec;
+    --ink:       #1e2733;
+    --muted:     #5b6673;
+    --line:      #e6e2da;
+    --drift:     #b02a5b;   /* rose   — a claim that has gone stale        */
+    --drift-2:   #e0699a;
+    --truth:     #15803d;   /* green  — verified against the tree          */
+    --guard:     #3f4fbf;   /* indigo — the check that makes drift loud    */
+    --open:      #b45309;   /* amber  — genuinely open work                */
+    --shadow:    0 1px 2px rgba(20,30,45,.06), 0 6px 20px rgba(20,30,45,.06);
+    --radius: 12px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    --maxw: 68rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #0f141a;
+      --surface:   #161d26;
+      --surface-2: #1c2530;
+      --ink:       #e8edf2;
+      --muted:     #9aa7b4;
+      --line:      #263140;
+      --drift:     #fb6aa0;
+      --drift-2:   #b02a5b;
+      --truth:     #4ade80;
+      --guard:     #8b96f0;
+      --open:      #f59e5b;
+      --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.62;
+    font-size: 16px; -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--maxw); margin: 0 auto; padding: 2.4rem 1.4rem 6rem; }
+  header h1 {
+    font-size: clamp(1.5rem, 2.4vw, 2.15rem); line-height: 1.2;
+    margin: 0 0 .6rem; letter-spacing: -.02em;
+  }
+  header h1::before {
+    content: "post-v1.1.0"; display: inline-block; margin-right: .6rem;
+    font: 600 .58em var(--mono); color: var(--guard);
+    border: 1px solid var(--guard); border-radius: 999px;
+    padding: .1em .6em; vertical-align: middle; letter-spacing: 0;
+  }
+  h2 {
+    font-size: 1.3rem; margin: 2.6rem 0 .8rem; letter-spacing: -.01em;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--line);
+  }
+  h3 { font-size: 1.08rem; margin: 1.6rem 0 .5rem; }
+  h4 { font-size: .98rem; margin: 1.1rem 0 .35rem; color: var(--ink); }
+  p { margin: .55rem 0; }
+  a { color: var(--guard); }
+  code { font-family: var(--mono); font-size: .86em; }
+  p code, li code, td code {
+    background: var(--surface-2); padding: .08em .38em; border-radius: 5px;
+    border: 1px solid var(--line);
+  }
+  section { margin-top: 1rem; }
+
+  /* metadata */
+  details.meta { margin: .4rem 0 0; }
+  details.meta summary {
+    cursor: pointer; font: 600 .8rem var(--mono); color: var(--muted); user-select: none;
+  }
+  details.meta dl {
+    display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1.1rem;
+    margin: .7rem 0 0; padding: .9rem 1.1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+    font-size: .84rem;
+  }
+  details.meta dt { color: var(--muted); font-family: var(--mono); }
+  details.meta dd { margin: 0; word-break: break-word; }
+
+  /* figures */
+  figure {
+    margin: 1.4rem 0; padding: 1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); text-align: center;
+  }
+  figure svg { width: 100%; height: auto; max-width: 100%; display: block; }
+  figcaption { margin-top: .7rem; font-size: .82rem; color: var(--muted); font-style: italic; }
+
+  /* callouts + tags */
+  .tag {
+    display: inline-block; font: 600 .66rem var(--mono); text-transform: uppercase;
+    letter-spacing: .04em; padding: .12em .5em; border-radius: 5px; vertical-align: middle;
+  }
+  .tag.existing { background: color-mix(in srgb, var(--guard) 15%, transparent); color: var(--guard); border: 1px solid color-mix(in srgb, var(--guard) 40%, transparent); }
+  .tag.new      { background: color-mix(in srgb, var(--open) 15%, transparent);  color: var(--open);  border: 1px solid color-mix(in srgb, var(--open) 40%, transparent); }
+  .tag.done     { background: color-mix(in srgb, var(--truth) 15%, transparent); color: var(--truth); border: 1px solid color-mix(in srgb, var(--truth) 40%, transparent); }
+  .tag.stale    { background: color-mix(in srgb, var(--drift) 15%, transparent); color: var(--drift); border: 1px solid color-mix(in srgb, var(--drift) 40%, transparent); }
+
+  .files ul { list-style: none; padding: 0; }
+  .files li { padding: .3rem 0; border-bottom: 1px dashed var(--line); }
+
+  /* phases */
+  .phase {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 4px solid var(--guard); border-radius: var(--radius);
+    padding: 1.1rem 1.3rem 1.3rem; margin: 1.1rem 0; box-shadow: var(--shadow);
+  }
+  .phase h3 { margin-top: .2rem; }
+  .phase.keystone { border-left-color: var(--drift); }
+  .phase.gate     { border-left-color: var(--open); }
+  ul.checklist { list-style: none; padding-left: 0; margin: .4rem 0 .8rem; }
+  ul.checklist li { padding: .22rem 0; }
+  code.status {
+    font-family: var(--mono); font-weight: 700; color: var(--muted);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 .25em; margin-right: .45em;
+  }
+  .loop {
+    margin-top: .7rem; padding: .7rem .9rem; font-size: .88rem;
+    background: color-mix(in srgb, var(--guard) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--guard) 30%, transparent);
+    border-radius: 8px;
+  }
+  .dep { font: 600 .74rem var(--mono); color: var(--drift); display: inline-block; margin: .1rem 0 .3rem; }
+
+  pre {
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-left: 3px solid var(--guard); border-radius: 8px;
+    padding: .8rem 1rem; overflow-x: auto; font-size: .84rem; margin: .7rem 0;
+  }
+  pre code { background: none; border: none; padding: 0; }
+
+  /* questionables + amendments */
+  #questionables details, #amendments details {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: .6rem .9rem; margin: .55rem 0; box-shadow: var(--shadow);
+  }
+  #questionables summary, #amendments summary { cursor: pointer; font-weight: 600; }
+  .qa-answer { color: var(--muted); margin: .6rem 0 .1rem; font-size: .93rem; }
+
+  /* tables */
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .88rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  th { background: var(--surface-2); }
+  .pill { font: 600 .72rem var(--mono); padding: .1em .5em; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); }
+  blockquote {
+    margin: 1rem 0; padding: .5rem 1rem; border-left: 3px solid var(--drift);
+    background: var(--surface); color: var(--muted);
+  }
+  hr { border: none; border-top: 1px solid var(--line); margin: 2rem 0; }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Backlog Reconciliation, the CI Format Guard, and Data-Schema Grants</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-08-05T02:31-06:00</dd>
+        <dt>modified</dt>     <dd>2026-08-05T02:31-06:00, 2026-08-05T02:47-06:00 (added Phase 7 — per-as_of_date evaluation grain docs), 2026-08-05T11:52-06:00 (all 7 questionables resolved by maintainer; added Phase 8 — ontology fold-in), 2026-08-05T13:22-06:00 (Phase 8 glossary → full definition; added Phase 9 — DirtyDuck violation features)</dd>
+        <dt>commits</dt>      <dd>35ffd8c9</dd>
+        <dt>agent name</dt>   <dd>Claude Code (Opus 5, 1M)</dd>
+        <dt>session id</dt>   <dd>7918898e-03f2-446b-8370-2c36571c29a0</dd>
+        <dt>back refs</dt>    <dd>TODO.org (v1.1.0 milestone, "Small cosmetics" seeds), ai-docs/triage-session-summary.org (2026-07-29→07-31 Next Session Checklist), specs/v1.0.1-baselines-and-hardening.html, docs/cloud-runbook.md §4.0/§4.4, docs/adr/0004, docs/adr/0007, src/tests/test_docs_version_reference.py</dd>
+        <dt>forward refs</dt> <dd>v1.2.0 milestone (SHAP interpretability — gated in Phase 6, not built here), docs/adr-conformance.md refresh covering ADR-0029/0030</dd>
+      </dl>
+    </details>
+  </header>
+
+  <figure>
+    <svg viewBox="0 0 940 340" role="img" aria-label="The backlog list checked against the tree">
+      <defs>
+        <style>
+          .box    { fill: var(--surface-2); stroke: var(--line); }
+          .hd     { font: 700 13px var(--sans); fill: var(--ink); }
+          .it     { font: 12px var(--mono); fill: var(--muted); }
+          .itd    { font: 12px var(--mono); fill: var(--truth); }
+          .ito    { font: 12px var(--mono); fill: var(--open); }
+          .itn    { font: 12px var(--mono); fill: var(--drift); }
+          .cap    { font: 700 15px var(--sans); fill: var(--ink); }
+          .arw    { stroke: var(--guard); stroke-width: 2; fill: none; marker-end: url(#ah); }
+          .gate   { fill: color-mix(in srgb, var(--guard) 12%, transparent); stroke: var(--guard); stroke-width: 1.5; }
+          .gl     { font: 700 12px var(--sans); fill: var(--guard); }
+          .leg    { font: 11px var(--sans); fill: var(--muted); }
+        </style>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--guard)"/>
+        </marker>
+      </defs>
+
+      <text x="24" y="28" class="cap">The backlog is a claim. The tree is the fact.</text>
+
+      <!-- left: the list as written -->
+      <rect class="box" x="24" y="46" width="290" height="228" rx="8"/>
+      <text x="38" y="68" class="hd">TODO.org / CLAUDE.md seeds</text>
+      <text x="38" y="92"  class="it">ruff format --check</text>
+      <text x="38" y="114" class="it">verify-anonymous-pull</text>
+      <text x="38" y="136" class="it">data-schema grants</text>
+      <text x="38" y="158" class="it">nightly tutorial-smoke</text>
+      <text x="38" y="180" class="it">SHAP (v1.2.0)</text>
+      <text x="38" y="202" class="it">CONTRIBUTING.md rewrite</text>
+      <text x="38" y="224" class="it">triage score → CWD parquets</text>
+      <text x="38" y="256" class="leg">7 items, all reading as open</text>
+
+      <!-- gate -->
+      <path class="arw" d="M320,140 H386"/>
+      <rect class="gate" x="392" y="98" width="132" height="86" rx="8"/>
+      <text x="458" y="130" class="gl" text-anchor="middle">Phase 1</text>
+      <text x="458" y="150" class="gl" text-anchor="middle">verify each</text>
+      <text x="458" y="168" class="leg" text-anchor="middle">against the tree</text>
+      <path class="arw" d="M530,140 H596"/>
+
+      <!-- right: reality -->
+      <rect class="box" x="602" y="46" width="314" height="228" rx="8"/>
+      <text x="616" y="68" class="hd">What the tree actually says</text>
+      <text x="616" y="92"  class="ito">OPEN  ruff format --check (safe today)</text>
+      <text x="616" y="114" class="ito">OPEN  data-schema grants</text>
+      <text x="616" y="136" class="ito">GATE  verify-anonymous-pull (next tag)</text>
+      <text x="616" y="158" class="ito">GATE  SHAP — a milestone, not a chore</text>
+      <text x="616" y="180" class="itd">DONE  tutorial-smoke — green ×5 nights</text>
+      <text x="616" y="202" class="itd">DONE  score CWD fix — shipped 07-16</text>
+      <text x="616" y="224" class="itd">DONE  CONTRIBUTING.md — already rewritten</text>
+      <text x="616" y="252" class="itn">NEW   README.md advertises :v1.0.0-rc1</text>
+      <text x="616" y="268" class="leg">…found only by looking</text>
+
+      <g transform="translate(24,296)">
+        <rect x="0" y="0" width="10" height="10" rx="2" fill="var(--truth)"/>
+        <text x="18" y="9" class="leg">already done — close with evidence</text>
+        <rect x="250" y="0" width="10" height="10" rx="2" fill="var(--open)"/>
+        <text x="268" y="9" class="leg">genuinely open</text>
+        <rect x="420" y="0" width="10" height="10" rx="2" fill="var(--drift)"/>
+        <text x="438" y="9" class="leg">drift discovered while verifying — not on any list</text>
+      </g>
+    </svg>
+    <figcaption>Three of the seven backlog items were already finished. One real defect was sitting outside every list.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>
+      Work the post-<strong>v1.1.0</strong> backlog to zero — but <em>reconcile it first</em>, because verification
+      against the tree shows three of its seven items are already complete and one is a milestone masquerading as a
+      chore. What remains after reconciliation is small and sharply defined: one CI line, one CLI flag, one release
+      gate to watch, and one v1.2.0 scope decision. The reconciliation pass also surfaced work that was on
+      <em>no</em> list — the repo-root <code>README.md</code> tells every new reader to
+      <code>docker pull …:v1.0.0-rc1</code>, three releases stale — so this plan folds that in and extends the
+      existing drift guard to cover the blind spot that let it survive.
+    </p>
+  </section>
+
+  <!-- ===== PROBLEM ===== -->
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>
+      The v1.1.0 release session named its own theme: <strong>silent staleness</strong> — "the thing still works, so
+      nobody notices it's wrong." That session fixed three instances and added a guard for each. This backlog is the
+      <em>fourth</em> instance, in both directions at once:
+    </p>
+    <ul>
+      <li><strong>Stale in the optimistic direction</strong> — items stay on the list after the work ships. <code>tutorial-smoke</code> has run green for five consecutive nights; the <code>triage score</code> CWD-parquet fix shipped 2026-07-13/16 <em>with tests</em>; <code>CONTRIBUTING.md</code> was rewritten. All three still read as open, because the list they live on (<code>CLAUDE.md</code>'s "Small seeds" paragraph) was never reconciled against <code>TODO.org</code>, which already marks them <code>[X]</code>.</li>
+      <li><strong>Stale in the pessimistic direction</strong> — docs keep asserting things the code stopped doing. <code>README.md:12</code> still calls the cloud live validation "the gate between <code>v1.0.0-rc1</code> and <code>v1.0.0</code>" (it ran 2026-07-19 and <em>is</em> what gated the release), and <code>README.md:113</code> advertises the <code>rc1</code> image tag. Both survived last session's sweep for one structural reason: the drift guard added then, <code>test_docs_version_reference.py</code>, scans <strong>only</strong> <code>docs-site/src/content/docs/</code>. The repo root was outside its blast radius.</li>
+    </ul>
+    <p>
+      The same structural gap exists in CI. The lint job runs <code>uvx ruff check src/</code> — and
+      <code>[tool.ruff.lint]</code> selects exactly <strong>three rules</strong> (<code>F821/F822/F823</code>), with
+      no <code>format --check</code> at all. That is how a 10-file <code>ruff</code> 0.15.0 reformat rode into
+      <code>092e2f43</code> unnoticed. The check is cheap and, verified below, would go green today.
+    </p>
+    <figure>
+      <svg viewBox="0 0 940 300" role="img" aria-label="The drift guard's blast radius excludes the repo root">
+        <defs>
+          <style>
+            .cov    { fill: color-mix(in srgb, var(--truth) 12%, transparent); stroke: var(--truth); stroke-width: 2; }
+            .unc    { fill: color-mix(in srgb, var(--drift) 10%, transparent); stroke: var(--drift); stroke-width: 2; stroke-dasharray: 6 4; }
+            .f      { font: 12px var(--mono); fill: var(--ink); }
+            .fs     { font: 12px var(--mono); fill: var(--drift); }
+            .hd2    { font: 700 13px var(--sans); fill: var(--ink); }
+            .okl    { font: 700 12px var(--sans); fill: var(--truth); }
+            .bad    { font: 700 12px var(--sans); fill: var(--drift); }
+            .cap    { font: 700 15px var(--sans); fill: var(--ink); }
+            .leg    { font: 11px var(--sans); fill: var(--muted); }
+          </style>
+        </defs>
+        <text x="24" y="28" class="cap">Why <tspan style="fill:var(--drift)">:v1.0.0-rc1</tspan> survived a sweep that fixed the same bug elsewhere</text>
+
+        <!-- covered region -->
+        <rect class="cov" x="24" y="52" width="420" height="176" rx="10"/>
+        <text x="42" y="76" class="hd2">scanned by test_docs_version_reference.py</text>
+        <text x="42" y="100" class="f">docs-site/src/content/docs/index.md</text>
+        <text x="42" y="122" class="f">docs-site/…/tutorials/dirtyduckling.md</text>
+        <text x="42" y="144" class="f">docs-site/…/reference/cli.md</text>
+        <text x="42" y="166" class="f">docs-site/…/reference/architecture.md</text>
+        <text x="42" y="200" class="okl">✓ 4 drift errors caught + fixed 2026-07-31</text>
+
+        <!-- uncovered region -->
+        <rect class="unc" x="486" y="52" width="430" height="176" rx="10"/>
+        <text x="504" y="76" class="hd2">outside the scan root</text>
+        <text x="504" y="100" class="fs">README.md:113  →  :v1.0.0-rc1</text>
+        <text x="504" y="122" class="fs">README.md:12   →  "gate between rc1 and v1.0.0"</text>
+        <text x="504" y="144" class="fs">README.md:12   →  "All 28 architecture decisions"</text>
+        <text x="504" y="166" class="fs">CONTRIBUTING.md:16 → "28 accepted ADRs"</text>
+        <text x="504" y="200" class="bad">✗ never checked — the guard cannot see here</text>
+
+        <text x="24" y="260" class="leg">DOCS_SITE = REPO_ROOT / "docs-site" / "src" / "content" / "docs"   ← one constant decides the blast radius</text>
+        <text x="24" y="280" class="leg">docs/adr/ now holds 30 ADRs; the "28" is hardcoded in 4 places and drifts on every new decision.</text>
+      </svg>
+      <figcaption>The guard works exactly as written. The defect is its scan root, not its logic.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== SOLUTION ===== -->
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>
+      Six phases, ordered so that the cheapest truth-establishing work comes first and nothing is built on an
+      unverified premise. Phase&nbsp;1 reconciles the backlog and closes what is already done — it changes the scope
+      of everything after it, so it cannot come second. Phases&nbsp;2–4 are the genuinely open construction work.
+      Phase&nbsp;5 is a release gate with no code. Phase&nbsp;6 is a scope decision for v1.2.0, deliberately
+      <em>not</em> an implementation.
+    </p>
+    <p>
+      The through-line matches the pattern the last release established and which this codebase now has a habit of:
+      <strong>fix the instance, then add the guard that makes the class loud.</strong> Phase&nbsp;2 guards format
+      drift; Phase&nbsp;3 guards doc-version drift beyond <code>docs-site/</code>; Phase&nbsp;4 removes a standing
+      manual runbook step so it cannot be forgotten.
+    </p>
+    <figure>
+      <svg viewBox="0 0 940 290" role="img" aria-label="Grant surface: triage schema automated, data schemas by hand">
+        <defs>
+          <style>
+            .db     { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
+            .auto   { fill: color-mix(in srgb, var(--truth) 14%, transparent); stroke: var(--truth); stroke-width: 2; }
+            .hand   { fill: color-mix(in srgb, var(--open) 12%, transparent); stroke: var(--open); stroke-width: 2; stroke-dasharray: 6 4; }
+            .prop   { fill: color-mix(in srgb, var(--guard) 12%, transparent); stroke: var(--guard); stroke-width: 2; }
+            .sl     { font: 600 13px var(--mono); fill: var(--ink); }
+            .sm     { font: 11px var(--sans); fill: var(--muted); }
+            .lbl2   { font: 700 12px var(--sans); fill: var(--ink); }
+            .cap    { font: 700 15px var(--sans); fill: var(--ink); }
+            .okl    { font: 700 11px var(--sans); fill: var(--truth); }
+            .opl    { font: 700 11px var(--sans); fill: var(--open); }
+            .gul    { font: 700 11px var(--sans); fill: var(--guard); }
+          </style>
+        </defs>
+        <text x="24" y="28" class="cap">One project database, two grant regimes</text>
+
+        <rect class="db" x="24" y="46" width="892" height="150" rx="10"/>
+        <text x="40" y="68" class="lbl2">database: myproject</text>
+
+        <!-- triage schema: automated -->
+        <rect class="auto" x="48" y="82" width="250" height="96" rx="8"/>
+        <text x="64" y="106" class="sl">schema triage</text>
+        <text x="64" y="126" class="sm">grants + default privileges</text>
+        <text x="64" y="144" class="sm">+ matview OWNERSHIP (pg_matviews loop)</text>
+        <text x="64" y="168" class="okl">automated by --owner today</text>
+
+        <!-- data schemas: by hand -->
+        <rect class="hand" x="322" y="82" width="290" height="96" rx="8"/>
+        <text x="338" y="106" class="sl">schema raw · clean · ontology</text>
+        <text x="338" y="126" class="sm">grant usage, create … to triage_myproject;</text>
+        <text x="338" y="144" class="sm">runbook §4.4, copy-pasted per project</text>
+        <text x="338" y="168" class="opl">by hand — the remaining manual step</text>
+
+        <!-- proposal -->
+        <rect class="prop" x="636" y="82" width="256" height="96" rx="8"/>
+        <text x="652" y="106" class="sl">--data-schema (repeatable)</text>
+        <text x="652" y="126" class="sm">same grant body, any schema name</text>
+        <text x="652" y="144" class="sm">no hardcoded raw/clean/ontology</text>
+        <text x="652" y="168" class="gul">this plan, Phase 4</text>
+
+        <text x="24" y="228" class="sm">Why not hardcode the trio: raw/clean/ontology is a <tspan style="fill:var(--ink)">tutorial convention</tspan>, not a triage concept. A project database may use any schema names —</text>
+        <text x="24" y="248" class="sm">the same reason <tspan style="font-family:var(--mono)">triage.sources</tspan> stores a relation instead of assuming one (ADR-0008 keeps triage ignorant of the data model).</text>
+        <text x="24" y="272" class="sm">Matview ownership stays <tspan style="fill:var(--ink)">triage</tspan>-only: <tspan style="font-family:var(--mono)">REFRESH</tspan> is owner-only, and triage owns no matviews in your data schemas.</text>
+      </svg>
+      <figcaption><code>--owner</code> automated the hard half (ownership). Phase 4 automates the remaining half without inventing a schema-name convention.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>.github/workflows/ci.yml</code> — the <code>lint</code> job (line 44–47) runs <code>uvx ruff check src/</code> and nothing else; Phase 2 adds the format check here.</li>
+      <li><span class="tag existing">existing</span> <code>pyproject.toml</code> — <code>[tool.ruff] line-length = 88</code> (line 203–207, with the note about the reverted 120-setting rewrap) and <code>[tool.ruff.lint] select = ["F821","F822","F823"]</code>; the ruff version pin decision lands here or in the workflow.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/test_docs_version_reference.py</code> — the 4 drift guards; <code>DOCS_SITE</code> (line 20) is the constant whose narrowness is the Phase 3 defect.</li>
+      <li><span class="tag existing">existing</span> <code>README.md</code> — line 12 (stale status paragraph + hardcoded ADR count), line 113 (<code>:v1.0.0-rc1</code> pull command).</li>
+      <li><span class="tag existing">existing</span> <code>CONTRIBUTING.md</code> — already rewritten and good; line 16's "28 accepted architecture decisions" is the only drift.</li>
+      <li><span class="tag existing">existing</span> <code>CLAUDE.md</code> — the "Status &amp; Direction" section (lines ~330–345) whose "Small seeds" list is the stale source this backlog was derived from; also lines 333 and 373 carry the "28 ADRs" count.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/project_lifecycle.py</code> — <code>grant_project_role()</code> (lines 103–186); the statement list at 134–154 and the <code>pg_matviews</code> loop at 167–176 are what Phase 4 generalizes.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py</code> — <code>project create</code> (line ~1411) and <code>project grant</code>; both gain <code>--data-schema</code>.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/test_project_lifecycle.py</code> — the 3 ownership tests (126–215) and the <code>project_role</code> fixture that stands in for the cloud IAM user.</li>
+      <li><span class="tag existing">existing</span> <code>docs/cloud-runbook.md</code> — §4.0 (two-role model), §4.3 (<code>--owner</code>), §4.4 (by-hand fallback); line 230–233 is the "your own data schemas still need their grants" caveat Phase 4 retires.</li>
+      <li><span class="tag existing">existing</span> <code>docs/adr-conformance.md</code> — audits ADRs 0001–0028 (2026-07-03); ADR-0029 and ADR-0030 are unaudited.</li>
+      <li><span class="tag existing">existing</span> <code>TODO.org</code> — the milestone whose checkboxes Phase 1 reconciles.</li>
+      <li><span class="tag existing">existing</span> <code>.github/workflows/release.yml</code> — the <code>verify-anonymous-pull</code> job (<code>needs: release</code>) watched in Phase 5.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/results_schema/alembic/versions/0010_windowed_evaluations.py</code> — <em>Phase 7.</em> The WS1 rollup view and the docstring that states the per-<code>as_of_date</code> contract; the source of truth the new docs must paraphrase, not contradict.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/adapter_tests/test_model_builder.py:571</code> — <em>Phase 7.</em> <code>test_evaluation_is_per_as_of_date</code>, the existing proof. Cite it; do not duplicate it.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/reference/configuration.md:196-197</code> — <em>Phase 7.</em> Where <code>test_durations: '0day'</code> appears with no note about what it costs.</li>
+      <li><span class="tag existing">existing</span> <code>.github/workflows/tutorial-smoke.yml:97-112</code> — <em>Phase 7 constraint.</em> Asserts <code>experiment_hash</code> begins <code>b9e38fd8</code>; this is why the tutorial's <code>temporal_config</code> is off-limits.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py:512</code> — <em>Phase 7.</em> <code>leaderboard</code> reads the per-<code>as_of_date</code> <code>triage.leaderboard</code> matview; where <code>--windowed</code> switches to <code>evaluations_windowed</code> (the shape to copy is at <code>cli.py:673,735</code>, which <code>audition</code> already uses).</li>
+      <li><span class="tag existing">existing</span> <code>CONTEXT.md</code> — <em>Phase 8.</em> 24 glossary terms, missing <strong>Entity</strong> and <strong>Event</strong>. Insert near the existing <strong>Source</strong> term so the glossary and <code>triage.sources.role</code>'s check constraint agree.</li>
+      <li><span class="tag existing">existing</span> <code>chicago311/chi311_db/03_create_ontology.sql:39-40,76-89</code> — <em>Phase 8.</em> <code>closed_date</code>/<code>status</code> on the entity table, plus the <code>request_resolution</code> view that reads them.</li>
+      <li><span class="tag existing">existing</span> <code>example/chicago311/experiment.yaml:52-53</code> + <code>experiment-survival.yaml:51-57</code> — <em>Phase 8.</em> Both label queries read <code>e.closed_date</code> from <code>ontology.entities</code>; both must be rewritten, and both experiment hashes change as a result.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/tutorials/chicago311.md:39,53-54,61</code> — <em>Phase 8.</em> Reproduces the label query verbatim; the page is verbatim-verified, so a stale block is a broken tutorial.</li>
+      <li><span class="tag existing">existing</span> <code>dirtyduck/food_db/03_create_violations_table.sql:12-17</code> — <em>Phase 9.</em> Proves <code>severity</code> is a deterministic function of <code>code</code> and <code>description</code> is the code's canonical text — the two facts that make text-featurizing <code>description</code> provably redundant.</li>
+      <li><span class="tag existing">existing</span> <code>dirtyduck/food_db/04_create_semantic_tables.sql:74-114</code> — <em>Phase 9.</em> Where <code>ontology.events.violations</code> is built; where the projected count columns land.</li>
+      <li><span class="tag existing">existing</span> <code>dirtyduck/food_db/00_create_extensions.sql</code> — <em>Phase 9.</em> <code>pg_trgm</code>/<code>fuzzystrmatch</code>/<code>unaccent</code> already installed and explicitly "kept for potential violation-description features (deferred)". This phase is that deferral coming due.</li>
+      <li><span class="tag existing">existing</span> <code>example/dirtyduck/experiment.yaml:141-149,192-207</code> — <em>Phase 9.</em> The commented-out <code>feature_groups</code> block to copy, and the <code>sources:</code> block whose <code>version_label</code> must be bumped.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/tutorials/dirtyduckling.md:155-168</code> — <em>Phase 9 constraint.</em> Publishes literal leaderboard values the nightly smoke does <em>not</em> assert; this is why the canonical config stays untouched.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/sources.py:143</code> — <em>Phase 9.</em> The fingerprint is <code>(row_count, max_knowledge_date)</code>; adding columns changes neither, which is why the <code>version_label</code> bump is a correctness requirement.</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>docs/adr/0031-*.md</code> — <em>conditional, Phase 6 only.</em> Written only if the SHAP decision clears the three-criteria bar (hard to reverse + surprising without context + a real trade-off). Not written otherwise.</li>
+      <li><span class="tag new">new</span> <code>example/dirtyduck/experiment-cadence.yaml</code> — <em>Phase 7.</em> A multi-date test window against the same baked data. Deliberately a <strong>new</strong> file: it gets its own experiment hash and therefore cannot disturb the canonical tutorial identity the nightly smoke asserts.</li>
+      <li><span class="tag new">new</span> <code>docs-site/src/content/docs/reference/evaluation.md</code> — <em>Phase 7.</em> Decided: a page of its own, with a sidebar entry in <code>astro.config.mjs</code> and a pointer from <code>configuration.md</code>.</li>
+      <li><span class="tag new">new</span> <code>ontology.request_outcome</code> (table, in <code>chicago311/chi311_db/03_create_ontology.sql</code>) — <em>Phase 8.</em> New home for <code>closed_date</code>/<code>status</code>, so the entity table can no longer reach the future.</li>
+      <li><span class="tag new">new</span> <code>example/dirtyduck/experiment-violations.yaml</code> — <em>Phase 9.</em> Violation-content features with a <code>feature_groups</code> fan-out. A new file so the canonical tutorial's published leaderboard values stay valid.</li>
+      <li><span class="tag new">new</span> <em>(nothing else)</em> — every remaining change edits something that already exists. Phases 1–6 add no files at all.</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <!-- PHASE 1 -->
+    <div class="phase keystone">
+      <h3><code class="status">[]</code> Phase 1: Reconcile the backlog against the tree</h3>
+      <p>
+        Establish which items are actually open before doing any work, and record the evidence next to each closure so
+        the next reader does not have to re-derive it. This phase is <em>keystone</em>: it changes the scope of every
+        phase after it. It is also entirely bookkeeping — no source file changes.
+      </p>
+      <p class="dep">blocks: everything (Phases 2–6 assume the reconciled list)</p>
+
+      <h4>1. Close the three verified-done items in TODO.org and CLAUDE.md</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>tutorial-smoke</code>: mark <code>[X]</code> in <code>TODO.org</code> with evidence — <code>gh run list --workflow=tutorial-smoke.yml</code> shows <code>success</code> on 2026-07-31, 08-01, 08-02, 08-03, 08-04 (five consecutive nights). The workflow was never "optional pending"; it has been live on <code>cron: "13 8 * * *"</code> the whole time.</li>
+        <li><code class="status">[]</code> <code>triage score</code> CWD parquets: confirm already closed at <code>TODO.org:375-380</code> (2026-07-13, pushed 07-16) and verified in code — <code>adapters/forward.py:179-183</code> defaults <code>storage_dir</code> to <code>parent_root(lineage.artifact_uri)</code>, with the rationale in the <code>--project-path</code> help text and unit coverage at <code>test_profiles.py:183</code>. Remove it from the carried-forward checklist.</li>
+        <li><code class="status">[]</code> <code>CONTRIBUTING.md</code> rewrite: confirm done — the file is 135 lines, targets <code>ccd-ia/triage-pg</code>, and points at <code>CONTEXT.md</code> / <code>docs/adr/</code> / <code>.out-of-scope/</code>. Downgrade the item from "rewrite" to the single line of drift handled in Phase 3.</li>
+      </ul>
+
+      <h4>2. Fix the stale source that produced the phantom backlog</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Rewrite <code>CLAUDE.md</code>'s "Small seeds" sentence in <strong>Status &amp; Direction</strong>: of its six seeds, four are closed (<code>feature_groups</code> validator warning — <code>run.py:217,465</code>; ADR-0008 scale note retired; <code>score</code> CWD fix; tutorial-smoke), one is dropped (Spanish i18n — the <code>es</code> locale was deleted in <code>376bb05c</code>), and one survives as a one-line drift fix (<code>CONTRIBUTING.md</code>). Replace the list with what is genuinely open.</li>
+        <li><code class="status">[]</code> Update the same section's release state: it still reads "Released <code>v1.0.0-rc2</code> … promotion to <code>v1.0.0</code> gated on cloud live validation." Both are two releases stale — v1.0.0 shipped, the cloud E2E ran 2026-07-19, and v1.1.0 is current.</li>
+        <li><code class="status">[]</code> Record the <em>mechanism</em> in one sentence, not just the fix: this backlog was derived from a prose paragraph in <code>CLAUDE.md</code> that duplicates <code>TODO.org</code>'s checkboxes without being reconciled against them. Prefer pointing at <code>TODO.org</code> over restating it.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>No code changes, so validation is documentary: each closure must cite a command or a file:line that a skeptical reader can re-run. Re-run the two liveness checks rather than trusting this plan's transcript — they are cheap and they are the whole point of the phase.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml --limit 5 --json conclusion,createdAt</code> — proves the nightly is live and green, not merely configured.</li>
+        <li><code class="status">[]</code> <code>grep -n "storage_dir is None" src/triage/adapters/forward.py</code> — proves the CWD fix is in the tree, not just in a changelog.</li>
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/ -q</code> — baseline green before any edit lands (expected: 457 passed / 1 skipped, the v1.1.0 release gate figure).</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- PHASE 2 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 2: <code>ruff format --check</code> in CI</h3>
+      <p>
+        The highest value-per-effort item, and verified safe to land <em>today</em>: both the locked ruff (0.15.0) and
+        the version <code>uvx</code> currently resolves (0.15.17) report <strong>"157 files already formatted"</strong>
+        on <code>src/</code>. The check goes green on the first run; no reformat commit is needed.
+      </p>
+      <p class="dep">depends on: Phase 1 (baseline green)</p>
+
+      <h4>1. Add the check, on the locked ruff <span class="tag existing">decided</span></h4>
+      <p>
+        <strong>Decision (maintainer, 2026-08-05): resolve ruff from the lockfile.</strong> The <code>lint</code> job
+        switches from <code>uvx ruff …</code> to <code>uv sync --extra dev</code> + <code>uv run ruff …</code>, so CI
+        and <code>just lint</code> run byte-identical versions and the only place a ruff version lives is
+        <code>uv.lock</code>. Bumping becomes <code>uv lock --upgrade-package ruff</code> — a reviewable PR, not a
+        silent resolution at job start. Costs a sync step (~15s) in a job that currently does none.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> In <code>.github/workflows/ci.yml</code>'s <code>lint</code> job, replace <code>uvx ruff check src/</code> with <code>uv sync --extra dev</code> → <code>uv run ruff check src/</code> → <code>uv run ruff format --check src/</code>.</li>
+        <li><code class="status">[]</code> Verify the split this closes: today <code>uvx ruff</code> resolves <strong>0.15.17</strong> while <code>uv.lock</code> and the justfile pin <strong>0.15.0</strong> — CI has been running a different formatter than local all along, and they agree only by luck.</li>
+        <li><code class="status">[]</code> Mirror the format check in the justfile's <code>lint</code> recipe (currently <code>uv run ruff check src/</code> only) so local and CI agree — a CI-only check re-creates the drift asymmetry in a new place.</li>
+        <li><code class="status">[]</code> Add a one-line comment above the step naming the incident it prevents: a ruff 0.15.0 sweep of 10 files rode into <code>092e2f43</code> because <code>check</code> does not imply <code>format</code>.</li>
+        <li><code class="status">[]</code> Record the deferred lint-rule decision (maintainer: leave as-is) as a v1.2.0 seed in <code>TODO.org</code>: <code>[tool.ruff.lint] select</code> is 3 rules; the "tighten incrementally" comment never happened. No diff now.</li>
+      </ul>
+
+      <h4>2. Testing Strategy</h4>
+      <p>Prove the guard both passes on a clean tree <em>and</em> fails on a dirty one — the mistake to avoid is trusting a green run that would be green regardless. Verify the red case by deliberately mis-formatting one file, confirming failure, then reverting.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uvx ruff format --check src/</code> — exits 0, "157 files already formatted" (the CI-equivalent invocation).</li>
+        <li><code class="status">[]</code> <code>uv run ruff format --check src/</code> — exits 0 under the locked version too.</li>
+        <li><code class="status">[]</code> Inject a formatting violation into one file, re-run, confirm <strong>non-zero exit</strong>, then <code>git checkout</code> the file — proves the guard is load-bearing, not decorative.</li>
+        <li><code class="status">[]</code> <code>just lint</code> — the local recipe agrees with CI.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- PHASE 3 -->
+    <div class="phase keystone">
+      <h3><code class="status">[]</code> Phase 3: Repo-root doc drift + widen the guard</h3>
+      <p>
+        The work nobody put on a list. <code>README.md</code> is the public repo's front page and it advertises an
+        image tag from three releases ago. Fix the instances, then move the guard's scan root so this class cannot
+        recur outside <code>docs-site/</code>.
+      </p>
+      <p class="dep">depends on: Phase 1 (which release is current is a Phase-1 fact)</p>
+
+      <h4>1. Fix the instances</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>README.md:113</code> — <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.0.0-rc1</code> → the current release tag. This is the single most user-visible defect in the plan: a first-time reader following the README pulls a pre-release image.</li>
+        <li><code class="status">[]</code> <code>README.md:12</code> — rewrite the status paragraph. "Status: local v1 complete" and "its live validation is the gate between <code>v1.0.0-rc1</code> and <code>v1.0.0</code>" both predate the 2026-07-19 cloud E2E and the v1.0.0 → v1.1.0 releases.</li>
+        <li><code class="status">[]</code> <span class="tag existing">decided</span> Remove the hardcoded ADR count from all four sites — <code>README.md:12</code>, <code>CONTRIBUTING.md:16</code>, <code>CLAUDE.md:333</code>, <code>CLAUDE.md:373</code> — which say "28" against a <code>docs/adr/</code> holding 30. <strong>Decision (maintainer, 2026-08-05): drop the number entirely</strong> ("the accepted architecture decisions") rather than updating it to 30. It drifted by 2 in about a month; updating it just schedules the same bug for ADR-0031.</li>
+        <li><code class="status">[]</code> Refresh <code>docs/adr-conformance.md</code> to cover ADR-0029 (self-contained RDS/IAM) and ADR-0030 (target-history path), or state explicitly at the top that the audit is current as of ADR-0028 and dated. Either is honest; silence is not.</li>
+      </ul>
+
+      <h4>2. Widen the guard so the class stays caught</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> In <code>src/tests/test_docs_version_reference.py</code>, generalize the scanned set from the single <code>DOCS_SITE</code> root to include the repo-root markdown (<code>README.md</code>, <code>CONTRIBUTING.md</code>) — the two regexes (<code>_CLI_VERSION</code>, <code>_IMAGE_TAG</code>) need no change, only a wider file list.</li>
+        <li><code class="status">[]</code> Extend the existing "guard the guard" test (<code>test_docs_site_exists</code>) to assert the new roots exist too, so a rename fails loudly instead of silently scanning nothing.</li>
+        <li><code class="status">[]</code> Update the module docstring to name the new incident (README <code>rc1</code> tag), matching the file's existing convention of recording <em>why</em> each guard exists.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>Verify the widened guard the way the original was verified last session — by <strong>injecting</strong> a stale version and confirming red, not by trusting a green run. A guard that has only ever been observed passing has not been tested.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/test_docs_version_reference.py -v</code> — all guards green after the doc fixes.</li>
+        <li><code class="status">[]</code> Inject <code>ghcr.io/ccd-ia/triage-pg:v9.9.9</code> into <code>README.md</code>, re-run, confirm <strong>red</strong>, revert — proves the widened root actually reaches the repo root.</li>
+        <li><code class="status">[]</code> <code>grep -rn "28 architecture\|28 accepted\|28 ADR" --include="*.md" .</code> — returns nothing.</li>
+        <li><code class="status">[]</code> <code>grep -rn "v1.0.0-rc" README.md CONTRIBUTING.md</code> — returns nothing.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- PHASE 4 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 4: <code>--data-schema</code> — fold data-schema grants into <code>--owner</code></h3>
+      <p>
+        Finish the thread the v1.1.0 session opened. <code>grant_project_role()</code> automates everything the
+        pipeline needs in the <code>triage</code> schema, including the owner-only matview handover. The runbook
+        (§4.4, line 230–233) still tells operators to hand-grant their data schemas:
+        <code>grant usage, create on schema raw, clean, ontology to triage_myproject;</code>. That is the last
+        copy-paste step in project provisioning.
+      </p>
+      <p class="dep">depends on: Phase 1 · touches the same functions as v1.1.0's <code>31f76962</code></p>
+
+      <h4>1. Generalize the grant function</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Add a <code>data_schemas: Sequence[str] = ()</code> parameter to <code>grant_project_role()</code> (<code>project_lifecycle.py:103</code>). For each name, issue the same grant body already used for <code>triage</code>: <code>usage, create on schema</code>; <code>select/insert/update/delete on all tables</code>; <code>usage, select on all sequences</code>; and the matching <code>alter default privileges</code> pair so later loads are covered.</li>
+        <li><code class="status">[]</code> Use <code>sql.Identifier</code> for every schema name (the function's existing discipline) — these names come from the CLI, so this is a real injection boundary, not a formality.</li>
+        <li><code class="status">[]</code> Fail loudly on a schema that does not exist rather than silently granting nothing: check <code>pg_namespace</code> first and raise with the schema name and the database name in the message (per the global error-handling rule — say <em>what</em> failed, <em>on what input</em>).</li>
+        <li><code class="status">[]</code> <strong>Do not</strong> extend the <code>pg_matviews</code> ownership loop beyond <code>triage</code>. Ownership transfer exists because <code>REFRESH</code> is owner-only on triage's own matviews; reassigning ownership of the operator's data objects is a different and unrequested act.</li>
+        <li><code class="status">[]</code> Keep the return contract: the list of executed statements, in order, so the operator can replay them by hand.</li>
+      </ul>
+
+      <h4>2. Wire the CLI</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <span class="tag existing">decided</span> Add a repeatable <code>--data-schema</code> option to <code>project create</code> and <code>project grant</code> (<code>cli.py</code> ~1411–1520). <strong>Decision (maintainer, 2026-08-05): the repeatable flag</strong>, <em>not</em> a hardcoded <code>raw/clean/ontology</code> trio and <em>not</em> derived from the config's <code>sources:</code>. Provisioning happens before any experiment config exists — you create the database, then load data, then write a config — so deriving grants from a config inverts the order of operations and would break <code>project grant</code>'s standalone repair role.</li>
+        <li><code class="status">[]</code> Keep <code>--data-schema</code> independent of <code>--owner</code> in spirit but require <code>--owner</code> in practice (there is no role to grant to otherwise); reject the combination with a clear <code>typer.BadParameter</code> rather than silently ignoring the flag.</li>
+        <li><code class="status">[]</code> Extend the success message to name the schemas granted, so the operator sees what changed without reading logs.</li>
+        <li><code class="status">[]</code> Preserve idempotency — re-running must be a no-op, since <code>project grant</code>'s documented purpose is repair after a migration recreates objects.</li>
+      </ul>
+
+      <h4>3. Documentation</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>docs/cloud-runbook.md</code>: replace the §4.x "your own data schemas still need their grants; the CLI only manages <code>triage</code>" caveat (line 230–233) with the <code>--data-schema</code> invocation; demote the raw SQL to the by-hand fallback alongside §4.4's existing treatment.</li>
+        <li><code class="status">[]</code> Update the CLI reference page for both commands.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <p>Extend the three existing ownership tests (<code>test_project_lifecycle.py:126-215</code>), reusing the <code>project_role</code> fixture — a password-less login role standing in for the cloud IAM user, dropped afterwards because roles are cluster-global. The assertions must check the <em>catalog</em> (<code>has_schema_privilege</code>, <code>has_table_privilege</code>, <code>pg_default_acl</code>), not the returned statement strings — a test that only asserts we generated SQL proves nothing about what PostgreSQL did.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/test_project_lifecycle.py -v</code> — existing 3 ownership tests still green (no regression on the <code>triage</code>-schema path).</li>
+        <li><code class="status">[]</code> New test: after <code>--data-schema raw --data-schema clean</code>, <code>has_schema_privilege(role,'raw','USAGE')</code> and <code>…'CREATE'</code> are true.</li>
+        <li><code class="status">[]</code> New test: a table created in <code>raw</code> <em>after</em> the grant is readable by the role — proves the <code>alter default privileges</code> half, which is the half that silently rots.</li>
+        <li><code class="status">[]</code> New test: a nonexistent schema name raises with the schema name in the message.</li>
+        <li><code class="status">[]</code> New test: re-running <code>project grant</code> with the same flags is a clean no-op (idempotency).</li>
+        <li><code class="status">[]</code> New test: matviews outside <code>triage</code> are <strong>not</strong> reassigned — the negative assertion that keeps the blast radius honest.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- PHASE 5 -->
+    <div class="phase gate">
+      <h3><code class="status">[]</code> Phase 5: Release gate — first live <code>verify-anonymous-pull</code></h3>
+      <p>
+        Not construction: a watch item with a deadline attached to the next <code>v*</code> tag. The job is
+        <code>needs: release</code>, so it has never executed — it was authored, reasoned about, and merged without a
+        single real run. Its <em>first</em> execution is the one most likely to fail, and it will fail on a release,
+        which is the worst moment to discover a typo.
+      </p>
+      <p class="dep">deferred: fires only on the next tag push (no work available before then)</p>
+
+      <h4>1. Pre-arm the gate</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Re-read <code>.github/workflows/release.yml</code>'s <code>verify-anonymous-pull</code> job cold, specifically the <code>docker logout ghcr.io</code> step (it defends against an inherited <code>config.json</code> on the runner) and the GHCR-lag retry loop.</li>
+        <li><code class="status">[]</code> Confirm the version guard still passes its own check by inspection — it logged <code>tag v1.1.0 matches pyproject.toml version 1.1.0</code> on the only tag it has seen.</li>
+        <li><code class="status">[]</code> Add both to a release checklist in <code>TODO.org</code> so the next tag cut does not rely on memory.</li>
+      </ul>
+
+      <h4>2. Testing Strategy</h4>
+      <p>The only real test is a tag. Until then, the verifiable claim is the <em>current</em> state of the published artifacts — which can be checked anonymously today, without a release.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Anonymous <code>HEAD</code> against <code>ghcr.io/ccd-ia/triage-pg</code> manifests for the current tag → <strong>200</strong> (packages default to PRIVATE even on a public repo; visibility is a separate manual flip that can be undone).</li>
+        <li><code class="status">[]</code> <em>(on the next tag only)</em> Confirm the job actually ran, pulled without credentials, and that <code>triage --version</code> from inside the image matches the tag. Mark <code>[f]</code> and carry forward if no tag is cut during this plan's life — that is an expected outcome, not a failure of the plan.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If a box cannot be reached because no release was cut, mark it <code>[f]</code>, record why, and move on.
+      </div>
+    </div>
+
+    <!-- PHASE 6 -->
+    <div class="phase gate">
+      <h3><code class="status">[]</code> Phase 6: v1.2.0 SHAP seed — a scope decision, not an implementation</h3>
+      <p>
+        SHAP-level interpretability has been deferred since v1.0.0 and re-targeted to v1.2.0. It is the only item on
+        this backlog that is a <strong>milestone</strong>, not a chore — it is larger than everything else here
+        combined, and mixing it into a close-out session is how close-out sessions stop closing out. This phase
+        produces a decision and a scoped shape; it produces <em>no</em> SHAP code.
+      </p>
+      <p class="dep">gate: do not begin implementation inside this plan</p>
+
+      <h4>1. Scope the decision</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Establish where SHAP values would <em>live</em>. The relevant precedent is ADR-0011: postmodeling dissolved into (a) importances persisted to PG at train time, (b) diagnostic SQL views, (c) dashboard panels. Per-entity per-feature SHAP is a different cardinality class — <code>|entities| × |features| × |models|</code> — and <code>triage.individual_importances</code> already exists as a table (migration 0001). Whether SHAP reuses it or needs its own storage is the first real question.</li>
+        <li><code class="status">[]</code> Establish which estimators are in scope. TreeSHAP is exact and fast for the tree models in the grid; KernelSHAP is model-agnostic and expensive. Shipping only the tree path is a defensible v1.2.0 and should be considered explicitly rather than drifting into "SHAP for everything".</li>
+        <li><code class="status">[]</code> Establish the dependency cost: <code>shap</code> is a heavyweight dependency. The <code>baselines</code> and <code>cloud</code> extras set the precedent — an optional extra keeps the base install lean.</li>
+        <li><code class="status">[]</code> Check <code>.out-of-scope/</code> first, per the repo convention, in case an adjacent interpretability proposal was already declined.</li>
+        <li><code class="status">[]</code> Decide: does this clear the ADR bar (hard to reverse <em>and</em> surprising without context <em>and</em> a real trade-off)? Storage shape and estimator scope plausibly do; "we added SHAP" does not. Write the ADR only if all three hold.</li>
+      </ul>
+
+      <h4>2. Testing Strategy</h4>
+      <p>Nothing to execute — the deliverable is a decision recorded where the next session will find it. Validation is that the decision is written down and that no SHAP code was written.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> A v1.2.0 milestone entry exists in <code>TODO.org</code> with the storage-shape and estimator-scope questions stated as open, not assumed.</li>
+        <li><code class="status">[]</code> <code>git diff --stat</code> shows no changes under <code>src/triage/component/catwalk/</code> from this phase — the gate held.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        Implementation belongs to a v1.2.0 plan, not to this one.
+      </div>
+    </div>
+
+    <!-- PHASE 7 -->
+    <div class="phase keystone">
+      <h3><code class="status">[]</code> Phase 7: Document the per-<code>as_of_date</code> evaluation grain</h3>
+      <p>
+        <strong>Added 2026-08-05</strong> after a maintainer question exposed a documentation gap. Not one of the
+        original backlog items. Numbered after the gates only to avoid renumbering; it has <em>no dependency on
+        Phases 4–6</em> and is naturally executed alongside Phase 3, the other docs pass. Almost entirely
+        documentation — the one exception is <code>triage leaderboard --windowed</code> in task 3, added by
+        maintainer decision.
+      </p>
+
+      <h4>The problem</h4>
+      <p>
+        DSSG triage could not evaluate a model that was used at more than one prediction time. When a test matrix
+        spanned several <code>as_of_date</code>s (any <code>test_durations</code> &gt; <code>0day</code>), the whole
+        window collapsed into <em>one</em> number: predictions from every date were pooled into a single ranked list,
+        so <code>precision@100</code> over a month meant "of the 100 highest-scoring
+        <code>(entity, date)</code> pairs <em>anywhere</em> in that month" — not "of the 100 we inspected
+        <em>each day</em>". If you deploy daily at k=100 you actually inspect ~3,000 entities in a month, and the
+        pooled top-100 answers a question no operator ever asks.
+      </p>
+      <p>
+        <strong>triage-pg already fixed this</strong> — migration <code>0010_windowed_evaluations</code> (WS1,
+        2026-06-28), whose docstring names the defect verbatim: <em>"evaluate a model at EVERY test
+        <code>as_of_date</code> … instead of collapsing the test window into a single number at its max date"</em> and
+        <em>"<code>n_as_of_dates</code> — the count the original triage couldn't give you."</em> Three layers enforce
+        it: ranks partition by <code>(model_id, as_of_date)</code> (<code>0001:315</code>); every metric function takes
+        a required <code>p_as_of_date</code> and filters on it; the orchestrator loops over the distinct scored dates
+        (<code>adapters/model.py:953</code>). <code>as_of_date</code> is in the <code>triage.evaluations</code> primary
+        key, so per-date rows are the storage grain, not a view over something coarser. Behaviour is covered by
+        <code>test_model_builder.py:571</code> (<code>test_evaluation_is_per_as_of_date</code>).
+      </p>
+      <p>
+        <strong>So the gap is documentary, and it is real:</strong> <code>n_as_of_dates</code> appears in <em>no</em>
+        markdown anywhere in the repo. <code>evaluations_windowed</code> is mentioned once, in
+        <code>docs/postmodeling.md</code>, and nowhere on the published site. Meanwhile
+        <code>reference/configuration.md:197</code> shows <code>test_durations: '0day'</code> with no note that it
+        yields exactly <em>one</em> evaluation point — so a reader copies the teaching default and never discovers the
+        capability. The fix for the exact problem a user would hit is invisible to that user.
+      </p>
+
+      <h4>1. Document the evaluation grain and what it buys</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Write the explanation: evaluation grain is one row-set per <code>as_of_date</code>; the pooled-metric failure mode it replaces; <code>triage.evaluations_windowed</code> as the opt-in rollup (<code>n_as_of_dates</code>, <code>window_start/end</code>, <code>value_mean/min/max/stddev</code>, <code>num_labeled_total</code>) with the per-date rows as the source of truth. <em>Solves:</em> the capability exists but is undiscoverable.</li>
+        <li><code class="status">[]</code> Explain how <code>test_durations</code> × <code>test_as_of_date_frequencies</code> determines how many evaluation points a model gets, with a worked contrast — <code>'0day'</code> → 1 point; <code>test_durations: '6month'</code> + <code>test_as_of_date_frequencies: '1week'</code> → ~26. <em>Solves:</em> readers cannot currently connect a config knob to the number of metrics they get out.</li>
+        <li><code class="status">[]</code> <span class="tag existing">decided</span> <strong>Decision (maintainer, 2026-08-05): a new <code>docs-site/src/content/docs/reference/evaluation.md</code></strong> with its own sidebar entry in <code>astro.config.mjs</code> — this is <em>semantics</em>, not a key-by-key reference, and burying a conceptual explanation inside <code>configuration.md</code> is how it goes unread (the failure mode being fixed). Add a two-line pointer at <code>configuration.md:196-197</code> so a reader who arrives at the knob still finds the page, and cross-link from <code>reference/problems.md</code>.</li>
+      </ul>
+
+      <h4>2. Annotate the teaching default instead of changing it</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <strong>Do NOT change the tutorial configs' <code>temporal_config</code>.</strong> Verified constraint: <code>.github/workflows/tutorial-smoke.yml:97-112</code> asserts <code>experiment_hash</code> begins <code>b9e38fd8</code>, and <code>temporal_config</code> is part of Experiment identity (ADR-0022). Editing it changes the problem hash → red nightly + every published tutorial number wrong. <em>Solves:</em> stops an obvious-looking "improvement" from breaking the release's most visible guarantee.</li>
+        <li><code class="status">[]</code> Add a note at <code>reference/configuration.md:196-197</code> and in <code>example/dirtyduck/experiment.yaml</code> saying <code>test_durations: '0day'</code> is a deliberate point-in-time <em>teaching</em> default that yields exactly one evaluation point, and pointing at the cadence guidance. <em>Solves:</em> the silent default that hides the whole feature.</li>
+        <li><code class="status">[]</code> Ship a <em>new</em> config — <code>example/dirtyduck/experiment-cadence.yaml</code> — demonstrating a multi-date test window against the same baked data. A new file has its own experiment hash and touches nothing the smoke test asserts. <em>Solves:</em> gives readers something runnable without endangering the canonical tutorial.</li>
+      </ul>
+
+      <h4>3. Selection guidance: mean is not the selector</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Document that with ~26 evaluation points, <code>value_mean</code> alone is a poor selector: mean prec@100 = 0.38 with stddev 0.15 is operationally worse than 0.35 with stddev 0.03 — you get the bad weeks too, and a program swinging 0.20→0.55 loses its users' trust. Point at <code>value_stddev</code> / <code>value_min</code>. <em>Solves:</em> stability is computed and stored but never advertised as a selection criterion.</li>
+        <li><code class="status">[]</code> Document that <code>k</code> must equal real capacity per cycle: <code>precision@100_abs</code> at weekly frequency means "the 100 we inspect this week." Evaluating monthly while acting weekly is the same category error as the old pooled metric, relocated into the config. <em>Solves:</em> a metric that answers a question nobody asks.</li>
+        <li><code class="status">[]</code> Document the surface split, which is currently implicit: <code>triage audition</code> reads <code>evaluations_windowed</code> (<code>cli.py:673,735</code>) while <code>triage leaderboard</code> reads the per-<code>as_of_date</code> <code>triage.leaderboard</code> matview (<code>cli.py:512</code>). They answer different questions and a user has no way to know which they are looking at. <em>Solves:</em> two surfaces, one undocumented distinction.</li>
+        <li><code class="status">[]</code> <span class="tag existing">decided</span> <strong>Build <code>triage leaderboard --windowed</code></strong> (maintainer, 2026-08-05 — chosen over documenting-only). Reads <code>triage.evaluations_windowed</code> instead of the per-date matview, adding <code>n_as_of_dates</code>, <code>value_mean</code>, <code>value_stddev</code>, <code>value_min</code> to the output. This is the one piece of <em>code</em> in an otherwise documentation-only phase — keep it that small. <em>Solves:</em> stability numbers exist but are reachable only from <code>audition</code>, so the surface a user reaches for first cannot answer "is this model steady?".</li>
+        <li><code class="status">[]</code> Make the flag self-documenting: the header or a one-line note must say which grain is being shown, so a user cannot mistake a windowed mean for a single date's value. Without <code>--windowed</code> the output and its meaning are unchanged (no behaviour change for existing callers).</li>
+        <li><code class="status">[]</code> Treat <code>n_as_of_dates</code> as an assertion, not a statistic: if it reads 1 when 26 were expected, the temporal config is not doing what its author thinks. Say so where cadence is documented. <em>Solves:</em> the cheapest available misconfiguration check is unknown to users.</li>
+      </ul>
+
+      <h4>4. Label maturity — the cost of a fine test cadence</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Document the gotcha: with a weekly test frequency and a <code>6month</code> <code>label_timespan</code>, the last ~6 months of <code>as_of_date</code>s have immature labels. The metric functions filter <code>l.outcome is not null</code>, so those dates produce <em>fewer or no</em> evaluation rows rather than wrong ones — a safe failure, but a silent one. <code>num_labeled</code> per row is what distinguishes an immature date from a genuinely bad one; do not average blindly across them. <em>Solves:</em> the most likely way a reader who follows this advice gets confused by their own results.</li>
+        <li><code class="status">[]</code> <em>Optional, evaluate don't assume:</em> consider a <code>validate_experiment_config</code> warning when the test window extends within <code>label_timespan</code> of <code>label_end_time</code>. Follow the <code>feature_groups</code> precedent — a warning, never an error, since the run is still valid. Only if it can be computed without duplicating timechop's logic.</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>
+        The <em>behaviour</em> is already proven by <code>test_evaluation_is_per_as_of_date</code>
+        (<code>test_model_builder.py:571</code>): it asserts one evaluation row-set per prediction time and
+        <code>n_as_of_dates == 2</code> from the windowed view. Do not duplicate it. New tests here guard the
+        <em>documentation</em> and the new example config — the things that can rot.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/test_model_builder.py::test_evaluation_is_per_as_of_date -v</code> — the existing proof still passes; cite it in the docs rather than restating the claim.</li>
+        <li><code class="status">[]</code> <code>uv run triage analyze-config example/dirtyduck/experiment-cadence.yaml</code> — the new config validates and reports the expected number of test as_of_dates per split.</li>
+        <li><code class="status">[]</code> Run the new config E2E against the DirtyDuck DB and assert <code>select n_as_of_dates from triage.evaluations_windowed</code> &gt; 1 — proves the documented cadence guidance actually produces multiple evaluation points on real data, rather than being plausible prose.</li>
+        <li><code class="status">[]</code> <code>psql -c "select count(*) from triage.experiments"</code> on the tutorial DB after running <em>both</em> configs — two distinct experiment hashes, the canonical <code>b9e38fd8…</code> unchanged.</li>
+        <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml --limit 1</code> after merge — the nightly is still green, confirming the hash was not disturbed.</li>
+        <li><code class="status">[]</code> <code>grep -rn "n_as_of_dates" docs-site/ docs/</code> — returns hits; it currently returns nothing, which is the whole reason this phase exists.</li>
+        <li><code class="status">[]</code> <code>uv run triage leaderboard &lt;hash&gt; --windowed</code> against the tutorial DB — shows <code>n_as_of_dates</code> and <code>value_stddev</code>; the same command <em>without</em> the flag produces byte-identical output to before the change (no regression for existing callers).</li>
+        <li><code class="status">[]</code> New CLI test covering both branches of the flag, following the existing <code>leaderboard</code>/<code>audition</code> test pattern.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- PHASE 8 -->
+    <div class="phase keystone">
+      <h3><code class="status">[]</code> Phase 8: Ontology layer — glossary terms + the Chicago 311 label-source leak</h3>
+      <p>
+        <strong>Added 2026-08-05 by maintainer decision</strong>, against the recommendation to defer this to its own
+        milestone. Folding it in is the call; this phase scopes it honestly, including the consequence that makes it
+        more than a doc edit.
+      </p>
+
+      <h4>The problem</h4>
+      <p>
+        An audit of the three tutorial DBs' <code>ontology</code> schemas against the intended shape — at least one
+        <em>entity</em> table (static core attributes, one entity type per table) and at least one <em>events</em>
+        table (involved entity, date, event type, attributes, ideally a location) — found DirtyDuck conforming and the
+        other two diverging. Most of the divergence is defensible (both are transaction-grained problems where the
+        unit of prediction really is the arriving item). Two findings are not:
+      </p>
+      <ul>
+        <li><strong><code>CONTEXT.md</code> defines 24 terms and neither <em>Entity</em> nor <em>Event</em> is among them</strong> — while <code>triage.sources.role</code> carries <code>check (role in ('entity','event'))</code> and several SQL functions branch on <code>where s.role = 'entity'</code>. The two nouns the whole <code>entity_id</code> spine rests on are undefined in the glossary that exists to define exactly that.</li>
+        <li><strong>Chicago 311 carries <code>closed_date</code> and <code>status</code> on <code>ontology.entities</code></strong> (<code>03_create_ontology.sql:39-40</code>) — they are the label source, i.e. the future being predicted. The only thing keeping them out of the feature set is that no config declares them. The guard is a comment, not a constraint.</li>
+      </ul>
+
+      <h4>1. Glossary: Entity and Event — the full definition <span class="tag existing">low risk</span></h4>
+      <p>
+        <strong>Decision (maintainer, 2026-08-05): state the fuller definition</strong>, including the jsonb attribute
+        bag and the spatial coordinate, rather than the minimal descriptive form. The glossary should say what the
+        ontology layer <em>should</em> look like, not merely what the three tutorials happen to do — DirtyDuck is the
+        only conforming one, and a glossary that describes the average of three schemas would enshrine the divergence.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Add <strong>Entity</strong> to <code>CONTEXT.md</code>: the object of interest an <code>entity_id</code> names — <em>one entity type per table</em>, described by the static "core" attributes that identify <em>who or what this is</em>, not by things that happened to it. Include the validity/state requirement (a <code>daterange</code> or an <code>entity_state</code> table): "who was in the population at time <em>t</em>" belongs in the schema, indexed, not re-derived in every cohort query. DirtyDuck's <code>activity_period</code> + GIST index is the reference.</li>
+        <li><code class="status">[]</code> Add <strong>Event</strong>: something that <em>happened at a point in spacetime</em>, carrying — the involved entity; <em>when</em>; a <code>type</code> discriminator; the event's own attributes, ordinarily a <code>jsonb</code> bag; and, where the data allows, a <em>spatial coordinate</em> (<code>geography(Point,4326)</code> + GIST, not untyped lat/lon doubles). Place the coordinate on the <strong>event</strong> whenever the event can move; on the entity only when it provably cannot (a facility does not relocate; a 311 request's location <em>is</em> the event's).</li>
+        <li><code class="status">[]</code> State the <strong>two clocks</strong> inside the Event definition: <em>occurrence</em> time (when it happened) and <em>knowledge</em> time (when it became observable to us). <code>triage.sources.knowledge_date_column</code> already encodes the second, and all three tutorial DBs currently collapse them into one <code>date</code> — silently asserting zero recording lag. Where the lag genuinely is zero, that should be written down, not implied by a missing column.</li>
+        <li><code class="status">[]</code> Add the <strong>promotion rule</strong> as a companion note inside the Event term, not as a replacement for the jsonb clause: <em>promote to a typed column anything you intend to featurize; keep jsonb for what you retain but do not model.</em> Rationale in one line — jsonb costs the type system and the planner's selectivity estimates, and featurizer's DFS consumes columns. DirtyDuck is the worked example: <code>type</code>/<code>risk</code>/<code>result</code> are typed ENUMs and <em>are</em> the declared features, while <code>violations</code> jsonb is (today) read only by label queries. Both halves of the rule matter; stating only the jsonb half invites a schema nobody can featurize.</li>
+        <li><code class="status">[]</code> Name the <strong>transaction-grained</strong> pattern explicitly: when the unit of prediction is the arriving item (a DonorsChoose posting, a Chicago 311 filing), the entity legitimately <em>is</em> an event — but the durable actors it references (teacher, school, community area) still belong in their own entity tables rather than as bare text columns. Two of three shipped tutorials are this shape; without the term a reader concludes they are bugs.</li>
+        <li><code class="status">[]</code> Cross-link both terms to the existing <strong>Source</strong> term (a declared input table whose <code>role</code> is exactly <code>entity</code> or <code>event</code>), so the glossary and <code>triage.sources.role</code>'s check constraint agree.</li>
+      </ul>
+
+      <h4>2. Chicago 311: move the label source off the entity table <span class="tag stale">changes an experiment hash</span></h4>
+      <p>
+        <strong>Verified consequence — read before starting.</strong> <code>example/chicago311/experiment.yaml:52-53</code>
+        reads <code>e.closed_date</code> <em>from <code>ontology.entities</code></em> in its label query, and
+        <code>experiment-survival.yaml:51-57</code> does the same for <code>duration</code>/<code>event_observed</code>.
+        Moving the columns forces both label queries to change, and <code>label_config</code> is part of Experiment
+        identity (ADR-0022) — so <strong>both Chicago 311 experiment hashes change</strong>. The labels themselves are
+        unchanged if the logic is preserved, so model counts, prediction counts and AUC stay the same. Two mitigating
+        facts: the nightly smoke runs the <em>DirtyDuck</em> tutorial only, and the published Chicago 311 page uses
+        <code>&lt;hash-prefix&gt;</code> rather than a literal hash. The cost lands on anyone who already ran the
+        tutorial — their prior runs become a different Experiment and stop comparing.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Move <code>closed_date</code> + <code>status</code> out of <code>ontology.entities</code> into <code>ontology.request_outcome</code> (keyed by <code>entity_id</code>), in <code>chicago311/chi311_db/03_create_ontology.sql:39-40</code>. <em>Solves:</em> a <code>select *</code> from the entity table can no longer reach the future.</li>
+        <li><code class="status">[]</code> Update the existing <code>ontology.request_resolution</code> view (same file, 76-89) to join the new table.</li>
+        <li><code class="status">[]</code> Rewrite the label queries in <code>example/chicago311/experiment.yaml</code> and <code>experiment-survival.yaml</code> to join <code>ontology.request_outcome</code>, preserving the label logic exactly — the outcome values must not change, only where they are read from.</li>
+        <li><code class="status">[]</code> Update <code>docs-site/…/tutorials/chicago311.md</code> — it reproduces the label query verbatim (lines 53-54) and describes the entity columns in prose (line 39). The published tutorial is verbatim-verified, so a stale query block is a broken tutorial.</li>
+        <li><code class="status">[]</code> Re-run the Chicago 311 tutorial E2E and confirm the published counts still hold (7 model groups × 4 splits = 28 models, ~81,000 predictions, AUC ≈ 0.87). If any of those move, the label logic was <em>not</em> preserved — stop and fix, do not update the published numbers to match.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>
+        The glossary half is documentary. The schema half needs the same discipline as any label change: prove the
+        labels are identical before and after, so the hash change is provably cosmetic rather than a silent
+        redefinition of the problem.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>just chi311-up</code> then confirm <code>ontology.entities</code> no longer has <code>closed_date</code>/<code>status</code>: <code>select column_name from information_schema.columns where table_schema='ontology' and table_name='entities'</code>.</li>
+        <li><code class="status">[]</code> Capture <code>select outcome, count(*) from triage.labels group by 1</code> before and after the change — the distributions must be identical. This is the assertion that makes the hash change safe.</li>
+        <li><code class="status">[]</code> <code>uv run triage analyze-config example/chicago311/experiment.yaml</code> and the survival twin — both validate against the new schema.</li>
+        <li><code class="status">[]</code> Full Chicago 311 E2E; assert the four published numbers above.</li>
+        <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml --limit 1</code> — still green (it runs DirtyDuck, so this should be untouched; verify rather than assume).</li>
+        <li><code class="status">[]</code> <code>grep -n "Entity\|Event" CONTEXT.md</code> — both terms present and cross-linked to <strong>Source</strong>.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If the label distributions differ before/after, the change is not cosmetic — stop and fix the query, never the expectation.
+      </div>
+    </div>
+
+    <!-- PHASE 9 -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 9: DirtyDuck violation features — structured first, text in SQL</h3>
+      <p>
+        <strong>Added 2026-08-05.</strong> Direct application of Phase 8's promotion rule to the dataset that most
+        obviously needs it. This phase deliberately does <em>not</em> use featurizer's NLP bridges; task 3 records why,
+        so the idea is settled rather than re-proposed.
+      </p>
+
+      <h4>The problem</h4>
+      <p>
+        <code>ontology.events.violations</code> — a <code>jsonb</code> array of
+        <code>{code, severity, description, comment}</code> per inspection, with two GIN indexes — is the record of
+        <em>what inspectors actually found</em>. It is used as a feature in <strong>zero</strong> configs. Grepping all
+        eight DirtyDuck configs, <code>violations</code> appears only inside <em>label</em> queries
+        (<code>jsonb_array_length(violations)</code> for the regression variants) and in a source
+        <code>description:</code> string. The declared event features are <code>result</code>, <code>risk</code>,
+        <code>type</code> — the inspection's <em>verdict</em>, never its <em>content</em>.
+      </p>
+      <p>
+        "How many <em>critical</em> violations has this facility accumulated in the last 3 months" is very likely the
+        strongest unused signal in the dataset, it needs no new dependency, and it is exactly the feature a health
+        department would reach for first. The published tutorial currently tops out at <code>auc_roc</code> 0.5751
+        against a 0.500 floor — a thin margin that makes "the ML barely earns its complexity" the lesson. Whether
+        violation-content features move that is a genuinely interesting teaching result <em>either way</em>.
+      </p>
+
+      <h4>1. Structured features first — the cheap, high-value half</h4>
+      <p>
+        Two facts from <code>dirtyduck/food_db/03_create_violations_table.sql</code> shape this and should be stated in
+        the config comments so nobody re-derives them: <code>severity</code> is a <strong>deterministic function of
+        <code>code</code></strong> (1–14 → critical, 15–29 → serious, else minor — lines 12–17), and
+        <code>description</code> is the <strong>canonical text for that code</strong>, i.e. 1:1 with it. Anything
+        derived from <code>description</code> as free text is therefore provably redundant with counting codes.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Project the jsonb into typed columns on <code>ontology.events</code>: <code>n_violations</code>, <code>n_critical</code>, <code>n_serious</code>, <code>n_minor</code>. featurizer then aggregates them (SUM/AVG/MAX) over the existing <code>P1M/P3M/P6M</code> intervals through the <code>facilities → inspections</code> relationship already in the config. <em>Solves:</em> the dataset's richest signal is unreachable to a DFS engine that consumes columns.</li>
+        <li><code class="status">[]</code> Optionally expose <code>code</code> as a categorical with a fixed vocabulary (top-N), following the pattern <code>facility_type</code> already uses — featurizer v0.4.0 fixed-vocabulary one-hot, so the matrix adapter's ordinal encoder does not fire on it.</li>
+        <li><code class="status">[]</code> Keep the <code>violations</code> jsonb column as-is. It stays the retained long tail; the counts are the modelled promotion. This is Phase 8's rule demonstrated on real data.</li>
+      </ul>
+
+      <h4>2. Text — in PostgreSQL, not through a bridge</h4>
+      <p>
+        The only genuinely free text is <code>comment</code> (the inspector's specific observation);
+        <code>description</code> is code-determined, per above. The right tool is the one already installed:
+        <code>dirtyduck/food_db/00_create_extensions.sql</code> loads <code>pg_trgm</code>,
+        <code>fuzzystrmatch</code> and <code>unaccent</code> with the comment "kept for <em>potential</em>
+        violation-description / fuzzy-match features (deferred, DB-audit #5/§7)". This phase is that deferral coming
+        due.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Add a small set of boolean/count columns over <code>comment</code> for a fixed keyword set — rodent/mouse, roach/insect, temperature, handwashing — via <code>tsvector</code> or plain <code>ILIKE</code>. Dependency-free, PostgreSQL-native (the workspace's PostgreSQL-First rule), and pedagogically excellent: "did a prior inspection mention rodents" is a feature any reader immediately understands.</li>
+        <li><code class="status">[]</code> Keep the keyword list short and comment <em>why each term is there</em>. A long list overfits this dataset and turns a teaching feature into a leaderboard trick.</li>
+        <li><code class="status">[]</code> Leakage check, same as every other event feature: these aggregate over <em>prior</em> inspections through the existing <code>as_of</code> relationship, so the strictly-before boundary applies unchanged. The current inspection's own violations must never enter its own row.</li>
+      </ul>
+
+      <h4>3. Why NOT featurizer's NLP bridges — record the reasoning</h4>
+      <p>
+        featurizer v0.9.x <em>does</em> ship a text family and the pin (v1.0.0) includes it, so the capability is real.
+        It is the wrong instrument for this text, on two independent grounds — both worth writing down so this gets
+        settled once.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <strong>Signal mismatch.</strong> The Path-1 bridges are <code>SentimentBridge</code> (lexicon valence), <code>ReadabilityBridge</code> (Fernández-Huerta / Flesch), <code>LanguageIdBridge</code>, <code>NERCountsBridge</code> (spaCy persons/orgs/locations/money/dates). Against templated English regulatory prose: sentiment measures nothing (this is not opinion text), the readability of inspector boilerplate is not a facility-risk signal, language ID is a <em>constant</em> — a zero-variance feature — and NER has almost nothing to find (no persons, money, or organizations in a violation comment) while pulling in spaCy. The bridges are built for narrative text: case notes, complaint free-text, social media. Violation comments are none of those.</li>
+        <li><code class="status">[]</code> <strong>Operational mismatch.</strong> Per <code>docs/featurizer-passthrough-features.md</code>, triage-pg <em>does not orchestrate bridge materialization</em>: "run it as a Dagster/Snakemake asset (or a one-off) before <code>triage run</code>, then point the config at the result." DirtyDuck's entire promise is a two-command end-to-end run; a mandatory pre-step outside the pipeline breaks the tutorial it is meant to enrich.</li>
+        <li><code class="status">[]</code> Record both in <code>docs/featurizer-passthrough-features.md</code> (or <code>.out-of-scope/</code> if it reads as a rejected feature) so "why don't we use the text bridges on DirtyDuck?" has a written answer. <em>Solves:</em> a plausible-sounding idea that would cost a dependency, a pre-step, and a tutorial's simplicity for near-zero signal.</li>
+      </ul>
+
+      <h4>4. Ship it without breaking the published tutorial</h4>
+      <p>
+        <strong>Verified constraints.</strong> Adding features does <em>not</em> change the experiment hash — features
+        vary per <strong>Run</strong>, not per Experiment (ADR-0022) — and the nightly smoke's four assertions
+        (<code>b9e38fd8…</code>, <code>models=32</code>, <code>predictions=430176</code>, <code>evaluations=192</code>)
+        would all still pass. <em>But</em> <code>dirtyduckling.md</code> publishes literal leaderboard values
+        (0.5751 / 0.5748 / 0.5612 / 0.5521, and the prose "0.575", "0.58 vs the 0.50") which the smoke does
+        <strong>not</strong> assert. Editing the canonical config would therefore silently invalidate the published
+        page while CI stayed green — the exact silent-staleness class this whole plan exists to close.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Put the violation features in a <strong>new</strong> <code>example/dirtyduck/experiment-violations.yaml</code>; leave <code>experiment.yaml</code> untouched. Same containment pattern as Phase 7's <code>experiment-cadence.yaml</code>.</li>
+        <li><code class="status">[]</code> Use <code>feature_groups</code> (ADR-0023) in the new config — it is already present as a commented-out block in <code>experiment.yaml:141-149</code>. <code>group_by: source_entity</code> + <code>strategies: [all, leave-one-out]</code> yields one Experiment and several Runs whose leaderboards compare directly, answering the tutorial's own question: <em>do violation-content features add lift over facility attributes and inspection verdicts?</em> <em>Solves:</em> makes the result legible instead of asking the reader to trust a single number.</li>
+        <li><code class="status">[]</code> <strong>Bump the source <code>version_label</code></strong> from <code>dirtyduck-v1</code> to <code>dirtyduck-v2</code> when the new columns land. <span class="tag stale">correctness, not bookkeeping</span> A source fingerprint is <code>(row_count, max_knowledge_date)</code> (<code>sources.py:143</code>); adding columns changes <em>neither</em>, so the derivation DAG would consider cached matrices still valid and happily serve a matrix built before the columns existed. This is the one task in the phase that is a real bug if skipped.</li>
+        <li><code class="status">[]</code> If the new features materially beat the current 0.5751, say so in the docs and keep both configs — "the verdict features were the weak ones" is a better lesson than a silently improved number.</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>
+        The risk here is not a crash; it is a leak or a stale cache. Both need explicit proof, and the published
+        tutorial needs proof it was left alone.
+      </p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>just tutorial-up</code> then confirm the new columns exist and are populated: <code>select count(*), sum(n_critical) from ontology.events</code>.</li>
+        <li><code class="status">[]</code> <code>uv run triage analyze-config example/dirtyduck/experiment-violations.yaml</code> — validates, and the feature-group fan-out reports the expected number of Runs.</li>
+        <li><code class="status">[]</code> Leakage assertion: for a sampled <code>(entity_id, as_of_date)</code>, verify every violation contributing to its features has <code>date &lt; as_of_date</code> strictly. This is the cardinal rule and deserves a direct check, not an inference from "featurizer handles it".</li>
+        <li><code class="status">[]</code> Cache-invalidation assertion: with <code>version_label</code> bumped, a re-run must build a <em>new</em> matrix artifact rather than reuse the pre-column one. Verify against <code>triage.artifacts</code> / <code>run_source_pins</code>, not by watching the log.</li>
+        <li><code class="status">[]</code> Re-run the canonical <code>experiment.yaml</code> and confirm the four published leaderboard values are <strong>unchanged</strong> — proof the containment worked.</li>
+        <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml --limit 1</code> — still green.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        The <code>version_label</code> bump and the leakage assertion are not optional — skipping either produces a wrong model that looks right.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[]</code> <code>uv run pytest src/tests/ -q</code> — full suite green; count is ≥ the v1.1.0 gate of 457 passed / 1 skipped, plus the new Phase 3 and Phase 4 tests.</li>
+      <li><code class="status">[]</code> <code>uvx ruff check src/ &amp;&amp; uvx ruff format --check src/</code> — both halves of the lint gate pass under the version CI actually uses.</li>
+      <li><code class="status">[]</code> <code>just lint &amp;&amp; just typecheck</code> — local recipes agree with CI.</li>
+      <li><code class="status">[]</code> <code>uv run pytest src/tests/test_docs_version_reference.py src/tests/test_project_lifecycle.py -v</code> — the two guard suites this plan touches, run explicitly.</li>
+      <li><code class="status">[]</code> <code>grep -rn "v1.0.0-rc" README.md CONTRIBUTING.md CLAUDE.md</code> — no stale release tags in the repo-root prose.</li>
+      <li><code class="status">[]</code> <code>grep -rn "28 architecture\|28 accepted\|28 ADR" --include="*.md" .</code> — the hardcoded ADR count is gone everywhere.</li>
+      <li><code class="status">[]</code> <code>uv run triage project create --help</code> and <code>uv run triage project grant --help</code> — <code>--data-schema</code> is documented and repeatable.</li>
+      <li><code class="status">[]</code> <code>uv run triage leaderboard --help</code> — <code>--windowed</code> present; the flag-less output is unchanged from before this plan.</li>
+      <li><code class="status">[]</code> <code>grep -n "^\*\*Entity\|^\*\*Event" CONTEXT.md</code> — both glossary terms exist.</li>
+      <li><code class="status">[]</code> <code>psql -c "select column_name from information_schema.columns where table_schema='ontology' and table_name='entities' and column_name in ('closed_date','status')"</code> against the Chicago 311 DB — returns no rows.</li>
+      <li><code class="status">[]</code> Chicago 311 label distributions identical before/after Phase 8 — the assertion that makes its experiment-hash change provably cosmetic.</li>
+      <li><code class="status">[]</code> DirtyDuck's four published leaderboard values (0.5751 / 0.5748 / 0.5612 / 0.5521) unchanged after Phase 9 — proof the new features are contained in their own config.</li>
+      <li><code class="status">[]</code> <code>grep -n "version_label" example/dirtyduck/*.yaml</code> — bumped to <code>dirtyduck-v2</code> wherever the new columns are read; a stale pin would serve a pre-column matrix from cache.</li>
+      <li><code class="status">[]</code> <code>grep -rn "n_as_of_dates" docs-site/ docs/</code> — returns hits (it returns nothing today); the per-<code>as_of_date</code> evaluation grain is documented where readers are.</li>
+      <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml --limit 1</code> — still green after Phase 7; the canonical <code>b9e38fd8…</code> experiment hash was not disturbed.</li>
+      <li><code class="status">[]</code> <code>gh run list --workflow=ci.yml --limit 1</code> — CI green on the pushed branch, including the new format step.</li>
+      <li><code class="status">[]</code> <code>git status --short</code> — clean tree; nothing under <code>ai-docs/</code>, <code>TODO.org</code>, project <code>CLAUDE.md</code>, or <code>GIT_REMOTE</code> staged (they are gitignored session-local artifacts and must never be force-added).</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables <span class="tag done">all resolved 2026-08-05</span></h2>
+    <p>
+      All seven were put to the maintainer on 2026-08-05 and answered. Each is recorded below with the decision, the
+      reasoning that was on the table, and — where the answer went against the recommendation — what that changes
+      about the plan. Kept open-shaped rather than deleted, so the alternatives stay visible if a decision is revisited.
+    </p>
+
+    <details>
+      <summary>Pin ruff in CI, or let <code>uvx</code> float? → <strong>lockfile version</strong></summary>
+      <p class="qa-answer">
+        <strong>Decision: resolve ruff from <code>uv.lock</code></strong> (<code>uv sync --extra dev</code> +
+        <code>uv run ruff</code>) — matching the recommendation. Measured today, <code>uv.lock</code> and the justfile
+        use ruff <strong>0.15.0</strong> while <code>uvx ruff</code> resolves <strong>0.15.17</strong>: CI has been
+        running a different formatter than local, and only luck (both report "157 files already formatted") keeps them
+        agreeing. The lockfile removes the split entirely rather than papering over it; a bump becomes
+        <code>uv lock --upgrade-package ruff</code>, a reviewable PR. Costs a sync step in a job that currently does
+        none. Rejected: <code>uvx ruff@0.15.0</code> (puts the version in two places that can drift) and leaving it
+        floating (a ruff release turns CI red on an unrelated PR, which trains people to ignore red lint).
+        <strong>→ Phase 2 task 1.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary><code>--data-schema</code> flag, or read from the experiment config? → <strong>repeatable flag</strong></summary>
+      <p class="qa-answer">
+        <strong>Decision: the repeatable flag</strong> — matching the recommendation. The config's
+        <code>sources:</code> block does name relations, so derivation was possible in principle, but provisioning
+        happens <em>before</em> any experiment config exists (create the database, load data, then write a config), so
+        deriving grants from a config inverts the order of operations. The flag also keeps <code>project grant</code>
+        usable as the standalone repair tool it is documented to be. Rejected: hardcoding
+        <code>raw/clean/ontology</code>, which would bake a tutorial convention into the product.
+        <strong>→ Phase 4 task 2.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary>Update the ADR count to 30, or remove it? → <strong>remove it</strong></summary>
+      <p class="qa-answer">
+        <strong>Decision: drop the number</strong> — matching the recommendation. It is wrong in four places at once,
+        having drifted by two in about a month; updating it schedules the same bug for ADR-0031. Rejected: deriving it
+        at build time (works on the docs site, but not in <code>README.md</code> or <code>CLAUDE.md</code>, so it would
+        solve one of four sites). <strong>→ Phase 3 task 1.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary>Fold in the ontology-audit findings? → <strong>fold both in</strong> <span class="tag stale">against recommendation</span></summary>
+      <p class="qa-answer">
+        <strong>Decision: fold both into this plan</strong> — the recommendation had been to defer them to their own
+        milestone, on the grounds that quietly widening a close-out plan is how close-out plans stop closing out. The
+        maintainer's call is to do them now, so they are scoped properly as <strong>Phase 8</strong> rather than
+        sprinkled into existing phases.
+      </p>
+      <p class="qa-answer">
+        <strong>What that decision costs, stated plainly:</strong> the <code>CONTEXT.md</code> half is ~20 minutes and
+        carries no risk. The Chicago&nbsp;311 half is not a doc edit — <code>closed_date</code> is read by <em>both</em>
+        Chicago 311 label queries (<code>experiment.yaml:52-53</code>, <code>experiment-survival.yaml:51-57</code>), and
+        <code>label_config</code> is part of Experiment identity (ADR-0022), so moving the columns changes <em>both</em>
+        Chicago 311 experiment hashes. Anyone who has already run that tutorial gets a new problem identity and their
+        prior runs stop comparing. Mitigating: the nightly smoke runs DirtyDuck only, and the published page uses
+        <code>&lt;hash-prefix&gt;</code> not a literal. Phase 8 therefore requires a before/after label-distribution
+        assertion so the hash change is provably cosmetic. <strong>→ Phase 8.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary>Revisit <code>[tool.ruff.lint] select</code> (3 rules)? → <strong>leave it, note it</strong></summary>
+      <p class="qa-answer">
+        <strong>Decision: no change now; record it as a v1.2.0 seed</strong> — matching the recommendation. CI's
+        <code>ruff check</code> enforces exactly three rules (undefined name / export / local) and the "tighten
+        incrementally" comment never happened. Expanding the rule set across 157 files is a real project with an
+        unknown-size diff, not a line in a close-out plan. Rejected: expanding now, and sizing it with
+        <code>--statistics</code> first (the spike is cheap, but it invites doing the work in this session).
+        <strong>→ Phase 2 task 1, final bullet.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary>New <code>reference/evaluation.md</code>, or a section in <code>configuration.md</code>? → <strong>new page</strong></summary>
+      <p class="qa-answer">
+        <strong>Decision: a new page</strong> — matching the recommendation. <code>configuration.md</code> is a
+        key-by-key reference; this content is <em>semantics</em> (what the evaluation grain is, why pooling was wrong,
+        how to pick a cadence), and burying a conceptual explanation inside a config reference is precisely how it goes
+        unread — the failure mode being fixed. Cost: one sidebar entry in <code>astro.config.mjs</code>, plus a two-line
+        pointer at <code>configuration.md:196-197</code> so a reader who arrives at the knob still finds the page.
+        <strong>→ Phase 7 task 1.</strong>
+      </p>
+    </details>
+
+    <details>
+      <summary><code>triage leaderboard --windowed</code>? → <strong>build it in Phase 7</strong> <span class="tag stale">against recommendation</span></summary>
+      <p class="qa-answer">
+        <strong>Decision: build it now</strong> — the recommendation had been to document the surface split and build
+        the flag when it became someone's actual complaint, on the grounds that it is the only code in an otherwise
+        documentation-only phase of a close-out plan. The maintainer's call is to build it, which is defensible: the
+        view already exists, the change is genuinely small, and documenting "the stability numbers are over there in
+        <code>audition</code>" is a worse answer than putting them where users already look.
+      </p>
+      <p class="qa-answer">
+        <strong>Scope discipline that follows from it:</strong> the flag reads <code>evaluations_windowed</code> and
+        adds four columns. Without <code>--windowed</code>, output must be byte-identical to today — Phase 7's testing
+        strategy asserts exactly that, so a docs phase growing a code change cannot quietly grow a behaviour change
+        too. <strong>→ Phase 7 task 3.</strong>
+      </p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>Evidence for every Phase 1 closure</h3>
+    <p>Recorded here so the reconciliation does not have to be re-derived, and so a skeptical reader can attack any single row without re-running the whole pass.</p>
+    <table>
+      <thead><tr><th>Backlog item</th><th>Verdict</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>ruff format --check</code> in CI</td>
+          <td><span class="tag new">open</span></td>
+          <td><code>ci.yml</code> lint job is <code>uvx ruff check src/</code> only. Safe to add: both <code>uv run ruff format --check src/</code> (0.15.0) and <code>uvx ruff format --check src/</code> (0.15.17) report <em>157 files already formatted</em>.</td>
+        </tr>
+        <tr>
+          <td>Data-schema grants in <code>--owner</code></td>
+          <td><span class="tag new">open</span></td>
+          <td><code>grant_project_role()</code> hardcodes <code>schema triage</code> throughout (<code>project_lifecycle.py:138-153</code>); <code>pg_matviews</code> query filters <code>schemaname = 'triage'</code> (line 168). Runbook line 230–233 still instructs the hand-grant.</td>
+        </tr>
+        <tr>
+          <td><code>verify-anonymous-pull</code></td>
+          <td><span class="tag new">gate</span></td>
+          <td><code>needs: release</code> in <code>release.yml</code> — fires only on a <code>v*</code> tag push. No work available before then.</td>
+        </tr>
+        <tr>
+          <td>Nightly tutorial-smoke</td>
+          <td><span class="tag done">done</span></td>
+          <td><code>gh run list --workflow=tutorial-smoke.yml</code> → <code>success</code> ×5 (2026-07-31 … 2026-08-04). Workflow has <code>cron: "13 8 * * *"</code> and is not gated.</td>
+        </tr>
+        <tr>
+          <td><code>triage score</code> → CWD parquets</td>
+          <td><span class="tag done">done</span></td>
+          <td>Fixed 2026-07-13, pushed 07-16. <code>forward.py:179-183</code> defaults to <code>parent_root(lineage.artifact_uri)</code>; same in <code>retrain.py:111</code>; unit test <code>test_profiles.py:183</code>; closed at <code>TODO.org:375-380</code>.</td>
+        </tr>
+        <tr>
+          <td><code>CONTRIBUTING.md</code> rewrite</td>
+          <td><span class="tag done">done</span> <span class="tag stale">1 line drift</span></td>
+          <td>135 lines, targets <code>ccd-ia/triage-pg</code>, points at CONTEXT.md / ADRs / <code>.out-of-scope/</code>. Only defect: line 16 says "28 accepted architecture decisions" vs 30 on disk.</td>
+        </tr>
+        <tr>
+          <td>SHAP interpretability</td>
+          <td><span class="tag new">milestone</span></td>
+          <td>Deferred since v1.0.0, re-targeted to v1.2.0 during the v1.1.0 semver discussion. Not a chore; Phase 6 gates it.</td>
+        </tr>
+        <tr>
+          <td><em>README version drift</em></td>
+          <td><span class="tag stale">new find</span></td>
+          <td>Not on any list. <code>README.md:113</code> → <code>:v1.0.0-rc1</code>; <code>README.md:12</code> → pre-v1.0.0 status paragraph. Survived because <code>test_docs_version_reference.py</code>'s <code>DOCS_SITE</code> root excludes the repo root.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Sequencing rationale</h3>
+    <p>
+      Phase 1 first because it is the only phase that changes the others' scope — starting with the "highest
+      value-per-effort" item would have meant doing Phase 2 while three phantom items still sat on the list.
+      Phase 3 before Phase 4 because doc drift is user-visible on a public repo and costs an hour, while the grants
+      work is internal and costs a day. Phases 5 and 6 last because neither can complete inside this plan: one waits
+      on a tag, the other deliberately stops at a decision.
+    </p>
+
+    <h3>Risks and how they are handled</h3>
+    <table>
+      <thead><tr><th>Risk</th><th>Handling</th></tr></thead>
+      <tbody>
+        <tr><td>A future ruff release reformats the tree and turns CI red on an unrelated PR</td><td>The pin decision in Questionables. Either outcome is acceptable if chosen deliberately and commented; the failure mode to avoid is an <em>unexamined</em> float.</td></tr>
+        <tr><td>Phase 4 grants privileges an operator did not intend</td><td><code>--data-schema</code> is explicit and repeatable — nothing is granted unless named. The negative test (matviews outside <code>triage</code> are not reassigned) keeps the blast radius pinned.</td></tr>
+        <tr><td>Phase 6 quietly becomes a SHAP implementation</td><td>An explicit <code>git diff --stat</code> assertion in its own validation list. A gate that isn't checked isn't a gate.</td></tr>
+        <tr><td>The reconciliation itself is wrong (an item marked done that isn't)</td><td>Every closure cites a re-runnable command or a file:line, and Phase 1's testing strategy re-runs the two liveness checks rather than trusting this document.</td></tr>
+        <tr><td>Scope creep from the adjacent ontology audit</td><td>Explicitly declined in Questionables, with the two genuine findings named so they are not lost.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>What this plan deliberately does not do</h3>
+    <ul>
+      <li><strong>No legacy-schema migration.</strong> Considered and dropped this session: old DSSG artifacts cannot be given honest derivation identity (source pins and engine versions were never recorded), so any import would have to fabricate the hashes that the whole ADR-0013–0017 identity model depends on. Fabricated identity is worse than no rows, because <code>triage gc</code> and the cache-reuse path would treat it as real.</li>
+      <li><strong>No ruff rule-set expansion</strong> — decided 2026-08-05: recorded as a v1.2.0 seed, no diff now (see Questionables).</li>
+      <li><strong>No SHAP implementation</strong> — Phase 6 stops at a decision, with a <code>git diff --stat</code> assertion proving the gate held.</li>
+      <li><s><strong>No ontology-schema changes</strong></s> — <em>reversed by maintainer decision 2026-08-05.</em> Both audit findings are now in scope as Phase 8. The Chicago 311 half changes two experiment hashes; that consequence is documented in the phase and in the Questionables entry rather than discovered mid-build.</li>
+    </ul>
+
+    <figure>
+      <svg viewBox="0 0 940 232" role="img" aria-label="Phase order and what gates what">
+        <defs>
+          <style>
+            .pb   { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
+            .pk   { fill: color-mix(in srgb, var(--drift) 12%, transparent); stroke: var(--drift); stroke-width: 2; }
+            .pg   { fill: color-mix(in srgb, var(--open) 12%, transparent); stroke: var(--open); stroke-width: 2; stroke-dasharray: 5 4; }
+            .pn   { font: 700 12px var(--sans); fill: var(--ink); }
+            .pd   { font: 10.5px var(--sans); fill: var(--muted); }
+            .fl   { stroke: var(--guard); stroke-width: 2; fill: none; marker-end: url(#ah2); }
+            .cap  { font: 700 14px var(--sans); fill: var(--ink); }
+          </style>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--guard)"/>
+          </marker>
+        </defs>
+        <text x="24" y="26" class="cap">Order matters: Phase 1 rewrites the scope of everything downstream</text>
+
+        <rect class="pk" x="24"  y="48" width="150" height="66" rx="8"/>
+        <text x="40" y="72" class="pn">1 · Reconcile</text>
+        <text x="40" y="90" class="pd">close 3 · fix the</text>
+        <text x="40" y="104" class="pd">stale source list</text>
+
+        <path class="fl" d="M180,81 H214"/>
+        <rect class="pb" x="220" y="48" width="150" height="66" rx="8"/>
+        <text x="236" y="72" class="pn">2 · ruff format</text>
+        <text x="236" y="90" class="pd">1 CI line, verified</text>
+        <text x="236" y="104" class="pd">green on both versions</text>
+
+        <path class="fl" d="M376,81 H410"/>
+        <rect class="pk" x="416" y="48" width="160" height="66" rx="8"/>
+        <text x="432" y="72" class="pn">3 · Doc drift</text>
+        <text x="432" y="90" class="pd">README rc1 tag +</text>
+        <text x="432" y="104" class="pd">widen the guard root</text>
+
+        <path class="fl" d="M582,81 H616"/>
+        <rect class="pb" x="622" y="48" width="150" height="66" rx="8"/>
+        <text x="638" y="72" class="pn">4 · --data-schema</text>
+        <text x="638" y="90" class="pd">retire the last</text>
+        <text x="638" y="104" class="pd">manual runbook step</text>
+
+        <path class="fl" d="M778,81 H812"/>
+        <rect class="pg" x="818" y="48" width="98" height="66" rx="8"/>
+        <text x="834" y="72" class="pn">5 · gate</text>
+        <text x="834" y="90" class="pd">next tag</text>
+        <text x="834" y="104" class="pd">6 · SHAP scope</text>
+
+        <!-- Phases 7 + 8: parallel to Phase 3, added 2026-08-05 -->
+        <path class="fl" d="M496,120 V146"/>
+        <rect class="pk" x="416" y="152" width="160" height="52" rx="8"/>
+        <text x="432" y="174" class="pn">7 · Eval grain docs</text>
+        <text x="432" y="192" class="pd">+ leaderboard --windowed</text>
+
+        <path class="fl" d="M582,178 H616"/>
+        <rect class="pk" x="622" y="152" width="150" height="52" rx="8"/>
+        <text x="638" y="174" class="pn">8 · Ontology</text>
+        <text x="638" y="192" class="pd">glossary + chi311 leak</text>
+
+        <path class="fl" d="M778,178 H806"/>
+        <rect class="pb" x="812" y="152" width="104" height="52" rx="8"/>
+        <text x="826" y="174" class="pn">9 · Features</text>
+        <text x="826" y="192" class="pd">violations</text>
+
+        <text x="24" y="172" class="pd">Solid border = lands in this plan.  Dashed = cannot complete here by design (waits on a release / stops at a decision).</text>
+        <text x="24" y="192" class="pd">Rose = keystone: changes downstream scope, or fixes something a user can see today.</text>
+        <text x="24" y="220" class="pd">Phases 7–8 are numbered after the gates to avoid renumbering, but are unblocked after Phase 1 — run them with the Phase 3 docs pass.</text>
+      </svg>
+      <figcaption>Five arrows, two of which end at gates rather than deliverables — stated up front so "incomplete" is not mistaken for "failed". Phase 7 branches off the docs pass.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <details>
+      <summary>2026-08-05T02:47-06:00 — added Phase 7: document the per-<code>as_of_date</code> evaluation grain</summary>
+      <p>
+        <strong>What changed.</strong> New Phase 7 (docs-only, plus one example config), three new entries in Relevant
+        Files, two new global validation commands, and two new Questionables (page placement; whether
+        <code>triage leaderboard</code> should surface <code>n_as_of_dates</code>/<code>value_stddev</code>).
+      </p>
+      <p>
+        <strong>Why.</strong> A maintainer question — "old triage couldn't compute metrics when a model was used for
+        more than one prediction date; how are we handling it?" — turned out to have a good answer in the code and
+        <em>no</em> answer in the docs. Verification found the behaviour correct and tested since migration
+        <code>0010_windowed_evaluations</code> (WS1, 2026-06-28): ranks partition by
+        <code>(model_id, as_of_date)</code>, every metric function requires an <code>as_of_date</code>, the
+        orchestrator loops over scored dates, and <code>test_model_builder.py:571</code> proves it. But
+        <code>n_as_of_dates</code> appears in no markdown in the repo, <code>evaluations_windowed</code> is mentioned
+        once outside the published site, and <code>reference/configuration.md:197</code> shows
+        <code>test_durations: '0day'</code> with no note that it yields exactly one evaluation point. A user therefore
+        cannot discover the fix for the problem they have — which is exactly why the question was asked.
+      </p>
+      <p>
+        <strong>Constraint discovered while scoping it.</strong> The obvious move — change the tutorial's
+        <code>temporal_config</code> to demonstrate a multi-date window — is blocked:
+        <code>tutorial-smoke.yml:97-112</code> asserts <code>experiment_hash</code> begins <code>b9e38fd8</code>, and
+        <code>temporal_config</code> is part of Experiment identity (ADR-0022), so the edit would turn the nightly red
+        and invalidate every published tutorial number. Phase 7 ships a separate
+        <code>experiment-cadence.yaml</code> instead and states the constraint explicitly so a future reader does not
+        rediscover it the hard way.
+      </p>
+      <p>
+        <strong>Ordering note.</strong> Phase 7 is last only to avoid renumbering Phases 4–6; it depends on nothing
+        after Phase 1 and pairs naturally with Phase 3, the other documentation pass.
+      </p>
+    </details>
+
+    <details>
+      <summary>2026-08-05T11:52-06:00 — all seven questionables resolved; Phase 8 added (ontology fold-in)</summary>
+      <p>
+        <strong>What changed.</strong> Every Questionable now records a decision rather than a recommendation, and the
+        affected tasks were rewritten to match. Five answers matched the recommendation (lockfile-resolved ruff;
+        repeatable <code>--data-schema</code>; drop the ADR count; leave <code>[tool.ruff.lint] select</code> alone;
+        a dedicated <code>reference/evaluation.md</code>). <strong>Two went the other way</strong> and are marked as
+        such in the Questionables section — both alternatives are kept visible rather than deleted.
+      </p>
+      <p>
+        <strong>Reversal 1 — ontology findings folded in, not deferred.</strong> New <strong>Phase 8</strong>: add
+        <em>Entity</em> and <em>Event</em> to <code>CONTEXT.md</code> (24 terms today, and the two nouns the
+        <code>entity_id</code> spine rests on are missing while <code>triage.sources.role</code> has a check constraint
+        on exactly those strings), and move Chicago&nbsp;311's <code>closed_date</code>/<code>status</code> off
+        <code>ontology.entities</code>. Scoping it surfaced a consequence worth having in writing before the build
+        starts: <em>both</em> Chicago 311 label queries read <code>e.closed_date</code> from the entity table, and
+        <code>label_config</code> is part of Experiment identity (ADR-0022), so both experiment hashes change. Phase 8
+        therefore carries a before/after label-distribution assertion — if the distributions move, the label logic was
+        not preserved and the fix is the query, never the expectation.
+      </p>
+      <p>
+        <strong>Reversal 2 — <code>triage leaderboard --windowed</code> gets built now.</strong> Phase 7 was
+        documentation-only; it now contains one code change. Defensible: the view exists, the change is small, and
+        telling users "the stability numbers are over in <code>audition</code>" is a worse answer than putting them
+        where people already look. Scope is fenced by a regression assertion — without the flag, output must be
+        byte-identical to today.
+      </p>
+      <p>
+        <strong>Also updated:</strong> Relevant Files (+6 existing, +2 new), five new global validation commands, the
+        phase-order diagram, and the "deliberately does not do" list, where the no-ontology-changes line is struck
+        through rather than removed so the reversal is legible.
+      </p>
+    </details>
+
+    <details>
+      <summary>2026-08-05T13:22-06:00 — Phase 8 glossary states the full definition; Phase 9 added (DirtyDuck violation features)</summary>
+      <p>
+        <strong>Glossary (Phase 8 task 1) rewritten to the fuller definition</strong>, per maintainer instruction. The
+        <em>Event</em> term now carries the <code>jsonb</code> attribute bag and the spatial coordinate as part of the
+        canonical shape (with the coordinate on the <em>event</em> where the event can move), plus the two clocks and
+        the transaction-grained pattern; <em>Entity</em> now carries the validity/state requirement. The earlier draft
+        described only what the three tutorials happen to do — since DirtyDuck is the sole conforming one, that would
+        have enshrined the divergence. The promotion rule (<em>typed columns for what you model, jsonb for what you
+        retain</em>) is kept as a companion note <em>inside</em> the Event term rather than as a substitute for the
+        jsonb clause: stating only the jsonb half invites a schema nobody can featurize.
+      </p>
+      <p>
+        <strong>New Phase 9</strong>, from the maintainer's question about text features. Investigation changed the
+        shape of the answer. <code>ontology.events.violations</code> is used as a feature in <em>zero</em> configs — it
+        appears only in label queries — so the real gap is not a text gap: the dataset's record of what inspectors
+        <em>found</em> never reaches a model, while <code>result</code>/<code>risk</code>/<code>type</code> (the
+        verdict) do. Phase 9 therefore leads with structured counts
+        (<code>n_critical</code>/<code>n_serious</code>/<code>n_minor</code>), which need no dependency and are a direct
+        application of Phase 8's promotion rule.
+      </p>
+      <p>
+        <strong>The NLP bridges are explicitly declined, with the reasoning recorded</strong> (task 3) on two
+        independent grounds. Signal: the Path-1 family is sentiment / readability / language-ID / NER, and against
+        templated English regulatory prose sentiment measures nothing, readability of inspector boilerplate is not a
+        risk signal, language-ID is a zero-variance constant, and NER finds almost nothing while pulling in spaCy.
+        Operational: <code>docs/featurizer-passthrough-features.md</code> states triage-pg does <em>not</em> orchestrate
+        bridge materialization — it needs a Dagster/Snakemake pre-step, which breaks DirtyDuck's two-command promise.
+        Text is still in scope, but in PostgreSQL: <code>pg_trgm</code>/<code>unaccent</code> are already installed with
+        a DDL comment reserving them for exactly this, and keyword flags over the inspector <code>comment</code> field
+        are dependency-free and pedagogically clearer.
+      </p>
+      <p>
+        <strong>Two verified facts drive the phase's constraints.</strong> (1) <code>severity</code> is a deterministic
+        function of <code>code</code> and <code>description</code> is that code's canonical text
+        (<code>03_create_violations_table.sql:12-17</code>) — so text-featurizing <code>description</code> is provably
+        redundant with counting codes. (2) A source fingerprint is <code>(row_count, max_knowledge_date)</code>
+        (<code>sources.py:143</code>), so adding columns changes neither and the derivation DAG would serve a
+        pre-column matrix from cache — the <code>version_label</code> bump is a correctness requirement, not
+        bookkeeping. Containment mirrors Phase 7: a new <code>experiment-violations.yaml</code> rather than editing the
+        canonical config, because <code>dirtyduckling.md</code> publishes literal leaderboard values that the nightly
+        smoke does not assert.
+      </p>
+    </details>
+  </section>
+
+</main>
+</body>
+</html>
