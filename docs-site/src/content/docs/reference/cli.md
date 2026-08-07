@@ -41,7 +41,11 @@ lifecycles.)
 `project create --owner <role>` and `project grant <slug> --owner <role>` are cloud-profile
 only: they grant a per-project PostgreSQL role the database and hand it **ownership** of the
 `triage` matviews, which `REFRESH MATERIALIZED VIEW` requires and no grant can confer. The
-local profile needs neither — you already own what you create. See
+local profile needs neither — you already own what you create. Both commands also take a
+repeatable `--data-schema <name>` extending the same grants to your own schemas (whatever
+you name them): `create` creates them in the fresh database ready to load into, while
+`grant` requires them to exist (it is the repair tool — a typo must not silently provision
+an empty schema). Ownership of your data objects is never transferred. See
 [the cloud runbook §4.0](https://github.com/ccd-ia/triage-pg/blob/main/docs/cloud-runbook.md).
 
 ## Validate before running

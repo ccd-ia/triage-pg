@@ -1427,6 +1427,15 @@ def project_create(
             " (the cloud profile's per-project IAM login). Omit for the local profile."
         ),
     ),
+    data_schema: list[str] = typer.Option(
+        [],
+        "--data-schema",
+        help=(
+            "Data schema to create in the fresh database and grant to --owner alongside"
+            " triage (repeatable: --data-schema raw --data-schema clean). Whatever names"
+            " you use — triage imposes no convention. Requires --owner."
+        ),
+    ),
 ) -> None:
     """Create a project end-to-end: registry row → CREATE DATABASE → triage schema (head).
 
@@ -1436,9 +1445,16 @@ def project_create(
     With --owner, also applies the cloud-runbook §4.4 grants: database + schema + table
     privileges, default privileges for future objects, and OWNERSHIP of every matview in
     the triage schema (REFRESH is owner-only in PostgreSQL — no grant can substitute).
+    --data-schema extends the same grant body to your own schemas, creating them in the
+    fresh database, so loading data needs no hand-grant afterwards.
     """
     from triage import project_lifecycle
 
+    if data_schema and not owner:
+        raise typer.BadParameter(
+            "--data-schema grants privileges to the --owner role; pass --owner too"
+            " (without it there is no role to grant the schemas to)."
+        )
     registry_url, pool = _registry_pool_from_env()
     try:
         maint_url = project_lifecycle.maintenance_url(registry_url)
@@ -1449,14 +1465,20 @@ def project_create(
             display_name=display_name,
             database_name=database_name,
             owner=owner,
+            data_schemas=data_schema,
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     finally:
         pool.close()
+    schemas_note = (
+        f" Data schemas created + granted: [cyan]{', '.join(data_schema)}[/cyan]."
+        if data_schema
+        else ""
+    )
     granted = (
-        f" Role [cyan]{owner}[/cyan] granted + owns the triage matviews."
+        f" Role [cyan]{owner}[/cyan] granted + owns the triage matviews.{schemas_note}"
         if owner
         else ""
     )
@@ -1475,6 +1497,15 @@ def project_grant(
         ...,
         "--owner",
         help="Existing PG role to grant the database and hand matview ownership to.",
+    ),
+    data_schema: list[str] = typer.Option(
+        [],
+        "--data-schema",
+        help=(
+            "Also (re-)grant this existing data schema to --owner (repeatable). Fails"
+            " loud if the schema does not exist — this is the repair tool, and a typo"
+            " must not silently provision an empty schema."
+        ),
     ),
 ) -> None:
     """Re-apply the per-project role grants + matview ownership (cloud-runbook §4.4).
@@ -1496,7 +1527,10 @@ def project_grant(
         maint_url = project_lifecycle.maintenance_url(registry_url)
         project_url = swap_dbname(maint_url, db_name)
         statements = project_lifecycle.grant_project_role(
-            project_url, owner=owner, database_name=db_name
+            project_url,
+            owner=owner,
+            database_name=db_name,
+            data_schemas=data_schema,
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -1505,9 +1539,14 @@ def project_grant(
         pool.close()
     for statement in statements:
         console.print(f"  [dim]{statement}[/dim]")
+    schemas_note = (
+        f" incl. data schemas [cyan]{', '.join(data_schema)}[/cyan]"
+        if data_schema
+        else ""
+    )
     console.print(
         f"[green]Granted[/green] [cyan]{owner}[/cyan] on [cyan]{db_name}[/cyan]"
-        f" ({len(statements)} statements)."
+        f" ({len(statements)} statements{schemas_note})."
     )
 
 

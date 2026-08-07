@@ -219,3 +219,167 @@ def test_create_without_owner_leaves_matviews_with_the_creator(registry_db):
         project_lifecycle.drop_project(
             pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
         )
+
+
+DATA_SCHEMAS = ("raw", "clean")
+
+
+def test_create_with_data_schemas_provisions_and_grants(registry_db, project_role):
+    """--data-schema on create: the schemas are created in the fresh DB and granted.
+
+    The catalog is the assertion target — ``has_schema_privilege`` — not the returned
+    statement strings; generating SQL proves nothing about what PostgreSQL did.
+    """
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool,
+        slug=OWNER_SLUG,
+        maint_url=db_url,
+        owner=project_role,
+        data_schemas=DATA_SCHEMAS,
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with psycopg.connect(libpq_conninfo(project_url)) as conn:
+            for schema in DATA_SCHEMAS:
+                for privilege in ("USAGE", "CREATE"):
+                    row = conn.execute(
+                        "select has_schema_privilege(%s, %s, %s)",
+                        (project_role, schema, privilege),
+                    ).fetchone()
+                    assert row is not None and row[0] is True, (schema, privilege)
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_data_schema_default_privileges_cover_later_tables(registry_db, project_role):
+    """A table created AFTER the grant is readable by the role.
+
+    This is the ``alter default privileges`` half — the half that silently rots: the
+    initial grants look complete, then the first data load creates tables the role
+    cannot read.
+    """
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool,
+        slug=OWNER_SLUG,
+        maint_url=db_url,
+        owner=project_role,
+        data_schemas=("raw",),
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with psycopg.connect(libpq_conninfo(project_url), autocommit=True) as conn:
+            conn.execute("create table raw.events (id int)")
+            readable = conn.execute(
+                "select has_table_privilege(%s, 'raw.events', 'SELECT')",
+                (project_role,),
+            ).fetchone()
+            writable = conn.execute(
+                "select has_table_privilege(%s, 'raw.events', 'INSERT')",
+                (project_role,),
+            ).fetchone()
+        assert readable is not None and readable[0] is True
+        assert writable is not None and writable[0] is True
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_grant_missing_data_schema_fails_loud(registry_db, project_role):
+    """The repair path refuses a schema that does not exist, naming it — a typo must
+    not silently provision an empty schema (only ``create_project`` may create, since
+    a fresh database cannot have the schemas yet)."""
+    db_url, pool = registry_db
+    with pytest.raises(ValueError, match="data_schemas requires owner"):
+        project_lifecycle.create_project(
+            pool, slug=OWNER_SLUG, maint_url=db_url, data_schemas=("raw",)
+        )
+    project_lifecycle.create_project(
+        pool, slug=OWNER_SLUG, maint_url=db_url, owner=project_role
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with pytest.raises(ValueError, match=r"'nope' does not exist in database"):
+            project_lifecycle.grant_project_role(
+                project_url,
+                owner=project_role,
+                database_name=OWNER_SLUG,
+                data_schemas=("nope",),
+            )
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_grant_data_schemas_idempotent(registry_db, project_role):
+    """Re-applying with the same --data-schema flags is a clean no-op (the documented
+    repair-after-migration contract extends to the data schemas)."""
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool,
+        slug=OWNER_SLUG,
+        maint_url=db_url,
+        owner=project_role,
+        data_schemas=DATA_SCHEMAS,
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        first = project_lifecycle.grant_project_role(
+            project_url,
+            owner=project_role,
+            database_name=OWNER_SLUG,
+            data_schemas=DATA_SCHEMAS,
+        )
+        second = project_lifecycle.grant_project_role(
+            project_url,
+            owner=project_role,
+            database_name=OWNER_SLUG,
+            data_schemas=DATA_SCHEMAS,
+        )
+        assert first == second
+        assert any('on schema "raw"' in s for s in first), first
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )
+
+
+def test_data_schema_matviews_not_reassigned(registry_db, project_role):
+    """The negative assertion that keeps the blast radius honest: ownership transfer
+    exists only because REFRESH is owner-only on triage's OWN matviews. A matview in
+    the operator's data schema is their object — granting must not reassign it."""
+    db_url, pool = registry_db
+    project_lifecycle.create_project(
+        pool,
+        slug=OWNER_SLUG,
+        maint_url=db_url,
+        owner=project_role,
+        data_schemas=("raw",),
+    )
+    try:
+        project_url = swap_dbname(db_url, OWNER_SLUG)
+        with psycopg.connect(libpq_conninfo(project_url), autocommit=True) as conn:
+            conn.execute("create materialized view raw.mv as select 1 as x")
+        project_lifecycle.grant_project_role(
+            project_url,
+            owner=project_role,
+            database_name=OWNER_SLUG,
+            data_schemas=("raw",),
+        )
+        with psycopg.connect(libpq_conninfo(project_url)) as conn:
+            row = conn.execute(
+                "select matviewowner from pg_matviews"
+                " where schemaname = 'raw' and matviewname = 'mv'"
+            ).fetchone()
+            current = conn.execute("select current_user").fetchone()
+        assert row is not None and current is not None
+        assert row[0] == current[0] != project_role
+    finally:
+        project_lifecycle.drop_project(
+            pool, slug=OWNER_SLUG, confirm=OWNER_SLUG, maint_url=db_url
+        )

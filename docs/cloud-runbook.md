@@ -200,9 +200,11 @@ grant rds_iam to triage_myproject;
 export TRIAGE_REGISTRY_URL="postgresql://triage_admin:<pw>@localhost:54321/registry"
 export TRIAGE_MAINT_URL="postgresql://triage_admin:<pw>@localhost:54321/postgres"
 uv run triage project create myproject --display-name "My Project" \
-  --owner triage_myproject
+  --owner triage_myproject \
+  --data-schema raw --data-schema clean --data-schema ontology
 # -> registry row + CREATE DATABASE myproject + the triage schema at alembic head
 #    + the §4.0 grants and matview ownership for triage_myproject
+#    + your data schemas created and granted, ready to load into
 ```
 
 `--owner` names the role from §4.2 (it must already exist — this does not create it). It applies,
@@ -217,6 +219,13 @@ as the master, on the new database:
   in the `triage` schema — not just `leaderboard` by name, so a matview added by a future
   migration is covered without anyone remembering this step exists
 
+`--data-schema` (repeatable) extends the same grant body — `usage/create` on the schema,
+table/sequence privileges, and the default-privileges pair so tables your data load creates
+later are covered — to schemas of **your** naming; `raw`/`clean`/`ontology` above is a
+convention, not something triage knows about. On `create` the schemas are also created (a
+fresh database cannot have them yet). Ownership of your data objects is **never** transferred:
+the matview handover exists only because `REFRESH` is owner-only on triage's own matviews.
+
 Omit `--owner` in the local profile, where you already own everything you create.
 
 Re-apply it any time with `triage project grant`. It is idempotent, and it is the correct repair
@@ -224,14 +233,13 @@ after a migration that drops and recreates a matview — ownership resets to who
 migration, and `REFRESH` silently starts failing again:
 
 ```bash
-uv run triage project grant myproject --owner triage_myproject
+uv run triage project grant myproject --owner triage_myproject \
+  --data-schema raw --data-schema clean --data-schema ontology
 ```
 
-Your own data schemas still need their grants; the CLI only manages `triage`:
-
-```sql
-grant usage, create on schema raw, clean, ontology to triage_myproject;  -- as your data needs
-```
+On `grant`, a `--data-schema` that does not exist fails loud (this is the repair tool — a typo
+must not silently provision an empty schema); create missing schemas at `project create`, or by
+hand first.
 
 ### 4.4 The same thing by hand (fallback)
 
@@ -252,6 +260,8 @@ alter default privileges in schema triage
 alter default privileges in schema triage
   grant usage, select on sequences to triage_myproject;
 
+-- your data schemas — what --data-schema issues per named schema (plus the matching
+-- table/sequence grants and default privileges, same shape as the triage block above):
 grant usage, create on schema raw, clean, ontology to triage_myproject;  -- as your data needs
 
 -- Ownership transfer so the per-project role can REFRESH its matview (the leaderboard, ADR-0007).
