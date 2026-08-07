@@ -42,6 +42,7 @@ test-cov:
 # Run linter
 lint:
     uv run ruff check src/
+    uv run ruff format --check src/
 
 # Run type checker
 typecheck:

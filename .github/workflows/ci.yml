@@ -43,7 +43,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check src/
+      # Resolve ruff from uv.lock (not uvx) so CI and `just lint` run the same
+      # version; bumping it is `uv lock --upgrade-package ruff`, a reviewable diff.
+      - run: uv sync --extra dev
+      - run: uv run ruff check src/
+      # `check` does not imply formatting: a ruff 0.15.0 format sweep of 10 files
+      # rode into 092e2f43 unnoticed because this gate was missing.
+      - run: uv run ruff format --check src/
 
   frontend:
     runs-on: ubuntu-latest
