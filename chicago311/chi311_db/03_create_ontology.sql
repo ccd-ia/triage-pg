@@ -6,7 +6,10 @@
 -- self-referential as-of joins (ADR-0008 — featurizer does the feature engineering; we expose the
 -- graph). events = the same filings re-projected as a location/type EVENT stream that those joins
 -- aggregate (a leakage-free child: it carries only what is known at filing — where, what, when —
--- never the resolution). closed_date is the LABEL source only (resolution is the future target).
+-- never the resolution). The resolution (closed_date/status) is the LABEL source — the future
+-- being predicted — and lives in its OWN table, ontology.request_outcome, so that the entity
+-- table cannot reach the future: a guard that used to be a comment is now the schema. Label
+-- queries join request_outcome explicitly; a `select *` from entities stays leakage-free.
 --
 -- The ML problem (early-warning system): for a just-filed request, will it take LONGER than the
 -- SLA (default 14 days) to resolve? outcome=1 ("slow") is the request an operator would escalate.
@@ -35,9 +38,7 @@ select
     created_day_of_week,
     created_hour,
     created_month,
-    created_date,
-    closed_date,
-    status
+    created_date
 from clean.requests;
 
 alter table ontology.entities add primary key (entity_id);
@@ -45,6 +46,23 @@ create unique index entities_sr_uix on ontology.entities (sr_number);
 create index entities_area_ix on ontology.entities (community_area);
 create index entities_type_ix on ontology.entities (sr_type);
 create index entities_created_ix on ontology.entities (created_date);
+
+-- ------------------------------------------------------------ ontology.request_outcome = the future
+-- The realized resolution, one row per request (closed_date nullable while open). This is the label
+-- source and ONLY the label source: label queries join it by entity_id; it is never declared to
+-- featurizer and never a feature. Keeping it out of ontology.entities makes the leakage guard
+-- structural — the 2026-08-07 relocation was proven label-identical per entity (0 mismatches
+-- over all 30,654 requests) before it landed.
+drop table if exists ontology.request_outcome cascade;
+create table ontology.request_outcome as
+select
+    e.entity_id,
+    c.closed_date,
+    c.status
+from ontology.entities e
+join clean.requests c using (sr_number);
+
+alter table ontology.request_outcome add primary key (entity_id);
 
 -- ----------------------------------------------------------------- ontology.events = filing events
 -- One row per filed request, carrying ONLY filing-time facts (location, type, when). featurizer
@@ -79,11 +97,12 @@ select
     e.entity_id,
     e.sr_number,
     e.created_date,
-    e.closed_date,
-    e.status,
-    case when e.closed_date is not null
-         then round(extract(epoch from (e.closed_date - e.created_date)) / 86400.0, 2)
+    o.closed_date,
+    o.status,
+    case when o.closed_date is not null
+         then round(extract(epoch from (o.closed_date - e.created_date)) / 86400.0, 2)
     end                                                            as days_to_close,
-    (e.closed_date is null
-     or e.closed_date >= e.created_date + interval '14 days')      as slow_14d   -- TRUE = EWS positive
-from ontology.entities e;
+    (o.closed_date is null
+     or o.closed_date >= e.created_date + interval '14 days')      as slow_14d   -- TRUE = EWS positive
+from ontology.entities e
+join ontology.request_outcome o using (entity_id);

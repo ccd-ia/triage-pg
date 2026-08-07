@@ -36,8 +36,12 @@ uv run triage --dbfile chicago311-database.yaml db upgrade
 
 Same three-layer shape as every triage-pg project: `raw` → `clean` →
 `ontology.entities` (one row per request: `sr_type`, `owner_department`,
-`origin`, `ward`, `community_area`, `created_date`, `closed_date`) and
-`ontology.events`. The **entity here is the request itself**, not a facility —
+`origin`, `ward`, `community_area`, `created_date` — the facts known **at
+filing**) and `ontology.events`. The realized resolution (`closed_date`,
+`status`) lives in its own table, `ontology.request_outcome`: it is the future
+being predicted, and keeping it off the entity table makes the leakage guard
+structural — a `select *` from `ontology.entities` cannot reach the label
+source. The **entity here is the request itself**, not a facility —
 a deliberate contrast with DirtyDuck: cohorts don't have to be "things with
 history"; they can be *events at their moment of creation*.
 
@@ -50,12 +54,16 @@ month; the label is *slow resolution*:
 ```sql
 select
   e.entity_id,
-  (e.closed_date is null
-   or e.closed_date >= e.created_date + {label_timespan})::int as outcome
+  (o.closed_date is null
+   or o.closed_date >= e.created_date + {label_timespan})::int as outcome
 from ontology.entities as e
+join ontology.request_outcome as o using (entity_id)
 where e.created_date >= {as_of_date}::date - interval '1 month'
   and e.created_date <  {as_of_date}::date
 ```
+
+Note the join: the label query reaches the future *explicitly*, through
+`ontology.request_outcome` — the only table where the future lives.
 
 Whether a request was resolved is **administrative fact** — the city's own
 records close every ticket eventually, so `closed_date` (or its absence) is

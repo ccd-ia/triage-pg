@@ -56,8 +56,16 @@ _Avoid_: connector, plugin, driver
 An append-only scored row for an `(entity_id, as_of_date)` carrying a `scored_at` timestamp; never overwritten.
 _Avoid_: score, output, result
 
+**Entity**:
+The object of interest an `entity_id` names — one entity type per table, described by the static "core" attributes that identify *who or what this is*, never by things that happened to it (those are Events) and never by its future (that is the label's business). An entity table carries a validity/state representation — a `daterange` (DirtyDuck's `activity_period` + GIST index is the reference) or an entity-state table — so "who was in the population at time *t*" is answered by the schema, indexed, rather than re-derived inside every cohort query. Place a spatial coordinate on the entity only when it provably cannot move (a facility does not relocate); a moving location belongs on the Event. A Source with `role = 'entity'` declares such a table.
+_Avoid_: record, row, unit, subject
+
+**Event**:
+Something that happened at a point in spacetime, carrying: the involved Entity; when; a type discriminator; the event's own attributes — ordinarily a `jsonb` bag; and, where the data allows, a spatial coordinate (`geography(Point,4326)` + GIST, not untyped lat/lon doubles) placed on the event whenever the event can move. An Event has **two clocks**: occurrence time (when it happened) and knowledge time (when it became observable to us — what a Source's `knowledge_date_column` declares). Where the recording lag is genuinely zero, say so explicitly rather than implying it with a single collapsed date column. **Promotion rule** (companion, not a substitute for the jsonb clause): promote to a typed column anything you intend to featurize; keep `jsonb` for what you retain but do not model — jsonb costs the type system and the planner's selectivity estimates, and the Feature engine's DFS consumes columns. DirtyDuck is the worked example: `type`/`risk`/`result` are typed and featurized while the `violations` jsonb is retained detail. **Transaction-grained pattern**: when the unit of prediction is the arriving item (a DonorsChoose posting, a Chicago 311 filing), the entity legitimately *is* an event — but the durable actors it references (teacher, school, community area) still belong in their own Entity tables, not as bare text columns. A Source with `role = 'event'` declares such a table.
+_Avoid_: transaction (as a generic synonym), log row, fact (warehouse jargon)
+
 **Source**:
-A declared input table read by cohort, label, or feature queries; only declared Sources enter artifact identity (no SQL parsing).
+A declared input table read by cohort, label, or feature queries; only declared Sources enter artifact identity (no SQL parsing). Its `role` is exactly `entity` or `event` — the two terms above, which the schema enforces with a check constraint.
 _Avoid_: raw table, input data, from_obj
 
 **Source version (pin)**:

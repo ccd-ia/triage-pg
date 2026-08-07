@@ -21,7 +21,9 @@ Same packaging pattern: a Postgres image with `raw → clean → ontology` init 
      `sr_short_code`, `date`) — a leakage-free child stream carrying only where/what/when, never
      the resolution, so the as-of aggregations stay point-in-time-correct.
    - **`ontology.request_resolution`** (view) — realized `days_to_close` + the 14-day SLA breach,
-     for EDA / teaching. `closed_date` is the **label source only** (it is the future being predicted).
+     for EDA / teaching. `closed_date`/`status` live in their own table, `ontology.request_outcome` —
+     the **label source only** (it is the future being predicted), kept off the entity table so the
+     leakage guard is structural, not a comment.
 
 ## Data: baked subset vs a larger export
 

@@ -45,13 +45,16 @@ label_config:
   # outcome = 1 ("slow", the EWS positive) when the request is not resolved within the SLA window
   # ({label_timespan}, default 14 days) of its FILING. The SLA is tied to creation, so it is applied
   # to created_date — not as_of — which keeps the label honest regardless of the monthly grid slack.
-  # closed_date is the label source (never a feature: it is the future we are predicting).
+  # The resolution lives in ontology.request_outcome (one row per request, closed_date NULL while
+  # open) — the label source is a separate table precisely so the entity table cannot leak the
+  # future; label queries reach the future explicitly, by this join, or not at all.
   query: |
     select
       e.entity_id,
-      (e.closed_date is null
-       or e.closed_date >= e.created_date + {label_timespan})::int as outcome
+      (o.closed_date is null
+       or o.closed_date >= e.created_date + {label_timespan})::int as outcome
     from ontology.entities as e
+    join ontology.request_outcome as o using (entity_id)
     where e.created_date >= {as_of_date}::date - interval '1 month'
       and e.created_date <  {as_of_date}::date
 

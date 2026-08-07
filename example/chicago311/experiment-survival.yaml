@@ -44,18 +44,21 @@ label_config:
   name: time_to_resolution
   # created/closed are timestamps → day durations via epoch arithmetic. event_observed is a real
   # boolean (triage.labels.event_observed is boolean; emit the comparison directly, never ::int).
+  # The resolution lives in ontology.request_outcome (see experiment.yaml — the label source is
+  # a separate table so the entity table cannot leak the future).
   query: |
     select
       e.entity_id,
       case
-        when e.closed_date is not null
-         and e.closed_date < {as_of_date}::date + {label_timespan}
-        then extract(epoch from (e.closed_date - e.created_date)) / 86400.0
+        when o.closed_date is not null
+         and o.closed_date < {as_of_date}::date + {label_timespan}
+        then extract(epoch from (o.closed_date - e.created_date)) / 86400.0
         else extract(epoch from (({as_of_date}::date + {label_timespan}) - e.created_date)) / 86400.0
       end as duration,
-      (e.closed_date is not null
-       and e.closed_date < {as_of_date}::date + {label_timespan}) as event_observed
+      (o.closed_date is not null
+       and o.closed_date < {as_of_date}::date + {label_timespan}) as event_observed
     from ontology.entities as e
+    join ontology.request_outcome as o using (entity_id)
     where e.created_date >= {as_of_date}::date - interval '1 month'
       and e.created_date <  {as_of_date}::date
 
