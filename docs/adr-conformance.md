@@ -1,11 +1,12 @@
 # ADR conformance audit
 
 - Date: 2026-07-03
-- Updated: 2026-08-07 — extended through ADR-0030 (post-v1.1.0 close-out plan,
-  Phase 3). ADRs 0026–0028 were only *planned* at the original audit (their
+- Updated: 2026-08-07 — extended through ADR-0031 (post-v1.1.0 close-out plan,
+  Phases 3 and 6). ADRs 0026–0028 were only *planned* at the original audit (their
   criteria pre-check is Flag #4 below); all three have since been accepted and
-  implemented, so they get table rows now, alongside the two ADRs written after
-  the audit (0029 cloud-validation target, 0030 target-history path).
+  implemented, so they get table rows now, alongside the ADRs written after
+  the audit (0029 cloud-validation target, 0030 target-history path, 0031 SHAP
+  scope — written and audited the same day).
 - Auditor: claude-fable-5 (Claude Code), per `specs/triage-pg-v1-completion.html` Phase 1
 - Method: every ADR re-read against the tree at `76eb46fc`; evidence spot-verified by
   running the cited greps/tests, not by trusting status lines. The full suite was run
@@ -48,6 +49,7 @@ unexercised** (built + mock-tested, never run against the real environment).
 | 0028 | OIDC behind the AuthBackend seam | fulfilled (2026-08-07) | `dashboard/oidc.py` (`TRIAGE_AUTH=oidc`, 401-with-login_url for the SPA, logout); `dashboard_tests/test_oidc.py` — 9 stub-IdP tests, re-run green for this audit |
 | 0029 | Cloud validation on triage-pg's own RDS + IAM, not shared egobytp | fulfilled (2026-08-07) | Self-contained footprint: `infra/terraform/{rds,iam,batch,ecr,endpoints,s3}.tf`; `token_provider` seam in `profiles/auth.py` (ADR-0004) unchanged, as the ADR requires. The validation it records ran 2026-07-19: live Batch E2E succeeded (20 models / 268,860 predictions / 120 evaluations into the `cloudtest` RDS), then the footprint was torn down (23 triage-only resources; no tfstate/tfplan tracked in git). The standing-posture question (shared RDS + SET ROLE) remains deliberately deferred per the ADR's own Consequences — that is conformance, not a gap |
 | 0030 | Target-history path: two shapes, one leakage boundary | fulfilled (2026-08-07) | `adapters/target_history.py` (windowed-label lags `t + w ≤ as_of_date` + optional `history_query` raw series `knowledge_date < as_of_date`); reserved `_target_lag_*`/`_hist_*` columns excluded from features, encoding, and both imputation passes (`adapters/matrix.py`, `adapters/model.py`); consumed by `catwalk/baselines/timeseries.py`; leak boundaries tested in `adapter_tests/test_target_history.py` (7 tests) + `test_target_history_seam.py` (4) |
+| 0031 | v1.2.0 SHAP scope: TreeSHAP-only, on demand, into `individual_importances` | holding (2026-08-07) | Scope-only ADR written 2026-08-07; deliberately no implementation yet (that is the v1.2.0 plan's job). Conformance today = the gate held: no SHAP code in the tree, `shap` not in `pyproject.toml`, no changes under `catwalk/` |
 
 ## Contradiction found (1)
 
@@ -98,5 +100,5 @@ this exclusion.
   docstrings in `in_pg_evaluation.py`); count recorded in the plan's Phase 1
   checklist.
 - `grep -L 'Status' docs/adr/00*.md` — empty: every ADR carries a status line.
-- This document: 30 ADR rows (`grep -c '^| 00'`) — one per accepted ADR in
+- This document: 31 ADR rows (`grep -c '^| 00'`) — one per accepted ADR in
   `docs/adr/`; a count mismatch means an ADR landed without an audit row.
