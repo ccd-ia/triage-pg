@@ -495,6 +495,16 @@ def leaderboard_command(
         None, "--parameter", "-p", help="Filter to one parameter (e.g. '100_abs')."
     ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to print."),
+    windowed: bool = typer.Option(
+        False,
+        "--windowed",
+        help=(
+            "Aggregate each model across its whole test window instead of showing one"
+            " row per as_of_date: n_as_of_dates, value_mean, value_stddev, value_min"
+            " from triage.evaluations_windowed (full cohort only). Answers 'is this"
+            " model steady?', which a single date's value cannot."
+        ),
+    ),
     as_json: bool = typer.Option(False, "--json", help="Print raw rows as JSON."),
 ) -> None:
     """The experiment leaderboard, headless (ADR-0012) — the same ``triage.leaderboard``
@@ -502,15 +512,35 @@ def leaderboard_command(
 
     The matview is created WITH NO DATA and refreshed at run end; if no run has populated
     it yet this command refreshes it once and retries.
+
+    With ``--windowed``, reads ``triage.evaluations_windowed`` instead — one row per
+    (model, metric, parameter) rolled up over every evaluated as_of_date (migration
+    0010). The two grains answer different questions: per-date is "how did it do at
+    each prediction time", windowed is "how does it do across them".
     """
     from psycopg import errors as pg_errors
 
     engine = get_pool(ctx)
-    sql = (
-        "select model_group_id, model_type, split_kind, metric, parameter, as_of_date,"
-        "       value, value_expected, value_std, model_id, train_end_time"
-        " from triage.leaderboard where experiment_hash = %(hash)s"
-    )
+    if windowed:
+        # A plain view over per-date rows — no matview, so no refresh dance. Full
+        # cohort only (subset_hash = ''): a window pooled across subsets would answer
+        # no question anyone asks (same read audition uses).
+        sql = (
+            "select mg.model_group_id, mg.model_type, w.split_kind, w.metric,"
+            "       w.parameter, w.n_as_of_dates, w.value_mean, w.value_stddev,"
+            "       w.value_min, w.model_id, m.train_end_time"
+            " from triage.evaluations_windowed w"
+            " join triage.models m on m.model_id = w.model_id"
+            " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
+            " join triage.runs r on r.run_id = m.run_id"
+            " where r.experiment_hash = %(hash)s and w.subset_hash = ''"
+        )
+    else:
+        sql = (
+            "select model_group_id, model_type, split_kind, metric, parameter, as_of_date,"
+            "       value, value_expected, value_std, model_id, train_end_time"
+            " from triage.leaderboard where experiment_hash = %(hash)s"
+        )
     params: Dict[str, Any] = {"hash": experiment_hash, "limit": limit}
     if metric:
         sql += " and metric = %(metric)s"
@@ -518,22 +548,29 @@ def leaderboard_command(
     if parameter is not None:
         sql += " and parameter = %(parameter)s"
         params["parameter"] = parameter
-    sql += " order by metric, parameter, as_of_date desc, value desc nulls last"
+    if windowed:
+        sql += " order by metric, parameter, value_mean desc nulls last"
+    else:
+        sql += " order by metric, parameter, as_of_date desc, value desc nulls last"
     sql += " limit %(limit)s"
     with engine.connection() as conn:
         params["hash"] = _resolve_experiment_hash(conn, experiment_hash)
-        try:
-            rows = conn.execute(sql, params).fetchall()
-        except pg_errors.ObjectNotInPrerequisiteState:
-            conn.rollback()
-            conn.execute("refresh materialized view triage.leaderboard")
+        if windowed:
             rows = conn.execute(sql, params).fetchall()
         else:
-            if not rows:
-                # Populated but possibly STALE (e.g. a migration refreshed it before this
-                # experiment evaluated) — refresh once and retry before reporting empty.
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            except pg_errors.ObjectNotInPrerequisiteState:
+                conn.rollback()
                 conn.execute("refresh materialized view triage.leaderboard")
                 rows = conn.execute(sql, params).fetchall()
+            else:
+                if not rows:
+                    # Populated but possibly STALE (e.g. a migration refreshed it before
+                    # this experiment evaluated) — refresh once and retry before
+                    # reporting empty.
+                    conn.execute("refresh materialized view triage.leaderboard")
+                    rows = conn.execute(sql, params).fetchall()
     if as_json:
         console.print_json(json.dumps(rows, default=str))
         return
@@ -542,6 +579,42 @@ def leaderboard_command(
             "[yellow]No leaderboard rows — unknown experiment hash, or nothing has"
             " evaluated yet.[/yellow]"
         )
+        return
+    if windowed:
+        # The title must name the grain: a windowed mean mistaken for a single date's
+        # value is exactly the confusion this flag exists to remove.
+        table = Table(
+            title=(
+                f"Leaderboard — experiment {experiment_hash[:12]}… (windowed: one row"
+                " per model across all its evaluated as_of_dates)"
+            ),
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in (
+            "Group",
+            "Model",
+            "Algorithm",
+            "Metric",
+            "Param",
+            "Dates",
+            "Mean",
+            "Stddev",
+            "Min",
+        ):
+            table.add_column(col)
+        for r in rows:
+            table.add_row(
+                str(r["model_group_id"]),
+                str(r["model_id"]),
+                str(r["model_type"]).rsplit(".", 1)[-1],
+                r["metric"],
+                r["parameter"],
+                str(r["n_as_of_dates"]),
+                _fmt(r["value_mean"]),
+                _fmt(r["value_stddev"]),
+                _fmt(r["value_min"]),
+            )
+        console.print(table)
         return
     table = Table(
         title=f"Leaderboard — experiment {experiment_hash[:12]}…", box=box.SIMPLE_HEAVY

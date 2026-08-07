@@ -23,7 +23,11 @@ temporal_config:
   # One training row per entity every 6 months
   training_as_of_date_frequencies: '6month'
   training_label_timespans: ['6month']
-  # Test: 1 date at the split boundary (0day duration = point-in-time test)
+  # Test: 1 date at the split boundary. '0day' is a deliberate point-in-time teaching
+  # default — it yields exactly ONE evaluation point per model per metric. A deployed
+  # program scores on a cadence and gets one evaluation row-set per as_of_date; see
+  # experiment-cadence.yaml (a runnable twin) and the docs-site reference/evaluation
+  # page for how test_durations × test_as_of_date_frequencies sets that cadence.
   test_as_of_date_frequencies: '6month'
   test_durations: '0day'
   test_label_timespans: ['6month']

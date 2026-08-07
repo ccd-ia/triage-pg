@@ -265,3 +265,43 @@ def test_cli_leaderboard_refreshes_unpopulated_matview(
     rows = _json_payload(as_json.output)
     assert 0 < len(rows) <= 3
     assert {"model_group_id", "metric", "value"} <= set(rows[0])
+
+
+def test_cli_leaderboard_windowed_rolls_up_the_test_window(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+):
+    """--windowed reads evaluations_windowed: one row per model across its window.
+
+    The fixture evaluates each model at three as_of_dates, so the windowed row must
+    carry n_as_of_dates=3 and the hand-computable mean/min — g2: (0.60+0.90+0.90)/3.
+    Without the flag the per-date shape must be unchanged (the regression fence for
+    existing callers).
+    """
+    ids = _seed_audition_fixture(db_pool_greenfield)
+    g2, _ = ids["g2"]
+
+    windowed = _invoke(
+        db_url, tmp_path, monkeypatch, "leaderboard", EXP, "--windowed", "--json"
+    )
+    assert windowed.exit_code == 0, windowed.output
+    rows = _json_payload(windowed.output)
+    assert len(rows) == 2  # one row per model, not one per (model, as_of_date)
+    top = rows[0]  # ranked by value_mean desc
+    assert top["model_group_id"] == g2
+    assert top["n_as_of_dates"] == 3
+    assert top["value_mean"] == pytest.approx(0.8)
+    assert top["value_min"] == pytest.approx(0.6)
+    assert "value_stddev" in top
+
+    # The human table must name the grain, so a windowed mean cannot be mistaken
+    # for a single date's value.
+    human = _invoke(db_url, tmp_path, monkeypatch, "leaderboard", EXP, "--windowed")
+    assert human.exit_code == 0, human.output
+    assert "windowed" in human.output
+
+    plain = _invoke(db_url, tmp_path, monkeypatch, "leaderboard", EXP, "--json")
+    assert plain.exit_code == 0, plain.output
+    plain_rows = _json_payload(plain.output)
+    assert len(plain_rows) == 6  # 2 models x 3 as_of_dates — the per-date grain
+    assert {"as_of_date", "value"} <= set(plain_rows[0])
+    assert "n_as_of_dates" not in plain_rows[0]

@@ -61,7 +61,10 @@ training.
 `10_pct` cuts, `auc_roc`, `average_precision` — all PL/pgSQL over the
 predictions table. Precision@k is the operational metric ("if we act on the
 top k, how often are we right?"); AUC summarizes ranking quality
-independently of any cut.
+independently of any cut. Every metric is computed **per test `as_of_date`**,
+with a windowed rollup for stability — see
+[Evaluation](/triage-pg/reference/evaluation/) for the grain and how to pick
+a cadence.
 
 **Estimators.** Any sklearn classifier by class path
 (`sklearn.tree.DecisionTreeClassifier`,

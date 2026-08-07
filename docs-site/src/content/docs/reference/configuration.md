@@ -213,6 +213,11 @@ temporal_config:
 - If the resulting windows yield no splits the run fails with
   `Timechop produced no train/test splits for this temporal_config — widen the
   feature/label windows or shorten the label_timespan`.
+- Note the example's `test_durations: '0day'`: a deliberate point-in-time teaching
+  default that yields exactly **one** evaluation point per model per metric.
+  `test_durations` × `test_as_of_date_frequencies` decides how many prediction
+  times each model is evaluated at — the evaluation grain, what it buys you, and
+  how to pick a cadence are covered in [Evaluation](/triage-pg/reference/evaluation/).
 
 ## `feature_config`
 
