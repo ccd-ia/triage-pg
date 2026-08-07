@@ -69,3 +69,28 @@ else. So the new capabilities are reachable today, two ways:
 - The triage-pg ↔ featurizer seam (ADR-0008): triage owns timechop→`as_of_dates`, cohort, labels,
   matrix assembly, cache keys, and the imputation split (ADR-0009); featurizer owns DFS. Triage
   concepts still must never leak into featurizer.
+
+## Why the text bridges are NOT used on DirtyDuck (decided 2026-08-07)
+
+The obvious candidate — violation text in the DirtyDuck tutorial — deliberately does **not** go
+through the Path-1 text bridges. Recorded here so the idea is settled rather than re-proposed;
+the violation-content features shipped instead as typed SQL projections
+(`example/dirtyduck/experiment-violations.yaml`). Two independent grounds:
+
+- **Signal mismatch.** The Path-1 family is sentiment / readability / language-ID / NER, built
+  for narrative text (case notes, complaint free-text, social media). Against templated English
+  regulatory prose: sentiment measures nothing (not opinion text), the readability of inspector
+  boilerplate is not a facility-risk signal, language ID is a zero-variance constant, and NER has
+  almost nothing to find (no persons, money, or organizations in a violation comment) while
+  pulling in spaCy. Moreover the fields themselves argue against free-text treatment:
+  `severity` is a deterministic function of `code` and `description` is the code's canonical
+  text (1:1), so text-mining `description` is provably redundant with counting codes; the only
+  genuinely free text is the inspector `comment`, which a short word-bounded keyword set in
+  plain SQL captures.
+- **Operational mismatch.** triage-pg does not orchestrate bridge materialization (see "How
+  triage-pg consumes them" above — run it as a Dagster/Snakemake asset or a one-off *before*
+  `triage run`). DirtyDuck's entire promise is a two-command end-to-end run; a mandatory
+  pre-step outside the pipeline breaks the tutorial it was meant to enrich.
+
+Neither ground generalizes to all text: on narrative text (case notes, 311 complaint free-text
+at scale) the bridges remain the right instrument, reached exactly as this page describes.

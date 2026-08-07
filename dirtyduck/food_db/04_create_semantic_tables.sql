@@ -82,6 +82,26 @@ create table ontology.events as (
             i.inspection, i.type, i.date, i.risk, i.result,
             i.license_num, i.facility, i.facility_aka,
             i.facility_type, i.address,
+            -- Typed promotions of the violations content (the ontology promotion rule,
+            -- CONTEXT.md "Event"): promote what gets featurized, keep the jsonb as the
+            -- retained long tail. severity is a DETERMINISTIC function of code
+            -- (03_create_violations_table.sql: 1-14 critical / 15-29 serious / else minor)
+            -- and description is the code's canonical text (1:1) — so counting by severity
+            -- captures everything free-text description mining could. An inspection with
+            -- no violations carries one placeholder row with code = '' — nullif excludes it.
+            count(*) filter (where nullif(v.code, '') is not null)  as n_violations,
+            count(*) filter (where v.severity = 'critical')         as n_critical,
+            count(*) filter (where v.severity = 'serious')          as n_serious,
+            count(*) filter (where v.severity = 'minor')            as n_minor,
+            -- Keyword flags over the inspector's free-text comment (the only genuinely
+            -- free text — see above). Plain PostgreSQL regex, word-bounded (\y) so 'rat'
+            -- cannot match 'refrigeration'. The list is deliberately SHORT: each term is a
+            -- concept a health inspector actually writes down; a longer list overfits this
+            -- dataset and turns a teaching feature into a leaderboard trick.
+            max((v.comment ~ '\y(rodent|rodents|mice|mouse|rat|rats|droppings)\y')::int) as kw_rodent,
+            max((v.comment ~ '\y(roach|roaches|cockroach|cockroaches|insect|insects|flies)\y')::int) as kw_insect,
+            max((v.comment ~ 'temperature|thermometer')::int)       as kw_temperature,
+            max((v.comment ~ '\y(handwashing|hand washing|hand sink|soap)\y')::int) as kw_handwashing,
             jsonb_agg(
                 jsonb_build_object(
                     'code', v.code,
@@ -105,6 +125,8 @@ create table ontology.events as (
     select
         i.inspection as event_id,
         e.entity_id, i.type, i.date, i.risk, i.result,
+        i.n_violations, i.n_critical, i.n_serious, i.n_minor,
+        i.kw_rodent, i.kw_insect, i.kw_temperature, i.kw_handwashing,
         i.violations
     from
         entities as e

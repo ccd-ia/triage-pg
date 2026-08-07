@@ -5,8 +5,10 @@
 -- Spatial: backs the geography `location` column (the only extension currently load-bearing).
 create extension if not exists postgis;
 
--- Text toolkit — kept for *potential* violation-description / fuzzy-match features (deferred,
--- DB-audit #5/§7); light and RDS-available. Remove if text features are ruled out.
+-- Text toolkit — the deferred violation-text features landed 2026-08-07 as plain word-bounded
+-- regex flags over the inspector comment (04_create_semantic_tables.sql kw_* columns; consumed by
+-- example/dirtyduck/experiment-violations.yaml). These extensions stay for fuzzy-match /
+-- similarity exploration beyond the fixed keyword set; light and RDS-available.
 create extension if not exists pg_trgm;
 create extension if not exists fuzzystrmatch;
 create extension if not exists unaccent;

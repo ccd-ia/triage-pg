@@ -169,6 +169,17 @@ ensembles trading places at the top, the baselines below them:
 model clears the floor, so the features are earning their keep. That gap is the
 whole point of shipping baselines in the grid.
 
+**Want a bigger gap?** This config features the inspection *verdict*
+(`result`/`risk`) and never its *content* — what inspectors actually found.
+[`experiment-violations.yaml`](https://github.com/ccd-ia/triage-pg/blob/main/example/dirtyduck/experiment-violations.yaml)
+promotes the violations record into typed counts (`n_critical`, …) and keyword
+flags over the inspector's comment ("did a prior inspection mention rodents"),
+then uses a `feature_groups` leave-one-out fan-out to make the comparison
+legible: with violation-content features the mean test AUC climbs to ≈ 0.62,
+and *removing* them costs more than removing any other feature group — the
+verdict features were the weak ones. Same experiment hash, new runs: the
+leaderboard compares them directly.
+
 Hash prefixes work everywhere the CLI takes a hash, git-style.
 
 ## PASS — now the five-minute tour
