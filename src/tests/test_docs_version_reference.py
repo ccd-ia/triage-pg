@@ -5,6 +5,11 @@ The site drifted twice before this guard existed: the landing page told readers 
 ``triage-pg 1.0.0`` as captured CLI output. Both are the kind of error nobody notices from
 the inside — the reader is the one who hits it.
 
+Then the same defect recurred *outside* the guard's reach: ``README.md`` — the repo's
+front page — advertised ``:v1.0.0-rc1`` three releases after that tag, because the scan
+root here was ``docs-site/`` only. The repo-root markdown is now scanned too; the guard's
+blast radius is a constant in this file, and narrowing it is how drift survives.
+
 The banner in ``docs-site/astro.config.mjs`` derives the version from ``pyproject.toml`` at
 build time and cannot rot. Prose and captured console output can, so they are checked here.
 """
@@ -18,8 +23,16 @@ import triage
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_SITE = REPO_ROOT / "docs-site" / "src" / "content" / "docs"
+#: Repo-root pages readers hit before the docs site — the README rc1 drift lived here.
+ROOT_DOCS = (REPO_ROOT / "README.md", REPO_ROOT / "CONTRIBUTING.md")
 ASTRO_CONFIG = REPO_ROOT / "docs-site" / "astro.config.mjs"
 VERSION_BANNER = REPO_ROOT / "docs-site" / "src" / "components" / "VersionBanner.astro"
+
+
+def _scanned_files() -> list[Path]:
+    """Every file the version guards read: the docs site plus the repo-root pages."""
+    return [*sorted(DOCS_SITE.rglob("*.md*")), *ROOT_DOCS]
+
 
 #: ``triage --version`` output captured into a fenced console block.
 _CLI_VERSION = re.compile(r"^triage-pg (\d+\.\d+\.\d+)", re.MULTILINE)
@@ -31,11 +44,16 @@ def test_docs_site_exists():
     """Guard the guard: a moved docs tree must fail loudly, not silently pass."""
     assert DOCS_SITE.is_dir(), f"docs site content not found at {DOCS_SITE}"
     assert ASTRO_CONFIG.is_file(), f"astro config not found at {ASTRO_CONFIG}"
+    for path in ROOT_DOCS:
+        assert path.is_file(), (
+            f"repo-root page not found at {path} — if it was renamed, update ROOT_DOCS"
+            " so the version guards keep scanning it"
+        )
 
 
 def test_captured_cli_version_matches_the_package():
     stale: list[str] = []
-    for path in sorted(DOCS_SITE.rglob("*.md*")):
+    for path in _scanned_files():
         for match in _CLI_VERSION.finditer(path.read_text(encoding="utf-8")):
             if match.group(1) != triage.__version__:
                 stale.append(
@@ -49,7 +67,7 @@ def test_captured_cli_version_matches_the_package():
 
 def test_advertised_image_tag_matches_the_package():
     stale: list[str] = []
-    for path in sorted(DOCS_SITE.rglob("*.md*")):
+    for path in _scanned_files():
         for match in _IMAGE_TAG.finditer(path.read_text(encoding="utf-8")):
             tag = match.group(1) + (match.group(2) or "")
             if tag != triage.__version__:

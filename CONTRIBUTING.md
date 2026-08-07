@@ -13,7 +13,7 @@ first will save you a round-trip in review:
 
 - **[`CONTEXT.md`](CONTEXT.md)** — the domain glossary (Project, Experiment, Run,
   as_of_date, Cohort, Matrix, …). Use these terms exactly, in code and prose.
-- **[`docs/adr/`](docs/adr/)** — 28 accepted architecture decisions. If your change
+- **[`docs/adr/`](docs/adr/)** — the accepted architecture decisions. If your change
   contradicts one, open an issue first; if it *implements* one, cite it in the PR.
 - **[`.out-of-scope/`](.out-of-scope/)** — features we have explicitly rejected
   (e.g. deep learning). Check here before proposing scope additions.

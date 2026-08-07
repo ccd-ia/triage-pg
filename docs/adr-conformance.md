@@ -1,10 +1,16 @@
 # ADR conformance audit
 
 - Date: 2026-07-03
+- Updated: 2026-08-07 — extended through ADR-0030 (post-v1.1.0 close-out plan,
+  Phase 3). ADRs 0026–0028 were only *planned* at the original audit (their
+  criteria pre-check is Flag #4 below); all three have since been accepted and
+  implemented, so they get table rows now, alongside the two ADRs written after
+  the audit (0029 cloud-validation target, 0030 target-history path).
 - Auditor: claude-fable-5 (Claude Code), per `specs/triage-pg-v1-completion.html` Phase 1
 - Method: every ADR re-read against the tree at `76eb46fc`; evidence spot-verified by
   running the cited greps/tests, not by trusting status lines. The full suite was run
-  green at the end of the audit (see Verification at the bottom).
+  green at the end of the audit (see Verification at the bottom). The 2026-08-07 rows
+  were verified the same way against the tree at `81d17111`.
 
 Verdicts: **fulfilled** (implemented + evidence verified) · **partial** (a named gap
 remains) · **holding** (a deliberate deferral that still holds) · **code-complete,
@@ -37,6 +43,11 @@ unexercised** (built + mock-tested, never run against the real environment).
 | 0023 | Feature groups + four strategies | fulfilled | `adapters/feature_groups.py` (partition + all/leave-one-out/leave-one-in/all-combinations, capped); `adapter_tests/test_feature_groups.py`; fan-out into Runs under one Experiment |
 | 0024 | Write webapp: registry POSTs + user-auth seam | fulfilled | `triage/registry.py`, `dashboard/auth.py` (`Principal`/`AuthBackend`/`TrustedHeaderAuth`), `dashboard/write_routes.py`; `dashboard_tests/test_write_api.py`; commits `b657b17f` (backend) / `e9310683` (frontend). Status line added 2026-07-03 |
 | 0025 | Per-project DB routing — project switcher | fulfilled | `dashboard/project_routing.py` (`resolve_active_pool`/`pool_for_slug`/`project_dburl`); `dashboard_tests/test_project_routing.py`; live-proven across the 3 tutorial DBs (commit `76eb46fc`). Status line added 2026-07-03. Open refinement: full reload on switch (deep-link fix → plan Phase 2) |
+| 0026 | Survival estimators + in-PG C-index | fulfilled (2026-08-07) | `catwalk/estimators/survival.py` (sksurv wrappers, `survival` extra); migration `0011_survival_c_index.py` — `triage.c_index` matches `concordance_index_censored` to 1e-9 on live chi311 data (C-index up to 0.79); survival baselines (KaplanMeier/NelsonAalen/MarginalHazard/SingleFeatureCox) added in v1.1.0 |
+| 0027 | Monitoring: scheduled `triage score` + SQL views, no daemon | fulfilled (2026-08-07) | Migration `0012_monitoring_views.py` (`monitoring_score_drift` PSI+KS at scipy parity 1e-9, `monitoring_volume`, `monitoring_calibration`, `monitoring_outcome_tracking`); `triage score` CLI; EventBridge template; dashboard MonitoringView; live-smoked on chi311. Subset-guard + twin-model dedupe fixes in migration 0018 (2026-07-10) |
+| 0028 | OIDC behind the AuthBackend seam | fulfilled (2026-08-07) | `dashboard/oidc.py` (`TRIAGE_AUTH=oidc`, 401-with-login_url for the SPA, logout); `dashboard_tests/test_oidc.py` — 9 stub-IdP tests, re-run green for this audit |
+| 0029 | Cloud validation on triage-pg's own RDS + IAM, not shared egobytp | fulfilled (2026-08-07) | Self-contained footprint: `infra/terraform/{rds,iam,batch,ecr,endpoints,s3}.tf`; `token_provider` seam in `profiles/auth.py` (ADR-0004) unchanged, as the ADR requires. The validation it records ran 2026-07-19: live Batch E2E succeeded (20 models / 268,860 predictions / 120 evaluations into the `cloudtest` RDS), then the footprint was torn down (23 triage-only resources; no tfstate/tfplan tracked in git). The standing-posture question (shared RDS + SET ROLE) remains deliberately deferred per the ADR's own Consequences — that is conformance, not a gap |
+| 0030 | Target-history path: two shapes, one leakage boundary | fulfilled (2026-08-07) | `adapters/target_history.py` (windowed-label lags `t + w ≤ as_of_date` + optional `history_query` raw series `knowledge_date < as_of_date`); reserved `_target_lag_*`/`_hist_*` columns excluded from features, encoding, and both imputation passes (`adapters/matrix.py`, `adapters/model.py`); consumed by `catwalk/baselines/timeseries.py`; leak boundaries tested in `adapter_tests/test_target_history.py` (7 tests) + `test_target_history_seam.py` (4) |
 
 ## Contradiction found (1)
 
@@ -78,6 +89,8 @@ this exclusion.
    0027 monitoring (no-daemon scheduling vs pg_cron vs a worker is a real
    architectural fork), 0028 OIDC (in-app flow vs proxy-injected identity).
    Each ADR will record its criteria check in its Context section.
+   **CLOSED 2026-08-07**: all three were accepted, implemented, and now carry
+   audited table rows above.
 
 ## Verification
 
@@ -85,4 +98,5 @@ this exclusion.
   docstrings in `in_pg_evaluation.py`); count recorded in the plan's Phase 1
   checklist.
 - `grep -L 'Status' docs/adr/00*.md` — empty: every ADR carries a status line.
-- This document: 25 ADR rows (`grep -c '^| 00'`).
+- This document: 30 ADR rows (`grep -c '^| 00'`) — one per accepted ADR in
+  `docs/adr/`; a count mismatch means an ADR landed without an audit row.
