@@ -81,12 +81,12 @@ feature_config:
   # depth 2 explode into ~2,500 columns of transform compositions
   # (ABS(facilities.MEAN(…)), CUM_SUM(…), nested ABS — some past PostgreSQL's 63-char
   # name limit). This keeps every feature something a reader can say aloud: counts of
-  # verdicts, sums/means/maxes of violation content. NOTE 'transformations: []' cannot
-  # express "no transforms" (featurizer treats an empty list as unset and applies its
-  # 17 defaults); [identity] is the working spelling — it passes aggregations through
-  # under their own names and adds no wrapper columns.
+  # verdicts, sums/means/maxes of violation content. The empty list means "no
+  # transform layer" — honored since featurizer v1.0.1 (before that it silently fell
+  # back to the 17 defaults; 'transformations: [identity]' is the byte-identical
+  # spelling that also works on older engines).
   aggregations: [count, nunique, sum, mean, max]
-  transformations: [identity]
+  transformations: []
 
   entities:
     - alias: facilities

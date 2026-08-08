@@ -1,6 +1,6 @@
 # featurizer v0.9.x feature families in triage-pg
 
-**Status:** current pin `featurizer[parquet] @ v1.0.0` (`pyproject.toml`, ADR-0008/0016) — the
+**Status:** current pin `featurizer[parquet] @ v1.0.1` (`pyproject.toml`, ADR-0008/0016) — the
 featurizer **stability release**: the 0.9.x families below are unchanged, but the public config
 schema + `Featurizer` surface are now frozen under featurizer's own API-stability commitment, and
 the families are validated at realistic scale. **Date:** 2026-07-19.
