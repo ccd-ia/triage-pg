@@ -84,6 +84,25 @@ def upgrade():
     op.execute(SCHEMA_DDL)
 
 
+TEARDOWN_DDL = r"""
+-- Mirrors the results baseline's teardown, and for the same reason: alembic's stamp
+-- table lives in this schema (``version_table_schema='registry'``, env.py) and its
+-- row is deleted *after* this function returns, so a plain cascade drop would take
+-- the bookkeeping with it ("expected to match one row when deleting"). Swap the
+-- schema and carry the stamp across; an empty version table is left behind, exactly
+-- as a public-schema alembic install leaves one.
+do $$
+begin
+    if exists (select 1 from pg_namespace where nspname = 'registry') then
+        execute 'alter schema registry rename to registry_downgrading';
+        execute 'create schema registry';
+        execute 'alter table if exists registry_downgrading.registry_schema_versions set schema registry';
+        execute 'drop schema registry_downgrading cascade';
+    end if;
+end
+$$;
+"""
+
+
 def downgrade():
-    # The schema owns its tables; cascade drops everything.
-    op.execute("drop schema if exists registry cascade;")
+    op.execute(TEARDOWN_DDL)

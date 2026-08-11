@@ -331,6 +331,27 @@ def upgrade():
     op.execute(SCHEMA_DDL)
 
 
+TEARDOWN_DDL = r"""
+-- The schema owns its enums, functions and views, so a cascade drop is still the
+-- right teardown -- but alembic's stamp table lives in this schema too
+-- (``version_table_schema='triage'``, env.py), and alembic deletes its row *after*
+-- this function returns. Dropping the schema wholesale would take the bookkeeping
+-- table with it and the downgrade would die on "expected to match one row when
+-- deleting". So swap the schema out from under everything and carry the stamp
+-- across: what remains afterwards is exactly the residue a public-schema alembic
+-- install leaves behind -- an empty version table, nothing else.
+do $$
+begin
+    if exists (select 1 from pg_namespace where nspname = 'triage') then
+        execute 'alter schema triage rename to triage_downgrading';
+        execute 'create schema triage';
+        execute 'alter table if exists triage_downgrading.results_schema_versions set schema triage';
+        execute 'drop schema triage_downgrading cascade';
+    end if;
+end
+$$;
+"""
+
+
 def downgrade():
-    # The schema owns its enums and views; cascade drops everything.
-    op.execute("drop schema if exists triage cascade;")
+    op.execute(TEARDOWN_DDL)

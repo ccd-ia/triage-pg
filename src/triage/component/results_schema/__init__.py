@@ -75,18 +75,25 @@ def upgrade_if_clean(dburl):
     script_ = script.ScriptDirectory.from_config(alembic_cfg)
     try:
         with engine.connect() as conn:
+            # Schema-qualified on purpose: unqualified, the name resolves through the
+            # connecting role's search_path, which is how the stamp used to end up in a
+            # host project's schema (see triage.component.version_table).
             versions_table = conn.execute(
-                text("select to_regclass('results_schema_versions')")
+                text("select to_regclass('triage.results_schema_versions')")
             ).scalar_one()
         if versions_table is None:
+            # Either a genuinely fresh database or one stamped by triage-pg <= v1.1.1,
+            # whose stamp sits wherever search_path put it. upgrade_db covers both: its
+            # env.py pre-flight relocates a legacy stamp, after which an up-to-date
+            # database is already at head and no migration runs.
             logger.info(
-                "No results_schema_versions table exists, which means that this installation is fresh. Upgrading db."
+                "No triage.results_schema_versions table exists, which means that this installation is fresh. Upgrading db."
             )
             upgrade_db(dburl=dburl)
             return
         with engine.begin() as conn:
             current_revision = conn.execute(
-                text("select version_num from results_schema_versions limit 1")
+                text("select version_num from triage.results_schema_versions limit 1")
             ).scalar_one()
         logger.debug(
             "Database's triage_metadata schema version is %s", current_revision

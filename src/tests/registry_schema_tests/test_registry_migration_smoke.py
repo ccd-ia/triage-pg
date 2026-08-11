@@ -4,7 +4,13 @@ Uses pytest-postgresql (the root conftest ``postgresql`` fixture) to get an
 isolated throwaway database on a throwaway cluster — never touches any
 shared/`food` DB. Drives the real ``registry_schema`` alembic env (via the
 DATABASE_URL precedence path) through ``upgrade head`` -> assert ->
-``downgrade base`` -> assert-gone.
+``downgrade base`` -> assert the control plane is gone.
+
+"Gone" means the four tables the migration created, not the schema itself: the
+stamp table is pinned into ``registry`` (see ``triage.component.version_table``)
+and alembic keeps its bookkeeping across a downgrade, so an empty
+``registry.registry_schema_versions`` survives — the same residue a stock
+public-schema install leaves behind.
 """
 
 import os
@@ -76,13 +82,18 @@ def test_registry_migration_upgrade_and_downgrade(postgresql):
                 f"missing tables: {EXPECTED_TABLES - tables}"
             )
 
-            version_table = conn.execute(
-                text(
-                    "select 1 from information_schema.tables "
-                    "where table_name = 'registry_schema_versions'"
-                )
-            ).scalar()
-            assert version_table == 1
+            # The stamp is pinned into the schema this lineage owns — never left to
+            # the role's search_path, which would drop it in the host project's first
+            # schema (the 2026-08-11 bug). Assert the placement, not just existence.
+            version_table_schemas = set(
+                conn.execute(
+                    text(
+                        "select table_schema from information_schema.tables "
+                        "where table_name = 'registry_schema_versions'"
+                    )
+                ).scalars()
+            )
+            assert version_table_schemas == {"registry"}
 
         down = _run_alembic(base_url, "downgrade", "base")
         print("\n=== alembic-registry downgrade base ===")
@@ -92,13 +103,28 @@ def test_registry_migration_upgrade_and_downgrade(postgresql):
         )
 
         with engine.connect() as conn:
-            schema_exists = conn.execute(
-                text(
-                    "select 1 from information_schema.schemata where schema_name = 'registry'"
-                )
-            ).scalar()
+            # ``downgrade base`` takes the control plane down but NOT alembic's own
+            # bookkeeping: the stamp table lives in this schema, and alembic deletes
+            # its row after the migration returns. So the schema survives holding
+            # exactly one empty table — the same residue alembic leaves in ``public``
+            # on a stock install. Everything the migration created is gone.
+            remaining = set(
+                conn.execute(
+                    text(
+                        "select table_name from information_schema.tables "
+                        "where table_schema = 'registry'"
+                    )
+                ).scalars()
+            )
             print("=== \\dt registry.* (after downgrade base) ===")
-            print(f"registry schema present: {schema_exists == 1}")
-            assert schema_exists is None
+            for name in sorted(remaining):
+                print(f"registry | {name} | table")
+            assert remaining == {"registry_schema_versions"}
+            assert not (EXPECTED_TABLES & remaining)
+
+            stamp_rows = conn.execute(
+                text("select count(*) from registry.registry_schema_versions")
+            ).scalar()
+            assert stamp_rows == 0
     finally:
         engine.dispose()

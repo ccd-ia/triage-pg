@@ -8,9 +8,18 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL
 
+from triage.component.version_table import prepare_version_table
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# The stamp table is pinned into the schema this lineage owns, never left to the
+# connecting role's search_path (see triage.component.version_table for the whole
+# story). ``version_table_schema`` alone is not enough: alembic writes the table
+# before migration 0001 creates the schema, so online mode also runs a pre-flight.
+VERSION_TABLE = "results_schema_versions"
+VERSION_TABLE_SCHEMA = "triage"
 
 # The greenfield migrations are raw ``op.execute`` statements; autogenerate is
 # never used, so there is no ORM ``Base.metadata`` to target.
@@ -111,7 +120,8 @@ def run_migrations_offline():
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        version_table="results_schema_versions",
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
         include_object=include_object,
         include_schemas=True,
         compare_type=True,
@@ -119,6 +129,10 @@ def run_migrations_offline():
     )
 
     with context.begin_transaction():
+        # Offline mode cannot inspect the target, so the emitted script carries the
+        # schema creation itself — alembic writes ``CREATE TABLE triage.<version>``
+        # as its first statement, before migration 0001 would create the schema.
+        context.execute(f"create schema if not exists {VERSION_TABLE_SCHEMA};")
         context.run_migrations()
 
 
@@ -134,10 +148,16 @@ def run_migrations_online():
     connectable = create_engine(url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
+        prepare_version_table(
+            connection,
+            schema=VERSION_TABLE_SCHEMA,
+            version_table=VERSION_TABLE,
+        )
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            version_table="results_schema_versions",
+            version_table=VERSION_TABLE,
+            version_table_schema=VERSION_TABLE_SCHEMA,
             include_schemas=True,
             include_object=include_object,
         )

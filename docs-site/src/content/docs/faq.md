@@ -162,3 +162,42 @@ Two usual causes:
 
    Only then run `uv run triage --dbfile dirtyduck-database.yaml db upgrade`. If
    port 5440 is taken, pick another and adjust `dirtyduck-database.yaml` to match.
+
+---
+
+## Can triage-pg share a database with a project that already has schemas?
+
+Yes. Everything it creates lives in the `triage` schema — the 41 tables, the
+views, the enums, the metric functions — **including alembic's stamp table**,
+`triage.results_schema_versions`. Nothing is written to `public`, and nothing is
+written to your schemas. Drop the schema and triage-pg is gone.
+
+That last part was not true before **v1.1.2**: the stamp table was created
+unqualified, so PostgreSQL resolved it through the connecting role's
+`search_path` and it landed in whatever schema came first there. On a role
+carrying `search_path = raw, clean, ontology, …` that meant a `raw`-schema table
+triage-pg had no business creating. Upgrading is automatic — `triage db upgrade`
+moves an old stamp into `triage` before running anything, so a database already
+at head stays at head and no migration replays. The manual equivalent, if you
+would rather do it yourself first:
+
+```sql
+alter table public.results_schema_versions set schema triage;
+```
+
+The registry control-plane database gets the same treatment in its own schema
+(`registry.registry_schema_versions`).
+
+---
+
+## Why did my command connect to the tutorial database instead of my own?
+
+Because a `database.yaml` in the current directory outranks `PG*` /
+`DATABASE_URL` — [documented precedence](/triage-pg/reference/cli/), and the repo
+root ships example connection files. Run a command from there with a production
+environment loaded and the file still wins.
+
+Since v1.1.2 that is at least loud: when a `database.yaml` is picked up while the
+environment names a *different* database, the CLI logs a warning naming both. To
+use the environment, run from a directory without a `database.yaml` — or name the
+file you mean with `--dbfile`, which is always honoured without complaint.

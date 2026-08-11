@@ -44,7 +44,7 @@ def test_create_and_drop_project_end_to_end(registry_db, monkeypatch):
         assert project_lifecycle.database_ready(project_url) is True
         with psycopg.connect(libpq_conninfo(project_url)) as conn:
             version = conn.execute(
-                "select version_num from results_schema_versions"
+                "select version_num from triage.results_schema_versions"
             ).fetchone()
         assert version is not None
 

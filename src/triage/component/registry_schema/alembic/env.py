@@ -10,9 +10,17 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL
 
+from triage.component.version_table import prepare_version_table
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Same stamp-placement contract as the results lineage, with the schema this one
+# owns: pinned into ``registry``, never resolved through the role's search_path
+# (triage.component.version_table has the full rationale).
+VERSION_TABLE = "registry_schema_versions"
+VERSION_TABLE_SCHEMA = "registry"
 
 # Raw-SQL DDL migration (mirrors the greenfield results baseline) — there is no
 # SQLAlchemy model metadata to autogenerate against.
@@ -83,13 +91,17 @@ def run_migrations_offline():
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        version_table="registry_schema_versions",
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
         include_schemas=True,
         compare_type=True,
         compare_server_default=True,
     )
 
     with context.begin_transaction():
+        # The emitted script has to create the schema itself: alembic writes
+        # ``CREATE TABLE registry.<version>`` before migration 0001 runs.
+        context.execute(f"create schema if not exists {VERSION_TABLE_SCHEMA};")
         context.run_migrations()
 
 
@@ -100,10 +112,16 @@ def run_migrations_online():
     connectable = create_engine(url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
+        prepare_version_table(
+            connection,
+            schema=VERSION_TABLE_SCHEMA,
+            version_table=VERSION_TABLE,
+        )
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            version_table="registry_schema_versions",
+            version_table=VERSION_TABLE,
+            version_table_schema=VERSION_TABLE_SCHEMA,
             include_schemas=True,
         )
         with context.begin_transaction():

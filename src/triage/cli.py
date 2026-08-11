@@ -161,9 +161,11 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
 
     # Try explicit dbfile or default database.yaml
     if dbfile:
+        # No warning here: --dbfile is the caller saying which database they mean.
         config = yaml.full_load(dbfile.read_text())
     elif DEFAULT_DATABASE_FILE.exists():
         config = yaml.full_load(DEFAULT_DATABASE_FILE.read_text())
+        _warn_if_env_is_shadowed(DEFAULT_DATABASE_FILE, config)
     else:
         # Try DATABASE_URL environment variable
         environ_url = os.getenv("DATABASE_URL")
@@ -224,6 +226,61 @@ def resolve_db_url(dbfile: Optional[pathlib.Path]) -> str:
         raise typer.BadParameter(
             "database.yaml is missing required keys: host, user, pass, port, db"
         ) from exc
+
+
+def _warn_if_env_is_shadowed(source: pathlib.Path, config: Dict[str, Any]) -> None:
+    """Say out loud when a YAML file outranks a populated environment.
+
+    The file winning is the documented precedence, not a bug — but the failure mode
+    is silent and expensive: running any command from the repo root picks up the
+    example ``database.yaml`` sitting there and targets the tutorial database even
+    when ``PG*``/``DATABASE_URL`` point at production (this bit a host-project setup
+    on 2026-08-11). Warn only when the environment names a *different* database, so
+    the usual case where both agree stays quiet.
+    """
+    env_target = _env_db_target()
+    if env_target is None:
+        return
+
+    file_target = (
+        str(config.get("host")),
+        str(config.get("port")),
+        str(config.get("db")),
+    )
+    if env_target == file_target:
+        return
+
+    logger.warning(
+        "Using %s (host=%s db=%s) — the environment points at host=%s db=%s and is "
+        "being ignored. A config file outranks PG*/DATABASE_URL; pass --dbfile "
+        "explicitly, or run from a directory without a database.yaml, to use the "
+        "environment instead.",
+        source,
+        file_target[0],
+        file_target[2],
+        env_target[0],
+        env_target[2],
+    )
+
+
+def _env_db_target() -> Optional[tuple[str, str, str]]:
+    """``(host, port, database)`` the environment resolves to, or ``None`` if unset.
+
+    Mirrors the env branches of ``resolve_db_url`` — including its default port — so
+    the comparison is between what would actually be connected to, not between raw
+    strings.
+    """
+    environ_url = os.getenv("DATABASE_URL")
+    if environ_url:
+        url = make_url(environ_url)
+        return (str(url.host), str(url.port or 5432), str(url.database))
+
+    pg_host = os.getenv("PGHOST")
+    pg_database = os.getenv("PGDATABASE")
+    if pg_host and pg_database:
+        return (pg_host, os.getenv("PGPORT") or "5432", pg_database)
+
+    return None
 
 
 def _compose_db_url(
