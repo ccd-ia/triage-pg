@@ -68,7 +68,7 @@ from triage.adapters.feature_groups import (
 )
 from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
-from triage.adapters.matrix import MatrixResult, build_matrix
+from triage.adapters.matrix import MatrixResult, build_matrix, feature_labels
 from triage.adapters.model import build_model, score_and_evaluate
 from triage.adapters.subsets import register_subsets, validate_subsets_config
 from triage.adapters.target_history import (
@@ -721,7 +721,9 @@ def _create_run(
 
 
 def _feature_subsets(
-    feature_config: Mapping[str, Any], feature_names: Sequence[str]
+    feature_config: Mapping[str, Any],
+    feature_names: Sequence[str],
+    featurizer_config: Mapping[str, Any] | None = None,
 ) -> list[FeatureSubset]:
     """Resolve the run fan-out: the feature-column subsets one experiment expands into.
 
@@ -731,6 +733,10 @@ def _feature_subsets(
     declared strategies into subsets. ``feature_groups`` is a triage-pg adapter concern and is
     stripped from the config the featurizer sees (see :func:`_featurizer_only`), so featurizer
     stays group-agnostic (ADR-0008).
+
+    ``featurizer_config`` is the already-stripped config the matrices were built from; pass it
+    so the label map provably describes the same rendered config (it defaults to deriving one,
+    which keeps existing callers working).
     """
     fg = (
         feature_config.get("feature_groups")
@@ -748,12 +754,32 @@ def _feature_subsets(
     entity_aliases = [
         e["alias"] for e in feature_config.get("entities", []) if "alias" in e
     ]
+    definitions = fg.get("definitions")
+    # Labels are only consulted by the explicit-definitions path, so only that path pays for
+    # featurizer's planner. group_by='source_entity' (the default, and every tutorial config)
+    # is immune to truncation by construction and builds nothing.
+    labels = None
+    if definitions:
+        try:
+            labels = feature_labels(
+                featurizer_config
+                if featurizer_config is not None
+                else _featurizer_only(feature_config)
+            )
+        except Exception as exc:
+            raise ValueError(
+                "feature_groups.definitions globs are matched against each column's full"
+                " featurizer label (names over PostgreSQL's 63-byte cap are hash-truncated),"
+                " but building the manifest from feature_config failed. Fix the config, or"
+                f" use group_by instead of definitions. Underlying error: {exc}"
+            ) from exc
     groups = partition_features(
         feature_names,
         entity_aliases,
         group_by=fg.get("group_by", "source_entity"),
-        definitions=fg.get("definitions"),
+        definitions=definitions,
         target_alias=feature_config.get("target"),
+        labels=labels,
     )
     return mix_strategies(
         groups,
@@ -1146,7 +1172,7 @@ def run_experiment(
             for mid in (ft.matrix_artifact_id, fs.matrix_artifact_id)
         ]
 
-        subsets = _feature_subsets(feature_config, feature_names)
+        subsets = _feature_subsets(feature_config, feature_names, featurizer_config)
         # First subset reuses the run that built the shared artifacts; the rest get new runs.
         run_ids = [first_run_id] + [
             _create_run(db_engine, exp_hash, profile, random_seed) for _ in subsets[1:]

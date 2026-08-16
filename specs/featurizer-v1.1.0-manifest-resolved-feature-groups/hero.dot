@@ -1,0 +1,15 @@
+digraph hero {
+  rankdir=TB; bgcolor="transparent"; ranksep=0.5;
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" penwidth=2 fontname="Helvetica" fontsize=13 fontcolor="#1f2328" margin="0.25,0.17"];
+  edge [fontname="Helvetica" fontsize=11 fontcolor="#656d76" penwidth=1.7 color="#656d76"];
+
+  label [label="COUNT(consultas.frecuencia_cardiaca|P1W)" color="#0969da"];
+  cap   [label="PostgreSQL 63-byte cap" color="#9e6a03" fillcolor="#fdf6e3"];
+  col   [label="COUNT(consultas.frecuen~1c0ca6e8" color="#da3633" fillcolor="#fff5f5"];
+  glob  [label="glob \"*frecuencia_cardiaca*\"" color="#8957e5" fillcolor="#faf7ff"];
+
+  label -> cap [label="truncates"];
+  cap -> col;
+  glob -> col [label="misses" color="#da3633" fontcolor="#da3633" style=dashed];
+  glob -> label [label="matches" color="#1a7f37" fontcolor="#1a7f37"];
+}

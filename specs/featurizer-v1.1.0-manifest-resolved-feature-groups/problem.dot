@@ -1,0 +1,12 @@
+digraph problem {
+  rankdir=LR; bgcolor="transparent";
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" penwidth=2 fontname="Helvetica" fontsize=13 fontcolor="#1f2328" margin="0.24,0.17"];
+  edge [fontname="Helvetica" fontsize=11 fontcolor="#656d76" penwidth=1.6 color="#656d76"];
+
+  glob [label="definitions:\n\"*frecuencia_cardiaca*\"" color="#0969da"];
+  hit  [label="198 columns\ngrouped" color="#1a7f37" fillcolor="#f2fbf4"];
+  miss [label="474 columns\nabort the run" color="#da3633" fillcolor="#fff5f5"];
+
+  glob -> hit  [label="untruncated"];
+  glob -> miss [label="truncated" color="#da3633" fontcolor="#da3633"];
+}

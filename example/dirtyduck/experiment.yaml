@@ -148,7 +148,14 @@ feature_config:
   #   group_by: source_entity
   #   strategies: [all, leave-one-out, leave-one-in, all-combinations]
   #   all_combinations_max_groups: 6   # guard: all-combinations is 2^N-1 runs
-  #   # Or define groups explicitly by column-name glob (overrides group_by) for finer control:
+  #   # Or define groups explicitly by glob (overrides group_by) for finer control. Globs are
+  #   # matched against each column's full LABEL as well as its physical name: a name over
+  #   # PostgreSQL's 63-byte cap is hash-truncated from the tail, so a glob aimed past the cut
+  #   # could never match the column (and the hash is unpredictable). The two globs below sit
+  #   # near the front of the name, so they'd survive truncation either way — don't read that
+  #   # as a rule. Check any glob first with:
+  #   #   triage analyze-config experiment.yaml --features '*(inspections.*'
+  #   # Every column must land in exactly one group; unmatched or ambiguous is a loud error.
   #   # definitions:
   #   #   facility_attrs:     ["facilities.*"]
   #   #   inspection_history: ["*(inspections.*"]

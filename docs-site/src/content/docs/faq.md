@@ -126,6 +126,38 @@ The adapter strips `feature_groups` back out before featurizer (or the
 
 ---
 
+## My run aborts on a feature column ending in `~1c0ca6e8`.
+
+The message reads *"feature column `…frecuen~1c0ca6e8` matches no
+`feature_groups.definitions` glob"*, and its advice — add a glob or widen one —
+looks impossible to follow. It is: that suffix is a content hash you cannot
+predict or type.
+
+What happened is that the generated feature name was longer than PostgreSQL's
+63-byte identifier limit, so featurizer hash-truncated it **from the tail**. A
+glob aimed at a fragment that sits past the cut (`"*frecuencia_cardiaca*"`) still
+describes the feature correctly, but no longer appears in the physical column
+name.
+
+You do not need to work around it. Globs are matched against each column's full,
+untruncated **label** as well as its physical name, so write the glob against the
+label and it will match. To confirm before running anything:
+
+```console
+$ triage analyze-config experiment.yaml --features '*frecuencia_cardiaca*'
+```
+
+That prints exactly the columns partitioning would group (same matching rule),
+showing truncated ones as `label → column`. `--features '*'` lists every column.
+Neither needs a database.
+
+Two related notes. `group_by: source_entity` — the default — is never affected:
+truncation keeps the head of the name, so the leading `<alias>.` token always
+survives. And a glob you previously hand-wrote against a truncated name still
+works; matching the label is additional, not a replacement.
+
+---
+
 ## `triage score` scattered Parquet files into my cron directory.
 
 Fixed. `--project-path` (the matrix output root) now **defaults to the model's

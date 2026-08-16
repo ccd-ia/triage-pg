@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: featurizer v1.1.0 — Manifest-Resolved Feature Groups</title>
+<style>
+  :root {
+    --bg:        #ffffff;
+    --surface:   #f6f8fa;
+    --fg:        #1f2328;
+    --muted:     #656d76;
+    --border:    #d0d7de;
+    --accent:    #0969da;
+    --accent-2:  #8957e5;
+    --warn:      #9e6a03;
+    --warn-bg:   #fdf6e3;
+    --danger:    #da3633;
+    --danger-bg: #fff5f5;
+    --ok:        #1a7f37;
+    --ok-bg:     #f2fbf4;
+    --cyan:      #0598bc;
+    --font:  system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono:  ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --radius: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  header { border-bottom: 2px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+
+  h1 {
+    font-size: 2.1rem; line-height: 1.2; margin: 0 0 1rem;
+    letter-spacing: -0.02em; font-weight: 650;
+  }
+  h2 {
+    font-size: 1.45rem; margin: 3rem 0 1rem; padding-bottom: .4rem;
+    border-bottom: 1px solid var(--border); font-weight: 620; letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.15rem; margin: 2rem 0 .6rem; font-weight: 620; }
+  h4 {
+    font-size: .93rem; margin: 1.5rem 0 .5rem; font-weight: 650;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  }
+
+  p { margin: .8rem 0; }
+  ul, ol { margin: .7rem 0; padding-left: 1.4rem; }
+  li { margin: .35rem 0; }
+
+  code {
+    font-family: var(--mono); font-size: .87em;
+    background: var(--surface); padding: .12em .38em;
+    border-radius: 4px; border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1rem 1.1rem;
+    overflow-x: auto; font-size: .85rem; line-height: 1.55;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: 1em; }
+
+  a { color: var(--accent); }
+
+  /* ---- metadata ---- */
+  .meta {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: .6rem 1rem;
+  }
+  .meta summary {
+    cursor: pointer; font-size: .85rem; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  }
+  .meta dl {
+    display: grid; grid-template-columns: max-content 1fr;
+    gap: .3rem 1.2rem; margin: .9rem 0 .3rem; font-size: .87rem;
+  }
+  .meta dt { color: var(--muted); font-family: var(--mono); font-size: .8rem; }
+  .meta dd { margin: 0; word-break: break-word; }
+
+  /* ---- figures ---- */
+  figure {
+    margin: 1.8rem 0; padding: 1.4rem 1rem 1rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); text-align: center;
+  }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    margin-top: 1rem; font-size: .84rem; color: var(--muted);
+    font-style: italic; line-height: 1.5;
+  }
+
+  /* ---- tags ---- */
+  .tag {
+    display: inline-block; font-size: .68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    padding: .1em .5em; border-radius: 4px; vertical-align: middle;
+    margin-right: .4rem;
+  }
+  .tag.existing { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  .tag.new      { background: var(--ok-bg);   color: var(--ok);    border: 1px solid var(--ok); }
+
+  .files ul { list-style: none; padding-left: 0; }
+  .files li { padding: .3rem 0; border-bottom: 1px dashed var(--border); font-size: .93rem; }
+
+  /* ---- phases ---- */
+  .phase {
+    border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: var(--radius); padding: 1.2rem 1.6rem 1.6rem;
+    margin: 1.8rem 0; background: var(--bg);
+  }
+  .phase.done { border-left-color: var(--ok); background: var(--ok-bg); }
+  .phase h3 { margin-top: .4rem; }
+
+  .status {
+    font-family: var(--mono); font-weight: 700; font-size: .85em;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: .05em .3em; border-radius: 3px; color: var(--muted);
+  }
+
+  ul.checklist { list-style: none; padding-left: 0; }
+  ul.checklist li {
+    padding: .3rem 0 .3rem .2rem; font-size: .93rem;
+    border-bottom: 1px dotted var(--border);
+  }
+
+  .loop {
+    margin-top: 1.2rem; padding: .8rem 1rem;
+    background: var(--warn-bg); border: 1px solid var(--warn);
+    border-radius: var(--radius); font-size: .87rem; color: #6b4a02;
+  }
+
+  /* ---- callouts ---- */
+  .callout {
+    padding: .9rem 1.1rem; border-radius: var(--radius);
+    margin: 1.2rem 0; font-size: .93rem; border: 1px solid;
+  }
+  .callout.info   { background: #f0f6ff;      border-color: var(--accent);   }
+  .callout.warn   { background: var(--warn-bg);   border-color: var(--warn);   }
+  .callout.danger { background: var(--danger-bg); border-color: var(--danger); }
+  .callout.ok     { background: var(--ok-bg);     border-color: var(--ok);     }
+  .callout strong:first-child { display: block; margin-bottom: .3rem; }
+
+  /* ---- tables ---- */
+  table {
+    width: 100%; border-collapse: collapse; margin: 1.2rem 0; font-size: .89rem;
+  }
+  th, td { text-align: left; padding: .5rem .7rem; border: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface); font-weight: 650; }
+  .table-wrap { overflow-x: auto; }
+
+  /* ---- questionables ---- */
+  #questionables details, #amendments details {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: .7rem 1rem; margin: .7rem 0; background: var(--bg);
+  }
+  #questionables summary, #amendments summary { cursor: pointer; font-weight: 600; font-size: .93rem; }
+  .qa-answer { margin: .7rem 0 .2rem; font-size: .92rem; color: var(--fg); }
+
+  .decided    { color: var(--accent); font-family: var(--mono); font-size: .82em; }
+  .asked      { color: var(--ok);     font-family: var(--mono); font-size: .82em; }
+  .unresolved { color: var(--danger); font-family: var(--mono); font-size: .82em; }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: featurizer v1.1.0 — Manifest-Resolved Feature Groups</h1>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-08-16</dd>
+        <dt>modified</dt>     <dd>2026-08-16, 2026-08-16 (build: phases 2-4)</dd>
+        <dt>commits</dt>      <dd>—</dd>
+        <dt>agent name</dt>   <dd>Claude Opus 5 (1M context)</dd>
+        <dt>session id</dt>   <dd>a935a6fc-04b2-41cf-96f4-8e3ba01551b6</dd>
+        <dt>back refs</dt>    <dd>specs/post-v1.1.0-backlog-reconciliation-and-ci-guards.html, docs/adr/0008-featurizer-as-feature-engine.md, docs/adr/0016 (engine versions in identity), docs/adr/0023-feature-groups-and-strategies.md, TODO.org, ccd-ia/featurizer <code>.out-of-scope/tail-preserving-truncation.md</code></dd>
+        <dt>forward refs</dt> <dd>—</dd>
+      </dl>
+    </details>
+  </header>
+
+  <figure>
+    <svg
+ viewBox="0.00 0.00 412.00 293.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 288.92)">
+<title>hero</title>
+<!-- label -->
+<g id="node1" class="node">
+<title>label</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M294,-198.94C294,-198.94 12,-198.94 12,-198.94 6,-198.94 0,-192.94 0,-186.94 0,-186.94 0,-172.96 0,-172.96 0,-166.96 6,-160.96 12,-160.96 12,-160.96 294,-160.96 294,-160.96 300,-160.96 306,-166.96 306,-172.96 306,-172.96 306,-186.94 306,-186.94 306,-192.94 300,-198.94 294,-198.94"/>
+<text xml:space="preserve" text-anchor="middle" x="153" y="-174.35" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">COUNT(consultas.frecuencia_cardiaca|P1W)</text>
+</g>
+<!-- cap -->
+<g id="node2" class="node">
+<title>cap</title>
+<path fill="#fdf6e3" stroke="#9e6a03" stroke-width="2" d="M278.75,-112.96C278.75,-112.96 121.25,-112.96 121.25,-112.96 115.25,-112.96 109.25,-106.96 109.25,-100.96 109.25,-100.96 109.25,-86.98 109.25,-86.98 109.25,-80.98 115.25,-74.98 121.25,-74.98 121.25,-74.98 278.75,-74.98 278.75,-74.98 284.75,-74.98 290.75,-80.98 290.75,-86.98 290.75,-86.98 290.75,-100.96 290.75,-100.96 290.75,-106.96 284.75,-112.96 278.75,-112.96"/>
+<text xml:space="preserve" text-anchor="middle" x="200" y="-88.37" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">PostgreSQL 63&#45;byte cap</text>
+</g>
+<!-- label&#45;&gt;cap -->
+<g id="edge1" class="edge">
+<title>label&#45;&gt;cap</title>
+<path fill="none" stroke="#656d76" stroke-width="1.7" d="M163.43,-160.31C169.29,-149.84 176.74,-136.52 183.39,-124.65"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.7" points="186.35,-126.53 188.18,-116.09 180.24,-123.11 186.35,-126.53"/>
+<text xml:space="preserve" text-anchor="middle" x="201.44" y="-132.51" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#656d76">truncates</text>
+</g>
+<!-- col -->
+<g id="node3" class="node">
+<title>col</title>
+<path fill="#fff5f5" stroke="#da3633" stroke-width="2" d="M391.75,-37.98C391.75,-37.98 156.25,-37.98 156.25,-37.98 150.25,-37.98 144.25,-31.98 144.25,-25.98 144.25,-25.98 144.25,-12 144.25,-12 144.25,-6 150.25,0 156.25,0 156.25,0 391.75,0 391.75,0 397.75,0 403.75,-6 403.75,-12 403.75,-12 403.75,-25.98 403.75,-25.98 403.75,-31.98 397.75,-37.98 391.75,-37.98"/>
+<text xml:space="preserve" text-anchor="middle" x="274" y="-13.39" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">COUNT(consultas.frecuen~1c0ca6e8</text>
+</g>
+<!-- cap&#45;&gt;col -->
+<g id="edge2" class="edge">
+<title>cap&#45;&gt;col</title>
+<path fill="none" stroke="#656d76" stroke-width="1.7" d="M219.06,-74.18C227.28,-66.07 237.06,-56.42 246.08,-47.53"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.7" points="248.26,-50.29 252.92,-40.78 243.34,-45.31 248.26,-50.29"/>
+</g>
+<!-- glob -->
+<g id="node4" class="node">
+<title>glob</title>
+<path fill="#faf7ff" stroke="#8957e5" stroke-width="2" d="M334.75,-284.92C334.75,-284.92 153.25,-284.92 153.25,-284.92 147.25,-284.92 141.25,-278.92 141.25,-272.92 141.25,-272.92 141.25,-258.94 141.25,-258.94 141.25,-252.94 147.25,-246.94 153.25,-246.94 153.25,-246.94 334.75,-246.94 334.75,-246.94 340.75,-246.94 346.75,-252.94 346.75,-258.94 346.75,-258.94 346.75,-272.92 346.75,-272.92 346.75,-278.92 340.75,-284.92 334.75,-284.92"/>
+<text xml:space="preserve" text-anchor="middle" x="244" y="-260.33" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">glob &quot;*frecuencia_cardiaca*&quot;</text>
+</g>
+<!-- glob&#45;&gt;label -->
+<g id="edge4" class="edge">
+<title>glob&#45;&gt;label</title>
+<path fill="none" stroke="#1a7f37" stroke-width="1.7" d="M223.8,-246.29C211.64,-235.06 195.93,-220.57 182.4,-208.08"/>
+<polygon fill="#1a7f37" stroke="#1a7f37" stroke-width="1.7" points="185.07,-205.78 175.34,-201.57 180.32,-210.93 185.07,-205.78"/>
+<text xml:space="preserve" text-anchor="middle" x="224.2" y="-218.49" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#1a7f37">matches</text>
+</g>
+<!-- glob&#45;&gt;col -->
+<g id="edge3" class="edge">
+<title>glob&#45;&gt;col</title>
+<path fill="none" stroke="#da3633" stroke-width="1.7" stroke-dasharray="5,2" d="M273.78,-246.2C289.2,-234.67 306.53,-218.38 315,-198.94 336.77,-148.98 311.17,-85.92 291.76,-49.55"/>
+<polygon fill="#da3633" stroke="#da3633" stroke-width="1.7" points="294.92,-48.02 287,-40.98 288.8,-51.42 294.92,-48.02"/>
+<text xml:space="preserve" text-anchor="middle" x="339.14" y="-132.51" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#da3633">misses</text>
+</g>
+</g>
+</svg>
+    <figcaption>The whole problem in one picture. A generated feature name longer than PostgreSQL's 63-byte
+    identifier cap is hash-truncated from the tail, so the natural glob matches the <em>label</em> and misses
+    the <em>physical column</em>. Today only the physical column is consulted — and no glob can be written for
+    an unpredictable hash.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>
+      Two pieces of work, one landing. <strong>First</strong>, bump the featurizer pin from
+      <code>v1.0.1</code> to <code>v1.1.0</code> and confirm the identity consequences are the expected,
+      explained ones rather than silent drift. <strong>Second</strong>, use the API v1.1.0 adds — the
+      queryable feature <em>manifest</em> — to close a dead end in our own code: explicit
+      <code>feature_groups.definitions</code> globs are matched against physical column names, so any
+      definition targeting an inner fragment of a long feature name aborts the run on every truncated
+      column, with advice the user cannot act on.
+    </p>
+    <p>
+      The fix makes the obvious glob work, without importing featurizer into the pure module and without
+      making feature grouping depend on cache state. It ships as <strong>v1.1.3</strong>, a patch on the
+      1.1 line, keeping <code>v1.2.0</code> reserved for SHAP (ADR-0031).
+    </p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>
+      <code>src/triage/adapters/feature_groups.py:123-151</code> (<code>_partition_explicit</code>) globs the
+      <strong>physical</strong> column name. A definition like
+      <code>{cardiac: ["*frecuencia_cardiaca*"]}</code> therefore matches only the untruncated subset, and
+      every truncated sibling raises:
+    </p>
+    <pre><code>feature column 'COUNT(consultas.frecuen~1c0ca6e8' matches no
+feature_groups.definitions glob; every column must belong to exactly
+one group (add a glob or widen one).</code></pre>
+    <p>
+      On featurizer's own sample config that pattern hits <strong>672 columns by label but 198 by column
+      name</strong>. The remedy the message proposes — "add a glob or widen one" — is unactionable, because
+      the tail has been replaced by a content hash nobody can predict or type.
+    </p>
+    <figure>
+      <svg
+ viewBox="0.00 0.00 387.00 128.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 124.48)">
+<title>problem</title>
+<!-- glob -->
+<g id="node1" class="node">
+<title>glob</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M162.81,-85.48C162.81,-85.48 12,-85.48 12,-85.48 6,-85.48 0,-79.48 0,-73.48 0,-73.48 0,-46 0,-46 0,-40 6,-34 12,-34 12,-34 162.81,-34 162.81,-34 168.81,-34 174.81,-40 174.81,-46 174.81,-46 174.81,-73.48 174.81,-73.48 174.81,-79.48 168.81,-85.48 162.81,-85.48"/>
+<text xml:space="preserve" text-anchor="middle" x="87.4" y="-60.89" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">definitions:</text>
+<text xml:space="preserve" text-anchor="middle" x="87.4" y="-47.39" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">&quot;*frecuencia_cardiaca*&quot;</text>
+</g>
+<!-- hit -->
+<g id="node2" class="node">
+<title>hit</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M366.5,-120.48C366.5,-120.48 280.19,-120.48 280.19,-120.48 274.19,-120.48 268.19,-114.48 268.19,-108.48 268.19,-108.48 268.19,-81 268.19,-81 268.19,-75 274.19,-69 280.19,-69 280.19,-69 366.5,-69 366.5,-69 372.5,-69 378.5,-75 378.5,-81 378.5,-81 378.5,-108.48 378.5,-108.48 378.5,-114.48 372.5,-120.48 366.5,-120.48"/>
+<text xml:space="preserve" text-anchor="middle" x="323.34" y="-95.89" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">198 columns</text>
+<text xml:space="preserve" text-anchor="middle" x="323.34" y="-82.39" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">grouped</text>
+</g>
+<!-- glob&#45;&gt;hit -->
+<g id="edge1" class="edge">
+<title>glob&#45;&gt;hit</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M175.51,-72.77C201.85,-76.71 230.35,-80.98 255.18,-84.69"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="254.61,-88.15 265.02,-86.16 255.65,-81.22 254.61,-88.15"/>
+<text xml:space="preserve" text-anchor="middle" x="221.31" y="-84.97" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#656d76">untruncated</text>
+</g>
+<!-- miss -->
+<g id="node3" class="node">
+<title>miss</title>
+<path fill="#fff5f5" stroke="#da3633" stroke-width="2" d="M366.87,-51.48C366.87,-51.48 279.81,-51.48 279.81,-51.48 273.81,-51.48 267.81,-45.48 267.81,-39.48 267.81,-39.48 267.81,-12 267.81,-12 267.81,-6 273.81,0 279.81,0 279.81,0 366.87,0 366.87,0 372.87,0 378.87,-6 378.87,-12 378.87,-12 378.87,-39.48 378.87,-39.48 378.87,-45.48 372.87,-51.48 366.87,-51.48"/>
+<text xml:space="preserve" text-anchor="middle" x="323.34" y="-26.89" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">474 columns</text>
+<text xml:space="preserve" text-anchor="middle" x="323.34" y="-13.39" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#1f2328">abort the run</text>
+</g>
+<!-- glob&#45;&gt;miss -->
+<g id="edge2" class="edge">
+<title>glob&#45;&gt;miss</title>
+<path fill="none" stroke="#da3633" stroke-width="1.6" d="M175.51,-47.08C201.74,-43.27 230.11,-39.14 254.86,-35.55"/>
+<polygon fill="#da3633" stroke="#da3633" stroke-width="1.6" points="255.28,-39.02 264.67,-34.12 254.27,-32.1 255.28,-39.02"/>
+<text xml:space="preserve" text-anchor="middle" x="221.31" y="-45.31" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#da3633">truncated</text>
+</g>
+</g>
+</svg>
+      <figcaption>The failure is not partial grouping — it is a hard abort. A column that matches no group is
+      a loud <code>ValueError</code> by design (a typo'd glob must never silently drop features), so a single
+      truncated column stops the run.</figcaption>
+    </figure>
+    <div class="callout warn">
+      <strong>Our own example hides this.</strong>
+      <code>example/dirtyduck/experiment.yaml:151-154</code> ships a commented <code>definitions</code>
+      block using <code>"facilities.*"</code> and <code>"*(inspections.*"</code>. Both match within the head
+      of the name, which head-keeping truncation preserves — so they are truncation-safe <em>by luck, not by
+      design</em>. Anyone copying that pattern and pointing it at an inner fragment hits the wall.
+    </div>
+    <div class="callout info">
+      <strong>Not in scope: changing the truncation.</strong>
+      featurizer measured and rejected tail-preserving truncation upstream
+      (<code>.out-of-scope/tail-preserving-truncation.md</code> in that repo, with a test pinning the
+      conclusion). We consume the shape as given. Nor do we match against <code>definition</code> as a
+      label substitute: definitions embed truncated parent names and drop the interval, so
+      <code>P1W</code>/<code>P2W</code>/<code>P1M</code> siblings are byte-identical.
+    </div>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>
+      Match explicit definitions against the <strong>label</strong> as well as the physical name, sourcing
+      labels from featurizer's manifest. The load-bearing discovery — verified live during planning, not
+      assumed — is <strong>where the manifest comes from</strong>:
+    </p>
+    <p>
+      <code>Featurizer.feature_manifest</code> reads <code>self._plan</code>, and
+      <code>planner.plan()</code> runs inside <code>Featurizer.__init__</code>
+      (<code>featurizer/featurizer.py:166</code>) with <strong>no database connection</strong>. triage-pg
+      always declares one-hot vocabularies in the config (adapter-spec §4 fixed-vocabulary path), so the
+      manifest is fully determined by <code>feature_config</code> alone. Confirmed against
+      <code>example/dirtyduck/experiment.yaml</code> with no DB in reach:
+    </p>
+    <pre><code>manifest entries (no DB): 147     # matches the published 147-feature count
+kinds: {'derived': 120, 'one_hot': 27}
+truncated: 0
+columns_matching("*(inspections.*"): 120</code></pre>
+    <figure>
+      <svg
+ viewBox="0.00 0.00 727.00 85.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 81.1)">
+<title>solution</title>
+<!-- cfg -->
+<g id="node1" class="node">
+<title>cfg</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M92.55,-41.55C92.55,-41.55 12,-41.55 12,-41.55 6,-41.55 0,-35.55 0,-29.55 0,-29.55 0,-17.55 0,-17.55 0,-11.55 6,-5.55 12,-5.55 12,-5.55 92.55,-5.55 92.55,-5.55 98.55,-5.55 104.55,-11.55 104.55,-17.55 104.55,-17.55 104.55,-29.55 104.55,-29.55 104.55,-35.55 98.55,-41.55 92.55,-41.55"/>
+<text xml:space="preserve" text-anchor="middle" x="52.27" y="-18.52" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">feature_config</text>
+</g>
+<!-- plan -->
+<g id="node2" class="node">
+<title>plan</title>
+<path fill="#faf7ff" stroke="#8957e5" stroke-width="2" d="M258.1,-47.1C258.1,-47.1 153.55,-47.1 153.55,-47.1 147.55,-47.1 141.55,-41.1 141.55,-35.1 141.55,-35.1 141.55,-12 141.55,-12 141.55,-6 147.55,0 153.55,0 153.55,0 258.1,0 258.1,0 264.1,0 270.1,-6 270.1,-12 270.1,-12 270.1,-35.1 270.1,-35.1 270.1,-41.1 264.1,-47.1 258.1,-47.1"/>
+<text xml:space="preserve" text-anchor="middle" x="205.82" y="-24.9" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">Featurizer.__init__</text>
+<text xml:space="preserve" text-anchor="middle" x="205.82" y="-12.15" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">planner.plan()</text>
+</g>
+<!-- cfg&#45;&gt;plan -->
+<g id="edge1" class="edge">
+<title>cfg&#45;&gt;plan</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M105.43,-23.55C112.9,-23.55 120.72,-23.55 128.54,-23.55"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="128.36,-27.05 138.36,-23.55 128.36,-20.05 128.36,-27.05"/>
+</g>
+<!-- plan&#45;&gt;plan -->
+<g id="edge5" class="edge">
+<title>plan&#45;&gt;plan</title>
+<path fill="none" stroke="#9e6a03" stroke-width="1.6" stroke-dasharray="5,2" d="M190.37,-47.88C189.68,-57.28 194.83,-65.1 205.82,-65.1 211.49,-65.1 215.61,-63.02 218.17,-59.72"/>
+<polygon fill="#9e6a03" stroke="#9e6a03" stroke-width="1.6" points="221.51,-60.78 220.67,-50.22 214.74,-59 221.51,-60.78"/>
+<text xml:space="preserve" text-anchor="middle" x="205.82" y="-66.65" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#9e6a03">no database</text>
+</g>
+<!-- map -->
+<g id="node3" class="node">
+<title>map</title>
+<path fill="#f0fafd" stroke="#0598bc" stroke-width="2" d="M407.15,-41.85C407.15,-41.85 319.1,-41.85 319.1,-41.85 313.1,-41.85 307.1,-35.85 307.1,-29.85 307.1,-29.85 307.1,-17.25 307.1,-17.25 307.1,-11.25 313.1,-5.25 319.1,-5.25 319.1,-5.25 407.15,-5.25 407.15,-5.25 413.15,-5.25 419.15,-11.25 419.15,-17.25 419.15,-17.25 419.15,-29.85 419.15,-29.85 419.15,-35.85 413.15,-41.85 407.15,-41.85"/>
+<text xml:space="preserve" text-anchor="middle" x="363.12" y="-19.65" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">column → label</text>
+</g>
+<!-- plan&#45;&gt;map -->
+<g id="edge2" class="edge">
+<title>plan&#45;&gt;map</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M270.89,-23.55C278.47,-23.55 286.24,-23.55 293.88,-23.55"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="293.73,-27.05 303.73,-23.55 293.73,-20.05 293.73,-27.05"/>
+</g>
+<!-- part -->
+<g id="node4" class="node">
+<title>part</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M565.2,-41.55C565.2,-41.55 468.15,-41.55 468.15,-41.55 462.15,-41.55 456.15,-35.55 456.15,-29.55 456.15,-29.55 456.15,-17.55 456.15,-17.55 456.15,-11.55 462.15,-5.55 468.15,-5.55 468.15,-5.55 565.2,-5.55 565.2,-5.55 571.2,-5.55 577.2,-11.55 577.2,-17.55 577.2,-17.55 577.2,-29.55 577.2,-29.55 577.2,-35.55 571.2,-41.55 565.2,-41.55"/>
+<text xml:space="preserve" text-anchor="middle" x="516.67" y="-18.52" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">partition_features</text>
+</g>
+<!-- map&#45;&gt;part -->
+<g id="edge3" class="edge">
+<title>map&#45;&gt;part</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M420.13,-23.55C427.56,-23.55 435.27,-23.55 442.94,-23.55"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="442.9,-27.05 452.9,-23.55 442.9,-20.05 442.9,-27.05"/>
+</g>
+<!-- grp -->
+<g id="node5" class="node">
+<title>grp</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M707.5,-41.55C707.5,-41.55 626.2,-41.55 626.2,-41.55 620.2,-41.55 614.2,-35.55 614.2,-29.55 614.2,-29.55 614.2,-17.55 614.2,-17.55 614.2,-11.55 620.2,-5.55 626.2,-5.55 626.2,-5.55 707.5,-5.55 707.5,-5.55 713.5,-5.55 719.5,-11.55 719.5,-17.55 719.5,-17.55 719.5,-29.55 719.5,-29.55 719.5,-35.55 713.5,-41.55 707.5,-41.55"/>
+<text xml:space="preserve" text-anchor="middle" x="666.85" y="-18.52" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">feature groups</text>
+</g>
+<!-- part&#45;&gt;grp -->
+<g id="edge4" class="edge">
+<title>part&#45;&gt;grp</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M577.94,-23.55C585.53,-23.55 593.31,-23.55 600.97,-23.55"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="600.82,-27.05 610.82,-23.55 600.82,-20.05 600.82,-27.05"/>
+</g>
+</g>
+</svg>
+      <figcaption>The map is derived from the config, not from a featurizer run. That is what makes it
+      available on both the cold and the warm path.</figcaption>
+    </figure>
+    <p>
+      <code>feature_groups.py</code> stays pure exactly as its docstring promises — "no DB, no featurizer
+      import". It gains an optional <code>labels: Mapping[str, str]</code> parameter defaulting to identity;
+      the featurizer import lands in <code>matrix.py</code>, function-local, matching the existing pattern at
+      <code>matrix.py:218</code>.
+    </p>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>pyproject.toml:31</code> — the featurizer git pin; <code>v1.0.1</code> → <code>v1.1.0</code>, plus the <code>1.1.2</code> → <code>1.1.3</code> version bump in Phase 5.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/feature_groups.py</code> — the pure module. <code>partition_features</code> gains <code>labels</code>; <code>_partition_explicit</code> (123-151) gains label-or-column matching and the rewritten error; a shared match predicate is extracted for the CLI to reuse.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/matrix.py</code> — home of <code>_featurizer_config_yaml</code> (188-203) and <code>_run_featurizer</code> (206-245). Gains the new <code>feature_labels()</code> helper beside them.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/run.py</code> — <code>_feature_subsets</code> (723-764) wires the map in; <code>featurizer_config</code> is already computed at <code>:1043</code> and in scope at the call site <code>:1149</code>.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py:1243</code> — <code>analyze_config</code> gains <code>--features</code>.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/adapter_tests/test_feature_groups.py</code> — 166 lines, <strong>zero truncation coverage</strong>; that gap is why this survived.</li>
+      <li><span class="tag existing">existing</span> <code>example/dirtyduck/experiment.yaml:151-154</code> — the misleadingly-lucky commented <code>definitions</code> example.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/reference/configuration.md:264</code> — says "column-name globs"; now inaccurate.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/reference/cli.md:54</code> — the captured <code>analyze-config</code> block.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/test_docs_version_reference.py</code> — the release guard; scans <code>docs-site/</code> plus repo-root markdown.</li>
+      <li><span class="tag existing">existing</span> <code>docs/adr/0023-feature-groups-and-strategies.md</code> — gains a status line, not a new ADR.</li>
+      <li><span class="tag existing">existing</span> <code>CLAUDE.md</code> — the ADR-0008 bullet still reads "currently v1.0.0", already one release stale.</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>src/tests/adapter_tests/test_feature_labels.py</code> — covers <code>feature_labels()</code>: DB-free construction, the DirtyDuck manifest, unquoted keys, and cold/warm parity.</li>
+    </ul>
+    <p style="font-size:.9rem;color:var(--muted)">
+      No migration, no new schema, no new dependency. <code>featurizer</code> is already a direct dependency;
+      v1.1.0 adds API surface only.
+    </p>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed.</p>
+
+    <!-- ================= PHASE 1 ================= -->
+    <div class="phase done">
+      <h3><code class="status">[x]</code> Phase 1: Bump the pin, confirm the identity blast radius</h3>
+      <p>
+        <strong>Completed during the planning session (2026-08-16), verified, uncommitted.</strong>
+        Recorded here so the executor does not redo it and so the evidence travels with the plan.
+      </p>
+
+      <h4>1. Bump and re-lock</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>pyproject.toml:31</code> → <code>@v1.1.0</code>; <code>uv.lock</code> re-resolved (<code>v1.0.1</code> <code>98b2c05a</code> → <code>v1.1.0</code> <code>d43bf991</code>).</li>
+        <li><code class="status">[x]</code> Synced every extra (<code>dev test dashboard survival oidc baselines</code>); <code>uv pip show featurizer</code> → <code>1.1.0</code>.</li>
+        <li><code class="status">[x]</code> New API present: <code>columns_matching</code>, <code>manifest_matching</code>, <code>manifest.glob_to_like</code>, <code>manifest.filter_manifest</code>.</li>
+      </ul>
+
+      <h4>2. Confirm the identity effect is the expected one</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> featurizer enters <strong>only</strong> <code>feature_group</code> identity — verified by calling <code>engine_versions_for</code> per kind.</li>
+        <li><code class="status">[x]</code> Cohort and labels are unaffected by the featurizer bump: featurizer is not an input to their hash at all (<code>engine_versions_for('cohort')</code> → <code>triage-pg</code> only), and they are <em>parents</em> of the matrix, not descendants of the feature group.
+          <div class="callout warn" style="margin:.6rem 0 0">
+            <strong>Caveat found in the live E2E — two invalidations are easy to confuse.</strong>
+            On the tutorial database cohort and labels <em>did</em> rebuild. Not from featurizer:
+            <code>triage-pg</code> itself moved <code>1.1.0</code> → <code>1.1.2</code> since those
+            artifacts were built, and <em>every</em> kind carries <code>triage-pg</code> in its
+            engine_versions, so any triage-pg release invalidates everything. The artifact rows show
+            it directly — old cohorts <code>engines={'triage-pg': '1.1.0'}</code>, today's
+            <code>1.1.2</code>, identical <code>source_pins</code> and query. The featurizer-only
+            claim is structural and holds; the observation was confounded, not contradictory.
+          </div>
+        </li>
+        <li><code class="status">[x]</code> No ENGINE-DRIFT fallback needed — <code>policy='logical'</code> (<code>artifacts.py:114-136</code>) is a deliberate opt-in escape hatch; default <code>'exact'</code> rebuilding is ADR-0016 working as designed, and it is loud.</li>
+        <li><code class="status">[x]</code> <strong>Experiment hash does not move.</strong> <code>experiment_hash_for</code> (<code>run.py:196-207</code>) hashes only cohort + label + temporal + problem_type. Verified live: DirtyDuck still <code>b9e38fd8f366</code> — the nightly <code>tutorial-smoke</code> assertion on <code>b9e38fd8*</code> holds and published tutorial numbers stay valid.</li>
+      </ul>
+
+      <figure>
+        <svg
+ viewBox="0.00 0.00 419.00 246.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 241.66)">
+<title>identity</title>
+<!-- exp -->
+<g id="node1" class="node">
+<title>exp</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M130.05,-45.66C130.05,-45.66 12,-45.66 12,-45.66 6,-45.66 0,-39.66 0,-33.66 0,-33.66 0,-12 0,-12 0,-6 6,0 12,0 12,0 130.05,0 130.05,0 136.05,0 142.05,-6 142.05,-12 142.05,-12 142.05,-33.66 142.05,-33.66 142.05,-39.66 136.05,-45.66 130.05,-45.66"/>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-24.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">experiment hash</text>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-11.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">b9e38fd8 unchanged</text>
+</g>
+<!-- cohort -->
+<g id="node2" class="node">
+<title>cohort</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M92.92,-237.66C92.92,-237.66 49.12,-237.66 49.12,-237.66 43.12,-237.66 37.12,-231.66 37.12,-225.66 37.12,-225.66 37.12,-204 37.12,-204 37.12,-198 43.12,-192 49.12,-192 49.12,-192 92.92,-192 92.92,-192 98.92,-192 104.92,-198 104.92,-204 104.92,-204 104.92,-225.66 104.92,-225.66 104.92,-231.66 98.92,-237.66 92.92,-237.66"/>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-216.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cohort</text>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-203.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cached</text>
+</g>
+<!-- mtx -->
+<g id="node5" class="node">
+<title>mtx</title>
+<path fill="#fdf6e3" stroke="#9e6a03" stroke-width="2" d="M264.6,-173.66C264.6,-173.66 217.05,-173.66 217.05,-173.66 211.05,-173.66 205.05,-167.66 205.05,-161.66 205.05,-161.66 205.05,-140 205.05,-140 205.05,-134 211.05,-128 217.05,-128 217.05,-128 264.6,-128 264.6,-128 270.6,-128 276.6,-134 276.6,-140 276.6,-140 276.6,-161.66 276.6,-161.66 276.6,-167.66 270.6,-173.66 264.6,-173.66"/>
+<text xml:space="preserve" text-anchor="middle" x="240.82" y="-152.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">matrix</text>
+<text xml:space="preserve" text-anchor="middle" x="240.82" y="-139.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">rebuilds</text>
+</g>
+<!-- cohort&#45;&gt;mtx -->
+<g id="edge2" class="edge">
+<title>cohort&#45;&gt;mtx</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M105.58,-202.03C130.6,-192.49 165.1,-179.33 192.86,-168.74"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="193.94,-172.08 202.04,-165.24 191.45,-165.54 193.94,-172.08"/>
+<text xml:space="preserve" text-anchor="middle" x="173.55" y="-182.66" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#656d76">parent</text>
+</g>
+<!-- labels -->
+<g id="node3" class="node">
+<title>labels</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M92.92,-173.66C92.92,-173.66 49.12,-173.66 49.12,-173.66 43.12,-173.66 37.12,-167.66 37.12,-161.66 37.12,-161.66 37.12,-140 37.12,-140 37.12,-134 43.12,-128 49.12,-128 49.12,-128 92.92,-128 92.92,-128 98.92,-128 104.92,-134 104.92,-140 104.92,-140 104.92,-161.66 104.92,-161.66 104.92,-167.66 98.92,-173.66 92.92,-173.66"/>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-152.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">labels</text>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-139.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cached</text>
+</g>
+<!-- labels&#45;&gt;mtx -->
+<g id="edge3" class="edge">
+<title>labels&#45;&gt;mtx</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M105.58,-150.83C130.38,-150.83 164.49,-150.83 192.12,-150.83"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="191.88,-154.33 201.88,-150.83 191.88,-147.33 191.88,-154.33"/>
+<text xml:space="preserve" text-anchor="middle" x="173.55" y="-152.58" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#656d76">parent</text>
+</g>
+<!-- fg -->
+<g id="node4" class="node">
+<title>fg</title>
+<path fill="#fff5f5" stroke="#da3633" stroke-width="2" d="M110.55,-109.66C110.55,-109.66 31.5,-109.66 31.5,-109.66 25.5,-109.66 19.5,-103.66 19.5,-97.66 19.5,-97.66 19.5,-76 19.5,-76 19.5,-70 25.5,-64 31.5,-64 31.5,-64 110.55,-64 110.55,-64 116.55,-64 122.55,-70 122.55,-76 122.55,-76 122.55,-97.66 122.55,-97.66 122.55,-103.66 116.55,-109.66 110.55,-109.66"/>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-88.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">feature_group</text>
+<text xml:space="preserve" text-anchor="middle" x="71.02" y="-75.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">rebuilds</text>
+</g>
+<!-- fg&#45;&gt;mtx -->
+<g id="edge1" class="edge">
+<title>fg&#45;&gt;mtx</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M123.28,-106.38C145.4,-114.82 171.11,-124.62 192.74,-132.87"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="191.44,-136.12 202.03,-136.41 193.93,-129.58 191.44,-136.12"/>
+<text xml:space="preserve" text-anchor="middle" x="173.55" y="-131.88" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#656d76">parent</text>
+</g>
+<!-- mdl -->
+<g id="node6" class="node">
+<title>mdl</title>
+<path fill="#fdf6e3" stroke="#9e6a03" stroke-width="2" d="M399.15,-173.66C399.15,-173.66 351.6,-173.66 351.6,-173.66 345.6,-173.66 339.6,-167.66 339.6,-161.66 339.6,-161.66 339.6,-140 339.6,-140 339.6,-134 345.6,-128 351.6,-128 351.6,-128 399.15,-128 399.15,-128 405.15,-128 411.15,-134 411.15,-140 411.15,-140 411.15,-161.66 411.15,-161.66 411.15,-167.66 405.15,-173.66 399.15,-173.66"/>
+<text xml:space="preserve" text-anchor="middle" x="375.38" y="-152.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">model</text>
+<text xml:space="preserve" text-anchor="middle" x="375.38" y="-139.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">rebuilds</text>
+</g>
+<!-- mtx&#45;&gt;mdl -->
+<g id="edge4" class="edge">
+<title>mtx&#45;&gt;mdl</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M277.35,-150.83C292.5,-150.83 310.41,-150.83 326.69,-150.83"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="326.33,-154.33 336.33,-150.83 326.33,-147.33 326.33,-154.33"/>
+<text xml:space="preserve" text-anchor="middle" x="308.1" y="-152.58" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#656d76">parent</text>
+</g>
+</g>
+</svg>
+        <figcaption>What the pin bump actually invalidates. featurizer enters only the feature-group node;
+        matrices and models follow through <code>parents</code>. Cohort, labels, and the experiment hash are
+        untouched.</figcaption>
+      </figure>
+
+      <h4>3. Testing Strategy</h4>
+      <p>Full battery against the new pin, before any code change, so a later failure cannot be blamed on the bump.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code> — <strong>484 passed, 1 skipped</strong>.</li>
+        <li><code class="status">[x]</code> <code>just lint</code> — <code>ruff check</code> clean; <code>ruff format --check</code> 160 files formatted.</li>
+        <li><code class="status">[x]</code> <code>just typecheck</code> — <strong>0 errors</strong>, 9911 warnings. The recipe exits 1 because basedpyright returns nonzero on any warning; this is pre-existing (CI does not run basedpyright), and all 61 featurizer-matching lines are generic style warnings in <code>benchmarks/featurizer_scale.py</code>, none touching the API.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Phase complete.</strong> Evidence above is from real runs in the planning session, not memory.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 2 ================= -->
+    <div class="phase done">
+      <h3><code class="status">[x]</code> Phase 2: Manifest-resolved matching</h3>
+      <p>
+        The core change. A config-derived <code>column → label</code> map, threaded into the pure module as
+        plain data.
+      </p>
+
+      <figure>
+        <svg
+ viewBox="0.00 0.00 555.00 194.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 190.41)">
+<title>cache</title>
+<g id="clust1" class="cluster">
+<title>cluster_rej</title>
+<path fill="none" stroke="#da3633" stroke-width="1.5" stroke-dasharray="5,2" d="M20,-8C20,-8 275,-8 275,-8 281,-8 287,-14 287,-20 287,-20 287,-166.41 287,-166.41 287,-172.41 281,-178.41 275,-178.41 275,-178.41 20,-178.41 20,-178.41 14,-178.41 8,-172.41 8,-166.41 8,-166.41 8,-20 8,-20 8,-14 14,-8 20,-8"/>
+<text xml:space="preserve" text-anchor="middle" x="147.5" y="-163.01" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#da3633">Rejected: labels threaded out of matrix.py</text>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_acc</title>
+<path fill="none" stroke="#1a7f37" stroke-width="1.5" stroke-dasharray="5,2" d="M307,-8C307,-8 527,-8 527,-8 533,-8 539,-14 539,-20 539,-20 539,-161.58 539,-161.58 539,-167.58 533,-173.58 527,-173.58 527,-173.58 307,-173.58 307,-173.58 301,-173.58 295,-167.58 295,-161.58 295,-161.58 295,-20 295,-20 295,-14 301,-8 307,-8"/>
+<text xml:space="preserve" text-anchor="middle" x="417" y="-158.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a7f37">Chosen: labels derived from feature_config</text>
+</g>
+<!-- r_cold -->
+<g id="node1" class="node">
+<title>r_cold</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M116.28,-141.66C116.28,-141.66 35.72,-141.66 35.72,-141.66 29.72,-141.66 23.73,-135.66 23.73,-129.66 23.73,-129.66 23.73,-108 23.73,-108 23.73,-102 29.73,-96 35.73,-96 35.73,-96 116.28,-96 116.28,-96 122.28,-96 128.28,-102 128.28,-108 128.28,-108 128.28,-129.66 128.28,-129.66 128.28,-135.66 122.28,-141.66 116.28,-141.66"/>
+<text xml:space="preserve" text-anchor="middle" x="76" y="-120.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cold run</text>
+<text xml:space="preserve" text-anchor="middle" x="76" y="-107.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">featurizer runs</text>
+</g>
+<!-- r_out -->
+<g id="node3" class="node">
+<title>r_out</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M115.9,-60C115.9,-60 36.1,-60 36.1,-60 30.1,-60 24.1,-54 24.1,-48 24.1,-48 24.1,-36 24.1,-36 24.1,-30 30.1,-24 36.1,-24 36.1,-24 115.9,-24 115.9,-24 121.9,-24 127.9,-30 127.9,-36 127.9,-36 127.9,-48 127.9,-48 127.9,-54 121.9,-60 115.9,-60"/>
+<text xml:space="preserve" text-anchor="middle" x="76" y="-36.98" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">labels present</text>
+</g>
+<!-- r_cold&#45;&gt;r_out -->
+<g id="edge1" class="edge">
+<title>r_cold&#45;&gt;r_out</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M76,-95.38C76,-88.4 76,-80.6 76,-73.19"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="79.5,-73.35 76,-63.35 72.5,-73.35 79.5,-73.35"/>
+</g>
+<!-- r_warm -->
+<g id="node2" class="node">
+<title>r_warm</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M259.4,-141.66C259.4,-141.66 158.6,-141.66 158.6,-141.66 152.6,-141.66 146.6,-135.66 146.6,-129.66 146.6,-129.66 146.6,-108 146.6,-108 146.6,-102 152.6,-96 158.6,-96 158.6,-96 259.4,-96 259.4,-96 265.4,-96 271.4,-102 271.4,-108 271.4,-108 271.4,-129.66 271.4,-129.66 271.4,-135.66 265.4,-141.66 259.4,-141.66"/>
+<text xml:space="preserve" text-anchor="middle" x="209" y="-120.18" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">warm run</text>
+<text xml:space="preserve" text-anchor="middle" x="209" y="-107.43" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cache hit, skipped</text>
+</g>
+<!-- r_bad -->
+<g id="node4" class="node">
+<title>r_bad</title>
+<path fill="#fff5f5" stroke="#da3633" stroke-width="2" d="M247.02,-60C247.02,-60 170.97,-60 170.97,-60 164.97,-60 158.97,-54 158.97,-48 158.97,-48 158.97,-36 158.97,-36 158.97,-30 164.97,-24 170.97,-24 170.97,-24 247.02,-24 247.02,-24 253.02,-24 259.02,-30 259.02,-36 259.02,-36 259.02,-48 259.02,-48 259.02,-54 253.02,-60 247.02,-60"/>
+<text xml:space="preserve" text-anchor="middle" x="209" y="-36.98" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">labels absent</text>
+</g>
+<!-- r_warm&#45;&gt;r_bad -->
+<g id="edge2" class="edge">
+<title>r_warm&#45;&gt;r_bad</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M209,-95.38C209,-88.4 209,-80.6 209,-73.19"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="212.5,-73.35 209,-63.35 205.5,-73.35 212.5,-73.35"/>
+</g>
+<!-- a_cold -->
+<g id="node5" class="node">
+<title>a_cold</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M379.77,-136.83C379.77,-136.83 332.23,-136.83 332.23,-136.83 326.23,-136.83 320.23,-130.83 320.23,-124.83 320.23,-124.83 320.23,-112.83 320.23,-112.83 320.23,-106.83 326.23,-100.83 332.23,-100.83 332.23,-100.83 379.77,-100.83 379.77,-100.83 385.77,-100.83 391.77,-106.83 391.77,-112.83 391.77,-112.83 391.77,-124.83 391.77,-124.83 391.77,-130.83 385.77,-136.83 379.77,-136.83"/>
+<text xml:space="preserve" text-anchor="middle" x="356" y="-113.81" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">cold run</text>
+</g>
+<!-- a_out -->
+<g id="node7" class="node">
+<title>a_out</title>
+<path fill="#f2fbf4" stroke="#1a7f37" stroke-width="2" d="M449.52,-60C449.52,-60 364.48,-60 364.48,-60 358.48,-60 352.48,-54 352.48,-48 352.48,-48 352.48,-36 352.48,-36 352.48,-30 358.48,-24 364.48,-24 364.48,-24 449.52,-24 449.52,-24 455.52,-24 461.52,-30 461.52,-36 461.52,-36 461.52,-48 461.52,-48 461.52,-54 455.52,-60 449.52,-60"/>
+<text xml:space="preserve" text-anchor="middle" x="407" y="-36.98" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">identical labels</text>
+</g>
+<!-- a_cold&#45;&gt;a_out -->
+<g id="edge3" class="edge">
+<title>a_cold&#45;&gt;a_out</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M368.09,-100.1C374.01,-91.4 381.29,-80.72 387.94,-70.96"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="390.72,-73.1 393.46,-62.87 384.94,-69.16 390.72,-73.1"/>
+</g>
+<!-- a_warm -->
+<g id="node6" class="node">
+<title>a_warm</title>
+<path fill="#ffffff" stroke="#0969da" stroke-width="2" d="M476.15,-136.83C476.15,-136.83 421.85,-136.83 421.85,-136.83 415.85,-136.83 409.85,-130.83 409.85,-124.83 409.85,-124.83 409.85,-112.83 409.85,-112.83 409.85,-106.83 415.85,-100.83 421.85,-100.83 421.85,-100.83 476.15,-100.83 476.15,-100.83 482.15,-100.83 488.15,-106.83 488.15,-112.83 488.15,-112.83 488.15,-124.83 488.15,-124.83 488.15,-130.83 482.15,-136.83 476.15,-136.83"/>
+<text xml:space="preserve" text-anchor="middle" x="449" y="-113.81" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1f2328">warm run</text>
+</g>
+<!-- a_warm&#45;&gt;a_out -->
+<g id="edge4" class="edge">
+<title>a_warm&#45;&gt;a_out</title>
+<path fill="none" stroke="#656d76" stroke-width="1.6" d="M439.05,-100.1C434.27,-91.58 428.43,-81.17 423.04,-71.58"/>
+<polygon fill="#656d76" stroke="#656d76" stroke-width="1.6" points="426.16,-69.98 418.21,-62.98 420.06,-73.41 426.16,-69.98"/>
+</g>
+</g>
+</svg>
+        <figcaption>Why the map is built from <code>feature_config</code> and not threaded out of
+        <code>matrix.py</code>. <code>_run_featurizer</code> is reached only on a cache miss
+        (<code>matrix.py:875</code>); a cache hit returns early at <code>:700-713</code> with
+        <code>feature_names</code> read off the artifact row. A labels map sourced there would exist on cold
+        runs and vanish on warm ones — the same config grouping differently depending on cache state.</figcaption>
+      </figure>
+
+      <h4>1. Add <code>feature_labels()</code> to <code>matrix.py</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add <code>feature_labels(featurizer_config: Mapping[str, Any]) -> dict[str, str]</code> beside <code>_featurizer_config_yaml</code>.</li>
+        <li><code class="status">[x]</code> Build the config through <strong>the same</strong> <code>_featurizer_config_yaml</code> normalization the matrix used (it forces <code>as_of_boundary: exclusive</code>), so the map provably describes the same rendered config.</li>
+        <li><code class="status">[x]</code> Function-local <code>from featurizer import Featurizer</code>, mirroring <code>_run_featurizer</code> (<code>matrix.py:218</code>); same <code>NamedTemporaryFile</code> + <code>finally: unlink(missing_ok=True)</code> lifecycle.</li>
+        <li><code class="status">[x]</code> Return <code>{e.column: e.label for e in featurizer.feature_manifest}</code>.</li>
+        <li><code class="status">[x]</code> <strong>Verify the manifest's <code>column</code> is unquoted</strong> and matches matrix <code>feature_names</code> byte-for-byte. <code>pg_identifier</code> returns a <em>quoted</em> identifier; the manifest strips the quotes (spot-checked: <code>ABS(facilities.COUNT(inspections.date))</code>). A quoting mismatch would make every lookup miss and silently fall back to identity — the exact silent-degradation this plan exists to prevent.</li>
+        <li><code class="status">[x]</code> Docstring states <em>why</em> it is DB-free and that cold/warm parity is the load-bearing property, not an incidental one.</li>
+      </ul>
+
+      <h4>2. <code>partition_features</code> gains <code>labels</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> New keyword-only <code>labels: Mapping[str, str] | None = None</code>: physical column → full label; a column absent from the map is its own label.</li>
+        <li><code class="status">[x]</code> Consulted <strong>only</strong> on the explicit-definitions path. <code>group_by='source_entity'</code> is untouched — it is provably immune (<code>column.find(f"{alias}.")</code> plus head-keeping preserves the leading alias token; measured upstream at 0 of 1217 truncated columns losing or changing their alias).</li>
+        <li><code class="status">[x]</code> Module purity holds: <code>labels</code> is a plain <code>Mapping</code>; no featurizer import, no DB. Update the module docstring's explicit-definitions bullet to say globs match the label as well as the column name.</li>
+      </ul>
+
+      <h4>3. Label-or-column matching in <code>_partition_explicit</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Extract a shared predicate — <code>_matches(column, label, globs) -> bool</code> — so Phase 3's CLI cannot drift from partitioning semantics.</li>
+        <li><code class="status">[x]</code> A column joins a group when a glob matches <strong>its label or its physical name</strong>.</li>
+        <li><code class="status">[x]</code> Zero-match and multi-match stay loud <code>ValueError</code>s — required behaviour, preserved verbatim.</li>
+      </ul>
+      <pre><code>label = labels.get(column, column) if labels else column
+hits = [
+    name
+    for name, globs in definitions.items()
+    if any(
+        fnmatch.fnmatchcase(label, g) or fnmatch.fnmatchcase(column, g)
+        for g in globs
+    )
+]</code></pre>
+      <div class="callout ok">
+        <strong>Provably non-breaking.</strong> For an untruncated column <code>label == column</code>, so the
+        two operands are the same string and the result is identical to today. Behaviour changes for truncated
+        columns only, and only from <em>raise</em> to <em>match</em>. All three tutorial configs have 0
+        truncated columns.
+      </div>
+
+      <h4>4. Wire it in <code>run.py</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>_feature_subsets(feature_config, feature_names, featurizer_config=None)</code>; <code>None</code> ⇒ compute <code>_featurizer_only(feature_config)</code>, so existing callers and tests keep working unchanged.</li>
+        <li><code class="status">[x]</code> At the call site (<code>run.py:1149</code>) pass the <code>featurizer_config</code> already computed at <code>:1043</code> — makes "same config as the matrix" structural rather than incidental.</li>
+        <li><code class="status">[x]</code> Build the map <strong>only when <code>fg.get("definitions")</code> is truthy</strong>. <code>group_by='source_entity'</code> — the default and every tutorial config — pays zero planner cost.</li>
+        <li><code class="status">[x]</code> Fail loud if the map cannot be built: catch, re-raise <code>ValueError</code> naming <code>feature_groups.definitions</code> and the underlying error, chained <code>from exc</code> (nothing swallowed — the broad catch re-raises with context, per the repo's fail-fast rule).</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>
+        pytest, entirely without a database — both the pure module and <code>feature_labels()</code> are
+        DB-free, which is itself one of the properties under test. Truncation fixtures are hardcoded pairs
+        (keeping <code>test_feature_groups.py</code> free of a featurizer import) with their provenance
+        recorded in a comment: generated by <code>featurizer.planner.pg_identifier</code>, which keeps the
+        head and appends <code>~</code> + 8 hex to exactly 63 unquoted bytes.
+      </p>
+      <pre><code># provenance: pg_identifier(
+#   "AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P1W,as_of_date)")
+LABEL  = "AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P1W,as_of_date)"
+COLUMN = "AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5"
+assert len(COLUMN) == 63</code></pre>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_feature_groups.py -v</code> — truncated column + label map ⇒ the natural glob <code>"*frecuencia_cardiaca*"</code> groups it.</li>
+        <li><code class="status">[x]</code> Same column <strong>without</strong> the map ⇒ still raises. Proves the map is what fixes it, not an incidental change.</li>
+        <li><code class="status">[x]</code> Hand-pasted physical-name glob (<code>"*~67a3dcf5"</code>) still matches — the backwards-compatibility half of the label-or-column rule.</li>
+        <li><code class="status">[x]</code> Column matching group A by label and group B by column ⇒ multi-hit <code>ValueError</code>. Ambiguity stays loud.</li>
+        <li><code class="status">[x]</code> Untruncated corpus partitioned with and without <code>labels</code> ⇒ byte-identical output. The non-breaking claim, asserted.</li>
+        <li><code class="status">[x]</code> <code>group_by='source_entity'</code> given a <code>labels</code> map ⇒ ignored, output unchanged.</li>
+        <li><code class="status">[x]</code> Purity guard: assert <code>feature_groups.py</code>'s source imports no featurizer — the documented invariant, enforced.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_feature_labels.py -v</code> — over <code>example/dirtyduck/experiment.yaml</code>: 147 entries, 0 truncated, keys unquoted; called with no database configured at all, still returns the map (the cache-parity property).</li>
+        <li><code class="status">[x]</code> <code>just test</code> — full suite still green (484+ passed).</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 3 ================= -->
+    <div class="phase done">
+      <h3><code class="status">[x]</code> Phase 3: Diagnosis surfaces</h3>
+      <p>
+        Making the glob work is half of it; the user also has to be able to <em>see</em> what a glob resolves
+        to, and get a useful message when it resolves to nothing.
+      </p>
+
+      <h4>1. Rewrite the zero-match error</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> When <code>label != column</code>, show both — the label is what the user recognises.</li>
+        <li><code class="status">[x]</code> Name truncation as the likely cause and point at the new CLI.</li>
+        <li><code class="status">[x]</code> Keep it a <code>ValueError</code>; do not soften the failure.</li>
+      </ul>
+      <pre><code>feature column 'AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5'
+(label: 'AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P1W,as_of_date)')
+matches no feature_groups.definitions glob; every column must belong to exactly
+one group (add a glob or widen one). Names over PostgreSQL's 63-byte cap are
+hash-truncated from the tail — globs are matched against the full label as well
+as the physical name, so write the glob against the label above. Run
+`triage analyze-config &lt;config&gt; --features '&lt;glob&gt;'` to see what a glob resolves to.</code></pre>
+
+      <h4>2. <code>--features</code> on <code>analyze-config</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add an optional-value option to <code>cli.py:1243</code>: bare <code>--features</code> lists every feature column; <code>--features '&lt;glob&gt;'</code> shows what that glob catches. Implement via Click's <code>is_flag=False, flag_value="*"</code>. <strong>Fallback if typer/click will not cooperate:</strong> make the value required and document <code>--features '*'</code> as the list-all form — do not add a second option.</li>
+        <li><code class="status">[x]</code> Reuse <code>feature_labels()</code> — no DB, consistent with the rest of <code>analyze-config</code>, which already inspects a config offline.</li>
+        <li><code class="status">[x]</code> <strong>Match through the shared <code>_matches</code> predicate from Phase 2</strong>, not featurizer's <code>columns_matching</code>. featurizer matches label-only; ours is label-or-column. Reusing our predicate is what guarantees the CLI answers exactly the question "what would <code>definitions</code> match".</li>
+        <li><code class="status">[x]</code> Report truncated columns as <code>label → column</code> so the mapping is visible.</li>
+        <li><code class="status">[x]</code> Zero matches: print <code>0 of N match</code> and exit <strong>0</strong>. This is an inspection command answering a question the user asked; an empty answer is a valid answer. (featurizer's <code>LookupError</code>-on-empty is right for a <em>selection</em> API, wrong for a diagnostic.) If we call featurizer's matcher anywhere, pass <code>allow_empty=True</code> and raise our own wording.</li>
+      </ul>
+      <pre><code>$ triage analyze-config example/dirtyduck/experiment.yaml --features '*(inspections.*'
+120 of 147 feature columns match '*(inspections.*'  (0 truncated)
+  COUNT(inspections.date|interval=P1M)
+  COUNT(inspections.date|interval=P3M)
+  ...</code></pre>
+
+      <h4>3. Testing Strategy</h4>
+      <p>Typer's <code>CliRunner</code> over the existing CLI test patterns; no DB.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -k "analyze_config or features" -v</code> — bare <code>--features</code> lists all 147 for DirtyDuck; <code>--features '*(inspections.*'</code> lists exactly 120.</li>
+        <li><code class="status">[x]</code> <strong>Agreement test:</strong> over a corpus including truncated names, the set the CLI reports for glob <code>G</code> equals the set <code>partition_features(..., definitions={"g": [G]})</code> puts in group <code>g</code>. This is the invariant that keeps the two surfaces honest; assert it directly rather than trusting the shared helper.</li>
+        <li><code class="status">[x]</code> Zero-match run exits 0 and says so.</li>
+        <li><code class="status">[x]</code> Error-message test asserts the label appears in the raised text when the column is truncated.</li>
+        <li><code class="status">[x]</code> <code>just test</code> + <code>just lint</code> green.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 4 ================= -->
+    <div class="phase done">
+      <h3><code class="status">[x]</code> Phase 4: Docs and examples</h3>
+      <p>
+        The docs currently teach the wrong model ("column-name globs") and the flagship example teaches a
+        lucky habit. Both get corrected, and the stale pin references get swept.
+      </p>
+
+      <h4>1. Reference pages</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>reference/configuration.md:264</code> — "column-name globs" → globs matched against the full label <em>and</em> the physical name; explain the 63-byte cap and why the label is the surface to write against.</li>
+        <li><code class="status">[x]</code> <code>reference/cli.md</code> — document <code>--features</code> under <code>analyze-config</code>; capture real output (house rule: verbatim-verified, never invented).</li>
+        <li><code class="status">[x]</code> <code>faq.md</code> — new entry: "my <code>feature_groups</code> glob matches nothing / the run aborts on a <code>~hash</code> column".</li>
+      </ul>
+
+      <h4>2. The example that taught the wrong habit</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>example/dirtyduck/experiment.yaml:151-154</code> — annotate the commented <code>definitions</code> block: globs match the full label, these particular head-anchored globs are safe either way, and an inner-fragment glob needs the label (with a pointer to <code>--features</code>).</li>
+      </ul>
+
+      <h4>3. Sweep the stale pin references</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>CLAUDE.md</code> ADR-0008 bullet — reads "currently v1.0.0", already one release stale; → <code>v1.1.0</code>. Grep the tree for other <code>featurizer</code> version claims and fix each.</li>
+        <li><code class="status">[x]</code> <code>docs/adr/0023-feature-groups-and-strategies.md</code> — append a short status line recording that explicit definitions now resolve through the manifest.</li>
+        <li><code class="status">[x]</code> <strong>No new ADR.</strong> This fails the three-part bar: it is reversible, unsurprising once stated, and had no genuine alternative worth recording (the rejected threading is a bug, not a road not taken). Recorded in Questionables rather than <code>docs/adr/</code>.</li>
+        <li><code class="status">[x]</code> <code>TODO.org</code> — close this item with evidence, per house convention.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_docs_version_reference.py -v</code> — the drift guard still green.</li>
+        <li><code class="status">[x]</code> <code>cd docs-site &amp;&amp; npm run build</code> — site builds; no broken links.</li>
+        <li><code class="status">[x]</code> Every captured CLI block in changed docs re-run and pasted verbatim — not written from memory.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ================= PHASE 5 ================= -->
+    <div class="phase">
+      <h3><code class="status">[]</code> Phase 5: Release v1.1.3</h3>
+      <p>
+        Follows <code>TODO.org</code>'s release checklist verbatim — it exists because these steps have been
+        got wrong before, and it explicitly says not to rely on memory.
+      </p>
+      <div class="callout danger">
+        <strong>Maintainer gate.</strong> House rule: commit, push, and tag happen on the maintainer's ask.
+        Phases 2–4 land on a branch; this phase does not start until the maintainer says so.
+      </div>
+
+      <h4>1. Live end-to-end before tagging</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <strong>DONE 2026-08-16.</strong> <code>triage run example/dirtyduck/experiment.yaml</code> against the tutorial DB (port 5440) → <strong>hash <code>b9e38fd8f366</code>, 32 models / 430,176 predictions / 192 evaluations</strong> — the canonical published numbers, byte-for-byte. The invalidation is real and auditable, not a no-op: a new <code>feature_group</code> artifact stamped <code>featurizer=1.1.0</code> now sits alongside the historical <code>1.0.0</code> ×5 and <code>1.0.1</code> ×2 rows. <strong>A second run is a full cache hit</strong> ("already built — reusing" for all 32 models), so the rebuild is one-time exactly as the release note will claim.</li>
+        <li><code class="status">[x]</code> <strong>DONE 2026-08-16.</strong> DirtyDuck + <code>facility_attrs: ["facilities.*"]</code> / <code>inspection_history: ["*(inspections.*"]</code> (27 + 120 = 147): partitioned correctly and fanned out to <strong>3 runs</strong> <code>[all, leave-one-out:facility_attrs, leave-one-out:inspection_history]</code> under one experiment hash; the first two completed 32 / 430,176 / 192 each.
+          <div class="callout warn" style="margin:.6rem 0 0">
+            <strong>Third run failed — pre-existing, not this work.</strong>
+            <code>BaselineRankMultiFeature</code> selects its feature <em>by name</em>
+            (<code>rankers.py:57-67</code>), so leaving out the inspection group removes
+            <code>COUNT(inspections.result)</code> and it raises
+            <code>BaselineFeatureNotInMatrix</code>. Exactly the interaction
+            <code>TODO.org</code> already records for DonorsChoose — which is why donors ships
+            Dummy-only. Partitioning did its job; the failure is downstream in an estimator.
+            <strong>Seed:</strong> the DirtyDuck grid and a leave-one-out <code>definitions</code>
+            config are mutually incompatible out of the box — worth a docs note, or dropping the
+            ranker from any documented fan-out example.
+          </div>
+        </li>
+      </ul>
+
+      <h4>2. Version and lock</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Bump <code>pyproject.toml</code> <strong>first</strong> (<code>1.1.2</code> → <code>1.1.3</code>) — release.yml's guard hard-fails a tag that disagrees — and <code>src/triage/__init__.py</code>.</li>
+        <li><code class="status">[]</code> <code>uv lock</code> after the bump (the version is in the lockfile); commit both.</li>
+        <li><code class="status">[]</code> Re-capture every <code>triage-pg 1.1.2</code> console block from a real <code>uv run triage --version</code>; bump <code>:v1.1.2</code> image tags. <code>test_docs_version_reference.py</code> fails CI on any straggler.</li>
+      </ul>
+
+      <h4>3. Tag and watch</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Local gate: <code>just test</code> + <code>just lint</code> green.</li>
+        <li><code class="status">[]</code> Tag + push → watch <strong>both</strong> release.yml jobs: <code>release</code> <em>and</em> <code>verify-anonymous-pull</code>.</li>
+        <li><code class="status">[]</code> Confirm the Release <code>prerelease</code> flag matches the tag (no <code>-rc</code> ⇒ <code>false</code>) and both HTML assets attached.</li>
+        <li><code class="status">[]</code> <strong>Release notes must state the cache invalidation</strong>: featurizer <code>1.0.1</code> → <code>1.1.0</code> changes feature-group identity (ADR-0016), so the first run after upgrading rebuilds feature groups, matrices, and models. Expected, one-time, and by design. Cohort/label artifacts and experiment hashes are unaffected.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>gh run list --workflow=release.yml</code> — both jobs green on the tag.</li>
+        <li><code class="status">[]</code> <code>docker logout ghcr.io &amp;&amp; docker pull ghcr.io/ccd-ia/triage-pg:v1.1.3</code> — anonymous pull works (GHCR packages default to private; a break arrives as a stranger's failed pull, not as CI).</li>
+        <li><code class="status">[]</code> <code>gh run list --workflow=tutorial-smoke.yml</code> — the nightly still green against the released image.</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[]</code> <code>just sync &amp;&amp; just test</code> — full suite green on the new pin plus the new tests.</li>
+      <li><code class="status">[]</code> <code>just lint</code> — <code>ruff check</code> and <code>ruff format --check</code> both clean (the format gate is a CI job since <code>81d17111</code>).</li>
+      <li><code class="status">[]</code> <code>just typecheck</code> — <strong>0 errors</strong> (warnings are pre-existing and not gated).</li>
+      <li><code class="status">[]</code> <code>uv run pytest src/tests/adapter_tests/test_feature_groups.py src/tests/adapter_tests/test_feature_labels.py -v</code> — truncation now covered, including a genuinely 63-byte column with a <code>~hash</code> suffix.</li>
+      <li><code class="status">[]</code> <code>triage analyze-config example/dirtyduck/experiment.yaml --features '*(inspections.*'</code> — reports 120 of 147.</li>
+      <li><code class="status">[]</code> <code>triage run example/dirtyduck/experiment.yaml</code> — hash <code>b9e38fd8</code>, 32 / 430,176 / 192 unchanged.</li>
+      <li><code class="status">[]</code> <code>uv run pytest src/tests/test_docs_version_reference.py</code> — no doc advertises a stale version.</li>
+      <li><code class="status">[]</code> <code>gh run list --workflow=ci.yml</code> — all 5 jobs green on the branch.</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If a step is
+      genuinely not possible, mark it <code>[f]</code> and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+    <p style="font-size:.9rem;color:var(--muted)">
+      The decision log. <span class="asked">[asked]</span> went to the maintainer;
+      <span class="decided">[decided]</span> was settled by the agent with the rationale recorded;
+      <span class="unresolved">[unresolved]</span> is still open with the assumption in force.
+    </p>
+
+    <details>
+      <summary><span class="asked">[asked]</span> Which surface should explicit <code>definitions</code> globs match against?</summary>
+      <p class="qa-answer">
+        <strong>Chosen: label, then column.</strong> A column joins a group if a glob matches its label
+        <em>or</em> its physical name. Rationale accepted: it is a strict superset of today's behaviour, so no
+        existing config can break — including one where a user hand-pasted truncated names, which is currently
+        the only workaround. For untruncated columns the two operands are the same string, so the change is a
+        no-op there. The alternative (label-only) is cleaner to explain and matches featurizer's own semantics,
+        but would silently stop matching a hand-resolved glob.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="asked">[asked]</span> What happens if the label map cannot be built?</summary>
+      <p class="qa-answer">
+        <strong>Chosen: fail loud.</strong> Raise a <code>ValueError</code> naming
+        <code>feature_groups.definitions</code> and chaining the underlying featurizer error. Rationale
+        accepted: warn-and-fall-back-to-identity would make grouping depend on whether a plan build happened to
+        succeed — the same class of environment-dependent behaviour as the v1.1.2 <code>search_path</code> bug,
+        and against the repo's fail-fast rule. Only configs using explicit <code>definitions</code> can hit it.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="asked">[asked]</span> Should there be a way to discover what a glob resolves to?</summary>
+      <p class="qa-answer">
+        <strong>Chosen: <code>--features</code> on <code>triage analyze-config</code>.</strong> That command
+        already inspects a config without a database, and the manifest is DB-free, so it is the natural home —
+        one option plus a test, versus a whole new subcommand. It closes the loop: write a glob, see what it
+        catches, before running anything.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="asked">[asked]</span> How should this land, release-wise?</summary>
+      <p class="qa-answer">
+        <strong>Chosen: v1.1.3 patch.</strong> Same shape as v1.1.1 and v1.1.2, keeping <code>v1.2.0</code>
+        reserved for SHAP per ADR-0031. The plan therefore carries a full release phase (version bump first,
+        <code>uv lock</code>, doc re-captures, tag checklist, both release.yml jobs) rather than stopping at a
+        green merge. The cache invalidation is user-visible and belongs in release notes rather than arriving
+        unannounced.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="decided">[decided]</span> Where does the label map come from — config, or threaded out of the featurizer run?</summary>
+      <p class="qa-answer">
+        <strong>From <code>feature_config</code>, decided by the agent.</strong> featurizer's brief proposed
+        threading a <code>labels</code> map from the caller in <code>run.py</code> and asked whether the
+        manifest was available there. Investigation says: not from where they imagined.
+        <code>run.py:1142</code> takes <code>feature_names</code> off the built matrix, and the only
+        <code>Featurizer</code> instance lives in <code>_run_featurizer</code>, reached only on a cache miss.
+        A map sourced there would exist cold and vanish warm. But <code>planner.plan()</code> runs in
+        <code>Featurizer.__init__</code> with no DB, and triage-pg always declares one-hot vocabularies, so the
+        manifest is fully determined by the config — verified live (147 entries for DirtyDuck, no database).
+        This is strictly better than the proposed shape and needs no threading at all.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="decided">[decided]</span> Build the map always, or only when <code>definitions</code> are present?</summary>
+      <p class="qa-answer">
+        <strong>Only when present.</strong> <code>group_by='source_entity'</code> — the default and every
+        tutorial config — is provably immune to truncation and never consults labels, so it should pay nothing
+        for this feature. Building unconditionally would add a planner pass to every run for no benefit, and a
+        wide config's plan build is not free.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="decided">[decided]</span> Zero matches on <code>--features</code>: error, or empty answer?</summary>
+      <p class="qa-answer">
+        <strong>Print "0 of N match" and exit 0.</strong> featurizer raises <code>LookupError</code> on an
+        empty match, deliberately — but that is right for a <em>selection</em> API, where a silently empty
+        selection is the failure being prevented. <code>analyze-config</code> is a diagnostic answering a
+        question the user explicitly asked; "nothing matches" is the useful answer, and the user is most likely
+        running it <em>because</em> their glob is not matching. Where we call featurizer's matcher we pass
+        <code>allow_empty=True</code> and supply our own wording.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="decided">[decided]</span> Does this warrant an ADR?</summary>
+      <p class="qa-answer">
+        <strong>No.</strong> The three-part bar (hard to reverse · surprising without context · the result of a
+        real trade-off) fails on all three: it is a reversible function-signature addition, unsurprising once
+        the truncation is understood, and the rejected alternative was a bug rather than a road not taken.
+        ADR-0023 gets a status line instead.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="unresolved">[unresolved]</span> Does typer accept an optional-value option for <code>--features</code>?</summary>
+      <p class="qa-answer">
+        <strong>Assumption in force:</strong> Click's <code>is_flag=False, flag_value="*"</code> passes through
+        typer, giving both bare <code>--features</code> and <code>--features '&lt;glob&gt;'</code>. Not verified
+        against this typer version. <strong>Phase at risk: 3, task 2 — cosmetic only.</strong> The fallback is
+        specified inline (require the value; document <code>--features '*'</code> as the list-all form), so the
+        phase cannot block on it.
+      </p>
+    </details>
+
+    <details>
+      <summary><span class="unresolved">[unresolved]</span> Cost of the plan build on a wide config</summary>
+      <p class="qa-answer">
+        <strong>Assumption in force:</strong> negligible — sub-second on DirtyDuck, once per experiment, against
+        a DFS that takes far longer. Not measured on a wide config; the P9 notes record ~2,500 transform
+        compositions from unrestricted depth-2 DFS over 8 numerics, which is the case worth timing.
+        <strong>Phase at risk: 2, task 4.</strong> Mitigated structurally by building only when
+        <code>definitions</code> are present. If it does prove slow, the map is cacheable per config hash —
+        but do not build that until a measurement justifies it.
+      </p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>Why the truncation is safe to leave alone</h3>
+    <p>
+      Head-keeping truncation is what makes <code>group_by='source_entity'</code> immune, and that is not a
+      coincidence — the alias token sits at the front of every feature name, and the head is what survives.
+      featurizer measured tail-preserving truncation upstream and rejected it as a regression, with a test
+      pinning the conclusion. So the asymmetry is deliberate: the default grouping path is safe by
+      construction, and only the explicit-glob path — which can target anywhere in the name — needs the label.
+    </p>
+
+    <h3>What this shares with the v1.1.2 bug</h3>
+    <p>
+      The v1.1.2 release fixed an unqualified <code>results_schema_versions</code> that resolved through the
+      host role's <code>search_path</code> — correct in every database we own, wrong in a guest database. The
+      shape recurs here in two places, and both shaped the design:
+    </p>
+    <ul>
+      <li>
+        <strong>Our example config hides the bug.</strong> All three tutorial configs have 0 truncated columns
+        and head-anchored globs, so the test matrix cannot see the failure — exactly as our benign
+        <code>search_path</code> could not see the stamp bug. Hence the explicit truncation fixture in Phase 2:
+        a test that fails without the fix.
+      </li>
+      <li>
+        <strong>The rejected design would have created a fresh one.</strong> Labels present on a cold run and
+        absent on a warm one is the same defect class in a new location. That is the single strongest reason
+        for the config-derived map, and it is why the cold/warm parity property is asserted in a test rather
+        than left as a comment.
+      </li>
+    </ul>
+
+    <h3>Dependencies</h3>
+    <p>
+      None added. <code>featurizer[parquet]</code> is already a direct git-pinned dependency (ADR-0008/0016);
+      v1.1.0 is additive under featurizer's own ADR-0015 API freeze — no surface changed, no columns renamed,
+      nothing new persisted. No <code>uv add</code>, no migration, no schema change.
+    </p>
+
+    <h3>Unused v1.1.0 surface, and why</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>API</th><th>Used?</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Featurizer.feature_manifest</code></td>
+            <td>yes</td>
+            <td>The whole basis of the fix — gives <code>column → label</code> from the config, DB-free.</td>
+          </tr>
+          <tr>
+            <td><code>columns_matching</code> / <code>manifest_matching</code></td>
+            <td>no</td>
+            <td>They match label-only; ours is label-or-column. Using them in the CLI would let the diagnostic diverge from what partitioning actually does — the one thing the CLI exists to prevent.</td>
+          </tr>
+          <tr>
+            <td><code>manifest.glob_to_like</code></td>
+            <td>no</td>
+            <td>For querying a <em>persisted</em> manifest table by SQL <code>LIKE</code>. We consume <code>to_arrow</code>, never <code>to_tables()</code>, so no manifest table exists to query. Worth remembering it exists rather than hand-rolling glob→LIKE if that ever changes.</td>
+          </tr>
+          <tr>
+            <td><code>manifest.filter_manifest</code></td>
+            <td>no</td>
+            <td>Same reason as <code>manifest_matching</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Follow-on seeds (not this plan)</h3>
+    <ul>
+      <li>
+        <strong>featurizer:</strong> <code>config.get(key) or DEFAULT</code> swallows an explicitly empty list,
+        so <code>transformations: []</code> silently becomes the defaults and <code>[identity]</code> is the
+        working spelling. Recorded in the P9 notes; a None-check fixes it. Unrelated to this work but the pin
+        bump is a natural moment to file it upstream.
+      </li>
+      <li>
+        <strong>Guest-mode identifier audit</strong> (open in <code>TODO.org</code>): <code>adapters/</code>,
+        <code>diagnostics/</code>, and <code>dashboard/</code> are still unswept for unqualified relation names.
+        Same defect family as above, different mechanism.
+      </li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <p style="font-size:.9rem;color:var(--muted)">Append-only. Populated after first execution.</p>
+  </section>
+
+</main>
+</body>
+</html>

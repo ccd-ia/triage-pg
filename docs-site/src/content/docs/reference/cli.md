@@ -24,7 +24,7 @@ Two ergonomics used throughout:
 
 ```console
 $ uv run triage --version
-triage-pg 1.1.2
+triage-pg 1.1.3
 ```
 
 ## Set up a project database
@@ -63,6 +63,24 @@ $ triage analyze-config example/dirtyduck/experiment.yaml
 
 The same validator backs the webapp's submission form — errors come back
 path-addressed (`temporal_config.…`, `label_config.query`).
+
+`--features GLOB` answers a different question: which feature columns a
+`feature_groups.definitions` glob would actually catch. It matches by the same
+rule partitioning uses — each column's full label as well as its physical name —
+so what it prints is what the run would group. Needs no database.
+
+```console
+$ triage analyze-config example/dirtyduck/experiment.yaml --features '*(inspections.*'
+
+120 of 147 match '*(inspections.*'  (0 truncated)
+  ABS(facilities.COUNT(inspections.date))
+  ABS(facilities.COUNT(inspections.date|interval=P1M))
+  …
+```
+
+Use `--features '*'` to list every column. Where the 63-byte identifier cap
+truncated a name, the output shows `label → column` so you can see what the
+feature really is.
 
 ## Run
 

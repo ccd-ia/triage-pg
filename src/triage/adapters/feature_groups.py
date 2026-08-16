@@ -17,6 +17,10 @@ Grouping:
   the *target* entity and would collapse everything into one group (ADR-0023).
 * explicit ``definitions={group: [globs]}`` — each column is matched against the globs; every
   column must land in exactly one group (unmatched / ambiguous columns are a loud error).
+  Globs match the column's full featurizer **label** as well as its physical name (pass
+  ``labels=``), because a name over PostgreSQL's 63-byte cap is hash-truncated from the tail
+  and no glob can be written for the hash. The caller supplies the map as plain data —
+  ``adapters/matrix.feature_labels`` builds it from the config — so this module stays pure.
 
 Strategies (ported verbatim from triage's mixer): ``all``, ``leave-one-out``, ``leave-one-in``,
 ``all-combinations`` (2^N − 1, guarded by ``all_combinations_max_groups``).
@@ -36,6 +40,7 @@ logger = get_logger(__name__)
 __all__ = [
     "FeatureSubset",
     "STRATEGIES",
+    "matches_globs",
     "partition_features",
     "mix_strategies",
 ]
@@ -55,6 +60,32 @@ class FeatureSubset:
     """The groups included in this subset (sorted)."""
     columns: tuple[str, ...]
     """The feature columns included (sorted) — the projection applied to the matrix."""
+
+
+def matches_globs(
+    column: str,
+    globs: Sequence[str],
+    *,
+    labels: Mapping[str, str] | None = None,
+) -> bool:
+    """True when any glob matches the column's *label* or its physical name.
+
+    The single matching rule for explicit ``feature_groups.definitions``, shared by
+    :func:`partition_features` and ``triage analyze-config --features`` so a diagnostic can
+    never disagree with what partitioning actually does.
+
+    Names over PostgreSQL's 63-byte cap are hash-truncated from the tail, so a glob aimed at
+    an inner fragment (``*frecuencia_cardiaca*``) matches the label but misses the column.
+    ``labels`` maps physical column → full label (a column absent from it is its own label),
+    so for an untruncated column the two operands are the same string and this is exactly a
+    plain match on the column name. Matching the physical name *as well* keeps a glob that
+    was hand-written against a truncated name working.
+    """
+    label = labels.get(column, column) if labels else column
+    return any(
+        fnmatch.fnmatchcase(label, glob) or fnmatch.fnmatchcase(column, glob)
+        for glob in globs
+    )
 
 
 def _source_entity(column: str, entity_aliases: Sequence[str]) -> str | None:
@@ -81,6 +112,7 @@ def partition_features(
     group_by: str = "source_entity",
     definitions: Mapping[str, Sequence[str]] | None = None,
     target_alias: str | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> dict[str, list[str]]:
     """Partition ``feature_names`` into ``{group_name: [columns]}``.
 
@@ -93,9 +125,15 @@ def partition_features(
     target entity's *plain* direct variables carry no ``<alias>.`` prefix (featurizer names them
     bare, e.g. ``age``); these are attributed to ``target_alias``. A column that matches no alias
     and has no ``target_alias`` to fall back on is a loud error.
+
+    ``labels`` (physical column → full featurizer label) is consulted **only** on the
+    explicit-definitions path, where globs may target any part of a name that PostgreSQL's
+    63-byte cap may have truncated. ``group_by='source_entity'`` ignores it: head-keeping
+    truncation preserves the leading ``<alias>.`` token, so that path is immune by
+    construction. Absent ⇒ every column is its own label (today's behaviour exactly).
     """
     if definitions is not None:
-        return _partition_explicit(feature_names, definitions)
+        return _partition_explicit(feature_names, definitions, labels=labels)
     if group_by != "source_entity":
         raise ValueError(
             f"feature_groups.group_by={group_by!r} is not supported"
@@ -123,18 +161,27 @@ def partition_features(
 def _partition_explicit(
     feature_names: Sequence[str],
     definitions: Mapping[str, Sequence[str]],
+    *,
+    labels: Mapping[str, str] | None = None,
 ) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {name: [] for name in definitions}
     for column in feature_names:
         hits = [
             name
             for name, globs in definitions.items()
-            if any(fnmatch.fnmatchcase(column, g) for g in globs)
+            if matches_globs(column, globs, labels=labels)
         ]
         if len(hits) == 0:
+            label = labels.get(column, column) if labels else column
+            shown = f" (label: {label!r})" if label != column else ""
             raise ValueError(
-                f"feature column {column!r} matches no feature_groups.definitions glob; "
-                "every column must belong to exactly one group (add a glob or widen one)."
+                f"feature column {column!r}{shown} matches no feature_groups.definitions"
+                " glob; every column must belong to exactly one group (add a glob or widen"
+                " one). Names over PostgreSQL's 63-byte cap are hash-truncated from the"
+                " tail, so a glob aimed at an inner fragment misses the column — globs are"
+                " matched against the full label as well as the physical name, so write the"
+                " glob against the label. Run `triage analyze-config <config> --features"
+                " '<glob>'` to see what a glob resolves to."
             )
         if len(hits) > 1:
             raise ValueError(

@@ -73,3 +73,16 @@ unchanged. `feature_groups` is nested under `feature_config` for authoring conve
   expands strategies → Runs.
 - `all-combinations` is 2^N − 1 Runs × splits × grid — the documented blow-up; capped by default.
 - Survives ADR-0022: groups change only the Run attempt, never the Experiment identity.
+
+## Status note (2026-08-16, featurizer v1.1.0)
+
+Explicit `definitions` globs are matched against each column's full featurizer **label** as
+well as its physical name. A generated name over PostgreSQL's 63-byte cap is hash-truncated
+from the tail, so a glob aimed past the cut previously aborted the run on every truncated
+column with advice nobody could act on (the hash is unpredictable). The label map is built
+from `feature_config` alone via `adapters/matrix.feature_labels` — featurizer's planner needs
+no database — which keeps it identical on the matrix cache-hit path, where featurizer never
+runs. `group_by='source_entity'` is unchanged and unaffected: head-keeping truncation
+preserves the leading `<alias>.` token, so that path is immune by construction.
+`triage analyze-config --features GLOB` reports what a glob resolves to, through the same
+predicate partitioning uses.
