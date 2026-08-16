@@ -682,8 +682,8 @@ wheels = [
 
 [[package]]
 name = "featurizer"
-version = "1.0.1"
-source = { git = "https://github.com/ccd-ia/featurizer.git?rev=v1.0.1#98b2c05a580002ccfda12fc9721b17d93b36c69d" }
+version = "1.1.0"
+source = { git = "https://github.com/ccd-ia/featurizer.git?rev=v1.1.0#d43bf9912deeba9bf7333d044094aaf254b5c665" }
 dependencies = [
     { name = "icecream" },
     { name = "loguru" },
@@ -2827,7 +2827,7 @@ wheels = [
 
 [[package]]
 name = "triage"
-version = "1.1.2"
+version = "1.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -2939,7 +2939,7 @@ requires-dist = [
     { name = "dickens", specifier = ">=2.1.1" },
     { name = "factory-boy", marker = "extra == 'dev'", specifier = "==3.2.1" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = ">=0.115" },
-    { name = "featurizer", extras = ["parquet"], git = "https://github.com/ccd-ia/featurizer.git?rev=v1.0.1" },
+    { name = "featurizer", extras = ["parquet"], git = "https://github.com/ccd-ia/featurizer.git?rev=v1.1.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "httpx", marker = "extra == 'dashboard'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.28.1" },

@@ -8,6 +8,7 @@ import pytest
 
 from triage.adapters.feature_groups import (
     FeatureSubset,
+    matches_globs,
     mix_strategies,
     partition_features,
 )
@@ -86,6 +87,118 @@ def test_partition_explicit_ambiguous_is_loud():
             _ALIASES,
             definitions={"a": ["facilities.*"], "b": ["*zip_code*"]},
         )
+
+
+# -------------------------------------------- truncated names (the 63-byte cap)
+#
+# A generated feature name over PostgreSQL's 63-byte identifier cap is hash-truncated from
+# the TAIL, so a glob aimed at an inner fragment matches the label and misses the column.
+# The pair below is verbatim featurizer output (quotes stripped, as its manifest reports
+# them) for a depth-2 config over a long-named entity — hardcoded so this module keeps its
+# no-featurizer-import purity. Note the fragment 'frecuencia_cardiaca' survives ONLY in the
+# label: it sits past the cut, which is precisely the case no glob could reach before.
+_TRUNC_LABEL = (
+    "ABS(consultas_ambulatorias.MAX(signos_vitales_registrados."
+    "HOLT_WINTERS_LEVEL_7(signos_vitales_registrados."
+    "frecuencia_cardiaca_en_reposo)|interval=P1M))"
+)
+_TRUNC_COL = "ABS(consultas_ambulatorias.MAX(signos_vitales_registra~01f94542"
+_PLAIN_LABEL = "COUNT(consultas.frecuencia_cardiaca|interval=P1W)"
+_LABELS = {_TRUNC_COL: _TRUNC_LABEL, _PLAIN_LABEL: _PLAIN_LABEL}
+
+_CARDIAC_GLOB = "*frecuencia_cardiaca*"
+
+
+def test_truncated_fixture_is_honest():
+    # Guards the fixture itself: a "truncated" name that is not actually at the cap would
+    # make every test below pass for the wrong reason.
+    assert len(_TRUNC_COL.encode()) == 63
+    assert len(_TRUNC_LABEL.encode()) > 63
+    assert _CARDIAC_GLOB.strip("*") not in _TRUNC_COL
+
+
+def test_truncated_column_groups_via_its_label():
+    groups = partition_features(
+        [_TRUNC_COL, _PLAIN_LABEL],
+        [],
+        definitions={"cardiac": [_CARDIAC_GLOB]},
+        labels=_LABELS,
+    )
+    assert groups == {"cardiac": sorted([_TRUNC_COL, _PLAIN_LABEL])}
+
+
+def test_truncated_column_without_labels_still_raises():
+    # The map is what fixes it — proves the pass above is not incidental.
+    with pytest.raises(ValueError, match="matches no feature_groups"):
+        partition_features([_TRUNC_COL], [], definitions={"cardiac": [_CARDIAC_GLOB]})
+
+
+def test_unmatched_error_shows_the_label():
+    with pytest.raises(ValueError, match="label:"):
+        partition_features(
+            [_TRUNC_COL], [], definitions={"nope": ["*nomatch*"]}, labels=_LABELS
+        )
+
+
+def test_hand_written_physical_name_glob_still_matches():
+    # Back-compat: pasting the ~hash tail was the only workaround before labels existed.
+    groups = partition_features(
+        [_TRUNC_COL], [], definitions={"hand": ["*~01f94542"]}, labels=_LABELS
+    )
+    assert groups == {"hand": [_TRUNC_COL]}
+
+
+def test_label_and_column_hits_on_different_groups_stay_ambiguous():
+    with pytest.raises(ValueError, match="matches multiple groups"):
+        partition_features(
+            [_TRUNC_COL],
+            [],
+            definitions={"by_label": [_CARDIAC_GLOB], "by_column": ["*~01f94542"]},
+            labels=_LABELS,
+        )
+
+
+def test_labels_are_a_no_op_for_untruncated_columns():
+    # The non-breaking claim, asserted: label == column ⇒ byte-identical partitioning.
+    definitions = {
+        "facility_attrs": ["facilities.*"],
+        "inspection_history": ["*(inspections.*"],
+    }
+    cols = _FACILITY_COLS + _INSPECTION_COLS
+    assert partition_features(cols, _ALIASES, definitions=definitions) == (
+        partition_features(
+            cols, _ALIASES, definitions=definitions, labels={c: c for c in cols}
+        )
+    )
+
+
+def test_source_entity_path_ignores_labels():
+    # group_by='source_entity' is immune by construction (head-keeping preserves the
+    # leading '<alias>.' token), so a labels map must not perturb it.
+    cols = _FACILITY_COLS + _INSPECTION_COLS
+    lying = {c: "totally.different.name" for c in cols}
+    assert partition_features(cols, _ALIASES) == partition_features(
+        cols, _ALIASES, labels=lying
+    )
+
+
+def test_matches_globs_missing_column_falls_back_to_itself():
+    # A column absent from the map is its own label — never a KeyError.
+    assert matches_globs("plain.column", ["plain.*"], labels={"other": "x"})
+
+
+def test_feature_groups_module_imports_no_featurizer():
+    # The documented purity invariant ("no DB, no featurizer import"), enforced.
+    from pathlib import Path
+
+    import triage.adapters.feature_groups as fg
+
+    source = Path(str(fg.__file__)).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "import featurizer" not in code
+    assert "from featurizer" not in code
 
 
 # ---------------------------------------------------------------- strategies

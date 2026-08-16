@@ -1,0 +1,18 @@
+digraph identity {
+  rankdir=LR; bgcolor="transparent";
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" penwidth=2 fontname="Helvetica" fontsize=12 fontcolor="#1f2328" margin="0.2,0.14"];
+  edge [penwidth=1.6 color="#656d76" fontname="Helvetica" fontsize=10 fontcolor="#656d76"];
+
+  exp    [label="experiment hash\nb9e38fd8 unchanged" color="#1a7f37" fillcolor="#f2fbf4"];
+  cohort [label="cohort\ncached" color="#1a7f37" fillcolor="#f2fbf4"];
+  labels [label="labels\ncached" color="#1a7f37" fillcolor="#f2fbf4"];
+  fg     [label="feature_group\nrebuilds" color="#da3633" fillcolor="#fff5f5"];
+  mtx    [label="matrix\nrebuilds" color="#9e6a03" fillcolor="#fdf6e3"];
+  mdl    [label="model\nrebuilds" color="#9e6a03" fillcolor="#fdf6e3"];
+
+  fg -> mtx [label="parent"];
+  cohort -> mtx [label="parent"];
+  labels -> mtx [label="parent"];
+  mtx -> mdl [label="parent"];
+  {rank=same; exp}
+}

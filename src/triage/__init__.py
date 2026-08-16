@@ -2,7 +2,7 @@
 
 __author__ = """Center for Data Science and Public Policy"""
 __email__ = "datascifellows@gmail.com"
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 from .logging import configure_logging
 

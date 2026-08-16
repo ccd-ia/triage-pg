@@ -110,7 +110,7 @@ Prefer to be taught rather than shown commands? The **[tutorials](https://ccd-ia
 
 Installation reality: not on PyPI — clone and `uv sync`. Needs PostgreSQL 11+ (plain, no extensions). Optional extras: `dashboard` (FastAPI + SPA), `survival` (scikit-survival), `oidc` (real webapp auth).
 
-No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.1.2` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
+No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.1.3` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
 
 ## Acknowledgment — built on DSSG's triage
 

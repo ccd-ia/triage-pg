@@ -203,6 +203,43 @@ def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
     return yaml.safe_dump(cfg, sort_keys=True)
 
 
+def feature_labels(featurizer_config: Mapping[str, Any]) -> dict[str, str]:
+    """Map each output column name → its full, untruncated featurizer label.
+
+    A generated feature name longer than PostgreSQL's 63-byte identifier cap is
+    hash-truncated *from the tail* (``…interval=P~67a3dcf5``), so the physical column is a
+    lossy view of what the feature actually is. featurizer's manifest carries the label —
+    the only lossless surface — which is what ``feature_groups.definitions`` globs are
+    matched against (ADR-0023).
+
+    Built from the **config alone, with no database connection**: featurizer's planner runs
+    inside ``Featurizer.__init__``, and triage-pg always declares one-hot vocabularies
+    (adapter-spec §4 fixed-vocabulary path), so the manifest is fully determined without
+    touching PG.
+
+    That property is load-bearing, not incidental. ``_run_featurizer`` executes only on a
+    cache MISS; a matrix cache hit returns early with ``feature_names`` read off the
+    artifact row. Deriving labels from the config means the map is identical cold or warm,
+    so feature-group partitioning cannot depend on cache state — a config that groups one
+    way on a fresh database and another way on a re-run would be a worse defect than the
+    truncation it fixes.
+    """
+    from featurizer import Featurizer
+
+    config_yaml = _featurizer_config_yaml(featurizer_config)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".yaml", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(config_yaml)
+        config_path = handle.name
+
+    try:
+        featurizer = Featurizer(config_path, validate=True)
+        return {entry.column: entry.label for entry in featurizer.feature_manifest}
+    finally:
+        Path(config_path).unlink(missing_ok=True)
+
+
 def _run_featurizer(
     db_engine: DictRowPool,
     featurizer_config: Mapping[str, Any],

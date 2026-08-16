@@ -261,10 +261,31 @@ feature_config:
 - Must be a non-empty mapping:
   `feature_config must be a non-empty mapping (the featurizer ER-graph config)`.
 - `feature_groups` belongs here, not at the top level (see the warning below).
-  Explicit `feature_groups.definitions` (a map of group name → column-name
-  globs) sets `n_feature_groups` at validate time; `group_by` partitions are
-  discovered from featurizer's columns at run time, so they are not known
-  pre-run.
+  Explicit `feature_groups.definitions` (a map of group name → globs) sets
+  `n_feature_groups` at validate time; `group_by` partitions are discovered
+  from featurizer's columns at run time, so they are not known pre-run.
+- **Write `definitions` globs against the feature's label.** A generated feature
+  name longer than PostgreSQL's 63-byte identifier limit is hash-truncated from
+  the tail (`AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5`),
+  so a glob aimed at a fragment past the cut would never match the physical
+  column — and the hash is not something you can write a glob for. Globs are
+  therefore matched against each column's full, untruncated **label** as well as
+  its physical name, so `["*frecuencia_cardiaca*"]` does what you mean. To see
+  what a glob resolves to before running anything:
+
+  ```console
+  $ triage analyze-config experiment.yaml --features '*(inspections.*'
+
+  120 of 147 match '*(inspections.*'  (0 truncated)
+    ABS(facilities.COUNT(inspections.date))
+    ABS(facilities.COUNT(inspections.date|interval=P1M))
+    ...
+  ```
+
+  `--features '*'` lists every feature column. Truncated columns are shown as
+  `label → column`. The command needs no database.
+- Every column must land in **exactly one** group. A column matching no glob, or
+  more than one, is a loud error rather than a silent drop or double-count.
 
 ## `grid_config`
 

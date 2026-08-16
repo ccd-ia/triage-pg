@@ -1,0 +1,24 @@
+digraph cache {
+  rankdir=TB; bgcolor="transparent";
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" penwidth=2 fontname="Helvetica" fontsize=12 fontcolor="#1f2328" margin="0.2,0.14"];
+  edge [fontname="Helvetica" fontsize=11 fontcolor="#656d76" penwidth=1.6 color="#656d76"];
+
+  subgraph cluster_rej {
+    label="Rejected: labels threaded out of matrix.py"; fontname="Helvetica"; fontsize=12; fontcolor="#da3633";
+    color="#da3633"; style="rounded,dashed"; penwidth=1.5; margin=16;
+    r_cold [label="cold run\nfeaturizer runs" color="#0969da"];
+    r_warm [label="warm run\ncache hit, skipped" color="#0969da"];
+    r_out  [label="labels present" color="#1a7f37" fillcolor="#f2fbf4"];
+    r_bad  [label="labels absent" color="#da3633" fillcolor="#fff5f5"];
+    r_cold -> r_out; r_warm -> r_bad;
+  }
+
+  subgraph cluster_acc {
+    label="Chosen: labels derived from feature_config"; fontname="Helvetica"; fontsize=12; fontcolor="#1a7f37";
+    color="#1a7f37"; style="rounded,dashed"; penwidth=1.5; margin=16;
+    a_cold [label="cold run" color="#0969da"];
+    a_warm [label="warm run" color="#0969da"];
+    a_out  [label="identical labels" color="#1a7f37" fillcolor="#f2fbf4"];
+    a_cold -> a_out; a_warm -> a_out;
+  }
+}

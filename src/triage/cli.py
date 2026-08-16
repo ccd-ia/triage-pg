@@ -7,6 +7,7 @@ import pathlib
 import subprocess
 import textwrap
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -1239,6 +1240,52 @@ def score_command(
     )
 
 
+def _print_feature_columns(config_data: Mapping[str, Any], pattern: str) -> None:
+    """Show which feature columns a ``feature_groups.definitions`` glob resolves to.
+
+    Matched through :func:`~triage.adapters.feature_groups.matches_globs` — the *same*
+    predicate partitioning uses — so this can never report a set the run would disagree
+    with. featurizer's own ``columns_matching`` is deliberately not used here: it matches
+    the label only, while ours also matches the physical name.
+
+    Needs no database: the manifest is built from the config alone.
+    """
+    from triage.adapters.feature_groups import matches_globs
+    from triage.adapters.matrix import feature_labels
+    from triage.adapters.run import _featurizer_only
+
+    feature_config = config_data.get("feature_config")
+    if not feature_config:
+        console.print("[red]feature_config block is required for --features.[/red]")
+        raise typer.Exit(code=1)
+
+    labels = feature_labels(_featurizer_only(feature_config))
+    matched = [c for c in labels if matches_globs(c, [pattern], labels=labels)]
+    truncated = sum(1 for c in matched if c != labels[c])
+
+    scope = (
+        "feature columns" if pattern == "*" else f"of {len(labels)} match {pattern!r}"
+    )
+    console.print(
+        f"\n[bold]{len(matched)}[/bold] {scope}"
+        f"  ([yellow]{truncated}[/yellow] truncated)"
+    )
+    if not matched:
+        console.print(
+            "[yellow]Nothing matched.[/yellow] Globs are matched against each column's"
+            " full label — run [cyan]--features '*'[/cyan] to see them all."
+        )
+        return
+
+    for column in matched:
+        label = labels[column]
+        # A truncated name is a lossy view of the feature; show what it really is.
+        if label != column:
+            console.print(f"  {label}\n    [dim]→ {column}[/dim]")
+        else:
+            console.print(f"  {column}")
+
+
 @app.command("analyze-config")
 def analyze_config(
     config: str = typer.Argument(..., help="Experiment config to inspect."),
@@ -1248,6 +1295,14 @@ def analyze_config(
         help="Also render the temporal cross-validation blocks to this image file"
         " (format from the extension: .png/.svg/.pdf) — Timechop's train/test"
         " matrices, as_of dates and label windows across time, one panel per split.",
+    ),
+    features: Optional[str] = typer.Option(
+        None,
+        "--features",
+        metavar="GLOB",
+        help="Show which feature columns a glob resolves to, using the same rule as"
+        " feature_groups.definitions (matched against each column's full label as well"
+        " as its physical name). Use --features '*' to list them all. Needs no database.",
     ),
 ) -> None:
     config_data = load_experiment_config(config)
@@ -1301,6 +1356,9 @@ def analyze_config(
         title="Cohort Configuration",
     )
     console.print(cohort_panel)
+
+    if features is not None:
+        _print_feature_columns(config_data, features)
 
     if plot is not None:
         # Lazy import: matplotlib/plotly load only when a plot is actually requested.

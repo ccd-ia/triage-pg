@@ -1,0 +1,14 @@
+digraph solution {
+  rankdir=LR; bgcolor="transparent";
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" penwidth=2 fontname="Helvetica" fontsize=12 fontcolor="#1f2328" margin="0.2,0.15"];
+  edge [fontname="Helvetica" fontsize=11 fontcolor="#656d76" penwidth=1.6 color="#656d76"];
+
+  cfg  [label="feature_config" color="#0969da"];
+  plan [label="Featurizer.__init__\nplanner.plan()" color="#8957e5" fillcolor="#faf7ff"];
+  map  [label="column → label" color="#0598bc" fillcolor="#f0fafd"];
+  part [label="partition_features" color="#0969da"];
+  grp  [label="feature groups" color="#1a7f37" fillcolor="#f2fbf4"];
+
+  cfg -> plan -> map -> part -> grp;
+  plan -> plan [label="no database" style=dashed color="#9e6a03" fontcolor="#9e6a03"];
+}
