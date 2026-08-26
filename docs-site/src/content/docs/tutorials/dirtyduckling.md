@@ -91,11 +91,17 @@ uv run triage --dbfile dirtyduck-database.yaml analyze-config example/dirtyduck/
 ```
 
 **PASS:** a panel report with **no errors** — the temporal splits, a model grid
-of 5, and the cohort/label SQL summaries:
+of 8, the 32 models that grid will actually produce, and the cohort/label SQL
+summaries:
 
 ```text
-  Avg train as_of dates     2.5
-  Model grid size             5
+  Feature columns                          147
+  Temporal splits                            4
+  Matrices to build      8  (4 train + 4 test)
+  Model grid size                            8
+  Model groups                               8
+  Feature-group runs                         1
+  Models to be trained                      32
 ╭──────────── Label Configuration ────────────╮
 │ Label name: failed_inspections              │
 │ SQL: select entity_id, bool_or(result =     │
@@ -103,6 +109,12 @@ of 5, and the cohort/label SQL summaries:
 │ ontology.events where {as_of_date}…         │
 ╰─────────────────────────────────────────────╯
 ```
+
+Read **Models to be trained** as the cost of Step 5: grid size × splits ×
+feature-group runs (8 × 4 × 1 here). The 8 matrices are built once and every
+model reads them; you'll see those exact 32 models on the leaderboard in Step 6.
+Add `--estimate` and it also counts the cohort and label rows those 32 models
+will be fitted on.
 
 This is the same validator the write-webapp runs before accepting a
 submission — errors come back path-addressed (`temporal_config.…`,

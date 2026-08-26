@@ -1139,8 +1139,15 @@ export interface ValidateConfigResult {
   experiment_hash: string | null
   problem_type: string | null
   n_splits: number | null
+  /** Grid size per split, PER RUN — total fits are n_models × n_splits × n_runs. */
   n_models: number | null
   n_feature_groups: number | null
+  /**
+   * Runs the experiment fans out into (ADR-0023) — one per feature subset. Distinct from
+   * `n_feature_groups`: 2 groups swept ['all', 'leave-one-out'] is 2 groups but 3 runs.
+   * Null when feature_config cannot be planned — "not known", not "zero".
+   */
+  n_runs: number | null
   errors: { path: string; message: string }[]
   warnings: string[]
 }

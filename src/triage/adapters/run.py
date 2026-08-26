@@ -248,14 +248,17 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
     ``POST /api/validate-config`` is a thin wrapper over this (ADR-0012: validation is core
     logic, not UI logic). Returns::
 
-        {valid, experiment_hash, problem_type, n_splits, n_models, n_feature_groups,
+        {valid, experiment_hash, problem_type, n_splits, n_models, n_feature_groups, n_runs,
          errors: [{path, message}], warnings: [str]}
 
     ``experiment_hash`` is the ADR-0022 problem identity — derivable whenever the four problem
     keys are present, even if deeper checks fail (presence fixes identity). ``n_models`` is the
-    grid size per split; ``n_feature_groups`` is only known pre-run for explicit
-    ``definitions`` (``group_by`` partitions are discovered from featurizer's columns at
-    run time).
+    grid size **per split, per run** — the total fits are ``n_models × n_splits × n_runs``.
+
+    ``n_feature_groups`` and ``n_runs`` both come from the DB-free feature manifest (see
+    :func:`_resolve_fanout`) and are different numbers: two groups swept
+    ``['all', 'leave-one-out']`` is 2 groups but 3 runs. Either is ``None`` when the
+    ``feature_config`` cannot be planned — "not known", not "zero".
     """
     errors: list[dict[str, str]] = []
     warnings: list[str] = []
@@ -359,6 +362,7 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 _err("grid_config", str(exc))
 
     n_feature_groups: int | None = None
+    n_runs: int | None = None
     feature_config = experiment_config.get("feature_config")
     if feature_config is not None:
         if not isinstance(feature_config, Mapping) or not feature_config:
@@ -372,6 +376,9 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 definitions = groups.get("definitions")
                 if isinstance(definitions, Mapping):
                     n_feature_groups = len(definitions)
+            n_feature_groups, n_runs = _resolve_fanout(
+                feature_config, fallback_groups=n_feature_groups
+            )
 
     task_framing = experiment_config.get("task_framing")
     if task_framing is not None and task_framing not in _TASK_FRAMINGS:
@@ -489,6 +496,7 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
         "n_splits": n_splits,
         "n_models": n_models,
         "n_feature_groups": n_feature_groups,
+        "n_runs": n_runs,
         "errors": errors,
         "warnings": warnings,
     }
@@ -790,6 +798,103 @@ def _feature_subsets(
     )
 
 
+def _resolve_fanout(
+    feature_config: Mapping[str, Any], *, fallback_groups: int | None
+) -> tuple[int | None, int | None]:
+    """``(n_feature_groups, n_runs)`` for a config, from the DB-free feature manifest.
+
+    Groups and runs are different numbers and both are worth reporting: two groups swept
+    ``['all', 'leave-one-out']`` is 2 groups but 3 runs, and it is the *runs* that multiply the
+    training cost (grid × splits × runs). Historically neither was knowable before featurizer
+    ran, so this returned a count only for explicit ``definitions``; ``feature_labels`` made the
+    manifest DB-free, so both are now derivable from ``feature_config`` alone.
+
+    Best-effort by construction: a ``feature_config`` this cannot plan gets ``(fallback, None)``
+    rather than an exception or a fabricated number. Validation must not fail *here* — a config
+    broken enough to defeat the planner has its own error to report, and a null is the honest
+    way to say "not known", which is what the field already meant.
+
+    Costs one featurizer planner pass: 2–6 ms across the committed example configs once the
+    process is warm (the first call in a process also pays featurizer's import, ~0.3s).
+    """
+    try:
+        columns = list(feature_labels(_featurizer_only(feature_config)))
+        subsets = _feature_subsets(
+            feature_config, columns, _featurizer_only(feature_config)
+        )
+    except Exception as exc:  # noqa: BLE001 — reported as "unknown", never raised
+        logger.debug(f"fan-out not resolvable from feature_config alone: {exc}")
+        return fallback_groups, None
+    groups = {name for subset in subsets for name in subset.group_names}
+    return len(groups), len(subsets)
+
+
+class BaselinePreflightError(ValueError):
+    """A name-pinned baseline cannot survive the fan-out this config declares."""
+
+
+def _format_baseline_refusal(issues: Sequence[Any]) -> str:
+    """The refusal message: what breaks, in which run, and the two ways out."""
+    lines = "\n".join(f"  - {issue.describe()}" for issue in issues)
+    return (
+        "grid_config declares baseline(s) that select feature columns BY NAME, and the"
+        " feature_groups fan-out removes those columns from at least one run:\n"
+        f"{lines}\n"
+        "Each such run would raise BaselineFeatureNotInMatrix partway through training —"
+        " after its matrices are already built. Either pin the baseline to a column present"
+        " in every run, or narrow feature_groups.strategies so no run drops it."
+        " Run `triage analyze-config <config>` to see the full fan-out."
+    )
+
+
+def _blocking_baseline_issues(
+    grid_config: Mapping[str, Any],
+    feature_config: Mapping[str, Any],
+    columns: Sequence[str],
+) -> list[Any]:
+    """Baseline issues that make a run certainly fail, dropping the advisory ones.
+
+    An estimator that will not construct is excluded: ``build_model`` raises on it with the
+    real traceback, and a guard that pre-empts that would only obscure it. Imported lazily —
+    ``preflight`` reaches back into this module.
+    """
+    from triage.adapters.preflight import check_baseline_features
+
+    return [
+        issue
+        for issue in check_baseline_features(grid_config, feature_config, columns)
+        if issue.detail is None
+    ]
+
+
+def _check_baselines_before_building(experiment_config: Mapping[str, Any]) -> None:
+    """Refuse a config whose name-pinned baselines cannot survive its own fan-out.
+
+    Runs in the fail-fast block, before cohort/labels/features/matrices exist, using the
+    DB-free feature manifest. That manifest is *exactly* the built matrix's column set — the
+    same equivalence ``_feature_subsets`` already relies on for explicit ``definitions``
+    (featurizer's planner runs in ``Featurizer.__init__`` with no database, and triage-pg
+    always declares one-hot vocabularies), verified column-for-column across the example
+    configs. So this cannot refuse a run that would have succeeded.
+
+    Anything the manifest cannot answer — an unplannable ``feature_config``, an estimator that
+    will not construct — is left to the code that raises on it properly; a pre-flight must
+    never turn someone else's error into its own.
+    """
+    feature_config = experiment_config.get("feature_config")
+    grid_config = experiment_config.get("grid_config")
+    if not isinstance(feature_config, Mapping) or not grid_config:
+        return
+    try:
+        columns = list(feature_labels(_featurizer_only(feature_config)))
+        blocking = _blocking_baseline_issues(grid_config, feature_config, columns)
+    except Exception as exc:  # noqa: BLE001 — never mask the real failure with a guard's
+        logger.debug(f"baseline pre-flight skipped (config not plannable yet): {exc}")
+        return
+    if blocking:
+        raise BaselinePreflightError(_format_baseline_refusal(blocking))
+
+
 def _featurizer_only(feature_config: Mapping[str, Any]) -> dict[str, Any]:
     """The featurizer ER-graph config with the triage-pg-only ``feature_groups`` key removed.
 
@@ -1053,6 +1158,8 @@ def run_experiment(
         raise ValueError(
             f"unknown task_framing {task_framing!r} — expected one of {list(_TASK_FRAMINGS)}"
         )
+    # Name-pinned baselines vs the feature-group fan-out: refuse before anything is built.
+    _check_baselines_before_building(experiment_config)
 
     temporal_config = TemporalConfig.model_validate(
         _require(experiment_config, "temporal_config")
@@ -1173,6 +1280,15 @@ def run_experiment(
         ]
 
         subsets = _feature_subsets(feature_config, feature_names, featurizer_config)
+        # The same baseline check again, now against the columns the matrices REALLY have.
+        # The pre-flight above already cleared this from the manifest, so reaching here means
+        # the manifest and the built matrix disagreed — a bug worth failing loudly on, and
+        # still cheaper than discovering it mid-training.
+        late_issues = _blocking_baseline_issues(
+            experiment_config.get("grid_config") or {}, feature_config, feature_names
+        )
+        if late_issues:
+            raise BaselinePreflightError(_format_baseline_refusal(late_issues))
         # First subset reuses the run that built the shared artifacts; the rest get new runs.
         run_ids = [first_run_id] + [
             _create_run(db_engine, exp_hash, profile, random_seed) for _ in subsets[1:]

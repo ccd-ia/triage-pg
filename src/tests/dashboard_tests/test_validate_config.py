@@ -252,3 +252,39 @@ def test_temporal_viz_422_without_temporal_config(client):
     )
     assert r.status_code == 422
     assert "temporal_config" in r.json()["detail"]
+
+
+def test_validate_verdict_always_carries_the_same_keys(client):
+    """The YAML-parse early return hand-builds its verdict, so it can drift from the core's.
+
+    Every field the SPA reads must be present on BOTH paths — a missing key is an undefined in
+    the banner, not an error anyone would notice.
+    """
+    c, _ = client
+    expected = {
+        "valid",
+        "experiment_hash",
+        "problem_type",
+        "n_splits",
+        "n_models",
+        "n_feature_groups",
+        "n_runs",
+        "errors",
+        "warnings",
+    }
+
+    good = c.post(
+        "/api/validate-config",
+        json={"config_text": CHI311_YAML.read_text(encoding="utf-8")},
+        headers=HEADERS,
+    ).json()
+    unparseable = c.post(
+        "/api/validate-config",
+        json={"config_text": "querty: [unclosed"},
+        headers=HEADERS,
+    ).json()
+
+    assert set(good) == expected
+    assert set(unparseable) == expected
+    assert good["n_runs"] == 1  # chi311 declares no fan-out
+    assert unparseable["n_runs"] is None

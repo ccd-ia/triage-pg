@@ -247,6 +247,15 @@ function VerdictPanel({ verdict }: { verdict: ValidateConfigResult }) {
           {verdict.n_feature_groups != null ? (
             <> · {verdict.n_feature_groups} feature group(s)</>
           ) : null}
+          {verdict.n_runs != null ? <> · {verdict.n_runs} run(s)</> : null}
+          {/* The product is what the submitter is actually committing to; the factors above
+              are easy to read past. Only shown when every factor is known. */}
+          {verdict.n_models != null && verdict.n_splits != null && verdict.n_runs != null ? (
+            <>
+              {' '}
+              · <b>{verdict.n_models * verdict.n_splits * verdict.n_runs} model(s) total</b>
+            </>
+          ) : null}
         </span>
       ) : (
         <div>

@@ -13,7 +13,11 @@ from typing import Any
 import pytest
 
 from triage.adapters.feature_groups import mix_strategies, partition_features
-from triage.adapters.run import experiment_hash_for, run_experiment
+from triage.adapters.run import (
+    BaselinePreflightError,
+    experiment_hash_for,
+    run_experiment,
+)
 from triage.profiles.storage import LocalStorage
 
 PROBLEM_TYPE = "classification"
@@ -555,3 +559,118 @@ def test_feature_group_fanout_runs_share_one_experiment(db_pool_greenfield, tmp_
             run.splits[0].train_matrix.storage_uri
             == all_run.splits[0].train_matrix.storage_uri
         )
+
+
+# ---------------------------------------------------------------------------
+# The baseline pre-flight: refuse before building, never after
+# ---------------------------------------------------------------------------
+
+_PINNED = "COUNT(orders.order_id)"
+_RANKER = "triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature"
+
+
+def _baseline_grid(feature: str = _PINNED) -> dict[str, Any]:
+    """A grid holding one name-pinned baseline alongside the ordinary estimator."""
+    return {
+        CLASS_PATH: {"max_depth": [3]},
+        _RANKER: {"rules": [[{"feature": feature, "low_value_high_score": False}]]},
+    }
+
+
+def test_run_refuses_a_baseline_the_fanout_would_break(db_pool_greenfield, tmp_path):
+    """The 2026-08-16 live failure, refused before a single artifact exists.
+
+    A ``leave-one-in`` sweep produces a run holding only the ``customers`` group, which does
+    not carry the column the baseline ranks on — so that run would raise
+    ``BaselineFeatureNotInMatrix`` *after* its matrices were built. The point of refusing here
+    is that the other runs are not half-completed first: the fix is a one-line config edit,
+    and the user should get all the runs, not two of three plus a traceback.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    config = _experiment_config()
+    config["grid_config"] = _baseline_grid()
+    config["feature_config"]["feature_groups"] = {
+        "strategies": ["all", "leave-one-in"],
+        "group_by": "source_entity",
+    }
+
+    with pytest.raises(BaselinePreflightError) as excinfo:
+        run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "store"),
+            random_seed=42,
+        )
+
+    message = str(excinfo.value)
+    assert _PINNED in message
+    assert "leave-one-in:customers" in message
+    assert (
+        "analyze-config" in message
+    )  # points at the command that shows the whole fan-out
+
+    # Nothing was built — that is the entire value of failing here rather than mid-training.
+    with engine.connection() as conn:
+        for table in ("experiments", "runs", "cohorts", "labels", "matrices", "models"):
+            n = conn.execute(f"select count(*) as n from triage.{table}").fetchone()[
+                "n"
+            ]
+            assert n == 0, f"triage.{table} was written before the refusal"
+
+
+def test_run_accepts_a_pinned_baseline_when_no_run_drops_it(
+    db_pool_greenfield, tmp_path
+):
+    """The safety property: the guard must not refuse a config that would have worked.
+
+    Same baseline, same pinned column — but with no fan-out every run carries every column,
+    so the experiment runs to completion. A guard that fires here would be worse than the bug
+    it prevents.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    config = _experiment_config()
+    config["grid_config"] = _baseline_grid()
+
+    experiment = run_experiment(
+        engine,
+        config,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "store"),
+        random_seed=42,
+    )
+
+    assert experiment.num_models > 0
+    assert experiment.num_predictions > 0
+
+
+def test_run_refuses_a_baseline_pinned_to_a_column_that_does_not_exist(
+    db_pool_greenfield, tmp_path
+):
+    """A misspelled feature name is a different defect, and says so.
+
+    Not "narrow the strategies" — no strategy would help; feature_config never produces the
+    column. Reported once for the whole experiment rather than once per run.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    config = _experiment_config()
+    config["grid_config"] = _baseline_grid("COUNT(orders.does_not_exist)")
+
+    with pytest.raises(BaselinePreflightError) as excinfo:
+        run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "store"),
+            random_seed=42,
+        )
+
+    message = str(excinfo.value)
+    assert "does not produce" in message
+    assert message.count("COUNT(orders.does_not_exist)") == 1

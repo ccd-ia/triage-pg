@@ -32,7 +32,6 @@ from triage.artifacts import (
     gc_candidates,
     purge,
 )
-from triage.component.catwalk.grid import flatten_grid_config
 from triage.component.results_schema import (
     db_history,
     downgrade_db,
@@ -1286,8 +1285,122 @@ def _print_feature_columns(config_data: Mapping[str, Any], pattern: str) -> None
             console.print(f"  {column}")
 
 
+def _print_plan_notes(plan) -> None:
+    """The fan-out breakdown, the truncation note, and the baseline pre-flight.
+
+    Printed under the overview table because each is a *consequence* of it: the fan-out
+    explains the run count, truncation explains why a glob might miss, and a baseline issue
+    explains a run that would die partway through training.
+    """
+    if plan.feature_error:
+        console.print(
+            f"\n[yellow]Feature manifest could not be built:[/yellow] {plan.feature_error}"
+            "\n[dim]Split and grid numbers above are still exact; the feature column count,"
+            " the fan-out and the baseline check are not available.[/dim]"
+        )
+    for warning in plan.warnings:
+        console.print(f"[yellow]note:[/yellow] {warning}")
+
+    if plan.n_truncated_columns:
+        console.print(
+            f"[dim]{plan.n_truncated_columns} feature name(s) exceed PostgreSQL's 63-byte cap"
+            " and are hash-truncated — globs still match the full label"
+            " ([cyan]--features '*'[/cyan] shows both).[/dim]"
+        )
+
+    if len(plan.subsets) > 1:
+        fan = Table(title="Feature-group fan-out", box=box.SIMPLE_HEAVY)
+        fan.add_column("Run")
+        fan.add_column("Groups")
+        fan.add_column("Columns", justify="right")
+        fan.add_column("Models", justify="right")
+        for subset in plan.subsets:
+            fan.add_row(
+                subset.label,
+                ", ".join(subset.group_names),
+                str(subset.n_columns),
+                str(plan.grid_size * plan.n_splits),
+            )
+        console.print(fan)
+
+    if plan.baseline_issues:
+        lines = []
+        for issue in plan.baseline_issues:
+            name = issue.class_path.rsplit(".", 1)[-1]
+            if issue.detail:
+                lines.append(f"[red]{name}[/red] {issue.detail}")
+            else:
+                lines.append(
+                    f"[red]{name}[/red] pins {', '.join(issue.missing)} —"
+                    f" absent from run [magenta]{issue.subset_label}[/magenta]"
+                )
+        console.print(
+            Panel.fit(
+                "\n".join(lines)
+                + "\n\n[dim]These estimators select feature columns by name, so a fan-out that"
+                " drops the group holding the column fails that run with"
+                " BaselineFeatureNotInMatrix — after its matrix is built. Pin the baseline to a"
+                " column present in every run, or narrow the strategies.[/dim]",
+                title="[red]Baseline pre-flight[/red]",
+            )
+        )
+
+
+def _print_data_estimate(
+    ctx: typer.Context, config_data: Mapping[str, Any], max_dates: Optional[int]
+) -> None:
+    """Count what cohort + labels would produce, per as_of_date, against the live database."""
+    from triage.adapters.preflight import estimate_data
+
+    pool = get_pool(ctx)
+    try:
+        estimate = estimate_data(pool, config_data, max_dates=max_dates)
+    except Exception as exc:
+        console.print(f"[red]Estimate failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        pool.close()
+
+    cohort_by_date = {c.as_of_date: c.entities for c in estimate.cohort}
+    mean_header = {
+        "classification": "base rate",
+        "survival": "event rate",
+    }.get(estimate.problem_type, "mean target")
+
+    table = Table(
+        title=f"Data estimate ({len(estimate.cohort)} as_of_date(s))",
+        box=box.SIMPLE_HEAVY,
+    )
+    table.add_column("as_of_date")
+    table.add_column("timespan")
+    table.add_column("cohort", justify="right")
+    table.add_column("labels", justify="right")
+    table.add_column("labeled", justify="right")
+    table.add_column(mean_header, justify="right")
+    for label in estimate.labels:
+        table.add_row(
+            label.as_of_date.isoformat(),
+            label.label_timespan,
+            f"{cohort_by_date.get(label.as_of_date, 0):,}",
+            f"{label.entities:,}",
+            f"{label.labeled:,}",
+            "—" if label.outcome_mean is None else f"{label.outcome_mean:.4f}",
+        )
+    console.print(table)
+    console.print(
+        f"[cyan]cohort rows:[/cyan] {estimate.cohort_total:,}"
+        f"   [cyan]label rows:[/cyan] {estimate.label_total:,}"
+        + (
+            f"   [yellow](sampled: first {max_dates} as_of_date(s), not a total)[/yellow]"
+            if max_dates
+            else ""
+        )
+    )
+
+
 @app.command("analyze-config")
 def analyze_config(
+    ctx: typer.Context,
     config: str = typer.Argument(..., help="Experiment config to inspect."),
     plot: Optional[pathlib.Path] = typer.Option(
         None,
@@ -1304,21 +1417,39 @@ def analyze_config(
         " feature_groups.definitions (matched against each column's full label as well"
         " as its physical name). Use --features '*' to list them all. Needs no database.",
     ),
+    estimate: bool = typer.Option(
+        False,
+        "--estimate",
+        help="Also count what the cohort and label queries would produce — entities per"
+        " as_of_date, labeled rows, and the base rate. Runs one query per as_of_date"
+        " against the database; everything else needs no database.",
+    ),
+    estimate_dates: int = typer.Option(
+        0,
+        "--estimate-dates",
+        metavar="N",
+        help="With --estimate, sample only the first N as_of_dates instead of all of them.",
+    ),
 ) -> None:
+    """Inspect an experiment config: the plan it implies, and optionally the data behind it.
+
+    Everything except ``--estimate`` is derived from the config alone, with no database —
+    splits from timechop, feature columns from featurizer's planner, the fan-out from the same
+    subset builder the run uses, and the model count as their product.
+    """
+    from triage.adapters.preflight import plan_experiment
+
     config_data = load_experiment_config(config)
     temporal = config_data.get("temporal_config")
     if not temporal:
         console.print("[red]temporal_config block is required.[/red]")
         raise typer.Exit(code=1)
 
-    chopper = Timechop(**temporal)
-    matrix_sets = chopper.chop_time()
-    total_train = len(matrix_sets)
-    total_test = sum(len(m["test_matrices"]) for m in matrix_sets)
-    as_of_counts = [
-        len(matrix["train_matrix"]["as_of_times"]) for matrix in matrix_sets
-    ]
-    avg_train_as_of = sum(as_of_counts) / total_train if total_train else 0
+    try:
+        plan = plan_experiment(config_data)
+    except Exception as exc:
+        console.print(f"[red]Cannot plan this config:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
 
     label_config = config_data.get("label_config", {})
     cohort_config = config_data.get("cohort_config", {})
@@ -1327,20 +1458,32 @@ def analyze_config(
     table.add_column("Statistic")
     table.add_column("Value", justify="right")
     table.add_row("Config Version", config_data.get("config_version", CONFIG_VERSION))
+    if config_data.get("problem_type"):
+        table.add_row("Problem type", str(config_data["problem_type"]))
     table.add_row(
-        "Feature Aggregations", str(len(config_data.get("feature_aggregations", [])))
+        "Feature columns",
+        "unknown" if plan.n_feature_columns is None else str(plan.n_feature_columns),
     )
     table.add_row("Cohorts", "1" if cohort_config else "Default (labels-driven)")
-    table.add_row("Train matrix sets", str(total_train))
-    table.add_row("Test matrices", str(total_test))
-    table.add_row("Avg train as_of dates", f"{avg_train_as_of:.1f}")
-
-    grid_config = config_data.get("grid_config")
-    if grid_config:
-        grid_size = sum(1 for _ in flatten_grid_config(grid_config))
-        table.add_row("Model grid size", str(grid_size))
+    table.add_row("Temporal splits", str(plan.n_splits))
+    table.add_row("Distinct as_of dates", str(plan.n_as_of_dates))
+    table.add_row("Label timespans", ", ".join(plan.label_timespans) or "—")
+    # Matrices are the one count a fan-out does NOT multiply — subsets are column projections
+    # of the same Parquet, so say "train + test" rather than leave the reader to assume.
+    table.add_row(
+        "Matrices to build",
+        f"{plan.n_matrices}  [dim]({plan.n_splits} train + {plan.n_splits} test)[/dim]",
+    )
+    if plan.grid_size:
+        table.add_row("Model grid size", str(plan.grid_size))
+        table.add_row("Model groups", str(plan.n_model_groups))
+    table.add_row("Feature-group runs", str(plan.n_runs))
+    # The number the whole command exists to produce: grid × splits × runs. Reading the two
+    # factors off separate rows and multiplying them by hand is exactly what people got wrong.
+    table.add_row("[bold]Models to be trained[/bold]", f"[bold]{plan.n_models}[/bold]")
 
     console.print(table)
+    _print_plan_notes(plan)
 
     label_panel = Panel.fit(
         f"[cyan]Label name:[/cyan] {label_config.get('name', 'default')}\n"
@@ -1360,10 +1503,20 @@ def analyze_config(
     if features is not None:
         _print_feature_columns(config_data, features)
 
+    if estimate:
+        _print_data_estimate(ctx, config_data, estimate_dates or None)
+
     if plot is not None:
         # Lazy import: matplotlib/plotly load only when a plot is actually requested.
         # Dispatch by extension — .html gives the interactive (plotly) view, everything else a
         # static image (matplotlib).
+        from triage.adapters.temporal import TemporalConfig
+
+        # The SAME canonicalized kwargs the run feeds timechop — a plot drawn from the raw
+        # YAML would picture a schedule the run does not use.
+        chopper = Timechop(
+            **TemporalConfig.model_validate(temporal).to_timechop_kwargs()
+        )
         if plot.suffix.lower() == ".html":
             from triage.component.timechop.plotting import visualize_chops_plotly
 

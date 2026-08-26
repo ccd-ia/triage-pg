@@ -100,6 +100,11 @@ Load your source data into the new database (`raw` → `clean` → `ontology` sc
 tutorial `*_db/` dockers for the pattern), declare it under `sources:` in your config
 (ADR-0014 pinning), then `triage run your-experiment.yaml`.
 
+Before that last step, `triage analyze-config your-experiment.yaml` reports what the run
+implies — matrices, model groups, and models to be trained — from the config alone, so the
+size of the job is known before it starts. `--estimate` adds the cohort and label counts and
+the base rate per as_of_date, against the live database.
+
 ## The dashboard across many projects (ADR-0025)
 
 One dashboard instance serves every registry project via the top-bar **project switcher**:

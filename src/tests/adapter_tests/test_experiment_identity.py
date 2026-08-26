@@ -10,8 +10,15 @@ function AND at the experiment row written by ``_create_experiment_and_run``.
 from __future__ import annotations
 
 import getpass
+import pathlib
 
-from triage.adapters.run import _create_experiment_and_run, experiment_hash_for
+import yaml
+
+from triage.adapters.run import (
+    _create_experiment_and_run,
+    experiment_hash_for,
+    validate_experiment_config,
+)
 
 _BASE_CONFIG = {
     "problem_type": "classification",
@@ -272,3 +279,87 @@ def test_task_framing_persists_updates_and_never_clears(db_pool_greenfield):
     )
     assert h4 == h1
     assert stored(h1) == "visit_level"  # last provided write wins
+
+
+# ---------------------------------------------------------------------------
+# n_runs / n_feature_groups — the fan-out, resolved before anything runs
+# ---------------------------------------------------------------------------
+
+_DIRTYDUCK_CONFIG = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "example"
+    / "dirtyduck"
+    / "experiment.yaml"
+)
+
+
+def _dirtyduck() -> dict:
+    return yaml.safe_load(_DIRTYDUCK_CONFIG.read_text(encoding="utf-8"))
+
+
+def test_validate_reports_one_run_when_no_fanout_is_declared():
+    """No feature_groups ⇒ one implicit group ⇒ exactly one run."""
+    verdict = validate_experiment_config(_dirtyduck())
+
+    assert verdict["valid"] is True
+    assert verdict["n_runs"] == 1
+    assert verdict["n_feature_groups"] == 1
+    # The number a submitter is committing to: 8 × 4 × 1 (the canonical DirtyDuck 32).
+    assert verdict["n_models"] * verdict["n_splits"] * verdict["n_runs"] == 32
+
+
+def test_validate_distinguishes_groups_from_runs():
+    """2 groups swept ['all', 'leave-one-out'] is 2 groups but 3 RUNS.
+
+    The distinction is the reason for the new field: runs multiply the training cost, groups
+    do not, and reading one as the other understates the commitment by 3x here.
+    """
+    config = _dirtyduck()
+    config["feature_config"]["feature_groups"] = {
+        "definitions": {
+            "facility_attrs": ["facilities.*"],
+            "inspection_history": ["*(inspections.*"],
+        },
+        "strategies": ["all", "leave-one-out"],
+    }
+
+    verdict = validate_experiment_config(config)
+
+    assert verdict["valid"] is True
+    assert verdict["n_feature_groups"] == 2
+    assert verdict["n_runs"] == 3
+    assert verdict["n_models"] * verdict["n_splits"] * verdict["n_runs"] == 96
+
+
+def test_validate_resolves_the_fanout_for_group_by_too():
+    """``group_by`` used to report nothing — its partition was 'discovered at run time'.
+
+    feature_labels made the manifest DB-free, so the source-entity partition is knowable
+    here now. This is the case that regressed to null before.
+    """
+    config = _dirtyduck()
+    config["feature_config"]["feature_groups"] = {
+        "group_by": "source_entity",
+        "strategies": ["all", "leave-one-out"],
+    }
+
+    verdict = validate_experiment_config(config)
+
+    assert verdict["n_feature_groups"] is not None and verdict["n_feature_groups"] >= 2
+    assert verdict["n_runs"] == verdict["n_feature_groups"] + 1  # 'all' + one per group
+
+
+def test_validate_reports_unknown_rather_than_guessing_on_an_unplannable_config():
+    """A feature_config the planner cannot handle yields None — never 0, never an exception.
+
+    Validation must not fail *here*: the config has its own errors to report, and a fabricated
+    count would be worse than an honest null.
+    """
+    config = _dirtyduck()
+    config["feature_config"] = {"target": "nope", "entities": [{"alias": "nope"}]}
+
+    verdict = validate_experiment_config(config)
+
+    assert verdict["n_runs"] is None
+    assert verdict["n_splits"] >= 1  # the rest of the verdict is unaffected
+    assert verdict["n_models"] >= 1

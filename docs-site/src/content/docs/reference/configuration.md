@@ -12,8 +12,11 @@ this page transcribes it. The same validator backs two surfaces you can reach
 before committing to a run:
 
 - **`triage analyze-config <file>`** — the CLI dry-run. It runs exactly the
-  checks below, touches no database, and prints the derived shape (split count,
-  grid size, the label card). See [the CLI reference](/triage-pg/reference/cli/).
+  checks below, touches no database, and prints the derived shape: split count,
+  grid size, feature-column count, the feature-group fan-out, the models those
+  multiply out to, and the label card. `--estimate` additionally counts the
+  cohort and label rows against a live database. See
+  [the CLI reference](/triage-pg/reference/cli/).
 - **`POST /api/validate-config`** — the write webapp's submission-form check, a
   thin wrapper over the same function (validation is core logic, not
   UI logic).
@@ -22,13 +25,19 @@ Both return the same structured result:
 
 ```
 {valid, experiment_hash, problem_type, n_splits, n_models,
- n_feature_groups, errors: [{path, message}], warnings: [str]}
+ n_feature_groups, n_runs, errors: [{path, message}], warnings: [str]}
 ```
 
 Errors are **path-addressed** (`label_config.query`,
 `temporal_config.model_update_frequency`, `evaluation.subsets[0].name`) so a
 webapp form can point at the offending field. `experiment_hash` is derivable as
 soon as the four identity keys are present, even when deeper checks fail.
+
+`n_models` is the grid size **per split, per run**; the total fits are
+`n_models × n_splits × n_runs`. `n_feature_groups` and `n_runs` are different
+numbers — two groups swept `['all', 'leave-one-out']` is 2 groups but 3 runs,
+and it is runs that multiply the cost. Both are `null` when `feature_config`
+cannot be planned, meaning *not known* rather than zero.
 
 ## Identity vs. attempt (read this first)
 
@@ -261,9 +270,9 @@ feature_config:
 - Must be a non-empty mapping:
   `feature_config must be a non-empty mapping (the featurizer ER-graph config)`.
 - `feature_groups` belongs here, not at the top level (see the warning below).
-  Explicit `feature_groups.definitions` (a map of group name → globs) sets
-  `n_feature_groups` at validate time; `group_by` partitions are discovered
-  from featurizer's columns at run time, so they are not known pre-run.
+  Both `definitions` and `group_by` partitions are resolved at validate time —
+  the feature manifest is derived from `feature_config` with no database — so
+  `n_feature_groups` and `n_runs` are known before anything runs.
 - **Write `definitions` globs against the feature's label.** A generated feature
   name longer than PostgreSQL's 63-byte identifier limit is hash-truncated from
   the tail (`AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5`),
@@ -286,12 +295,20 @@ feature_config:
   `label → column`. The command needs no database.
 - Every column must land in **exactly one** group. A column matching no glob, or
   more than one, is a loud error rather than a silent drop or double-count.
+- **A fan-out and a name-pinned baseline can contradict each other.** If
+  `grid_config` holds a baseline that selects its feature by name
+  (`BaselineRankMultiFeature`, `SimpleThresholder`, `PercentileRankOneFeature`,
+  `LinearRanker`) and a strategy produces a run without that column, `triage run`
+  refuses the config before building anything, rather than training the runs that
+  work and dying on the one that cannot. `triage analyze-config` reports the same
+  conflict without running.
 
 ## `grid_config`
 
 **Purpose.** The estimator search space. Each estimator's hyperparameter lists
 are Cartesian-producted into concrete models; the total across all estimators
-is `n_models` (per split).
+is `n_models` (per split). Multiply by splits **and** by feature-group runs for
+the real fit count — `triage analyze-config` prints it as *Models to be trained*.
 
 **Required.** **Not** in identity — the Run's attempt.
 

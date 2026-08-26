@@ -52,8 +52,20 @@ an empty schema). Ownership of your data objects is never transferred. See
 
 ```console
 $ triage analyze-config example/dirtyduck/experiment.yaml
-  Avg train as_of dates     2.5
-  Model grid size             5
+  Statistic                              Value
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Config Version                            v8
+  Problem type                  classification
+  Feature columns                          147
+  Cohorts                                    1
+  Temporal splits                            4
+  Distinct as_of dates                       5
+  Label timespans                     6 months
+  Matrices to build      8  (4 train + 4 test)
+  Model grid size                            8
+  Model groups                               8
+  Feature-group runs                         1
+  Models to be trained                      32
 ╭──────────── Label Configuration ────────────╮
 │ Label name: failed_inspections              │
 │ SQL: select entity_id, bool_or(result =     │
@@ -61,8 +73,109 @@ $ triage analyze-config example/dirtyduck/experiment.yaml
 ╰─────────────────────────────────────────────╯
 ```
 
+Three of these counts scale differently, and the difference is the whole point
+of reading this table before committing a grid:
+
+| count | formula | does a fan-out multiply it? |
+|---|---|---|
+| **Matrices to build** | `2 × splits` | **no** |
+| **Model groups** | `grid × runs` | yes |
+| **Models to be trained** | `grid × splits × runs` | yes |
+
+**Models to be trained** is the number to budget against. The grid is trained
+once per train matrix, and there is one train matrix per split *per feature
+subset* — so a three-way fan-out over a 32-model experiment is 96 fits, not 32.
+
+**Matrices** is the one that does *not* multiply: featurizer runs once per split
+and every subset is a column projection of the same Parquet file, so a 4-run,
+4-split fan-out builds 8 matrices, not 32. **Model groups** do multiply, because
+the feature list is part of a group's identity — which is what makes a fan-out's
+leaderboard comparable, the same estimator on different features being a
+different group tracked across splits.
+
+All of this comes from the config alone; no database is touched.
+
 The same validator backs the webapp's submission form — errors come back
 path-addressed (`temporal_config.…`, `label_config.query`).
+
+### The fan-out, and the baselines it can break
+
+When `feature_config.feature_groups` declares a partition and a strategy, the
+command prints each run the experiment expands into, and cross-checks every
+name-pinned baseline against the columns that run will have:
+
+```console
+$ triage analyze-config experiment-fanout.yaml
+  Matrices to build      8  (4 train + 4 test)
+  Model grid size                            8
+  Model groups                              24
+  Feature-group runs                         3
+  Models to be trained                      96
+
+  Run                           Groups                Columns   Models
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  all                           facility_attrs,           147       32
+                                inspection_history
+  leave-one-out:facility_att…   inspection_history        120       32
+  leave-one-out:inspection_h…   facility_attrs             27       32
+
+╭──────────── Baseline pre-flight ────────────╮
+│ BaselineRankMultiFeature pins               │
+│ COUNT(inspections.result) — absent from run │
+│ leave-one-out:inspection_history            │
+╰─────────────────────────────────────────────╯
+```
+
+The DSSG baselines (`BaselineRankMultiFeature`, `SimpleThresholder`,
+`PercentileRankOneFeature`, `LinearRanker`) select their feature columns **by
+name**, while a `leave-one-out` sweep exists precisely to *remove* groups. Drop
+the group holding the pinned column and that run dies with
+`BaselineFeatureNotInMatrix` — after its matrix is already built. Pin the
+baseline to a column present in every run, or narrow the strategies.
+
+**`triage run` refuses such a config outright**, before building anything:
+
+```console
+$ triage run experiment-fanout.yaml
+BaselinePreflightError: grid_config declares baseline(s) that select feature
+columns BY NAME, and the feature_groups fan-out removes those columns from at
+least one run:
+  - BaselineRankMultiFeature pins COUNT(inspections.result) — absent from run
+'leave-one-out:inspection_history'
+```
+
+This is a deliberate all-or-nothing choice. Letting the run proceed would build
+and train the runs that *do* work, then die on the one that cannot — leaving you
+with two-thirds of a grid and a traceback. Refusing costs a one-line config edit
+and gives you all the runs. If the baseline names a column `feature_config` never
+produces at all, the message says that instead: no strategy would help, the name
+is wrong.
+
+### `--estimate` — the data behind the config
+
+Everything above is config-only. `--estimate` additionally counts what the
+cohort and label queries would produce, by rendering the same templates the
+builders render and wrapping them in a counting projection:
+
+```console
+$ triage --dbfile dirtyduck-database.yaml analyze-config \
+    example/dirtyduck/experiment.yaml --estimate
+
+  as_of_date   timespan   cohort   labels   labeled   base rate
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2015-01-01   6 months   11,279    6,382     6,382      0.2490
+  2015-07-01   6 months   12,289    6,755     6,755      0.2446
+  2016-01-01   6 months   13,363    7,394     7,394      0.2713
+  2016-07-01   6 months   13,859    6,978     6,978      0.2710
+  2017-01-01   6 months   14,261    7,284     7,284      0.2769
+
+cohort rows: 65,051   label rows: 34,793
+```
+
+The last column is the base rate for `classification`, the event rate for
+`survival`, and the mean target for the regression types. This runs one query
+per as_of_date, so `--estimate-dates N` samples the first N instead (the output
+says so, because a sampled total is not a total).
 
 `--features GLOB` answers a different question: which feature columns a
 `feature_groups.definitions` glob would actually catch. It matches by the same

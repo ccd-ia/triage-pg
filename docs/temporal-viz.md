@@ -19,7 +19,9 @@ panel in the read dashboard.
 
 ## CLI — `triage analyze-config --plot`
 
-`analyze-config` already prints the split/grid counts; `--plot` also renders the blocks. The
+`analyze-config` already prints the split/grid counts and the models they multiply out to;
+`--plot` also renders the blocks (from the same canonicalized temporal kwargs the run feeds
+timechop, so the picture is the schedule the run will use). The
 format is inferred from the extension — `.png`/`.svg`/`.pdf` give a static image (matplotlib),
 `.html` an interactive, self-contained page (plotly, also embeddable elsewhere):
 

@@ -296,6 +296,7 @@ def post_validate_config(
                 "n_splits": None,
                 "n_models": None,
                 "n_feature_groups": None,
+                "n_runs": None,
                 "errors": [{"path": "$", "message": f"not valid YAML/JSON: {exc}"}],
                 "warnings": [],
             }

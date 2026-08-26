@@ -118,3 +118,45 @@ def test_cli_agrees_with_partitioning_on_truncated_names(tmp_path):
     ]
     if reported:
         assert len(reported) == len(expected)
+
+
+def test_overview_reports_the_models_it_will_actually_train():
+    """32 = grid 8 × 4 splits — the canonical DirtyDuck number, stated as one figure.
+
+    The two factors were always printed; the product never was, and a reader multiplying two
+    table rows by hand is exactly the step that gets skipped.
+    """
+    result = runner.invoke(app, ["analyze-config", _DIRTYDUCK])
+
+    assert result.exit_code == 0
+    assert "Models to be trained" in result.stdout
+    assert "32" in result.stdout
+    assert "147" in result.stdout  # feature columns, from the manifest
+
+
+def test_fanout_and_baseline_preflight_are_reported_together(tmp_path):
+    """A leave-one-out fan-out triples the cost AND breaks a name-pinned baseline.
+
+    Both facts fall out of the same partition, so the command reports them together — the run
+    count a reader must budget for, and the run that would die once it got there.
+    """
+    import yaml
+
+    config = yaml.safe_load(Path(_DIRTYDUCK).read_text(encoding="utf-8"))
+    config["feature_config"]["feature_groups"] = {
+        "definitions": {
+            "facility_attrs": ["facilities.*"],
+            "inspection_history": ["*(inspections.*"],
+        },
+        "strategies": ["all", "leave-one-out"],
+    }
+    config_path = tmp_path / "fanout.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    result = runner.invoke(app, ["analyze-config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert "Feature-group fan-out" in result.stdout
+    assert "96" in result.stdout  # 8 × 4 × 3 runs
+    assert "Baseline pre-flight" in result.stdout
+    assert "BaselineRankMultiFeature" in result.stdout

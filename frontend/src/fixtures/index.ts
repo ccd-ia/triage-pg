@@ -1254,7 +1254,10 @@ export function fxValidateConfig(configText?: string): ValidateConfigResult {
         problem_type: 'classification',
         n_splits: 4,
         n_models: 5,
-        n_feature_groups: null,
+        // 2 groups swept ['all', 'leave-one-out'] -> 3 runs, so the banner's total
+        // (5 x 4 x 3 = 60) differs from the per-split grid size. Exercises the distinction.
+        n_feature_groups: 2,
+        n_runs: 3,
         errors: [],
         warnings: ['no sources declared — every derivation is volatile (ADR-0014)'],
       }
@@ -1265,6 +1268,7 @@ export function fxValidateConfig(configText?: string): ValidateConfigResult {
         n_splits: null,
         n_models: null,
         n_feature_groups: null,
+        n_runs: null,
         errors: [{ path: 'problem_type', message: 'required key is missing' }],
         warnings: [],
       }
