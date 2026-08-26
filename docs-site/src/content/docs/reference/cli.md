@@ -24,7 +24,7 @@ Two ergonomics used throughout:
 
 ```console
 $ uv run triage --version
-triage-pg 1.1.3
+triage-pg 1.1.4
 ```
 
 ## Set up a project database

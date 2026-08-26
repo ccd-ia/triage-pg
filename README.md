@@ -9,7 +9,7 @@
 
 triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching, consulting, and production monitoring.
 
-> **Status: `v1.1.0` released.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival) — each with baseline floors — plus in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is live-validated: a full Batch E2E gated the `v1.0.0` release. The accepted architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
+> **Status: `v1.1.4` released.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival) — each with baseline floors — plus in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is live-validated: a full Batch E2E gated the `v1.0.0` release. The accepted architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
 
 **New here?** Start at the [docs site](https://ccd-ia.github.io/triage-pg/) — or jump straight to the [onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html) · **Coming from DSSG triage?** The [honest side-by-side](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html). (Sources live in the repo under [`docs/`](docs/).)
 
@@ -87,6 +87,7 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 | **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
 | **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)) |
 | **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon (ADR-0027, [`docs/monitoring.md`](docs/monitoring.md)) |
+| **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates |
 | **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` (ADR-0002/0025) |
 | **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth — all business-logic-free (ADR-0012/0024/0028) |
 | **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam (ADR-0003–0005) |
@@ -101,16 +102,23 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 uv sync --extra dev --extra dashboard
 just chi311-up                                   # real Chicago 311 data in a docker Postgres
 # …point triage at it and run (full steps: docs/quickstart.md)
+uv run triage --dbfile chicago311-database.yaml analyze-config \
+  example/chicago311/experiment.yaml            # what it will do, before it does it
 uv run triage --dbfile chicago311-database.yaml run \
   example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 uv run triage leaderboard <experiment-hash>      # or `just serve` for the dashboard
 ```
 
+`analyze-config` is the dry run: it reports the matrices, model groups and
+**models to be trained** the config implies — derived from the config alone, no
+database — so you know the size of the job before starting it. Add `--estimate`
+and it also counts the cohort and label rows behind those models.
+
 Prefer to be taught rather than shown commands? The **[tutorials](https://ccd-ia.github.io/triage-pg/tutorials/)** are DSSG-style case studies: the [Dirty Duckling smoke test](https://ccd-ia.github.io/triage-pg/tutorials/dirtyduckling/), the full [DirtyDuck case study](https://ccd-ia.github.io/triage-pg/tutorials/dirtyduck/) (both problem framings), [Chicago 311](https://ccd-ia.github.io/triage-pg/tutorials/chicago311/) (fairness · monitoring · survival), and [DonorsChoose](https://ccd-ia.github.io/triage-pg/tutorials/donorschoose/) (deep feature synthesis). The command-reference walkthrough — your-own-data projects, the multi-project dashboard, webapp submissions — is [`docs/quickstart.md`](docs/quickstart.md). Three tutorial datasets ship as self-contained dockers: **DirtyDuck** food inspections ([`dirtyduck/`](dirtyduck/README.md)), **DonorsChoose** KDD Cup 2014 ([`donorschoose/`](donorschoose/README.md)), and **Chicago 311** ([`chicago311/`](chicago311/README.md)).
 
 Installation reality: not on PyPI — clone and `uv sync`. Needs PostgreSQL 11+ (plain, no extensions). Optional extras: `dashboard` (FastAPI + SPA), `survival` (scikit-survival), `oidc` (real webapp auth).
 
-No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.1.3` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
+No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.1.4` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
 
 ## Acknowledgment — built on DSSG's triage
 
