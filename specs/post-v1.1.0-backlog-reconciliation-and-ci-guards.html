@@ -444,7 +444,7 @@
 
     <!-- PHASE 1 -->
     <div class="phase keystone">
-      <h3><code class="status">[]</code> Phase 1: Reconcile the backlog against the tree</h3>
+      <h3><code class="status">[x]</code> Phase 1: Reconcile the backlog against the tree</h3>
       <p>
         Establish which items are actually open before doing any work, and record the evidence next to each closure so
         the next reader does not have to re-derive it. This phase is <em>keystone</em>: it changes the scope of every
@@ -481,7 +481,7 @@
 
     <!-- PHASE 2 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 2: <code>ruff format --check</code> in CI</h3>
+      <h3><code class="status">[x]</code> Phase 2: <code>ruff format --check</code> in CI</h3>
       <p>
         The highest value-per-effort item, and verified safe to land <em>today</em>: both the locked ruff (0.15.0) and
         the version <code>uvx</code> currently resolves (0.15.17) report <strong>"157 files already formatted"</strong>
@@ -521,7 +521,7 @@
 
     <!-- PHASE 3 -->
     <div class="phase keystone">
-      <h3><code class="status">[]</code> Phase 3: Repo-root doc drift + widen the guard</h3>
+      <h3><code class="status">[x]</code> Phase 3: Repo-root doc drift + widen the guard</h3>
       <p>
         The work nobody put on a list. <code>README.md</code> is the public repo's front page and it advertises an
         image tag from three releases ago. Fix the instances, then move the guard's scan root so this class cannot
@@ -560,7 +560,7 @@
 
     <!-- PHASE 4 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 4: <code>--data-schema</code> — fold data-schema grants into <code>--owner</code></h3>
+      <h3><code class="status">[x]</code> Phase 4: <code>--data-schema</code> — fold data-schema grants into <code>--owner</code></h3>
       <p>
         Finish the thread the v1.1.0 session opened. <code>grant_project_role()</code> automates everything the
         pipeline needs in the <code>triage</code> schema, including the owner-only matview handover. The runbook
@@ -611,7 +611,7 @@
 
     <!-- PHASE 5 -->
     <div class="phase gate">
-      <h3><code class="status">[]</code> Phase 5: Release gate — first live <code>verify-anonymous-pull</code></h3>
+      <h3><code class="status">[x]</code> Phase 5: Release gate — first live <code>verify-anonymous-pull</code></h3>
       <p>
         Not construction: a watch item with a deadline attached to the next <code>v*</code> tag. The job is
         <code>needs: release</code>, so it has never executed — it was authored, reasoned about, and merged without a
@@ -641,7 +641,7 @@
 
     <!-- PHASE 6 -->
     <div class="phase gate">
-      <h3><code class="status">[]</code> Phase 6: v1.2.0 SHAP seed — a scope decision, not an implementation</h3>
+      <h3><code class="status">[x]</code> Phase 6: v1.2.0 SHAP seed — a scope decision, not an implementation</h3>
       <p>
         SHAP-level interpretability has been deferred since v1.0.0 and re-targeted to v1.2.0. It is the only item on
         this backlog that is a <strong>milestone</strong>, not a chore — it is larger than everything else here
@@ -673,7 +673,7 @@
 
     <!-- PHASE 7 -->
     <div class="phase keystone">
-      <h3><code class="status">[]</code> Phase 7: Document the per-<code>as_of_date</code> evaluation grain</h3>
+      <h3><code class="status">[x]</code> Phase 7: Document the per-<code>as_of_date</code> evaluation grain</h3>
       <p>
         <strong>Added 2026-08-05</strong> after a maintainer question exposed a documentation gap. Not one of the
         original backlog items. Numbered after the gates only to avoid renumbering; it has <em>no dependency on
@@ -767,7 +767,7 @@
 
     <!-- PHASE 8 -->
     <div class="phase keystone">
-      <h3><code class="status">[]</code> Phase 8: Ontology layer — glossary terms + the Chicago 311 label-source leak</h3>
+      <h3><code class="status">[x]</code> Phase 8: Ontology layer — glossary terms + the Chicago 311 label-source leak</h3>
       <p>
         <strong>Added 2026-08-05 by maintainer decision</strong>, against the recommendation to defer this to its own
         milestone. Folding it in is the call; this phase scopes it honestly, including the consequence that makes it
@@ -845,7 +845,7 @@
 
     <!-- PHASE 9 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 9: DirtyDuck violation features — structured first, text in SQL</h3>
+      <h3><code class="status">[x]</code> Phase 9: DirtyDuck violation features — structured first, text in SQL</h3>
       <p>
         <strong>Added 2026-08-05.</strong> Direct application of Phase 8's promotion rule to the dataset that most
         obviously needs it. This phase deliberately does <em>not</em> use featurizer's NLP bridges; task 3 records why,
@@ -1240,6 +1240,29 @@
   <!-- ===== AMENDMENTS ===== -->
   <section id="amendments">
     <h2>Amendments</h2>
+    <details open>
+      <summary>2026-08-25 — marker reconciliation (bookkeeping only; no scope change)</summary>
+      <p>
+        <strong>What changed.</strong> All nine phase-level markers flipped <code>[]</code> → <code>[x]</code>. The plan
+        was fully built on 2026-08-07 and shipped as <code>v1.1.1</code> via PR #3 (CI green on first run, including the
+        new lint format gate), but the markers were never flipped — so <code>specs/</code> indexing reported this plan as
+        <em>0/9 phases · not-started</em> eighteen days after it landed, and the session briefing surfaced it as the
+        project's largest piece of standing work.
+      </p>
+      <p>
+        <strong>Evidence.</strong> Per-phase commits from <code>TODO.org</code>, each verified as an ancestor of
+        <code>HEAD</code> on 2026-08-25: P2 <code>81d17111</code>, P3 <code>a43b8eae</code>, P4 <code>f2eb3d59</code>,
+        P6 <code>8a46adf0</code>, P7 <code>cb1c900c</code>, P8 <code>87f42f14</code>, P9 <code>558268cd</code>.
+        P1 (reconciliation) and P5 (the release gate) touched only session-local files; P5's gate closed the same evening
+        when <code>verify-anonymous-pull</code> ran live and green on the <code>v1.1.1</code> release (run
+        <code>31236979685</code>).
+      </p>
+      <p>
+        <strong>Deliberately not done.</strong> The per-task boxes inside each phase were left at <code>[]</code>.
+        Completion is recorded at phase granularity in <code>TODO.org</code>; back-filling individual checkmarks would
+        assert box-level evidence that was never captured.
+      </p>
+    </details>
     <details>
       <summary>2026-08-05T02:47-06:00 — added Phase 7: document the per-<code>as_of_date</code> evaluation grain</summary>
       <p>

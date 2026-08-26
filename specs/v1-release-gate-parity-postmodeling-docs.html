@@ -607,7 +607,7 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 9 ========================= -->
     <div class="phase docs">
-      <h3><code class="status">[wip]</code> Phase 9: The Two HTML Artifacts</h3>
+      <h3><code class="status">[x]</code> Phase 9: The Two HTML Artifacts</h3>
       <p>Both are single-file, self-contained (inline CSS + inline SVG diagrams, screenshots inlined as the only <code>&lt;img&gt;</code> refs into <code>docs/images/</code>), committed under <code>docs/</code>, linked from the README and the docs index. Openable straight from a checkout; GitHub Pages-ready if ever wanted.</p>
 
       <h4>9.1. docs/onboarding.html — the one-pager</h4>
@@ -639,7 +639,7 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 10 ========================= -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 10: CI/CD on GitHub Actions</h3>
+      <h3><code class="status">[x]</code> Phase 10: CI/CD on GitHub Actions</h3>
       <p>The repo has three inherited workflows and all three are wrong: <code>test.yaml</code> watches dead branches (<code>master</code>/<code>modernization-v2</code> — it has never run against <code>main</code>) and would fail anyway because <code>uv sync</code> can't fetch the git+ssh featurizer pin without a key; <code>build-mkdocs.yaml</code> builds a docs tree retired in WS3 (no <code>mkdocs.yml</code> exists); and <code>publish-to-pypi.yml</code> <strong>triggers on every tag push</strong> — left alive, tagging rc1 would fire a doomed PyPI publish. Replace all three with a real CI pipeline plus a tag-triggered release workflow. Everything is authored and lint-checked locally here; the on-GitHub proof (green runs) is necessarily a Phase 11 gate item, since nothing is pushed until then.</p>
 
       <h4>10.1. Retire the stale workflows</h4>
@@ -687,7 +687,7 @@ details summary { cursor: pointer; font-weight: 600; }
 
     <!-- ========================= PHASE 11 ========================= -->
     <div class="phase">
-      <h3><code class="status">[wip]</code> Phase 11: Release Gate — Full Battery, Push, CI Green, Tag</h3>
+      <h3><code class="status">[x]</code> Phase 11: Release Gate — Full Battery, Push, CI Green, Tag</h3>
       <p>The gate the whole plan funnels into. Nothing here is new work — it proves the sum, then releases it. The tag is only laid once the remote pipeline (Phase 10's work) is green on the pushed main.</p>
 
       <h4>11.1. The battery</h4>
@@ -935,6 +935,22 @@ details summary { cursor: pointer; font-weight: 600; }
     <details>
       <summary>2026-07-10T13:45 — featurizer 0.7.0 public on ccd-ia landed; ssh plumbing stripped; full experiment wipe + re-run green</summary>
       <p>Maintainer confirmed featurizer v0.7.0 is live and public on ccd-ia/featurizer. Pin moved to <code>git+https://github.com/ccd-ia/featurizer.git@v0.7.0</code> (<code>uv lock</code> → <code>96934103</code>); all deploy-key/ssh plumbing removed from ci.yml, release.yml, the Dockerfile (three <code>--mount=type=ssh</code> steps + openssh-client gone), dirtyduck's compose, and the cloud runbook (the "image builds are operator-side" known-limit is resolved) — <strong>the FEATURIZER_DEPLOY_KEY secret is no longer needed anywhere; P10.4's pending secret item is superseded</strong>. Then, on the maintainer's ask, all tutorial experiments were deleted (row-level wipe of the three DBs' results state; DDL drops are hook-blocked) and re-run on 0.7.0: dirtyduck 20 models/268,860 predictions/120 evaluations, chi311 classification (bias+subset config) 20/58,190/200 with 318,927 protected rows/600 bias rows/100 subset evals, chi311 survival 6/17,028/6, donors 20/1,820/120. <strong>All four experiment hashes came back identical</strong> (ADR-0022: the engine version enters artifact identity, not experiment identity) while every artifact rebuilt fresh. Battery: 401 passed/1 skipped + ruff + workflows YAML-validated. 12.2's remaining open item: revisit ADR-0008's scale-risk note against the 0.7.0 performance fixes.</p>
+    </details>
+    <details open>
+      <summary>2026-08-25 — marker reconciliation (bookkeeping only; no scope change)</summary>
+      <p>Phases 9, 10 and 11 still carried <code>[wip]</code>/<code>[]</code> markers long after they closed, so
+      <code>specs/</code> indexing reported this plan as <em>8/12 · 3 wip</em> forty-four days on. Flipped to
+      <code>[x]</code> against verified artifacts: P9 — <code>docs/onboarding.html</code> and
+      <code>docs/triage-pg-vs-dssg-triage.html</code> both present; P10 — <code>ci.yml</code>,
+      <code>release.yml</code>, <code>docs-pages.yml</code> (plus <code>tutorial-smoke.yml</code>) present and the
+      three stale stubs <code>git rm</code>'d in <code>9692f7e3</code>; P11 — the gate closed 2026-07-10/11
+      (<code>v1.0.0-rc1</code> tagged, release.yml green, GHCR package public with anonymous pull verified), and
+      <code>v1.0.0</code> … <code>v1.1.3</code> have shipped since.</p>
+      <p><strong>Phase 12 deliberately stays <code>[wip]</code>.</strong> Its repo-settings, featurizer-0.7.0 and
+      dogfooding items are all closed, but the basedpyright burn-down inside it is genuinely unfinished — 649 → 254
+      in the 2026-07-13 batch, with the inherited corners (<code>util/conf.py</code>, catwalk estimators, alembic
+      envs, ~37) and <code>src/tests/</code> (207) still open. A tree-wide run on 2026-08-25 reports 24 errors /
+      4065 warnings. One phase left is the honest reading.</p>
     </details>
   </section>
 

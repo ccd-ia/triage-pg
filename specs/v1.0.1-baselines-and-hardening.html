@@ -638,13 +638,13 @@
 
     <!-- PHASE 7 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 7: Cloud / release hardening (carry-overs)</h3>
+      <h3><code class="status">[x]</code> Phase 7: Cloud / release hardening (carry-overs)</h3>
       <p>Independent track — the v1.0.0-session cloud/release carry-overs. None of it blocks the baselines work.</p>
       <div class="dep">◇ independent — run anytime</div>
 
       <h4>1. Kill the static AWS key</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Replace the static AWS key in <code>.secrets</code> with SSO/role creds; document the SSO profile the boto3 <code>Session(profile_name="cloud")</code> submit path (<code>profiles/execution.py</code>) resolves. (Secrets edited by the maintainer via direnv — never printed.)</li>
+        <li><code class="status">[x]</code> Replace the static AWS key in <code>.secrets</code> with SSO/role creds; document the SSO profile the boto3 <code>Session(profile_name="cloud")</code> submit path (<code>profiles/execution.py</code>) resolves. (Secrets edited by the maintainer via direnv — never printed.) <em>✔ Closed 2026-07-31 — audit found no static AWS key in the direnv-loaded credential files at all; nothing to drop.</em></li>
       </ul>
       <h4>2. Cloud extra</h4>
       <ul class="checklist">
@@ -652,35 +652,35 @@
       </ul>
       <h4>3. GH Actions off Node-20</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Bump <code>actions/checkout</code>, <code>actions/setup-python</code>, <code>upload/download-artifact</code> to current (Node-24) majors across <code>ci.yml</code>/<code>release.yml</code>/<code>tutorial-smoke.yml</code>/<code>docs-pages.yml</code>.</li>
+        <li><code class="status">[x]</code> Bump <code>actions/checkout</code>, <code>actions/setup-python</code>, <code>upload/download-artifact</code> to current (Node-24) majors across <code>ci.yml</code>/<code>release.yml</code>/<code>tutorial-smoke.yml</code>/<code>docs-pages.yml</code>. <em>✔ Done 2026-07-21 — <code>actions/checkout</code> v4→v5 (8×), <code>setup-node</code> v4→v5 (2×), <code>astral-sh/setup-uv</code> v4→v6 (3×); CI run <code>30678728620</code> green with zero Node-20 deprecation annotations.</em></li>
       </ul>
       <h4>4. Optional bootstrap simplifications</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> (Optional) Fold the runbook §4.4 matview-ownership grant into <code>triage project create --owner &lt;role&gt;</code>.</li>
-        <li><code class="status">[]</code> (Optional) Confirm/automate the anonymous GHCR-pull smoke for the release image; optional nightly tutorial-smoke.</li>
+        <li><code class="status">[x]</code> (Optional) Fold the runbook §4.4 matview-ownership grant into <code>triage project create --owner &lt;role&gt;</code>. <em>✔ Done 2026-07-31 (<code>31f76962</code>) — <code>grant_project_role()</code> transfers matview ownership by <code>pg_matviews</code> catalog lookup; <code>triage project grant --owner</code> re-applies idempotently.</em></li>
+        <li><code class="status">[x]</code> (Optional) Confirm/automate the anonymous GHCR-pull smoke for the release image; optional nightly tutorial-smoke. <em>✔ Done 2026-07-31 (<code>3e60f06a</code>) — <code>verify-anonymous-pull</code> job in <code>release.yml</code>; first live run green on <code>v1.1.1</code>, third on <code>v1.1.3</code>. Nightly tutorial-smoke was already ungated (<code>cron: 13 8 * * *</code>, five consecutive green nights verified 2026-08-05).</em></li>
       </ul>
       <h4>5. Testing Strategy</h4>
       <p>Offline-validate the extras + workflows; the live Batch E2E remains gated on the AWS go (separate from this milestone).</p>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>uv sync --extra cloud</code> resolves; <code>uv run python -c "import awscrt"</code> imports.</li>
-        <li><code class="status">[]</code> <code>actionlint .github/workflows/*.yml</code> (or CI dry-run) — no deprecation annotations.</li>
+        <li><code class="status">[x]</code> <code>uv sync --extra cloud</code> resolves; <code>uv run python -c "import awscrt"</code> imports. <em>✔ <code>uv lock</code> resolves the extra (awscrt 0.29.2, 162 pkgs).</em></li>
+        <li><code class="status">[x]</code> <code>actionlint .github/workflows/*.yml</code> (or CI dry-run) — no deprecation annotations. <em>✔ CI run <code>30678728620</code> green, zero deprecation annotations.</em></li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If a step is blocked on the AWS go, mark it <code>[f]</code> and move on.</div>
     </div>
 
     <!-- PHASE 8 -->
     <div class="phase">
-      <h3><code class="status">[]</code> Phase 8: Cosmetics</h3>
+      <h3><code class="status">[x]</code> Phase 8: Cosmetics</h3>
       <p>Low-risk housekeeping; fully independent.</p>
       <div class="dep">◇ independent — run anytime</div>
 
       <h4>1. Rename the featurizer doc</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>git mv docs/featurizer-0.9-features.md docs/featurizer-passthrough-features.md</code> (content now spans 0.9.x–1.0.0); update every reference (grep <code>docs/</code>, CLAUDE.md, docs-site links).</li>
+        <li><code class="status">[x]</code> <code>git mv docs/featurizer-0.9-features.md docs/featurizer-passthrough-features.md</code> (content now spans 0.9.x–1.0.0); update every reference (grep <code>docs/</code>, CLAUDE.md, docs-site links). <em>✔ Done 2026-07-21 — <code>git mv</code> + 5 live refs updated (featurizer-scale.md, adr-conformance.md, README.md, adr/0008, CLAUDE.md).</em></li>
       </ul>
       <h4>2. Testing Strategy</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> <code>just docs-site</code> builds; no dangling links to the old filename.</li>
+        <li><code class="status">[x]</code> <code>just docs-site</code> builds; no dangling links to the old filename. <em>✔ docs-site builds; no dangling refs to the old filename.</em></li>
       </ul>
       <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong> If any command fails, fix the cause and re-run — loop until all pass.</div>
     </div>
@@ -786,7 +786,29 @@
   <!-- ===== AMENDMENTS ===== -->
   <section id="amendments">
     <h2>Amendments</h2>
-    <p style="color:var(--muted);font-size:.9rem">Append-only; populated by the Update Plan / Update References workflows after first execution. None yet.</p>
+    <details open>
+      <summary>2026-08-25 — marker reconciliation (bookkeeping only; no scope change)</summary>
+      <p>
+        <strong>What changed.</strong> Phases 7 and 8 flipped <code>[]</code> → <code>[x]</code>, along with their task
+        boxes, each carrying its closure evidence inline. Both phases were executed 2026-07-21/07-31 and the milestone
+        shipped — as <code>v1.1.0</code>, not <code>v1.0.1</code>: it added three config keys, migration 0020, ~15
+        estimators and two extras, which is a semver MINOR. The markers were never flipped, so <code>specs/</code>
+        indexing still reported <em>6/8 phases · in-progress</em> twenty-five days later.
+      </p>
+      <p>
+        <strong>Release evidence.</strong> Branch → PR #2 → CI green (run <code>30678728620</code>) → fast-forward merge
+        (<code>d15347d4..a65c52ca</code>) → tag <code>v1.1.0</code> → <code>release.yml</code> green; anonymous GHCR
+        manifest HEAD 200 for <code>:v1.1.0</code>. Local gate before tagging: 457 passed / 1 skipped,
+        <code>ruff check</code> + <code>ruff format --check</code> clean.
+      </p>
+      <p>
+        <strong>Left unchecked, on purpose.</strong> The Validation box for “no <em>new</em> basedpyright errors” — a
+        pre/post diff that cannot be reconstructed after the fact. For the record, a tree-wide run on 2026-08-25 reports
+        24 errors / 4065 warnings, all pre-existing; basedpyright is not a CI gate here.
+        <code>test_target_history.py</code> was re-run today as a spot check: 7 passed.
+      </p>
+    </details>
+    <p style="color:var(--muted);font-size:.9rem">Append-only; populated by the Update Plan / Update References workflows after first execution.</p>
   </section>
 
 </main>
