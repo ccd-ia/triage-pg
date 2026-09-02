@@ -2308,7 +2308,9 @@ def tui_command(
     """Open the terminal cockpit: Status · Runs · Data · Query · Actions + the project screens."""
     from triage.tui.app import build_app
 
-    build_app(require_db_url(ctx), poll_seconds=poll, dashboard_url=dashboard_url).run()
+    build_app(
+        require_db_url(ctx), poll_seconds=poll, dashboard_url=dashboard_url, cli_app=app
+    ).run()
 
 
 @app.command("status")
@@ -2406,7 +2408,7 @@ def actions_list_command(
 
     from triage.tui.adapters import TriageActions
 
-    lk.actions_list(TriageActions(), json_out=as_json, console=console)
+    lk.actions_list(TriageActions(cli_app=app), json_out=as_json, console=console)
 
 
 @actions_app.command("run", context_settings={"allow_extra_args": True})
@@ -2421,7 +2423,7 @@ def actions_run_command(
 
     from triage.tui.adapters import TriageActions
 
-    code = lk.actions_run(TriageActions(), name, ctx.args, console=console)
+    code = lk.actions_run(TriageActions(cli_app=app), name, ctx.args, console=console)
     if code != 0:
         raise typer.Exit(code)
 

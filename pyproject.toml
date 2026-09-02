@@ -57,7 +57,11 @@ dependencies = [
     "textual>=6.5.0",
     "typer>=0.19.2",
     "wrapt>=1.17.3",
-    "lynkeus",
+    # lynkeus is the shared Textual shell behind `triage tui` (Status/Runs/Data/Query/
+    # Actions + the project screens). Pinned to a public git tag like featurizer: lynkeus
+    # ADR-0001 (docs/adr/0001-shared-shell-package.md there) explains why it is a package
+    # every consumer pins rather than a copy in each repo.
+    "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -218,9 +222,6 @@ select = [
     "F823",  # undefined-local
 ]
 ignore = []
-
-[tool.uv.sources]
-lynkeus = { path = "../lynkeus", editable = true }
 
 [dependency-groups]
 dev = [

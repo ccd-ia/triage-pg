@@ -9,6 +9,7 @@ import pytest
 from lynkeus.testing import settle
 from textual.widgets import DataTable, Input, Static
 
+from triage.cli import app as cli_app
 from triage.tui.app import build_app
 from triage.tui.screens import AuditionScreen, ExperimentsScreen, LeaderboardScreen
 
@@ -29,6 +30,7 @@ def app(db_url, seeded, tmp_path, monkeypatch):
         dashboard_url="http://dash.example",
         cwd=tmp_path,
         clock=lambda: NOW,
+        cli_app=cli_app,
     )
 
 

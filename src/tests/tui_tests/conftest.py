@@ -14,8 +14,6 @@ from lynkeus import PgSource
 from tests.dashboard_tests.conftest import SeededExperiment, _seed_full_experiment
 from triage.util.db import libpq_conninfo
 
-pytest_plugins = ["lynkeus.testing"]
-
 
 @pytest.fixture
 def seeded(db_pool_greenfield) -> SeededExperiment:

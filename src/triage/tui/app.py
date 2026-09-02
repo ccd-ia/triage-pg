@@ -11,6 +11,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from lynkeus.app import ShellApp
 
@@ -52,6 +53,7 @@ def build_app(
     cwd: Path | None = None,
     clock: Callable[[], datetime] | None = None,
     with_project_screens: bool = True,
+    cli_app: Any = None,
 ) -> ShellApp:
     """Assemble the shell over the resolved project database URL."""
     source = source_for(db_url)
@@ -59,7 +61,7 @@ def build_app(
     dashboard = (
         dashboard_url or os.environ.get("TRIAGE_DASHBOARD_URL") or DEFAULT_DASHBOARD_URL
     )
-    actions = TriageActions(cwd)
+    actions = TriageActions(cwd, cli_app)
     screens = []
     if with_project_screens:
         from triage.tui.screens import project_screens

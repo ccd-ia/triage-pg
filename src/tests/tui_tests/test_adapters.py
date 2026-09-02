@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from lynkeus import ActionSource, RunState
 
+from triage.cli import app as cli_app
+
 from triage.tui.adapters import (
     SAVED_QUERIES,
     TriageActions,
@@ -192,7 +194,7 @@ def test_parse_just_dump_reads_comments_params_and_marks_clean_recipes() -> None
 
 
 def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs() -> None:
-    actions = {a.name: a for a in cli_actions()}
+    actions = {a.name: a for a in cli_actions(cli_app)}
 
     for name in ("triage run", "triage leaderboard", "triage tui", "triage status"):
         assert name in actions, name
@@ -211,7 +213,7 @@ def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs() -> No
 
 
 def test_actions_list_and_run_in_a_directory_without_a_justfile(tmp_path: Path) -> None:
-    adapter = TriageActions(cwd=tmp_path)
+    adapter = TriageActions(cwd=tmp_path, cli_app=cli_app)
     names = {a.name for a in adapter.list()}
     assert "triage --version" not in names
     assert "triage status" in names

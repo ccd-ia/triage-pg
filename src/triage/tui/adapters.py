@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import typer
 from lynkeus import (
     Action,
     ActionSource,
@@ -603,9 +604,8 @@ def parse_just_dump(text: str) -> list[Action]:
     return actions
 
 
-def cli_actions() -> list[Action]:
-    """Every verb of ``triage.cli``, introspected from the typer app."""
-    from triage.cli import app as cli_app
+def cli_actions(cli_app: typer.Typer) -> list[Action]:
+    """Every verb of a typer app (``triage.cli.app``), introspected, never imported."""
 
     def describe(command: Any) -> str:
         doc = (
@@ -638,8 +638,11 @@ def cli_actions() -> list[Action]:
 class TriageActions:
     """``ActionsAdapter``: ``just`` recipes + CLI verbs, each run as a subprocess."""
 
-    def __init__(self, cwd: Path | None = None) -> None:
+    def __init__(
+        self, cwd: Path | None = None, cli_app: typer.Typer | None = None
+    ) -> None:
         self.cwd = cwd or Path.cwd()
+        self.cli_app = cli_app
 
     def list(self) -> list[Action]:
         """Recipes first (when ``just`` and a justfile are present), then the CLI."""
@@ -657,7 +660,9 @@ class TriageActions:
                 actions.extend(parse_just_dump(dump.stdout))
             else:
                 logger.warning("just --dump failed: {}", dump.stderr.strip())
-        return actions + cli_actions()
+        if self.cli_app is not None:
+            actions.extend(cli_actions(self.cli_app))
+        return actions
 
     def run(self, name: str, args: list[str]) -> subprocess.Popen[str]:
         """Start the recipe or verb; stdout+stderr merged, line-buffered, no colour."""

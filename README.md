@@ -107,6 +107,7 @@ uv run triage --dbfile chicago311-database.yaml analyze-config \
 uv run triage --dbfile chicago311-database.yaml run \
   example/chicago311/experiment.yaml --project-path /tmp/chi311-run
 uv run triage leaderboard <experiment-hash>      # or `just serve` for the dashboard
+just tui                                         # the terminal cockpit: status · runs · leaderboard · audition
 ```
 
 `analyze-config` is the dry run: it reports the matrices, model groups and

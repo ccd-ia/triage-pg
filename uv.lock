@@ -1186,32 +1186,13 @@ wheels = [
 
 [[package]]
 name = "lynkeus"
-version = "0.0.1"
-source = { editable = "../lynkeus" }
+version = "0.1.0"
+source = { git = "https://github.com/nanounanue/lynkeus.git?rev=v0.1.0#7903abe1768e5e8b05f65ea3c7a4bacbdf490839" }
 dependencies = [
     { name = "loguru" },
     { name = "psycopg", extra = ["binary"] },
     { name = "rich" },
     { name = "textual" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "loguru", specifier = ">=0.7" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "rich", specifier = ">=14" },
-    { name = "textual", specifier = ">=6.5,<7" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.20" },
-    { name = "icecream", specifier = ">=2.1" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "pytest-textual-snapshot", specifier = ">=1.1" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "typer", specifier = ">=0.12" },
 ]
 
 [[package]]
@@ -2994,7 +2975,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'oidc'", specifier = ">=2.2.0" },
     { name = "jupyter-console", marker = "extra == 'dev'", specifier = ">=6.6.3" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "lynkeus", editable = "../lynkeus" },
+    { name = "lynkeus", git = "https://github.com/nanounanue/lynkeus.git?rev=v0.1.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "moto", extras = ["batch", "s3"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "numpy", specifier = ">=2.3.4" },
