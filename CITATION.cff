@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "triage-pg: early-warning ML pipelines native to PostgreSQL"
+type: software
+authors:
+  - family-names: "De Unánue"
+    given-names: "Adolfo"
+    orcid: "https://orcid.org/0000-0003-3499-0965"
+version: 1.1.4
+date-released: 2026-08-26
+license: MIT
+repository-code: "https://github.com/ccd-ia/triage-pg"
+url: "https://ccd-ia.github.io/triage-pg/"
+keywords:
+  - machine-learning
+  - postgresql
+  - early-warning
+  - temporal-validation
+  - public-policy
