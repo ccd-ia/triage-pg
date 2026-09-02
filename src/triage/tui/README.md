@@ -1,182 +1,59 @@
-# Triage Interactive TUI
+# triage tui
 
-An interactive terminal user interface for exploring and managing Triage experiments.
-
-## Quick Start
+The terminal cockpit for a triage-pg project, built on
+[lynkeus](https://github.com/nanounanue/lynkeus), the shared Textual shell
+(lynkeus ADR-0001). The shell owns the six standard screens, the keys and the
+theme; this package owns the three adapters that feed them and the project
+screens that follow (Experiments, Leaderboard, Audition).
 
 ```bash
-# Launch the TUI (coming soon)
-uv run triage tui
-
-# Or from Python
-python -c "from triage.tui import TriageApp; from triage import create_engine; app = TriageApp(create_engine('database.yaml')); app.run()"
+just tui                       # uv run triage tui
+uv run triage tui --poll 10    # refresh the active screen every 10 s (0 = off)
 ```
 
-## Current Status
+The database is resolved exactly as for every other verb (`--dbfile` ›
+`database.yaml` › `DATABASE_URL` › `PG*`). Credentials never appear here.
 
-🚧 **Work in Progress** - Basic structure created, implementation in progress
+## Screens
 
-### Implemented
-- ✅ Basic package structure
-- ✅ ExperimentListScreen skeleton
-- ✅ ExperimentDetailScreen skeleton
-- ✅ Main App class
+| Tab | Reads | Notes |
+|---|---|---|
+| 1 Status | `triage.runs`, `experiments`, `artifacts`, `pg_class` sizes, `results_schema_versions` | pending work is derived from queries: runs still `started` after 6 h, artifacts stuck `building`, a leaderboard matview missing completed runs, experiments without a run |
+| 2 Runs | `triage.runs` + `run_progress` + `run_artifacts`; `LISTEN run_progress` (ADR-0021) with a 5 s poll of the view when LISTEN is unavailable | `o` opens the run in the dashboard (`$TRIAGE_DASHBOARD_URL`, default the local `just serve`) |
+| 3 Data | the catalog (`pg_class`, `pg_attribute`, `pg_indexes`, `pg_stat_user_tables`) | `4` opens the selected relation in Query |
+| 4 Query | any read-only statement; the nine `triage` views are the saved queries | your own saved queries live under `~/.local/state/triage/tui/<project>/` |
+| 5 Actions | `just --dump` (cwd) + the typer commands of `triage.cli` | `gc`, `archive`, `db downgrade`, `project drop` and the `*-clean` recipes are confirmed first |
+| 6 Experiments | `experiment_summary` | enter drills into the experiment's runs |
+| 7 Leaderboard | the `leaderboard` matview | `R` refreshes it (through the CLI) |
+| 8 Audition | `audition_distances` / `audition` | sparklines of distance-from-best per model group |
 
-### TODO (Phase 1 - Foundation)
-- [ ] Complete ExperimentListScreen with real data
-- [ ] Database polling service
-- [ ] CSS styling
-- [ ] Basic keybindings
-- [ ] CLI command integration
+No business logic lives here (ADR-0012): every number is a `SELECT` over the
+same views the dashboard and the CLI read, and every mutation is the CLI run
+as a subprocess whose exit code becomes the action's state.
 
-See `../../../docs/tui-design.md` for full design specification.
+## Headless twins
 
-## Features (Planned)
+The same adapters print for a terminal or an agent:
 
-### Experiment Dashboard
-- Browse all experiments with status indicators
-- Sort and filter by name, status, date
-- Real-time updates for running experiments
-- Quick stats overview
+```bash
+triage status --json
+triage runs list --limit 10 --json
+triage runs show <run-id-prefix> --json
+triage runs tail <run-id-prefix> --json        # one JSON object per event
+triage query "select * from triage.run_summary limit 5" --json
+triage actions list --json
+triage actions run "just test"
+triage actions run triage -- --version
+```
 
-### Experiment Details
-- Multi-tab view (Overview, Models, Matrices, Config, Logs)
-- Live progress tracking
-- Streaming logs
-- Model performance metrics
+`triage runs status` (the AWS Batch backfill) is unchanged and sits beside them.
 
-### Model Comparison
-- Side-by-side comparison
-- Performance charts
-- Feature importance analysis
-- Export capabilities
-
-### Interactive Commands
-- Command palette (press `/`)
-- Run experiments
-- Audition models
-- Aequitas bias audits
-- Export predictions
-
-### Advanced Features
-- Fairness-aware model selection
-- Bias audit visualization
-- Production deployment
-- Report generation
-
-## Keyboard Shortcuts
-
-### Global
-- `/` - Open command palette
-- `?` - Help
-- `q` - Quit
-- `r` - Refresh
-
-### Navigation
-- `↑/↓` or `j/k` - Move up/down
-- `Enter` - Select/drill down
-- `Esc` - Go back
-- `Tab` - Switch tabs
-
-### Experiment List
-- `f` - Filter experiments
-- `s` - Sort by column
-- `Space` - Select experiment
-
-## Architecture
+## Layout
 
 ```
 triage/tui/
-├── __init__.py           # Package exports
-├── app.py                # Main App and Screens
-├── widgets/              # Reusable UI components
-│   ├── experiment_table.py
-│   ├── model_metrics.py
-│   ├── progress_tracker.py
-│   ├── command_palette.py
-│   └── log_stream.py
-├── screens/              # Full-screen views
-│   ├── dashboard.py      # Experiment list
-│   ├── experiment.py     # Experiment details
-│   ├── models.py         # Model comparison
-│   └── audition.py       # Model selection
-├── services/             # Background services
-│   ├── db_poller.py      # Database polling
-│   └── log_watcher.py    # Log streaming
-└── styles/
-    └── triage.tcss       # CSS styling
+  adapters.py   TriageStatus · TriageRuns · TriageActions · SAVED_QUERIES
+  screens.py    Experiments · Leaderboard · Audition
+  app.py        build_app(db_url) → lynkeus.app.ShellApp
+tests/tui_tests/  adapters over the dashboard's seeded experiment; the CLI verbs; Pilot runs
 ```
-
-## Development
-
-### Running in Development Mode
-
-```bash
-# Install dependencies
-uv sync --extra dev
-
-# Run the TUI (once integrated)
-uv run triage tui --debug
-
-# Or run directly for testing
-uv run python -m triage.tui.app
-```
-
-### Testing
-
-```bash
-# Run TUI tests (coming soon)
-uv run pytest src/tests/tui_tests/
-
-# Manual testing
-# 1. Set up test database with sample experiments
-# 2. Launch TUI
-# 3. Navigate and test features
-```
-
-### Contributing
-
-See the main [CONTRIBUTING.md](../../../CONTRIBUTING.md) for guidelines.
-
-TUI-specific considerations:
-- Follow Textual best practices
-- Keep screens focused (single responsibility)
-- Use widgets for reusable components
-- Test with different terminal sizes
-- Ensure keyboard-only navigation works
-
-## Technical Notes
-
-### Database Polling
-- Polls every 5 seconds when experiments are running
-- Uses efficient queries with proper indexes
-- Caches static data (configs, model groups)
-
-### Performance
-- Lazy loading for large datasets
-- Virtualized tables (only render visible rows)
-- Background workers for expensive operations
-- Debounced updates to avoid UI flicker
-
-### Error Handling
-- Graceful degradation when DB unavailable
-- Clear error messages with recovery suggestions
-- Retry logic for transient failures
-
-## References
-
-- [Textual Documentation](https://textual.textualize.io/)
-- [Rich Documentation](https://rich.readthedocs.io/)
-- [Design Document](../../../docs/tui-design.md)
-- [TODO List](../../../TODO.org)
-
-## Future Vision
-
-The TUI aims to provide a complete interactive experience for Triage, making it easy to:
-- Explore experiment results without SQL queries
-- Monitor long-running experiments in real-time
-- Compare and select models visually
-- Ensure fairness with integrated bias audits
-- Deploy models to production with confidence
-
-Think of it as "k9s for Triage" or "lazygit for ML experiments".

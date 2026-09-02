@@ -68,7 +68,8 @@ project_app = typer.Typer(
 )
 app.add_typer(project_app, name="project")
 runs_app = typer.Typer(
-    help="Inspect runs — AWS Batch status backfill (cloud-profile-spec §7)."
+    help="Inspect runs — list/show/tail (the TUI's Runs screen, headless) and the"
+    " AWS Batch status backfill (cloud-profile-spec §7)."
 )
 app.add_typer(runs_app, name="runs")
 postmodel_app = typer.Typer(
@@ -78,6 +79,10 @@ postmodel_app = typer.Typer(
 app.add_typer(postmodel_app, name="postmodel")
 model_app = typer.Typer(help="Inspect a single trained model (headless, ADR-0012).")
 app.add_typer(model_app, name="model")
+actions_app = typer.Typer(
+    help="The TUI's Actions palette, headless: just recipes + CLI verbs as subprocesses."
+)
+app.add_typer(actions_app, name="actions")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -2265,6 +2270,151 @@ def gc_command(
     if do_purge:
         purged = purge(engine, min_age_days=min_age)
         console.print(f"[green]Purged {len(purged)} dead artifact row(s).[/green]")
+
+
+# ------------------------------------------------------------------ TUI (lynkeus)
+# The cockpit and its headless twins. Every verb here reads the same views the shell's
+# screens render (ADR-0012); ``--json`` is for agents and scripts. The adapters live in
+# ``triage.tui.adapters``; the shell itself is the lynkeus package (lynkeus ADR-0001).
+
+
+def _tui_source(ctx: typer.Context):
+    from triage.tui.adapters import source_for
+
+    return source_for(require_db_url(ctx))
+
+
+@app.command("tui")
+def tui_command(
+    ctx: typer.Context,
+    poll: float = typer.Option(
+        5.0, "--poll", help="Seconds between refreshes of the active screen (0 = off)."
+    ),
+    dashboard_url: Optional[str] = typer.Option(
+        None,
+        "--dashboard-url",
+        help="Where `o` opens a run (default: $TRIAGE_DASHBOARD_URL or the local dashboard).",
+    ),
+) -> None:
+    """Open the terminal cockpit: Status · Runs · Data · Query · Actions + the project screens."""
+    from triage.tui.app import build_app
+
+    build_app(require_db_url(ctx), poll_seconds=poll, dashboard_url=dashboard_url).run()
+
+
+@app.command("status")
+def status_command(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="Print the status as JSON."),
+) -> None:
+    """Project status — health, sizes, last runs, pending work — derived from queries."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageStatus, project_name
+
+    db_url = require_db_url(ctx)
+    lk.status(
+        TriageStatus(_tui_source(ctx), project_name(db_url) or "triage-pg"),
+        json_out=as_json,
+        console=console,
+    )
+
+
+@runs_app.command("list")
+def runs_list_command(
+    ctx: typer.Context,
+    limit: int = typer.Option(20, "--limit", "-n", help="Max runs to print."),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """The most recent runs, newest first."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageRuns
+
+    lk.runs_list(TriageRuns(_tui_source(ctx)), limit, json_out=as_json, console=console)
+
+
+@runs_app.command("show")
+def runs_show_command(
+    ctx: typer.Context,
+    run_id: str = typer.Argument(..., help="Run id or a unique prefix."),
+    as_json: bool = typer.Option(False, "--json", help="Print the detail as JSON."),
+) -> None:
+    """One run: its row, per-stage progress and metadata."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageRuns
+
+    try:
+        lk.runs_show(
+            TriageRuns(_tui_source(ctx)), run_id, json_out=as_json, console=console
+        )
+    except LookupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@runs_app.command("tail")
+def runs_tail_command(
+    ctx: typer.Context,
+    run_id: str = typer.Argument(..., help="Run id or a unique prefix."),
+    as_json: bool = typer.Option(
+        False, "--json", help="One JSON object per event line."
+    ),
+) -> None:
+    """Follow a run's progress (LISTEN run_progress; a finished run replays its counts)."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageRuns
+
+    try:
+        lk.runs_tail(
+            TriageRuns(_tui_source(ctx)), run_id, json_out=as_json, console=console
+        )
+    except LookupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("query")
+def query_command(
+    ctx: typer.Context,
+    sql_text: str = typer.Argument(..., metavar="SQL", help="One read-only statement."),
+    as_json: bool = typer.Option(
+        False, "--json", help="Print the rows as JSON records."
+    ),
+) -> None:
+    """Run one statement inside a read-only transaction and print the rows."""
+    from lynkeus import commands as lk
+
+    lk.query(_tui_source(ctx), sql_text, json_out=as_json, console=console)
+
+
+@actions_app.command("list")
+def actions_list_command(
+    as_json: bool = typer.Option(False, "--json", help="Print the palette as JSON."),
+) -> None:
+    """Every action the palette offers: just recipes (cwd) + triage verbs."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageActions
+
+    lk.actions_list(TriageActions(), json_out=as_json, console=console)
+
+
+@actions_app.command("run", context_settings={"allow_extra_args": True})
+def actions_run_command(
+    ctx: typer.Context,
+    name: str = typer.Argument(
+        ..., help="Action name, e.g. 'just test' or 'triage gc'."
+    ),
+) -> None:
+    """Run one action as a subprocess, stream its output, exit with its code."""
+    from lynkeus import commands as lk
+
+    from triage.tui.adapters import TriageActions
+
+    code = lk.actions_run(TriageActions(), name, ctx.args, console=console)
+    if code != 0:
+        raise typer.Exit(code)
 
 
 def execute() -> None:

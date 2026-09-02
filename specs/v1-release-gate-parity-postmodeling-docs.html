@@ -728,9 +728,9 @@ details summary { cursor: pointer; font-weight: 600; }
 
       <h4>12.1. Maintainer repo settings (GitHub-side; blocked on maintainer)</h4>
       <ul class="checklist">
-        <li><code class="status">[]</code> Branch protection on <code>main</code> (after the first green CI run — protecting on red locks the fix out)</li>
+        <li><code class="status">[]</code> Branch protection on <code>main</code> (after the first green CI run — protecting on red locks the fix out) — <strong>still open, verified 2026-09-02</strong>: <code>GET /repos/ccd-ia/triage-pg/branches/main/protection</code> → 404 "Branch not protected", <code>/rules/branches/main</code> → <code>[]</code>. CLAUDE.md had claimed protection was on; corrected.</li>
         <li><code class="status">[x]</code> Enable GitHub Pages — DONE 2026-07-11 (Source: GitHub Actions); https://ccd-ia.github.io/triage-pg/ serves the onboarding one-pager + comparison; push trigger restored</li>
-        <li><code class="status">[]</code> <code>git rm</code> the 3 neutralized workflow stubs (<code>test.yaml</code>, <code>build-mkdocs.yaml</code>, <code>publish-to-pypi.yml</code>) — the pre-tool-use hook forbids <code>.github</code> deletions mid-session, so this is a maintainer one-liner (or a hook-exempt shell)</li>
+        <li><code class="status">[x]</code> DONE — removed in <code>9692f7e3</code>; the tracked workflow list is ci / docs-pages / release / tutorial-smoke only (verified 2026-09-02). <code>git rm</code> the 3 neutralized workflow stubs (<code>test.yaml</code>, <code>build-mkdocs.yaml</code>, <code>publish-to-pypi.yml</code>) — the pre-tool-use hook forbids <code>.github</code> deletions mid-session, so this is a maintainer one-liner (or a hook-exempt shell)</li>
       </ul>
 
       <h4>12.2. featurizer 0.7.0 → public in the ccd-ia org</h4>
@@ -738,7 +738,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <ul class="checklist">
         <li><code class="status">[x]</code> Once public: switch the pyproject pin from git+ssh (nanounanue/featurizer) to <code>https://github.com/ccd-ia/featurizer</code> and drop the <code>FEATURIZER_DEPLOY_KEY</code> ssh plumbing from ci.yml — the secret becomes unnecessary. <strong>This supersedes P10.4's deploy-key item</strong> if 0.7.0 lands before the rc1 tag; maintainer call: wait for 0.7.0 vs. create the key as a stopgap to get CI green now.</li>
         <li><code class="status">[x]</code> Re-pin to the 0.7.0 tag and re-run the three-dataset smokes (artifact identity: an engine-version bump changes <code>engine_versions</code>, so feature/matrix artifacts legitimately rebuild — expect new hashes, NOT a held identity)</li>
-        <li><code class="status">[]</code> Revisit ADR-0008's "scale is the main open risk" note against the 0.7.0 performance fixes</li>
+        <li><code class="status">[x]</code> DONE — ADR-0008 status update 2026-07-13 retires the scale note as resolved (re-validated at v0.8.0, three pins indistinguishable). Revisit ADR-0008's "scale is the main open risk" note against the 0.7.0 performance fixes</li>
       </ul>
 
       <h4>12.3. basedpyright burn-down</h4>

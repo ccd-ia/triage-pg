@@ -57,6 +57,7 @@ dependencies = [
     "textual>=6.5.0",
     "typer>=0.19.2",
     "wrapt>=1.17.3",
+    "lynkeus",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +72,7 @@ dev = [
   "moto[batch,s3]>=5.0.0",
   "parsedatetime==2.6",
   "pytest>=8.2",
+  "pytest-asyncio>=0.24",
   "pytest-cov==3.0.0",
   "pytest-postgresql>=6.0.0",
   "pytest-timeout>=2.3.0",
@@ -177,6 +179,7 @@ BOTO_CONFIG = "/dev/null"
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
+asyncio_mode = "auto"
 filterwarnings = [
     # External package warnings we can't fix
     "ignore:invalid escape sequence:SyntaxWarning:millify",
@@ -215,6 +218,9 @@ select = [
     "F823",  # undefined-local
 ]
 ignore = []
+
+[tool.uv.sources]
+lynkeus = { path = "../lynkeus", editable = true }
 
 [dependency-groups]
 dev = [
