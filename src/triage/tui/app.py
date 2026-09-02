@@ -59,17 +59,18 @@ def build_app(
     dashboard = (
         dashboard_url or os.environ.get("TRIAGE_DASHBOARD_URL") or DEFAULT_DASHBOARD_URL
     )
+    actions = TriageActions(cwd)
     screens = []
     if with_project_screens:
         from triage.tui.screens import project_screens
 
-        screens = project_screens(source, dashboard)
+        screens = project_screens(source, dashboard, actions)
     return ShellApp(
         project="triage-pg",
         subtitle=f"project {project}" if project else "",
         status_adapter=TriageStatus(source, project or "triage-pg"),
         runs_adapter=TriageRuns(source, dashboard),
-        actions_adapter=TriageActions(cwd),
+        actions_adapter=actions,
         source=source,
         project_screens=screens,
         saved_queries=SAVED_QUERIES,

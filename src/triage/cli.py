@@ -567,6 +567,12 @@ def leaderboard_command(
             " model steady?', which a single date's value cannot."
         ),
     ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Refresh the matview first (a run does this at its end; the TUI's R key"
+        " runs this verb).",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Print raw rows as JSON."),
 ) -> None:
     """The experiment leaderboard, headless (ADR-0012) — the same ``triage.leaderboard``
@@ -617,6 +623,9 @@ def leaderboard_command(
     sql += " limit %(limit)s"
     with engine.connection() as conn:
         params["hash"] = _resolve_experiment_hash(conn, experiment_hash)
+        if refresh:
+            conn.execute("refresh materialized view triage.leaderboard")
+            logger.info("Refreshed triage.leaderboard on request")
         if windowed:
             rows = conn.execute(sql, params).fetchall()
         else:

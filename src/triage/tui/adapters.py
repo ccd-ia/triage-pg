@@ -186,14 +186,7 @@ class TriageStatus:
         extra = {
             "size": f"{row['size']} · {row['n_tables']} tables · {row['n_views']} views"
         }
-        try:
-            version = self.source.rows(
-                "select version_num from triage.results_schema_versions"
-            )
-            extra["schema"] = str(version[0]["version_num"]) if version else "unstamped"
-        except psycopg.Error as exc:
-            logger.debug("results_schema_versions not readable: {}", exc)
-            extra["schema"] = "unknown"
+        extra["schema"] = self._schema_version()
         by_status = self.source.rows(
             "select status, count(*) as n from triage.artifacts group by status order by status"
         )
@@ -202,6 +195,24 @@ class TriageStatus:
                 f"{r['n']} {r['status']}" for r in by_status
             )
         return extra
+
+    def _schema_version(self) -> str:
+        """The alembic stamp, wherever the stamp table lives (``triage`` after
+        ``prepare_version_table`` moved it there, ``public`` on older databases)."""
+        homes = self.source.rows(
+            "select schemaname from pg_tables where tablename = 'results_schema_versions'"
+            " order by (schemaname = 'triage') desc"
+        )
+        if not homes:
+            return "unstamped"
+        schema = homes[0]["schemaname"]
+        rows = self.source.rows(
+            f"select version_num from {schema}.results_schema_versions"  # noqa: S608
+        )
+        if not rows:
+            return "unstamped"
+        version = str(rows[0]["version_num"])
+        return version if schema == "triage" else f"{version} (in {schema})"
 
     def _gauges(self) -> list[Gauge]:
         exact = self.source.rows(
