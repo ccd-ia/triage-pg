@@ -66,3 +66,15 @@ infra/terraform/terraform.tfvars
 infra/terraform/*.tfstate
 infra/terraform/*.tfstate.backup
 infra/terraform/tfplan*
+
+# Session-local hand-off artifacts (session-closer). Never staged, never force-added.
+# NOTE: docs/ is deliberately NOT listed — in this repo docs/ is committed project
+# content (31 ADRs + the specs the docs-site builds from); ignoring it would hide a
+# new ADR from `git status`. ai-docs/ above is the Claude-generated counterpart.
+working-outline.md
+CLAUDE.md
+.project
+handoff-trace.log
+README.org
+COMPACT.md
+COMPACT-archive-*.md
