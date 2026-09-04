@@ -17,7 +17,12 @@ build time and cannot rot. Prose and captured console output can, so they are ch
 from __future__ import annotations
 
 import re
+import json
+import tomllib
 from pathlib import Path
+from typing import Any, cast
+
+import yaml
 
 import triage
 
@@ -106,12 +111,42 @@ def test_version_banner_is_derived_not_hardcoded():
 #: carry a version that has to be the released one.
 CITATION_CFF = REPO_ROOT / "CITATION.cff"
 ZENODO_JSON = REPO_ROOT / ".zenodo.json"
+#: Fields Zenodo reads off .zenodo.json; a missing one degrades the record
+#: rather than failing the release, which is why a test names them.
+_ZENODO_REQUIRED = (
+    "upload_type",
+    "title",
+    "description",
+    "creators",
+    "license",
+    "access_right",
+    "version",
+    "keywords",
+    "related_identifiers",
+)
+
+
+def _cff() -> dict[str, Any]:
+    """CITATION.cff as GitHub's citation widget reads it."""
+    return cast(dict[str, Any], yaml.safe_load(CITATION_CFF.read_text("utf-8")))
+
+
+def _zenodo() -> dict[str, Any]:
+    """.zenodo.json as Zenodo reads it — the authoritative record here."""
+    return cast(dict[str, Any], json.loads(ZENODO_JSON.read_text("utf-8")))
 
 
 def test_citation_files_exist():
     """Guard the guard: a renamed citation file must fail loudly, not pass."""
     assert CITATION_CFF.is_file(), f"CITATION.cff not found at {CITATION_CFF}"
-    assert ZENODO_JSON.is_file(), f".zenodo.json not found at {ZENODO_JSON}"
+    assert ZENODO_JSON.is_file(), (
+        f".zenodo.json not found at {ZENODO_JSON}. It is deliberate here and"
+        " authoritative: CFF 1.2.0 has no contributors field and no role"
+        " vocabulary, so the upstream DSSG credit — Rayid Ghani as"
+        " ProjectLeader, the team as ProjectMember, isDerivedFrom → dssg/triage"
+        " — exists only in this file. Deleting it silently drops all of it"
+        " from the DOI record."
+    )
 
 
 def test_citation_versions_match_the_package():
@@ -120,12 +155,8 @@ def test_citation_versions_match_the_package():
     CITATION.cff shipped in no release before v1.1.5 and its version said
     1.1.4, which is exactly the drift a released, citable record cannot carry.
     """
-    import json
-
-    import yaml
-
-    cff = yaml.safe_load(CITATION_CFF.read_text(encoding="utf-8"))
-    zenodo = json.loads(ZENODO_JSON.read_text(encoding="utf-8"))
+    cff = _cff()
+    zenodo = _zenodo()
     assert str(cff["version"]) == triage.__version__, (
         f"CITATION.cff says version {cff['version']}, package is"
         f" {triage.__version__} — the citation would name the wrong release"
@@ -136,6 +167,80 @@ def test_citation_versions_match_the_package():
     )
 
 
+def test_zenodo_record_carries_every_field_it_consumes():
+    """A missing field does not fail the release; it degrades the record."""
+    zenodo = _zenodo()
+    missing = [f for f in _ZENODO_REQUIRED if not zenodo.get(f)]
+    assert not missing, (
+        f".zenodo.json is missing fields Zenodo reads: {missing}."
+        " The archived record degrades silently without them."
+    )
+    assert cast(str, zenodo["upload_type"]) == "software"
+    without_orcid = [c["name"] for c in zenodo["creators"] if not c.get("orcid")]
+    assert not without_orcid, (
+        f"creators without an ORCID: {without_orcid}. The ORCID is what ties an"
+        " archived release to a person rather than to a name string."
+    )
+
+
+def test_the_two_citation_files_agree():
+    """Zenodo reads only .zenodo.json; GitHub's widget reads only CITATION.cff.
+
+    Nothing makes them agree, so they can publish different titles, licences or
+    keywords for the same release — the DOI landing page saying one thing and
+    the repository's own citation widget another.
+    """
+    cff = _cff()
+    zenodo = _zenodo()
+    assert cff["title"] == zenodo["title"], (
+        f"titles differ: CITATION.cff {cff['title']!r} vs"
+        f" .zenodo.json {zenodo['title']!r}"
+    )
+    assert cff["license"].lower() == zenodo["license"].lower(), (
+        f"licences differ: CITATION.cff {cff['license']!r} vs"
+        f" .zenodo.json {zenodo['license']!r}"
+    )
+    assert list(cff["keywords"]) == list(zenodo["keywords"]), (
+        "keywords differ between CITATION.cff and .zenodo.json"
+    )
+    assert cff.get("abstract"), (
+        "CITATION.cff has no abstract; GitHub's citation widget and any CFF"
+        " consumer would show the title alone"
+    )
+
+
+def test_upstream_credit_survives_in_the_zenodo_record():
+    """The DSSG attribution is the whole reason .zenodo.json exists here.
+
+    It is a public credit decision, not a formatting one: dropping the role or
+    the derivation link turns a credited rewrite back into an uncredited one.
+    """
+    zenodo = _zenodo()
+    leaders = [
+        c["name"] for c in zenodo["contributors"] if c["type"] == "ProjectLeader"
+    ]
+    assert leaders == ["Ghani, Rayid"], (
+        f"expected Rayid Ghani as the record's ProjectLeader, found {leaders}."
+        " He originated and led DSSG triage, which this project derives from."
+    )
+    members = {c["name"] for c in zenodo["contributors"]}
+    for name in ("Millan, Liliana", "Amarasinghe, Kasun"):
+        assert name in members, (
+            f"{name} is missing from the contributors. Upstream's own"
+            " AUTHORS.rst omits them because they contributed after it was"
+            " last touched; that omission is corrected here on purpose."
+        )
+    derived = [
+        r["identifier"]
+        for r in zenodo["related_identifiers"]
+        if r["relation"] == "isDerivedFrom"
+    ]
+    assert derived == ["https://github.com/dssg/triage"], (
+        f"expected an isDerivedFrom relation to dssg/triage, found {derived}."
+        " That relation is what makes the lineage machine-readable."
+    )
+
+
 def test_package_version_matches_pyproject():
     """`triage --version` prints ``__version__``; the release guard reads pyproject.
 
@@ -143,8 +248,6 @@ def test_package_version_matches_pyproject():
     whose ``triage --version`` contradicts its own tag — the exact failure the
     release workflow's guard exists to prevent, reached through the other file.
     """
-    import tomllib
-
     pyproject = tomllib.loads(
         (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
