@@ -34,16 +34,7 @@ tab shows its own keys in the row above the footer.
 
 ## Status
 
-```
-┌ database ──────────────────────────────┐ ┌ pending work · derived from queries ┐
-│ connection   ● connected pg 16         │ │ ✓ runs        nothing pending       │
-│ size         122 MB · 24 tables · 18 v │ └─────────────────────────────────────┘
-│ schema       0020_pinball_metric       │
-│ artifacts    54 built                  │
-│ predictions  ━━━━━━━━━━━━━━ 98,494 ~   │
-│ models       ━━━━━━━━━━━━━━ 34         │
-└────────────────────────────────────────┘
-```
+![The Status tab against the Chicago 311 project: database facts, row gauges, the last two runs, and pending work](../../../assets/reference/tui-status.svg)
 
 Database facts (size, relation counts, the alembic stamp, artifacts by
 status), row gauges (exact counts for the small tables, planner estimates for
@@ -100,6 +91,8 @@ app. `enter` runs the highlighted action as a subprocess; its stdout streams
 into the right-hand pane and the exit code becomes the state. `gc`,
 `archive`, `db downgrade`, `project drop` and the `*-clean` recipes are
 marked destructive and confirmed first.
+
+![The Actions palette with the prompt open on `triage run`: the highlighted row reads `CONFIG · Run a greenfield exp…`, and the dialog asks for the config the verb cannot run without](../../../assets/reference/tui-actions-prompt.svg)
 
 A verb that cannot run without arguments carries them as a hint next to its
 description (`triage run` → `CONFIG`, `triage predictlist` → `MODEL_ID
