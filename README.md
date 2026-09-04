@@ -5,6 +5,7 @@
 [![ci](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml/badge.svg)](https://github.com/ccd-ia/triage-pg/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ccd-ia/triage-pg?include_prereleases&label=release)](https://github.com/ccd-ia/triage-pg/releases)
 [![ghcr](https://img.shields.io/badge/ghcr.io-triage--pg-blue?logo=docker&logoColor=white)](https://github.com/orgs/ccd-ia/packages/container/package/triage-pg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22292553.svg)](https://doi.org/10.5281/zenodo.22292553)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching, consulting, and production monitoring.
