@@ -6,8 +6,8 @@ authors:
   - family-names: "De Unánue"
     given-names: "Adolfo"
     orcid: "https://orcid.org/0000-0003-3499-0965"
-version: 1.1.4
-date-released: 2026-08-26
+version: 1.1.5
+date-released: 2026-09-03
 license: MIT
 repository-code: "https://github.com/ccd-ia/triage-pg"
 url: "https://ccd-ia.github.io/triage-pg/"
@@ -17,3 +17,53 @@ keywords:
   - early-warning
   - temporal-validation
   - public-policy
+references:
+  - type: software
+    title: "triage: General Purpose Risk Modeling and Prediction Toolkit for Policy and Social Good Problems"
+    repository-code: "https://github.com/dssg/triage"
+    license: MIT
+    notes: >-
+      The work triage-pg derives from. Started at the Center for Data Science
+      and Public Policy, University of Chicago, and later maintained at
+      Carnegie Mellon University; Rayid Ghani originated and led the project.
+      triage-pg is a rewrite that keeps the pipeline shape and the timechop
+      temporal-splitting component. Authors below follow the upstream
+      AUTHORS.rst, with Kasun Amarasinghe and Liliana Millan added — both
+      contributed after that file was last updated.
+    authors:
+      - family-names: "Ghani"
+        given-names: "Rayid"
+        orcid: "https://orcid.org/0000-0003-0235-1843"
+      - name: "Center for Data Science and Public Policy, University of Chicago"
+      - family-names: "Ackermann"
+        given-names: "Klaus"
+      - family-names: "Amarasinghe"
+        given-names: "Kasun"
+      - family-names: "Bauman"
+        given-names: "Matt"
+      - family-names: "Crockett"
+        given-names: "Tristan"
+      - family-names: "De Unánue"
+        given-names: "Adolfo"
+      - family-names: "Koenig"
+        given-names: "Hannes"
+      - family-names: "Kuester"
+        given-names: "Benedict"
+      - family-names: "Kumar"
+        given-names: "Avishek"
+      - family-names: "Lin"
+        given-names: "Eddie"
+      - family-names: "London"
+        given-names: "Jesse"
+      - family-names: "Millan"
+        given-names: "Liliana"
+      - family-names: "Navarrete"
+        given-names: "Andrea"
+      - family-names: "Potash"
+        given-names: "Eric"
+      - family-names: "Rodolfa"
+        given-names: "Kit"
+      - family-names: "Salomon"
+        given-names: "Erika"
+      - family-names: "Walsh"
+        given-names: "Joe"

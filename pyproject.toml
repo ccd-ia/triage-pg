@@ -4,13 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "triage"
-version = "1.1.4"
+version = "1.1.5"
 description = "Risk modeling and prediction"
 readme = "README.md"
 license = { text = "MIT License" }
 requires-python = ">=3.12"
+# Authorship of this package. The upstream project it derives from (DSSG triage)
+# is credited in CITATION.cff's `references` and .zenodo.json's `contributors`.
 authors = [
-  { name = "Center for Data Science and Public Policy", email = "datascifellows@gmail.com" }
+  { name = "Adolfo De Unánue", email = "adolfo+git@unanue.mx" }
 ]
 keywords = ["triage"]
 classifiers = [

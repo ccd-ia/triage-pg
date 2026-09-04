@@ -97,3 +97,58 @@ def test_version_banner_is_derived_not_hardcoded():
         "VersionBanner.astro exists but is not registered as Starlight's Banner override"
         " in astro.config.mjs — it would never render"
     )
+
+
+# --------------------------------------------------------------- citation files
+#: The DOI record's metadata. Zenodo reads .zenodo.json in preference to
+#: CITATION.cff (it ignores the latter entirely when both exist), but GitHub's
+#: "Cite this repository" widget reads CITATION.cff — so both ship, and both
+#: carry a version that has to be the released one.
+CITATION_CFF = REPO_ROOT / "CITATION.cff"
+ZENODO_JSON = REPO_ROOT / ".zenodo.json"
+
+
+def test_citation_files_exist():
+    """Guard the guard: a renamed citation file must fail loudly, not pass."""
+    assert CITATION_CFF.is_file(), f"CITATION.cff not found at {CITATION_CFF}"
+    assert ZENODO_JSON.is_file(), f".zenodo.json not found at {ZENODO_JSON}"
+
+
+def test_citation_versions_match_the_package():
+    """A DOI is minted from these files; a stale version is minted permanently.
+
+    CITATION.cff shipped in no release before v1.1.5 and its version said
+    1.1.4, which is exactly the drift a released, citable record cannot carry.
+    """
+    import json
+
+    import yaml
+
+    cff = yaml.safe_load(CITATION_CFF.read_text(encoding="utf-8"))
+    zenodo = json.loads(ZENODO_JSON.read_text(encoding="utf-8"))
+    assert str(cff["version"]) == triage.__version__, (
+        f"CITATION.cff says version {cff['version']}, package is"
+        f" {triage.__version__} — the citation would name the wrong release"
+    )
+    assert str(zenodo["version"]) == triage.__version__, (
+        f".zenodo.json says version {zenodo['version']}, package is"
+        f" {triage.__version__} — the DOI record would name the wrong release"
+    )
+
+
+def test_package_version_matches_pyproject():
+    """`triage --version` prints ``__version__``; the release guard reads pyproject.
+
+    Nothing compared the two, so a bump to one alone would publish an image
+    whose ``triage --version`` contradicts its own tag — the exact failure the
+    release workflow's guard exists to prevent, reached through the other file.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert pyproject["project"]["version"] == triage.__version__, (
+        f"pyproject.toml says {pyproject['project']['version']},"
+        f" triage.__version__ says {triage.__version__}"
+    )
