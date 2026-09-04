@@ -48,7 +48,9 @@ tab shows its own keys in the row above the footer.
 Database facts (size, relation counts, the alembic stamp, artifacts by
 status), row gauges (exact counts for the small tables, planner estimates for
 `predictions` and `evaluations`), the last five runs, runs per day as a
-sparkline, and **pending work**. Pending work is never a stored flag: a run
+sparkline, and **pending work**. A fortnight with no run reads `none in 14 d`
+rather than a flat line — zeros and a steady rate draw the same picture, so
+the empty case is said in words. Pending work is never a stored flag: a run
 still `started` after six hours, an artifact stuck in `building` with no live
 run, a leaderboard matview that is missing completed runs, an experiment
 without a run. `triage status --json` prints the same thing.
@@ -97,9 +99,16 @@ description) and every verb of the `triage` CLI, introspected from the typer
 app. `enter` runs the highlighted action as a subprocess; its stdout streams
 into the right-hand pane and the exit code becomes the state. `gc`,
 `archive`, `db downgrade`, `project drop` and the `*-clean` recipes are
-marked destructive and confirmed first. Headless: `triage actions list
---json`, `triage actions run "just test"`, `triage actions run triage --
---version`.
+marked destructive and confirmed first.
+
+A verb that cannot run without arguments carries them as a hint next to its
+description (`triage run` → `CONFIG`, `triage predictlist` → `MODEL_ID
+AS_OF_DATE`) and `enter` **prompts** for them before starting anything;
+escape or an empty answer cancels. Only required arguments prompt — `just
+test *ARGS` and `triage gc` still run bare on `enter`, and options are passed
+headlessly. `y` copies the command with its arguments. Headless: `triage
+actions list --json`, `triage actions run "just test"`, `triage actions run
+triage -- --version`.
 
 ## Experiments (6)
 

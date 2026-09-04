@@ -75,8 +75,17 @@ def test_actions_list_and_run(invoke) -> None:
     assert "triage-pg" in out
 
 
-def test_runs_status_still_needs_a_region(invoke) -> None:
-    """The pre-existing cloud verb keeps working alongside list/show/tail."""
+def test_runs_status_still_needs_a_region(invoke, monkeypatch) -> None:
+    """The pre-existing cloud verb keeps working alongside list/show/tail.
+
+    The region has to be cleared: a developer whose ``.envrc`` exports
+    ``AWS_REGION`` gets past this check and on into botocore's credential
+    chain, where a local ``~/.aws/login`` profile raises about a missing
+    ``botocore[crt]`` instead. CI has neither, which is why the test only
+    ever failed on a laptop.
+    """
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     runner = CliRunner()
     result = runner.invoke(app, ["runs", "status"])
     assert result.exit_code != 0

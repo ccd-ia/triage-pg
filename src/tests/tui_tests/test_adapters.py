@@ -42,11 +42,28 @@ def test_status_is_derived_from_the_schema(source, seeded) -> None:
     assert "tables" in status.extra["size"]
     assert status.extra["schema"] != "unknown"
     assert "built" in status.extra["artifacts"]
-    assert len(status.series["runs per day"]) == 14
-    assert status.series["runs per day"][-1] == 2.0
+    runs_per_day = status.series[0]
+    assert runs_per_day.name == "runs per day"
+    assert len(runs_per_day.values) == 14
+    assert runs_per_day.values[-1] == 2.0
+    assert not runs_per_day.empty
+    assert runs_per_day.empty_note == "none in 14 d"
     # both runs completed, leaderboard refreshed, every experiment has a run
     assert [p.level for p in status.pending] == ["ok"]
     json.dumps(status.to_json())
+
+
+def test_a_fortnight_without_a_run_says_so_instead_of_drawing_a_flat_line(
+    source, seeded
+) -> None:
+    with source.connect() as conn:
+        conn.execute("update triage.runs set started_at = now() - interval '30 days'")
+
+    runs_per_day = TriageStatus(source, "test-project").status().series[0]
+
+    assert runs_per_day.values == [0.0] * 14
+    assert runs_per_day.empty
+    assert runs_per_day.summary() == "none in 14 d"
 
 
 def test_status_flags_a_stale_run_and_an_orphaned_build(source, seeded) -> None:
@@ -186,11 +203,53 @@ def test_parse_just_dump_reads_comments_params_and_marks_clean_recipes() -> None
     actions = {a.name: a for a in parse_just_dump(DUMP)}
 
     assert "just default" not in actions
-    assert actions["just test"].description == "Run tests · args: *ARGS"
+    assert actions["just test"].description == "Run tests"
     assert actions["just test"].source is ActionSource.JUST
     assert actions["just tutorial-clean"].destructive
     assert actions["just check"].description == "just check"
     assert not actions["just check"].destructive
+
+
+def test_just_args_name_only_what_a_recipe_cannot_run_without() -> None:
+    dump = (
+        "# Serve it\n"
+        'serve PORT="8000":\n'
+        "    echo\n\n"
+        "# Pass through\n"
+        "test *ARGS:\n"
+        "    echo\n\n"
+        "# Needs a target\n"
+        "deploy TARGET:\n"
+        "    echo\n\n"
+        "# Needs at least one\n"
+        "lint +FILES:\n"
+        "    echo\n\n"
+        "# Exported and required\n"
+        "load $DSN:\n"
+        "    echo\n"
+    )
+    actions = {a.name: a for a in parse_just_dump(dump)}
+
+    # a default and a zero-or-more variadic both run bare: no prompt
+    assert actions["just serve"].args == ""
+    assert actions["just test"].args == ""
+    assert actions["just deploy"].args == "TARGET"
+    assert actions["just lint"].args == "FILES..."
+    assert actions["just load"].args == "DSN"
+
+
+def test_cli_args_are_the_required_arguments_typer_prints_in_its_usage() -> None:
+    actions = {a.name: a for a in cli_actions(cli_app)}
+
+    # `triage run` with no config exits 2 with usage — the shell prompts instead
+    assert actions["triage run"].args == "CONFIG"
+    assert actions["triage predictlist"].args == "MODEL_ID AS_OF_DATE"
+    assert actions["triage postmodel compare"].args == "MODEL_A MODEL_B"
+    assert actions["triage project drop"].args == "SLUG"
+    # options and defaulted arguments are not prompted for: the verb runs bare
+    assert actions["triage gc"].args == ""
+    assert actions["triage status"].args == ""
+    assert actions["triage runs list"].args == ""
 
 
 def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs() -> None:

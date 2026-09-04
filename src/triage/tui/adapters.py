@@ -11,6 +11,7 @@ into the run's state.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -36,10 +37,12 @@ from lynkeus import (
     RunDetail,
     RunEvent,
     RunState,
+    Series,
     Stage,
     Status,
 )
 from sqlalchemy.engine import make_url
+from typer.models import ArgumentInfo
 
 from triage.logging import get_logger
 from triage.util.db import libpq_conninfo
@@ -173,7 +176,7 @@ class TriageStatus:
             pending=self._pending(),
             extra=self._extra(),
             gauges=self._gauges(),
-            series={"runs per day": self._runs_per_day()},
+            series=[Series("runs per day", self._runs_per_day(), "none in 14 d")],
         )
 
     def _extra(self) -> dict[str, str]:
@@ -254,6 +257,7 @@ class TriageStatus:
         )
 
     def _runs_per_day(self) -> list[float]:
+        """Fourteen daily counts, zeros included — a gap is a fact, not a hole."""
         rows = self.source.rows(
             "select count(r.run_id) as n"
             " from generate_series(current_date - 13, current_date, interval '1 day') d"
@@ -588,20 +592,76 @@ def parse_just_dump(text: str) -> list[Action]:
         if name == "default":
             comment = ""
             continue
-        params = match.group("params").split()
-        description = comment or f"just {name}"
-        if params:
-            description += f" · args: {' '.join(params)}"
         actions.append(
             Action(
                 f"just {name}",
-                description,
+                comment or f"just {name}",
                 ActionSource.JUST,
                 destructive=name.endswith("-clean"),
+                args=_required_parameters(match.group("params")),
             )
         )
         comment = ""
     return actions
+
+
+def _required_parameters(params: str) -> str:
+    """The just parameters a recipe cannot run without, as a usage hint.
+
+    ``just`` takes ``NAME`` as required, ``NAME="x"`` as defaulted, ``*NAME``
+    as zero-or-more and ``+NAME`` as one-or-more; ``$NAME`` exports it. Only
+    the first and last forms stop a bare ``just recipe`` from running, so only
+    those are prompted for — ``just test *ARGS`` still runs the whole suite
+    on ``enter``.
+    """
+    required: list[str] = []
+    for param in params.split():
+        if "=" in param or param.startswith("*"):
+            continue
+        bare = param.lstrip("+$")
+        if bare:
+            required.append(f"{bare}..." if param.startswith("+") else bare)
+    return " ".join(required)
+
+
+def _argument_info(parameter: inspect.Parameter) -> ArgumentInfo | None:
+    """The ``typer.Argument`` of a parameter, in either declaration style."""
+    if isinstance(parameter.default, ArgumentInfo):
+        return parameter.default
+    for meta in getattr(parameter.annotation, "__metadata__", ()):
+        if isinstance(meta, ArgumentInfo):
+            return meta
+    return None
+
+
+def _required_arguments(callback: Any) -> str:
+    """The metavars of the arguments a typer verb cannot run without.
+
+    typer prints a required argument in its usage line as the upper-cased
+    parameter name (``triage predictlist MODEL_ID``); the palette shows the
+    same string and the shell prompts for it before starting the subprocess.
+    Options and defaulted arguments are left out — the verb runs without them,
+    and ``triage actions run`` remains the way to pass them headlessly.
+    """
+    if callback is None:
+        return ""
+    try:
+        parameters = inspect.signature(callback).parameters
+    except (TypeError, ValueError):  # pragma: no cover — a builtin as callback
+        return ""
+    names: list[str] = []
+    for name, parameter in parameters.items():
+        info = _argument_info(parameter)
+        if info is None:
+            continue
+        required = (
+            info.default is ...
+            if info is parameter.default
+            else parameter.default is inspect.Parameter.empty
+        )
+        if required:
+            names.append(str(info.metavar or name.upper()))
+    return " ".join(names)
 
 
 def cli_actions(cli_app: typer.Typer) -> list[Action]:
@@ -618,20 +678,23 @@ def cli_actions(cli_app: typer.Typer) -> list[Action]:
             return command.name
         return command.callback.__name__.replace("_", "-") if command.callback else "?"
 
+    def entry(name: str, command: Any) -> Action:
+        return Action(
+            name,
+            describe(command),
+            ActionSource.CLI,
+            name in _DESTRUCTIVE,
+            args=_required_arguments(command.callback),
+        )
+
     actions: list[Action] = []
     for command in cli_app.registered_commands:
-        name = f"triage {verb(command)}"
-        actions.append(
-            Action(name, describe(command), ActionSource.CLI, name in _DESTRUCTIVE)
-        )
+        actions.append(entry(f"triage {verb(command)}", command))
     for group in cli_app.registered_groups:
         if group.typer_instance is None:
             continue
         for command in group.typer_instance.registered_commands:
-            name = f"triage {group.name} {verb(command)}"
-            actions.append(
-                Action(name, describe(command), ActionSource.CLI, name in _DESTRUCTIVE)
-            )
+            actions.append(entry(f"triage {group.name} {verb(command)}", command))
     return actions
 
 

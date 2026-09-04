@@ -22,7 +22,7 @@ The database is resolved exactly as for every other verb (`--dbfile` ›
 | 2 Runs | `triage.runs` + `run_progress` + `run_artifacts`; `LISTEN run_progress` (ADR-0021) with a 5 s poll of the view when LISTEN is unavailable | `o` opens the run in the dashboard (`$TRIAGE_DASHBOARD_URL`, default the local `just serve`) |
 | 3 Data | the catalog (`pg_class`, `pg_attribute`, `pg_indexes`, `pg_stat_user_tables`) | `4` opens the selected relation in Query |
 | 4 Query | any read-only statement; the nine `triage` views are the saved queries | your own saved queries live under `~/.local/state/triage/tui/<project>/` |
-| 5 Actions | `just --dump` (cwd) + the typer commands of `triage.cli` | `gc`, `archive`, `db downgrade`, `project drop` and the `*-clean` recipes are confirmed first |
+| 5 Actions | `just --dump` (cwd) + the typer commands of `triage.cli` | `gc`, `archive`, `db downgrade`, `project drop` and the `*-clean` recipes are confirmed first; a verb with required arguments (`triage run CONFIG`) is prompted for them rather than left to exit 2 |
 | 6 Experiments | `experiment_summary` | enter drills into the experiment's runs |
 | 7 Leaderboard | the `leaderboard` matview | `R` refreshes it (through the CLI) |
 | 8 Audition | `audition_distances` / `audition` | sparklines of distance-from-best per model group |

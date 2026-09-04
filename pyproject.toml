@@ -61,7 +61,7 @@ dependencies = [
     # Actions + the project screens). Pinned to a public git tag like featurizer: lynkeus
     # ADR-0001 (docs/adr/0001-shared-shell-package.md there) explains why it is a package
     # every consumer pins rather than a copy in each repo.
-    "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v0.1.0",
+    "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v0.2.0",
 ]
 
 [project.optional-dependencies]
