@@ -1,6 +1,6 @@
 {
   "upload_type": "software",
-  "title": "triage-pg: early-warning ML pipelines native to PostgreSQL",
+  "title": "triage-pg: temporal machine learning for public policy inside PostgreSQL",
   "description": "<p>triage-pg builds temporal machine-learning pipelines for tabular public-policy data — cohort, labels, features, matrices, train, predict, evaluate — with point-in-time correctness enforced by construction. Predictions are append-only and evaluation (precision@k, recall@k, AUC, regression and survival metrics, leaderboards, audition and bias group-bys) runs as SQL inside the database, so results are queryable without leaving PostgreSQL. It runs on plain PostgreSQL with no proprietary extensions.</p><p>It is a deliberately simplified rewrite of <a href=\"https://github.com/dssg/triage\">DSSG triage</a>, keeping that project's pipeline shape and its <code>timechop</code> temporal-splitting component while redesigning the substrate around a much smaller surface. The upstream team is credited in the contributors below.</p>",
   "creators": [
     {

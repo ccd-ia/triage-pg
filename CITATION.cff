@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "triage-pg: early-warning ML pipelines native to PostgreSQL"
+title: "triage-pg: temporal machine learning for public policy inside PostgreSQL"
 abstract: >-
   triage-pg builds temporal machine-learning pipelines for tabular
   public-policy data — cohort, labels, features, matrices, train, predict,
