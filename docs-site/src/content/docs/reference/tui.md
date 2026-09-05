@@ -87,10 +87,13 @@ grid and the saved-queries list. The nine `triage` views come pre-saved —
 
 The palette: every `just` recipe of the current directory (with its comment as
 description) and every verb of the `triage` CLI, introspected from the typer
-app. `enter` runs the highlighted action as a subprocess; its stdout streams
-into the right-hand pane and the exit code becomes the state. `gc`,
-`archive`, `db downgrade`, `project drop` and the `*-clean` recipes are
-marked destructive and confirmed first.
+app — both parsed by lynkeus's `actions` module, the same code every lynkeus
+consumer uses. `enter` runs the highlighted action as a subprocess; its stdout
+streams into the right-hand pane and the exit code becomes the state. An
+action is confirmed before it starts when its name or comment carries a
+destructive word (drop, downgrade, destroy, truncate, delete, rebuild, purge,
+reset, clean, prune), and so are `gc` and `archive`, which delete artifacts
+without saying so in their names.
 
 ![The Actions palette with the prompt open on `triage run`: the highlighted row reads `CONFIG · Run a greenfield exp…`, and the dialog asks for the config the verb cannot run without](../../../assets/reference/tui-actions-prompt.svg)
 

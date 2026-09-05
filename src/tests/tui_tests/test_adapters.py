@@ -7,17 +7,14 @@ import shutil
 from pathlib import Path
 
 import pytest
-from lynkeus import ActionSource, RunState
+from lynkeus import Action, ActionSource, RunState
 
 from triage.cli import app as cli_app
-
 from triage.tui.adapters import (
     SAVED_QUERIES,
     TriageActions,
     TriageRuns,
     TriageStatus,
-    cli_actions,
-    parse_just_dump,
     project_name,
 )
 
@@ -181,94 +178,48 @@ def test_cancel_is_explicit_about_not_existing(source) -> None:
 
 
 # ----------------------------------------------------------------- actions
-
-DUMP = """\
-# Show available commands
-default:
-    @just --list
-
-# Run tests
-test *ARGS:
-    uv run pytest {{ ARGS }}
-
-# Clean up DirtyDuck resources (removes containers, images, volumes)
-tutorial-clean:
-    docker compose down -v
-
-check: lint typecheck test
-"""
+# The justfile and typer parsing is lynkeus's and is tested there
+# (lynkeus/tests/test_actions.py). What is asserted here is this project's
+# palette: which verbs prompt for what, and which are confirmed before they run.
 
 
-def test_parse_just_dump_reads_comments_params_and_marks_clean_recipes() -> None:
-    actions = {a.name: a for a in parse_just_dump(DUMP)}
-
-    assert "just default" not in actions
-    assert actions["just test"].description == "Run tests"
-    assert actions["just test"].source is ActionSource.JUST
-    assert actions["just tutorial-clean"].destructive
-    assert actions["just check"].description == "just check"
-    assert not actions["just check"].destructive
+@pytest.fixture
+def verbs(tmp_path: Path) -> dict[str, Action]:
+    """The CLI half of the palette, listed from a directory without a justfile."""
+    return {a.name: a for a in TriageActions(cwd=tmp_path, cli_app=cli_app).list()}
 
 
-def test_just_args_name_only_what_a_recipe_cannot_run_without() -> None:
-    dump = (
-        "# Serve it\n"
-        'serve PORT="8000":\n'
-        "    echo\n\n"
-        "# Pass through\n"
-        "test *ARGS:\n"
-        "    echo\n\n"
-        "# Needs a target\n"
-        "deploy TARGET:\n"
-        "    echo\n\n"
-        "# Needs at least one\n"
-        "lint +FILES:\n"
-        "    echo\n\n"
-        "# Exported and required\n"
-        "load $DSN:\n"
-        "    echo\n"
-    )
-    actions = {a.name: a for a in parse_just_dump(dump)}
-
-    # a default and a zero-or-more variadic both run bare: no prompt
-    assert actions["just serve"].args == ""
-    assert actions["just test"].args == ""
-    assert actions["just deploy"].args == "TARGET"
-    assert actions["just lint"].args == "FILES..."
-    assert actions["just load"].args == "DSN"
-
-
-def test_cli_args_are_the_required_arguments_typer_prints_in_its_usage() -> None:
-    actions = {a.name: a for a in cli_actions(cli_app)}
-
+def test_cli_args_are_the_required_arguments_typer_prints_in_its_usage(
+    verbs: dict[str, Action],
+) -> None:
     # `triage run` with no config exits 2 with usage — the shell prompts instead
-    assert actions["triage run"].args == "CONFIG"
-    assert actions["triage predictlist"].args == "MODEL_ID AS_OF_DATE"
-    assert actions["triage postmodel compare"].args == "MODEL_A MODEL_B"
-    assert actions["triage project drop"].args == "SLUG"
+    assert verbs["triage run"].args == "CONFIG"
+    assert verbs["triage predictlist"].args == "MODEL_ID AS_OF_DATE"
+    assert verbs["triage postmodel compare"].args == "MODEL_A MODEL_B"
+    assert verbs["triage project drop"].args == "SLUG"
     # options and defaulted arguments are not prompted for: the verb runs bare
-    assert actions["triage gc"].args == ""
-    assert actions["triage status"].args == ""
-    assert actions["triage runs list"].args == ""
+    assert verbs["triage gc"].args == ""
+    assert verbs["triage status"].args == ""
+    assert verbs["triage runs list"].args == ""
 
 
-def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs() -> None:
-    actions = {a.name: a for a in cli_actions(cli_app)}
-
+def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs(
+    verbs: dict[str, Action],
+) -> None:
     for name in ("triage run", "triage leaderboard", "triage tui", "triage status"):
-        assert name in actions, name
+        assert name in verbs, name
     for name in ("triage runs list", "triage runs show", "triage runs tail"):
-        assert name in actions, name
+        assert name in verbs, name
     for name in ("triage query", "triage actions list", "triage actions run"):
-        assert name in actions, name
-    destructive = {n for n, a in actions.items() if a.destructive}
+        assert name in verbs, name
+    destructive = {n for n, a in verbs.items() if a.destructive}
     assert destructive == {
         "triage gc",
         "triage archive",
         "triage db downgrade",
         "triage project drop",
     }
-    assert actions["triage analyze-config"].description
+    assert verbs["triage analyze-config"].description
 
 
 def test_actions_list_and_run_in_a_directory_without_a_justfile(tmp_path: Path) -> None:
@@ -284,11 +235,32 @@ def test_actions_list_and_run_in_a_directory_without_a_justfile(tmp_path: Path) 
     assert "triage-pg" in out
 
 
+def test_run_falls_back_to_python_m_when_the_console_script_is_off_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkout run from source has no ``triage`` on PATH; the shell still runs it.
+
+    The base class then starts ``python -m triage.cli``, which works only because
+    ``triage.cli`` guards ``__main__``: without the guard the fallback imports the
+    module, runs nothing and exits 0 — indistinguishable from success.
+    """
+    monkeypatch.setattr(shutil, "which", lambda cmd, *args, **kwargs: None)
+    process = TriageActions(cwd=tmp_path, cli_app=cli_app).run("triage", ["--version"])
+    out = process.stdout.read() if process.stdout else ""
+    assert process.wait() == 0
+    assert "triage-pg" in out
+
+
 @pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
 def test_actions_list_reads_the_repo_justfile() -> None:
     root = Path(__file__).resolve().parents[3]
-    names = {a.name for a in TriageActions(cwd=root).list()}
-    assert "just tui" in names and "just test" in names
+    actions = {a.name: a for a in TriageActions(cwd=root).list()}
+    assert "just tui" in actions and "just test" in actions
+    assert actions["just test"].source is ActionSource.JUST
+    # lynkeus's word rule confirms the `clean` and `rebuild` recipes; `test` runs bare
+    assert actions["just tutorial-clean"].destructive
+    assert actions["just tutorial-rebuild"].destructive
+    assert not actions["just test"].destructive
 
 
 def test_saved_queries_run_against_the_seeded_schema(source, seeded) -> None:

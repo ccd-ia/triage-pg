@@ -5,20 +5,14 @@ exists in the ``triage`` schema — ``triage.runs``, the ``run_progress`` /
 ``run_summary`` / ``experiment_summary`` views, the artifact tables — never a
 stored flag (ADR-0012: no business logic in a UI; ADR-0021: progress is core
 telemetry). The Actions adapter lists ``just`` recipes and the typer commands
-of ``triage.cli`` and runs them as subprocesses; the shell turns the exit code
-into the run's state.
+of ``triage.cli`` — parsed by ``lynkeus.actions``, the module every consumer
+shares — and runs them as subprocesses; the shell turns the exit code into the
+run's state.
 """
 
 from __future__ import annotations
 
-import inspect
 import json
-import os
-import re
-import shlex
-import shutil
-import subprocess
-import sys
 import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -29,7 +23,6 @@ import psycopg
 import typer
 from lynkeus import (
     Action,
-    ActionSource,
     Gauge,
     PendingItem,
     PgSource,
@@ -40,9 +33,11 @@ from lynkeus import (
     Series,
     Stage,
     Status,
+    SubprocessActions,
+    just_actions,
+    typer_actions,
 )
 from sqlalchemy.engine import make_url
-from typer.models import ArgumentInfo
 
 from triage.logging import get_logger
 from triage.util.db import libpq_conninfo
@@ -565,188 +560,46 @@ class TriageRuns:
 
 # ------------------------------------------------------------------ actions
 
+#: The verbs this project knows to be destructive. ``gc`` and ``archive`` delete
+#: artifacts and rows without a destructive word in their names, so no word rule
+#: finds them; the other two also match lynkeus's ``DESTRUCTIVE_WORDS`` and are
+#: named anyway, so this set reads as the full list a maintainer must confirm.
 _DESTRUCTIVE = {
     "triage gc",
     "triage archive",
     "triage db downgrade",
     "triage project drop",
 }
-_RECIPE = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)(?P<params>[^:#]*):(?P<deps>.*)$")
 
 
-def parse_just_dump(text: str) -> list[Action]:
-    """Turn ``just --dump`` output into actions; the preceding comment is the description."""
-    actions: list[Action] = []
-    comment = ""
-    for line in text.splitlines():
-        if line.startswith("#"):
-            comment = line.lstrip("#").strip()
-            continue
-        if not line or line[0].isspace():
-            continue
-        match = _RECIPE.match(line)
-        if match is None:
-            comment = ""
-            continue
-        name = match.group("name")
-        if name == "default":
-            comment = ""
-            continue
-        actions.append(
-            Action(
-                f"just {name}",
-                comment or f"just {name}",
-                ActionSource.JUST,
-                destructive=name.endswith("-clean"),
-                args=_required_parameters(match.group("params")),
-            )
-        )
-        comment = ""
-    return actions
+class TriageActions(SubprocessActions):
+    """``ActionsAdapter``: ``just`` recipes + ``triage`` verbs, each run as a subprocess.
 
-
-def _required_parameters(params: str) -> str:
-    """The just parameters a recipe cannot run without, as a usage hint.
-
-    ``just`` takes ``NAME`` as required, ``NAME="x"`` as defaulted, ``*NAME``
-    as zero-or-more and ``+NAME`` as one-or-more; ``$NAME`` exports it. Only
-    the first and last forms stop a bare ``just recipe`` from running, so only
-    those are prompted for — ``just test *ARGS`` still runs the whole suite
-    on ``enter``.
+    The justfile and typer parsing is lynkeus's (``lynkeus.actions``), shared
+    with every consumer. What stays here is this project's own knowledge — the
+    verbs that destroy state whatever their wording — and the CLI to enumerate.
+    ``run`` is the base class's: the ``triage`` console script, or
+    ``python -m triage.cli`` when the script is not on ``PATH``.
     """
-    required: list[str] = []
-    for param in params.split():
-        if "=" in param or param.startswith("*"):
-            continue
-        bare = param.lstrip("+$")
-        if bare:
-            required.append(f"{bare}..." if param.startswith("+") else bare)
-    return " ".join(required)
 
-
-def _argument_info(parameter: inspect.Parameter) -> ArgumentInfo | None:
-    """The ``typer.Argument`` of a parameter, in either declaration style."""
-    if isinstance(parameter.default, ArgumentInfo):
-        return parameter.default
-    for meta in getattr(parameter.annotation, "__metadata__", ()):
-        if isinstance(meta, ArgumentInfo):
-            return meta
-    return None
-
-
-def _required_arguments(callback: Any) -> str:
-    """The metavars of the arguments a typer verb cannot run without.
-
-    typer prints a required argument in its usage line as the upper-cased
-    parameter name (``triage predictlist MODEL_ID``); the palette shows the
-    same string and the shell prompts for it before starting the subprocess.
-    Options and defaulted arguments are left out — the verb runs without them,
-    and ``triage actions run`` remains the way to pass them headlessly.
-    """
-    if callback is None:
-        return ""
-    try:
-        parameters = inspect.signature(callback).parameters
-    except (TypeError, ValueError):  # pragma: no cover — a builtin as callback
-        return ""
-    names: list[str] = []
-    for name, parameter in parameters.items():
-        info = _argument_info(parameter)
-        if info is None:
-            continue
-        required = (
-            info.default is ...
-            if info is parameter.default
-            else parameter.default is inspect.Parameter.empty
-        )
-        if required:
-            names.append(str(info.metavar or name.upper()))
-    return " ".join(names)
-
-
-def cli_actions(cli_app: typer.Typer) -> list[Action]:
-    """Every verb of a typer app (``triage.cli.app``), introspected, never imported."""
-
-    def describe(command: Any) -> str:
-        doc = (
-            command.help or (command.callback.__doc__ if command.callback else "") or ""
-        )
-        return _first_line(doc, 80)
-
-    def verb(command: Any) -> str:
-        if command.name:
-            return command.name
-        return command.callback.__name__.replace("_", "-") if command.callback else "?"
-
-    def entry(name: str, command: Any) -> Action:
-        return Action(
-            name,
-            describe(command),
-            ActionSource.CLI,
-            name in _DESTRUCTIVE,
-            args=_required_arguments(command.callback),
-        )
-
-    actions: list[Action] = []
-    for command in cli_app.registered_commands:
-        actions.append(entry(f"triage {verb(command)}", command))
-    for group in cli_app.registered_groups:
-        if group.typer_instance is None:
-            continue
-        for command in group.typer_instance.registered_commands:
-            actions.append(entry(f"triage {group.name} {verb(command)}", command))
-    return actions
-
-
-class TriageActions:
-    """``ActionsAdapter``: ``just`` recipes + CLI verbs, each run as a subprocess."""
+    prefix = "triage"
+    module = "triage.cli"
+    destructive = frozenset(_DESTRUCTIVE)
 
     def __init__(
         self, cwd: Path | None = None, cli_app: typer.Typer | None = None
     ) -> None:
-        self.cwd = cwd or Path.cwd()
+        super().__init__(cwd)
         self.cli_app = cli_app
 
     def list(self) -> list[Action]:
         """Recipes first (when ``just`` and a justfile are present), then the CLI."""
-        actions: list[Action] = []
-        just = shutil.which("just")
-        if just and (self.cwd / "justfile").exists():
-            dump = subprocess.run(
-                [just, "--dump"],
-                cwd=self.cwd,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if dump.returncode == 0:
-                actions.extend(parse_just_dump(dump.stdout))
-            else:
-                logger.warning("just --dump failed: {}", dump.stderr.strip())
+        actions = just_actions(self.cwd, self.is_destructive)
         if self.cli_app is not None:
-            actions.extend(cli_actions(self.cli_app))
+            actions.extend(
+                typer_actions(self.cli_app, self.prefix, self.is_destructive)
+            )
         return actions
-
-    def run(self, name: str, args: list[str]) -> subprocess.Popen[str]:
-        """Start the recipe or verb; stdout+stderr merged, line-buffered, no colour."""
-        argv = shlex.split(name) + list(args)
-        if argv and argv[0] == "triage" and shutil.which("triage") is None:
-            argv = [
-                sys.executable,
-                "-c",
-                "from triage.cli import execute; execute()",
-                *argv[1:],
-            ]
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb"}
-        return subprocess.Popen(
-            argv,
-            cwd=self.cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
 
 
 def stale_after() -> timedelta:

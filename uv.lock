@@ -1186,8 +1186,8 @@ wheels = [
 
 [[package]]
 name = "lynkeus"
-version = "0.2.1"
-source = { git = "https://github.com/nanounanue/lynkeus.git?rev=v0.2.1#4e95bca718ca5ad98117145aba952b093c563eb1" }
+version = "1.0.0"
+source = { git = "https://github.com/nanounanue/lynkeus.git?rev=v1.0.0#71b00b840d519eccf98eba5674fcffd7c5955b77" }
 dependencies = [
     { name = "loguru" },
     { name = "psycopg", extra = ["binary"] },
@@ -2975,7 +2975,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'oidc'", specifier = ">=2.2.0" },
     { name = "jupyter-console", marker = "extra == 'dev'", specifier = ">=6.6.3" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "lynkeus", git = "https://github.com/nanounanue/lynkeus.git?rev=v0.2.1" },
+    { name = "lynkeus", git = "https://github.com/nanounanue/lynkeus.git?rev=v1.0.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "moto", extras = ["batch", "s3"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "numpy", specifier = ">=2.3.4" },

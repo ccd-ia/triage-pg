@@ -2430,3 +2430,7 @@ def actions_run_command(
 
 def execute() -> None:
     app()
+
+
+if __name__ == "__main__":  # pragma: no cover — the TUI's `python -m` fallback
+    execute()
