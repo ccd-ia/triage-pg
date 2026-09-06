@@ -26,6 +26,94 @@ cohorts, labels, features, imputation, or matrices, review ADR-0009 (the
 fit-free/fit-based imputation split) and the "Common Gotchas" the docs describe —
 leakage bugs are the ones we care most about catching in review.
 
+## Changing triage-pg from another session
+
+triage-pg is worked on from more than one place: this repository's own sessions,
+a project repo that pins `triage-pg` as a dependency, and a session in
+`featurizer` or `lynkeus` that finds the seam on our side missing something.
+`main` is protected — a pull request, the five CI checks, linear history, force
+pushes and deletions refused, and no exemption for admins — so all of them land
+a change the same way. These six rules say which changes are yours to make from
+where you are.
+
+1. **Open an issue first, and read before you open it.** Go through the open
+   issues and pull requests at
+   <https://github.com/ccd-ia/triage-pg/issues> and
+   <https://github.com/ccd-ia/triage-pg/pulls>. If one already covers your need,
+   comment there with what you hit, and pin that branch in your own working tree
+   while you wait (rule 6 says what may then be committed). Do not open a second
+   issue for a need that already has one — two sessions discovering the same
+   thing separately is how the same fix gets written twice.
+
+2. **A need that reaches every consumer is issue-only.** This repository's
+   session fixes it and cuts the tag; a pull request opened from elsewhere is
+   the wrong shape for it. That covers:
+   - a dependency floor or cap, and a bump of a pinned engine —
+     `requires-python = ">=3.12"`, `featurizer @ …@v1.1.0`,
+     `lynkeus @ …@v1.0.0`;
+   - `uv.lock`;
+   - a schema default: any Alembic revision under
+     `src/triage/component/results_schema/` or `component/registry_schema/`,
+     which runs against databases we do not own;
+   - a public contract: a term in [`CONTEXT.md`](CONTEXT.md), an ADR in
+     [`docs/adr/`](docs/adr/), a CLI command or flag name, an `experiment.yaml`
+     key, the columns of an evaluation view. Experiment identity (ADR-0022) is
+     the one to be most careful with — see "Config validation" below.
+
+   Write in the issue what you needed and what you did in the meantime. That is
+   enough to fix it here and release it.
+
+3. **A local additive fix may be a pull request.** A keyword argument added to
+   an adapter, a column added to a diagnostic view, a bug fixed in
+   `src/triage/adapters/` — a change that adds without moving what is already
+   there. Reference its issue (`Resolves #123`) and carry the test that fails
+   without it, in the mirrored path under `src/tests/`. The review is three
+   checks: CI green, nothing renamed or removed, no signature changed. A change
+   that fails one of the three goes back to rule 2.
+
+4. **Pull requests do not write release notes.** There is no `CHANGELOG.md` here
+   and this policy does not add one. The notes live on the GitHub Release, and
+   [`.github/workflows/release.yml`](.github/workflows/release.yml) writes them
+   from the merged pull requests when a `v*` tag is pushed
+   (`generate_release_notes: true`). Your pull request title becomes a line at
+   <https://github.com/ccd-ia/triage-pg/releases> — write it as the line you
+   want to read there.
+
+5. **Branch in a worktree off `origin/main`, named `<who>/<need>`.**
+   `~/projects/triage-pg` is one checkout shared by every session on this
+   machine, and another session may have it on a branch of its own.
+
+   ```bash
+   git -C ~/projects/triage-pg fetch origin main
+   git -C ~/projects/triage-pg worktree add .worktrees/<need> -b <who>/<need> origin/main
+   ```
+
+   `.worktrees/` is gitignored. Point an editable install at the worktree path,
+   and `git worktree remove` it once the pull request has merged.
+
+6. **In a committed `pyproject.toml`, a dependency is pinned to a tag.** Never a
+   branch, a commit or a path: a rebase merge rewrites commits, so a commit pin
+   dies at the merge that was supposed to deliver it; a branch is deleted at
+   merge (`--delete-branch`); a path is one machine's. The two git dependencies
+   already carry the shape:
+
+   ```toml
+   "featurizer[parquet] @ git+https://github.com/ccd-ia/featurizer.git@v1.1.0",
+   "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v1.0.0",
+   ```
+
+   An editable path or a branch pin is for your working tree while the pull
+   request is open. Swap it back to the tag before you commit.
+
+**Landing it.** The required checks are *strict*, so a pull request has to be
+current with `main` before it merges:
+
+```bash
+git rebase origin/main && git push --force-with-lease
+gh pr checks --watch --fail-fast
+gh pr merge --rebase --delete-branch
+```
+
 ## Development environment
 
 Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/),
