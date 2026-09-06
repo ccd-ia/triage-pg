@@ -44,6 +44,11 @@ TODO.org_*
 # Claude Code hook logs (runtime output, session-local)
 logs/
 
+# Worktrees. `main` is protected, so a change is branched in its own worktree off
+# origin/main (CONTRIBUTING.md, "Changing triage-pg from another session") — the
+# shared checkout is never moved under another session.
+.worktrees/
+
 # DirtyDuck local run artifacts + dev config (never committed)
 dirtyduck-output/
 dirtyduck-database.yaml

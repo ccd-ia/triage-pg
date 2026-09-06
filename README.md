@@ -157,6 +157,8 @@ just alembic upgrade head    # apply the results-schema migration (needs a Postg
 
 Database connection comes from `DATABASE_URL` or the standard `PG*` environment variables (e.g. loaded via direnv) — there are no hardcoded credentials. Tests spin up their own throwaway PostgreSQL via `pytest-postgresql`.
 
+`main` is protected — every change lands through a pull request with green CI, this repository's own sessions included — so a change coming from another session starts at ["Changing triage-pg from another session"](CONTRIBUTING.md#changing-triage-pg-from-another-session) in `CONTRIBUTING.md`, which says what is an issue, what may be a pull request, and how the branch is made.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). triage-pg is a derivative work of triage (© 2019 Data Science and Public Policy, University of Chicago); the original copyright notice and MIT terms are preserved.
