@@ -31,10 +31,12 @@ leakage bugs are the ones we care most about catching in review.
 triage-pg is worked on from more than one place: this repository's own sessions,
 a project repo that pins `triage-pg` as a dependency, and a session in
 `featurizer` or `lynkeus` that finds the seam on our side missing something.
-`main` is protected — a pull request, the five CI checks, linear history, force
-pushes and deletions refused, and no exemption for admins — so all of them land
-a change the same way. These six rules say which changes are yours to make from
-where you are.
+`main` is protected — a pull request, the five CI contexts (`tests`, `lint`,
+`frontend`, `terraform`, `docker`), linear history, force pushes and deletions
+refused, and no exemption for admins — so all of them land a change the same
+way. Four of the five run on your pull request; `docker` builds on `main` only
+and reports as skipped, which satisfies the requirement. These six rules say
+which changes are yours to make from where you are.
 
 1. **Open an issue first, and read before you open it.** Go through the open
    issues and pull requests at
