@@ -25,8 +25,8 @@ identifiers:
     value: 10.5281/zenodo.22292553
     description: Concept DOI for all versions
   - type: doi
-    value: 10.5281/zenodo.22292554
-    description: Version 1.1.5
+    value: 10.5281/zenodo.22390956
+    description: Version 1.1.6
 license: MIT
 repository-code: "https://github.com/ccd-ia/triage-pg"
 url: "https://ccd-ia.github.io/triage-pg/"
