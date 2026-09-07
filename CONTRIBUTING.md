@@ -52,7 +52,7 @@ which changes are yours to make from where you are.
    the wrong shape for it. That covers:
    - a dependency floor or cap, and a bump of a pinned engine —
      `requires-python = ">=3.12"`, `featurizer @ …@v1.1.0`,
-     `lynkeus @ …@v1.0.0`;
+     `lynkeus @ …@v1.1.0`;
    - `uv.lock`;
    - a schema default: any Alembic revision under
      `src/triage/component/results_schema/` or `component/registry_schema/`,
@@ -101,7 +101,7 @@ which changes are yours to make from where you are.
 
    ```toml
    "featurizer[parquet] @ git+https://github.com/ccd-ia/featurizer.git@v1.1.0",
-   "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v1.0.0",
+   "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v1.1.0",
    ```
 
    An editable path or a branch pin is for your working tree while the pull
