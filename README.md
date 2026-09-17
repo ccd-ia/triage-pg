@@ -90,12 +90,20 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 | **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon (ADR-0027, [`docs/monitoring.md`](docs/monitoring.md)) |
 | **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates |
 | **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` (ADR-0002/0025) |
-| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth — all business-logic-free (ADR-0012/0024/0028) |
+| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents — all business-logic-free (ADR-0012/0024/0028) |
 | **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam (ADR-0003–0005) |
 
 | ![Experiment overview — model groups × splits heatmap](docs/images/experiment-overview.png) | ![Model card — curves, calibration, diagnostics](docs/images/model-sheet.png) | ![Production monitoring — drift, volume, outcomes](docs/images/monitoring-view.png) |
 |---|---|---|
 | the experiment overview | one model's card | production monitoring |
+
+The same project from the terminal — `triage tui`, no browser and no port to
+forward. Eight tabs, every number a `SELECT` over the views above; the
+[tour](https://ccd-ia.github.io/triage-pg/reference/tui/) walks through them:
+
+| ![Status tab — database facts, row gauges, the last runs, pending work](docs/images/tui-status.png) | ![Runs tab — the run list, its artifact stages and its live log](docs/images/tui-runs.png) | ![Leaderboard tab — one row per model group, sparkline over the test as-of dates](docs/images/tui-leaderboard.png) |
+|---|---|---|
+| status and pending work | a run, stage by stage | the leaderboard matview |
 
 ## Five minutes to a running experiment
 
