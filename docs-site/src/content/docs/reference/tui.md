@@ -34,7 +34,7 @@ tab shows its own keys in the row above the footer.
 
 ## Status
 
-![The Status tab against the Chicago 311 project: database facts, row gauges, the last two runs, and pending work](../../../assets/reference/tui-status.svg)
+![The Status tab against the DirtyDuck project: database facts, row gauges, the last five runs, and pending work](../../../assets/reference/tui-status.svg)
 
 Database facts (size, relation counts, the alembic stamp, artifacts by
 status), row gauges (exact counts for the small tables, planner estimates for
@@ -63,6 +63,8 @@ serve`), `y` copy the detail as JSON.
 Headless: `triage runs list`, `triage runs show <prefix>`, `triage runs tail
 <prefix>` — all with `--json`; `runs tail --json` prints one JSON object per
 event, so an agent can follow a run the way the screen does.
+
+![The Runs tab: nineteen runs on the left, the selected run's artifact stages (cohort, labels, matrices, models, predictions, evaluations) and its replayed log on the right](../../../assets/reference/tui-runs.svg)
 
 ## Data
 
@@ -114,6 +116,8 @@ run. The detail panel adds the latest run's base rate and cohort size over
 its as-of dates as sparklines. `enter` opens the Runs tab filtered to this
 experiment; `o` opens it in the dashboard.
 
+![The Experiments tab: one classification / resource_prioritization experiment over nineteen runs and 262 models, with its base rate and cohort size as sparklines over five as-of dates](../../../assets/reference/tui-experiments.svg)
+
 ## Leaderboard (7)
 
 The `triage.leaderboard` matview for the selected experiment and one
@@ -123,6 +127,8 @@ cycles through the pairs that were actually evaluated, `x` through the
 experiments. `R` refreshes the matview — through `triage leaderboard
 --refresh`, run as a subprocess, its exit code shown in the note line.
 
+![The Leaderboard tab: 34 model groups ranked by mean auc_roc, each with min, max, a sparkline over the test as-of dates and the last value](../../../assets/reference/tui-leaderboard.svg)
+
 ## Audition (8)
 
 `audition_distances` and `audition` for the same experiment and pair: per
@@ -130,6 +136,8 @@ model group, the average value, the average distance from the best group at
 each as-of date, the maximum regret, the regret at the *next* date, and a
 sparkline of the distance over time — flat and low means steady. Best first.
 `4` from here opens the distances behind the sparklines in Query.
+
+![The Audition tab: the same 34 groups by average distance from the best group, with max regret, regret next time and the distance over time](../../../assets/reference/tui-audition.svg)
 
 ## What stays in the dashboard
 
