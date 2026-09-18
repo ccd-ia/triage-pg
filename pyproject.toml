@@ -73,6 +73,9 @@ dev = [
   "codecov==2.1.13",
   "coverage>=4.4",
   "factory_boy==3.2.1",
+  # The wheel build hook (build_frontend.py) imports hatchling; it is already a
+  # build-system requirement, and having it here lets basedpyright resolve the import.
+  "hatchling>=1.25",
   "hypothesis==6.46.1",
   "jupyter-console>=6.6.3",
   "moto[batch,s3]>=5.0.0",
