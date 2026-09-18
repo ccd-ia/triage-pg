@@ -35,7 +35,10 @@ PACKAGED_STATIC = "triage/dashboard/static"
 SKIP_ENV = "TRIAGE_SKIP_FRONTEND_BUILD"
 
 
-class FrontendBuildHook(BuildHookInterface):
+# basedpyright wants type arguments here, but hatchling's own generics recurse
+# (BuildHookInterface[BuilderConfig, PluginManager] and BuilderConfig is itself generic),
+# so parameterising buys nothing for a build-time plugin class.
+class FrontendBuildHook(BuildHookInterface):  # pyright: ignore[reportMissingTypeArgument]
     """Build (or reuse) `frontend/dist` and force-include it into the wheel."""
 
     PLUGIN_NAME = "custom"
