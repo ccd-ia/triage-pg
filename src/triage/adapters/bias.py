@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from triage.adapters.placeholders import render_as_of_date
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -107,7 +108,7 @@ def ingest_protected_groups(
     with db_engine.connection() as conn:
         for as_of_date in as_of_dates:
             date_str = str(as_of_date)
-            rows = conn.execute(query_template.format(as_of_date=date_str)).fetchall()
+            rows = conn.execute(render_as_of_date(query_template, date_str)).fetchall()
             if not rows:
                 logger.warning(
                     f"bias_config query returned no rows for as_of_date={date_str}"

@@ -7,7 +7,7 @@ A subset is a named cohort slice defined by a templated query the user owns::
         - name: district7
           query: |
             select entity_id from ontology.service_requests
-            where district = 7 and created_date < '{as_of_date}'
+            where district = 7 and created_date < {as_of_date}::date
 
 Each subset's identity is the sha256 over its canonical config (name + query) — the
 ``subset_hash`` stamped on every evaluation row it produces. Members are materialized
@@ -26,6 +26,7 @@ import hashlib
 import json
 from typing import Any, Mapping, Sequence
 
+from triage.adapters.placeholders import render_as_of_date
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -87,7 +88,7 @@ def register_subsets(
             for as_of_date in as_of_dates:
                 date_str = str(as_of_date)
                 rows = conn.execute(
-                    subset["query"].format(as_of_date=date_str)
+                    render_as_of_date(subset["query"], date_str)
                 ).fetchall()
                 if rows and "entity_id" not in rows[0]:
                     raise ValueError(
