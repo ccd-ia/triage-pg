@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>triage-pg dashboard — SPA not built</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.6;
+             max-width: 46rem; margin: 3rem auto; padding: 0 1rem; color: #1b1d1a; }
+      code, pre { font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+      pre { background: #f3f4f2; border: 1px solid #dcdfd8; border-radius: 6px;
+            padding: .8rem 1rem; overflow-x: auto; }
+      .muted { color: #5c6159; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #14161a; color: #e6e8e3; }
+        pre { background: #22262c; border-color: #31363e; }
+        .muted { color: #9aa196; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>The dashboard SPA is not in this install</h1>
+    <p>
+      The JSON API is live under <code>/api</code> — this placeholder is what the
+      server falls back to when no built single-page app is present. Every route
+      returns this page, which is why the dashboard looks empty rather than broken.
+    </p>
+
+    <h2>Build it from a source checkout</h2>
+<pre>cd frontend &amp;&amp; npm ci &amp;&amp; npm run build
+TRIAGE_DASHBOARD_STATIC="$PWD/dist" \
+  uv run uvicorn triage.dashboard.app:app</pre>
+    <p class="muted">
+      From a checkout, <code>just serve</code> does this for you once
+      <code>frontend/dist</code> exists.
+    </p>
+
+    <h2>Or install a wheel that carries it</h2>
+    <p>
+      Wheels built with node available ship the SPA inside the package, so this page
+      never appears. A wheel built without node falls back to what you are reading.
+    </p>
+
+    <p class="muted">
+      The container image always carries the SPA:
+      <code>docker pull ghcr.io/ccd-ia/triage-pg:latest</code>
+    </p>
+  </body>
+</html>

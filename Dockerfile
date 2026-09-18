@@ -133,6 +133,11 @@ RUN uv sync --frozen --no-dev --no-editable --extra dashboard
 
 # Drop the Vite bundle at a fixed path and point the app at it via TRIAGE_DASHBOARD_STATIC,
 # so static serving does not depend on the (--no-editable) package install layout.
+#
+# Since #15 the wheel ALSO carries the bundle (build_frontend.py), so this is now belt and
+# braces — deliberately kept: the env var is explicit, auditable in `docker inspect`, and wins
+# over whatever the install layout happens to hold. Precedence is
+# TRIAGE_DASHBOARD_STATIC > the packaged static/ > the packaged placeholder page.
 COPY --from=frontend-build --chown=triage:triage /frontend/dist /opt/triage/dashboard-static
 ENV TRIAGE_DASHBOARD_STATIC=/opt/triage/dashboard-static
 

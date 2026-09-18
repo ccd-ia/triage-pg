@@ -6,7 +6,13 @@ The fastest way to see triage-pg work end-to-end is the **Chicago 311 tutorial d
 (ADR-0002). Both paths end at the dashboard.
 
 Prerequisites: [uv](https://docs.astral.sh/uv/), Docker, a `just` runner
-(`brew install just`), and Node (only for rebuilding the dashboard SPA).
+(`brew install just`), and Node (to build the dashboard SPA — CI uses 20, the Docker image 22).
+
+> **The dashboard SPA.** `just serve` serves `frontend/dist`, which a source checkout only
+> has after `cd frontend && npm ci && npm run build`. A wheel built with Node present
+> carries the bundle inside the package, so an install needs no Node; one built without it
+> installs fine and serves a page naming those two commands rather than a blank screen.
+> Precedence: `TRIAGE_DASHBOARD_STATIC` > the packaged bundle > that placeholder page.
 
 ```bash
 uv sync --extra dev --extra dashboard
