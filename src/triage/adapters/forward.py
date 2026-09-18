@@ -32,8 +32,6 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
-from triage.util.db import DictRowPool, returned_row
-
 from triage.adapters.cohort import build_cohort
 from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
@@ -45,6 +43,7 @@ from triage.component.catwalk.prediction_ranking import record_predictions
 from triage.derivation import as_uuid
 from triage.logging import get_logger
 from triage.profiles.storage import parent_root, storage_for_root
+from triage.util.db import DictRowPool, returned_row
 
 logger = get_logger(__name__)
 
@@ -233,9 +232,13 @@ def predict_forward(
         )
 
         estimator = _load_estimator(lineage.artifact_uri)
-        # Score against the TRAIN feature geometry the estimator was fit on (skew guard).
+        # Score against the geometry the estimator was ACTUALLY fitted on, recorded per model
+        # at fit time (triage.models.feature_list, migration 0021, #14). NOT
+        # train_matrix.feature_names: that is the matrix's BUILD order, and the fit order is the
+        # feature-group projection, which is sorted — so the two differ whenever the build order
+        # is not already sorted, and _design_X reorders silently because the column SETS match.
         scoring_view = replace(
-            production_matrix, feature_names=list(lineage.train_matrix.feature_names)
+            production_matrix, feature_names=list(lineage.fit_feature_list)
         )
         scores = score_matrix(estimator, scoring_view)
         num_predictions = record_predictions(

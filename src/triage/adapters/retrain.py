@@ -23,10 +23,8 @@ semantics (G5), differing from inherited triage's forced same-group; no override
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
-
-from triage.util.db import DictRowPool
 
 from triage.adapters.cohort import build_cohort
 from triage.adapters.forward import (
@@ -45,6 +43,7 @@ from triage.adapters.temporal import TemporalConfig
 from triage.logging import get_logger
 from triage.profiles.storage import parent_root, storage_for_root
 from triage.util.conf import convert_str_to_relativedelta
+from triage.util.db import DictRowPool
 
 logger = get_logger(__name__)
 
@@ -162,6 +161,14 @@ def retrain(
             storage_root=storage_dir,
             source_pins=pins,
             policy=cache_policy,
+        )
+        # Project onto the group's fit geometry before fitting (#14). build_matrix returns every
+        # column in BUILD order; without this the retrained estimator is fitted on a different
+        # column set (a feature-group subset's model would train on all of them) and in a
+        # different order — then rejoins its group anyway, because _model_group_hash sorts the
+        # list before hashing. The group's spec is what a retrain is supposed to reproduce.
+        train_matrix = replace(
+            train_matrix, feature_names=list(lineage.fit_feature_list)
         )
         model_result = build_model(
             db_engine,
