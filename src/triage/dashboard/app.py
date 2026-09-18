@@ -26,7 +26,6 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from triage.util.db import DictRowPool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
@@ -36,7 +35,7 @@ from triage.dashboard.oidc import auth_router
 from triage.dashboard.routes import router
 from triage.dashboard.write_routes import default_experiment_runner, write_router
 from triage.logging import get_logger
-from triage.util.db import connection_pool
+from triage.util.db import DictRowPool, connection_pool
 
 logger = get_logger(__name__)
 
@@ -47,10 +46,54 @@ _REGISTRY_URL_ENV = "TRIAGE_REGISTRY_URL"
 # Static dir for the built SPA bundle. Defaults to the packaged static/ dir; override with
 # TRIAGE_DASHBOARD_STATIC (the Docker dashboard image + the native preview point it at the
 # Vite build output, spec §6).
-_STATIC_DIR = pathlib.Path(
-    os.environ.get("TRIAGE_DASHBOARD_STATIC")
-    or (pathlib.Path(__file__).parent / "static")
-)
+# The built SPA lands in `static/` — put there by the wheel's build hook (#15), by the Docker
+# image, or by TRIAGE_DASHBOARD_STATIC pointing at frontend/dist. `_placeholder/` is a SEPARATE
+# packaged directory holding the "no SPA here" page, so the two never occupy the same path:
+# force-including a bundle over a packaged index.html is a hard build error in hatchling.
+_PACKAGED_STATIC = pathlib.Path(__file__).parent / "static"
+_PACKAGED_PLACEHOLDER = pathlib.Path(__file__).parent / "_placeholder"
+
+# Sits beside the placeholder index.html. A sentinel file rather than a string match on the
+# HTML: that page is documentation for whoever lands on it, so its wording will change, and a
+# detector that breaks when someone edits the copy is worse than no detector.
+_PLACEHOLDER_SENTINEL = ".triage-placeholder"
+
+
+def _resolve_static_dir() -> pathlib.Path:
+    """Where to serve the SPA from: the override, then a packaged bundle, then the placeholder."""
+    override = os.environ.get("TRIAGE_DASHBOARD_STATIC")
+    if override:
+        return pathlib.Path(override)
+    if (_PACKAGED_STATIC / "index.html").exists():
+        return _PACKAGED_STATIC
+    return _PACKAGED_PLACEHOLDER
+
+
+_STATIC_DIR = _resolve_static_dir()
+
+
+def is_placeholder_static(static_dir: pathlib.Path) -> bool:
+    """True when the static root is the packaged placeholder rather than a built SPA."""
+    return (static_dir / _PLACEHOLDER_SENTINEL).exists()
+
+
+def _warn_if_placeholder(static_dir: pathlib.Path) -> None:
+    """Say, at startup, that every page will be the placeholder — and what fixes it.
+
+    Without this the server returns HTTP 200 for every route and the operator sees a blank
+    dashboard, which reads as "my data is missing" rather than "no SPA was built". The reporter
+    of #15 needed a headless-browser pass (nine identical screenshots, zero ``<script>`` tags) to
+    work out which it was.
+    """
+    if not is_placeholder_static(static_dir):
+        return
+    logger.warning(
+        "dashboard: no SPA bundle at {} — every non-/api route will serve the placeholder"
+        " page. Build it with `cd frontend && npm ci && npm run build`, then point"
+        " TRIAGE_DASHBOARD_STATIC at frontend/dist (from a checkout, `just serve` does"
+        " this). The /api routes are unaffected.",
+        static_dir,
+    )
 
 
 class _SpaStaticFiles(StaticFiles):
@@ -195,6 +238,7 @@ def create_app(
     app.include_router(auth_router)
 
     if _STATIC_DIR.is_dir():
+        _warn_if_placeholder(_STATIC_DIR)
         app.mount(
             "/", _SpaStaticFiles(directory=str(_STATIC_DIR), html=True), name="static"
         )

@@ -150,6 +150,17 @@ triage = "src/triage"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/triage"]
+# Strip the `src/` prefix for the wheel, overriding the global [tool.hatch.build.sources]
+# mapping. That mapping rewrites a force-included destination of `triage/…` into
+# `src/triage/…`, which would bury the dashboard bundle one directory too deep (#15).
+sources = ["src"]
+
+# Ship the built dashboard SPA inside the wheel (#15). Without this a git/wheel install
+# serves only the placeholder page, with HTTP 200, which reads as a broken dashboard.
+# The hook REUSES an existing frontend/dist (CI and the Dockerfile's frontend-build stage
+# both produce one) and never fails the build when node is absent — see build_frontend.py.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "build_frontend.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -160,6 +171,7 @@ include = [
   "docs",
   "dirtyduck",
   "example",
+  "frontend",
   "justfile",
   "pyproject.toml",
   "src"
