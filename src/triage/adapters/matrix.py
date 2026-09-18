@@ -319,16 +319,45 @@ def _merge_arrow_groups(groups, target_id_col: str):
     return merged.to_arrow()
 
 
-def _feature_columns(column_names: Sequence[str], target_id_col: str) -> list[str]:
-    """Feature columns = everything that is neither a key, a ``__missing`` flag, nor a reserved
-    ``_target_lag_*`` column.
+def _target_temporal_ix(featurizer_config: Mapping[str, Any] | None) -> str | None:
+    """The target entity's own ``temporal_ix`` column name, if the config names one.
+
+    featurizer passes it through as a Date-typed *feature* column even though it is not in the
+    entity's ``variables:`` map. The leak guard used to drop it with the advice "mark it
+    role:identifier in the featurizer config", which cannot be followed — there is no variable
+    to mark (#12). Excluding it by name here removes it at the only place that knows it is the
+    target's clock rather than a feature.
+    """
+    if not featurizer_config:
+        return None
+    target = featurizer_config.get("target")
+    for entity in featurizer_config.get("entities", []) or []:
+        if entity.get("alias") == target:
+            ix = entity.get("temporal_ix")
+            return str(ix) if ix else None
+    return None
+
+
+def _feature_columns(
+    column_names: Sequence[str],
+    target_id_col: str,
+    target_temporal_ix: str | None = None,
+) -> list[str]:
+    """Feature columns = everything that is neither a key, a ``__missing`` flag, the target
+    entity's own ``temporal_ix``, nor a reserved ``_target_lag_*`` column.
 
     The target-history lags (ADR-0030) are joined into the matrix for the time-series baselines
     ONLY; excluding the reserved prefix here keeps them out of the feature set — so no real model
     trains on the label's own lags, and the fit-based/fit-free imputation passes (which run over
     the feature columns) never touch the structurally-missing history (ADR-0009).
+
+    ``target_temporal_ix`` is the target entity's clock (``signup_date``, ``knowledge_date``…),
+    which featurizer emits as a feature but which no user can declare ``role: identifier``
+    because it is not a declared variable (#12).
     """
     keys = {_AS_OF_COL, target_id_col}
+    if target_temporal_ix:
+        keys.add(target_temporal_ix)
     suffix = _missing_suffix()
     return [
         name
@@ -354,18 +383,47 @@ def _numeric_dtypes():
     )  # fmt: skip
 
 
+def _cast_boolean_features(frame, feature_columns: Sequence[str]):
+    """Cast Boolean feature columns to ``Int8`` so the leak guard keeps them (#12).
+
+    A PostgreSQL ``boolean`` is already a 0/1 feature: numpy casts it for free and every
+    estimator in the grid handles it. It is not like the other non-numeric types, which need a
+    user decision — so dropping it lost a column the config explicitly declared, and the run
+    trained on a matrix narrower than the one ``analyze-config`` had counted.
+
+    The cast happens HERE rather than by widening :func:`_numeric_dtypes`, which is deliberately
+    shared with the fit-free fill "so the two never drift": teaching that tuple about Boolean
+    would also change which columns the imputation passes touch, as a side effect of a fix about
+    the design matrix. After this cast there is no Boolean left for either to disagree about.
+
+    Returns ``(frame, cast_names)``.
+    """
+    import polars as pl
+
+    to_cast = [c for c in feature_columns if frame.schema.get(c) == pl.Boolean]
+    if not to_cast:
+        return frame, []
+    frame = frame.with_columns([pl.col(c).cast(pl.Int8) for c in to_cast])
+    logger.info(
+        "cast %d boolean feature column(s) to 0/1 — %s",
+        len(to_cast),
+        to_cast,
+    )
+    return frame, to_cast
+
+
 def _numeric_feature_columns(frame, feature_columns: Sequence[str]) -> list[str]:
     """Drop any feature column that is not numeric *after* categorical encoding (leak guard).
 
-    featurizer passes the target entity's ``temporal_ix`` through as a Date-typed **feature**
-    column; :func:`_feature_columns` filters only the keys + ``__missing`` flags, so a raw Date
-    (or any other non-numeric leak) would survive into ``feature_names`` and crash
-    ``estimator.fit`` — :func:`triage.adapters.model._design_X` does
-    ``frame.select(feature_names).to_numpy()`` with no dtype filter. By the time this runs
-    :func:`_apply_cat_encoding` has turned every *legitimate* direct categorical into an ordinal
-    ``Int32``, so anything still non-numeric is a leak. We drop it and log loudly (a Date column
-    is almost always the target entity's ``temporal_ix`` reaching the feature set — give it a
-    featurizer ``role: identifier`` to drop it at the source).
+    A non-numeric column reaching ``estimator.fit`` would crash it —
+    :func:`triage.adapters.model._design_X` does ``frame.select(feature_names).to_numpy()`` with
+    no dtype filter. By the time this runs, :func:`_apply_cat_encoding` has turned every direct
+    categorical into an ordinal ``Int32`` and :func:`_cast_boolean_features` has turned every
+    boolean into ``Int8``, so what is left genuinely needs a user decision.
+
+    The target entity's ``temporal_ix`` no longer arrives here: :func:`_feature_columns` excludes
+    it by name, because the old advice to mark it ``role: identifier`` could not be followed (it
+    is not a declared variable, #12).
     """
     numeric = _numeric_dtypes()
     kept, dropped = [], []
@@ -374,9 +432,10 @@ def _numeric_feature_columns(frame, feature_columns: Sequence[str]) -> list[str]
     if dropped:
         logger.warning(
             "dropping %d non-numeric feature column(s) from the matrix — %s. sklearn needs a"
-            " numeric design matrix; a Date column here is typically the target entity's"
-            " temporal_ix leaking into the feature set (mark it role:identifier in the"
-            " featurizer config to drop it at the source).",
+            " numeric design matrix. Booleans are cast to 0/1 and direct categoricals are"
+            " ordinal-encoded before this point, so each column here is a declared variable"
+            " whose type needs a decision: give it role:identifier to drop it at the source,"
+            " or role:categorical with a vocabulary to one-hot encode it.",
             len(dropped),
             [(f, str(frame.schema.get(f))) for f in dropped],
         )
@@ -934,7 +993,15 @@ def _assemble(
         labels, on=["entity_id", _AS_OF_COL], how="left"
     )
 
-    feature_columns = _feature_columns(features.columns, "entity_id")
+    target_temporal_ix = _target_temporal_ix(featurizer_config)
+    feature_columns = _feature_columns(
+        features.columns, "entity_id", target_temporal_ix
+    )
+    # Excluded from the feature set above, and dropped from the frame here so it does not ride
+    # along in the Parquet either — the behaviour the leak guard used to produce, minus the
+    # warning the user could not act on (#12).
+    if target_temporal_ix and target_temporal_ix in design.columns:
+        design = design.drop(target_temporal_ix)
 
     # Categorical encoding FIRST — turn direct-categorical *strings* into ordinal codes
     # (train-fit, reused for test) so the matrix Parquet is fully numeric for sklearn
@@ -946,6 +1013,10 @@ def _assemble(
         train_matrix_artifact_id=train_matrix_artifact_id,
     )
     design = _apply_cat_encoding(design, cat_encodings)
+
+    # A PostgreSQL boolean is already a 0/1 feature; cast it before the guard below rather than
+    # letting the guard drop a column the config declared (#12).
+    design, _cast_booleans = _cast_boolean_features(design, feature_columns)
 
     # Drop any feature column still non-numeric after categorical encoding — the target entity's
     # temporal_ix leaks through featurizer as a Date-typed *feature*, and sklearn needs a numeric

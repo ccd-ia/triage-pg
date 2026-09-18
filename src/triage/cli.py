@@ -1007,6 +1007,17 @@ def audition_command(
         "--rule",
         help="Selection rule for the headline pick (any of the 8 standard rules).",
     ),
+    from_date: Optional[datetime] = typer.Option(
+        None,
+        "--from",
+        help="Only consider splits on or after this date (YYYY-MM-DD). Use it to select on"
+        " a regime — the last two seasons — rather than over all of history (#13).",
+    ),
+    to_date: Optional[datetime] = typer.Option(
+        None,
+        "--to",
+        help="Only consider splits on or before this date (YYYY-MM-DD).",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Print the raw result as JSON."),
 ) -> None:
     """Model selection over the in-PG audition views (ADR-0007), headless (ADR-0012).
@@ -1049,13 +1060,22 @@ def audition_command(
             metric = metric or row["metric"]
             parameter = parameter if parameter is not None else row["parameter"]
 
-        params = {"h": experiment_hash, "m": metric, "p": parameter}
+        window_from = from_date.date() if from_date is not None else None
+        window_to = to_date.date() if to_date is not None else None
+        params = {
+            "h": experiment_hash,
+            "m": metric,
+            "p": parameter,
+            "f": window_from,
+            "t": window_to,
+        }
+        # audition_windowed with both bounds null is triage.audition exactly (migration 0022),
+        # so one query serves both the windowed and the unwindowed case.
         ranking = conn.execute(
             "select model_group_id, n_splits_evaluated, avg_value, stddev_value,"
             "       avg_distance_from_best, max_regret,"
             "       avg_regret_next_time, max_regret_next_time"
-            " from triage.audition"
-            " where experiment_hash = %(h)s and metric = %(m)s and parameter = %(p)s"
+            " from triage.audition_windowed(%(h)s, %(m)s, %(p)s, %(f)s, %(t)s)"
             " order by avg_distance_from_best asc, max_regret asc, model_group_id asc",
             params,
         ).fetchall()
@@ -1086,7 +1106,7 @@ def audition_command(
                 }
             gid = conn.execute(
                 "select triage.audition_pick(%(h)s, %(m)s, %(p)s, %(r)s,"
-                " %(rp)s::jsonb) as model_group_id",
+                " %(rp)s::jsonb, %(f)s, %(t)s) as model_group_id",
                 {**params, "r": rule_name, "rp": json.dumps(rule_params)},
             ).fetchone()
             strategies.append(
@@ -1097,7 +1117,8 @@ def audition_command(
             )
 
         selected = conn.execute(
-            "select * from triage.selected_model(%(h)s, %(m)s, %(p)s, %(r)s)",
+            "select * from triage.selected_model(%(h)s, %(m)s, %(p)s, %(r)s,"
+            " %(f)s, %(t)s)",
             {**params, "r": rule},
         ).fetchone()
 
@@ -1109,6 +1130,7 @@ def audition_command(
                     "metric": metric,
                     "parameter": parameter,
                     "rule": rule,
+                    "window": {"from": window_from, "to": window_to},
                     "ranking": ranking,
                     "strategies": strategies,
                     "selected": selected,
@@ -1119,10 +1141,14 @@ def audition_command(
         return
 
     pick = next((s["model_group_id"] for s in strategies if s["rule"] == rule), None)
+    # Say the window out loud: a narrowed table otherwise reads as a smaller experiment.
+    window_note = ""
+    if window_from is not None or window_to is not None:
+        window_note = f"  ·  splits {window_from or 'start'} → {window_to or 'latest'}"
     table = Table(
         title=(
             f"Audition — experiment {experiment_hash[:12]}…"
-            f"  ({metric}{parameter and ' ' + parameter or ''})"
+            f"  ({metric}{parameter and ' ' + parameter or ''}){window_note}"
         ),
         box=box.SIMPLE_HEAVY,
     )
@@ -1193,6 +1219,26 @@ def retrain_predict_command(
     console.print("[green]Retrain and predict completed.[/green]")
 
 
+def _read_cohort_query(path: "Optional[pathlib.Path]") -> Optional[str]:
+    """Read a ``--cohort-query`` SQL file, failing loudly rather than scoring the wrong rows.
+
+    A path rather than an inline string: a cohort query is multi-line SQL with quotes in it,
+    and a shell-quoted one-liner is how it gets mangled (#10).
+    """
+    if path is None:
+        return None
+    if not path.exists():
+        raise typer.BadParameter(f"--cohort-query file not found: {path}")
+    sql = path.read_text().strip()
+    if not sql:
+        raise typer.BadParameter(f"--cohort-query file is empty: {path}")
+    if "{as_of_date}" not in sql:
+        raise typer.BadParameter(
+            f"--cohort-query {path} must contain the {{as_of_date}} placeholder"
+        )
+    return sql
+
+
 @app.command("predictlist")
 def predictlist_command(
     ctx: typer.Context,
@@ -1203,6 +1249,14 @@ def predictlist_command(
         "--project-path",
         help="Artifact storage path. Omitted = the model's existing artifact root.",
     ),
+    cohort_query: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--cohort-query",
+        help="Path to a SQL file holding the PRODUCTION cohort to score over, overriding"
+        " cohort_config.forward_query and the training cohort. Needs the {as_of_date}"
+        " placeholder. Use it when the entities to score are not the ones the model"
+        " trained on — an unplayed game, an open case (#10).",
+    ),
 ) -> None:
     engine = get_pool(ctx)
     predict_forward(
@@ -1210,6 +1264,7 @@ def predictlist_command(
         model_id,
         as_of_date.date(),
         storage_dir=str(project_path) if project_path is not None else None,
+        cohort_query_template=_read_cohort_query(cohort_query),
     )
     console.print("[green]Prediction list generated.[/green]")
 
@@ -1229,6 +1284,14 @@ def score_command(
         help="Artifact storage path. Omitted = the model's existing artifact root —"
         " so a bare cron line never scatters Parquets into the scheduler's CWD.",
     ),
+    cohort_query: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--cohort-query",
+        help="Path to a SQL file holding the PRODUCTION cohort to score over, overriding"
+        " cohort_config.forward_query and the training cohort. Needs the {as_of_date}"
+        " placeholder. Use it when the entities to score are not the ones the model"
+        " trained on — an unplayed game, an open case (#10).",
+    ),
 ) -> None:
     """Forward-score a model (the ADR-0027 monitoring entrypoint; alias of predictlist).
 
@@ -1247,6 +1310,7 @@ def score_command(
         model_id,
         when,
         storage_dir=str(project_path) if project_path is not None else None,
+        cohort_query_template=_read_cohort_query(cohort_query),
     )
     console.print(
         f"[green]Forward-scored model {model_id} at {when} (append-only).[/green]"

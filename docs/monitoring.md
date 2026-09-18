@@ -15,6 +15,34 @@ defaults to the **model's own artifact root** (the parent of its recorded `artif
 a bare schedule line writes the production matrix beside the model's other artifacts instead
 of scattering Parquets into the scheduler's CWD — pass the flag only to redirect output.
 
+**Which entities get scored.** By default, the ones the model's **training** cohort selects
+— and for most supervised problems that is the wrong set. A training cohort usually has to
+select outcome-bearing rows, because the label query needs a realized outcome:
+
+```sql
+where game_date = {as_of_date}::date
+  and game_state in ('OFF', 'FINAL')     -- excludes every unplayed game
+```
+
+Reused at scoring time, that excludes exactly the entities forward scoring exists for, and
+it does so silently: the run completes and the rows you wanted are absent. Declare the
+production cohort instead (ADR-0032):
+
+```yaml
+cohort_config:
+  query: |             # training: rows whose outcome is already known
+    select entity_id from games
+    where game_date = {as_of_date}::date and game_state in ('OFF', 'FINAL')
+  forward_query: |     # production: everything to score, resolved or not
+    select entity_id from games
+    where game_date = {as_of_date}::date
+```
+
+`forward_query` is **identity-neutral** — adding it never changes an `experiment_hash`, so
+it is safe to add to a config whose experiment already has runs, a leaderboard and an
+audition. For a one-off, `triage score 42 --cohort-query production-cohort.sql` overrides
+both.
+
 **Local (cron):**
 
 ```cron

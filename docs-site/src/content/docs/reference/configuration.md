@@ -135,6 +135,26 @@ cohort_config:
   `the cohort query must contain the {as_of_date} placeholder`. The query
   returns one column, `entity_id`.
 
+:::note[How `{as_of_date}` is substituted]
+`{as_of_date}` becomes a **quoted SQL literal** — `'2014-01-01'` — in every block
+that accepts it: `cohort_config`, `label_config`, `bias_config` and
+`evaluation.subsets`. So write the cast form:
+
+```sql
+where created_date < {as_of_date}::date
+```
+
+A placeholder you quote yourself (`'{as_of_date}'`, or `date '{as_of_date}'`) is
+also accepted and renders identically — the surrounding quote pair is stripped
+before substitution, so neither spelling can double a quote or leave a bare
+literal. Older examples in these docs use the quoted form and remain correct.
+
+Before v1.2.0 the four blocks disagreed: `cohort_config` and `label_config`
+quoted the date while `evaluation.subsets` and `bias_config` did not, so the cast
+form above failed *at run time* with `cannot cast type integer to date` — after
+the cohort and labels had already been built.
+:::
+
 ## `label_config`
 
 **Purpose.** The target `y`. A templated SQL query producing one label row per

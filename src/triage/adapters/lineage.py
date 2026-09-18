@@ -16,6 +16,7 @@ and walk ``triage.artifact_inputs`` parent edges.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,6 +55,9 @@ class ModelLineage:
     hyperparameters: dict[str, Any]
     train_matrix: MatrixResult
     train_matrix_artifact_id: str
+    fit_feature_list: list[
+        str
+    ]  # the ORDER this estimator was fitted on (#14, migration 0021)
     featurizer_config: dict[str, Any]
     temporal_config: dict[str, Any]
     imputation_config: dict[str, Any]
@@ -154,6 +158,44 @@ def _run_links(db_engine: DictRowPool, run_id: Any) -> tuple[str | None, str | N
     return row["experiment_hash"], row["problem_type"]
 
 
+def _fit_feature_list(
+    db_engine: DictRowPool, model_row: Mapping[str, Any]
+) -> list[str]:
+    """The ordered column list this estimator was fitted on (``triage.models.feature_list``).
+
+    Recorded at fit time by :func:`build_model` since migration 0021 (#14). A database written
+    before that migration, or a row its backfill could not classify, leaves the column null; we
+    fall back to the model group's list and say so, because that list is the fit order for a model
+    built by ``triage run`` and is *not* the fit order for one built by ``triage retrain`` (which
+    fits on the matrix's build order and then rejoins the group through a hash that sorts).
+
+    Never falls back to ``matrices.feature_names``: that is the build order, and scoring against it
+    is the bug this column exists to close.
+    """
+    recorded = model_row.get("feature_list")
+    if recorded:
+        return list(recorded)
+
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select feature_list from triage.model_groups where model_group_id = %(g)s",
+            {"g": model_row["model_group_id"]},
+        ).fetchone()
+    if row is None or not row["feature_list"]:
+        raise ValueError(
+            f"model {model_row['model_id']} has no recorded feature_list and its model group"
+            + " has none either — the fit geometry cannot be recovered, so scoring it would"
+            + " guess at the column order (see migration 0021)"
+        )
+    logger.warning(
+        f"model {model_row['model_id']} predates migration 0021 (no models.feature_list):"
+        + " falling back to the model group's sorted list. That is correct for a model built"
+        + " by `triage run` and WRONG for one built by `triage retrain` — re-run the 0021"
+        + " backfill, or retrain the model, if its scores look transposed."
+    )
+    return list(row["feature_list"])
+
+
 def reconstruct_model_lineage(
     db_engine: DictRowPool,
     model_id: int,
@@ -176,7 +218,7 @@ def reconstruct_model_lineage(
     with db_engine.connection() as conn:
         model_row = conn.execute(
             "select model_id, model_hash, model_group_id, run_id,"
-            + " train_matrix_uuid, artifact_uri, random_seed"
+            + " train_matrix_uuid, artifact_uri, random_seed, feature_list"
             + " from triage.models where model_id = %(mid)s",
             {"mid": model_id},
         ).fetchone()
@@ -225,6 +267,8 @@ def reconstruct_model_lineage(
             f"cohort/labels parent of train matrix {train_matrix_artifact_id!r} is missing"
         )
 
+    fit_feature_list = _fit_feature_list(db_engine, model_row)
+
     experiment_hash, run_problem_type = _run_links(db_engine, model_row["run_id"])
     problem_type = problem_type_override or run_problem_type
     if problem_type is None:
@@ -244,6 +288,7 @@ def reconstruct_model_lineage(
         hyperparameters=dict(model_cfg.get("hyperparameters", {})),
         train_matrix=train_matrix,
         train_matrix_artifact_id=train_matrix_artifact_id,
+        fit_feature_list=fit_feature_list,
         featurizer_config=dict(matrix_cfg["feature_group"]),
         temporal_config=dict(matrix_cfg["temporal_config"]),
         imputation_config=dict(matrix_cfg["imputation_policy"]),

@@ -183,14 +183,33 @@ _PROBLEM_KEYS = ("cohort_config", "label_config", "temporal_config", "problem_ty
 _TASK_FRAMINGS = ("early_warning", "resource_prioritization", "visit_level")
 
 
+#: Keys inside ``cohort_config`` that are identity-NEUTRAL: they observe the problem at scoring
+#: time, they do not define it. ``forward_query`` names the production cohort a forward score
+#: runs over (ADR-0032, #10) — a config that adds it must keep its existing experiment_hash, or
+#: every experiment in every database would fork the day the key shipped.
+_COHORT_IDENTITY_NEUTRAL_KEYS = ("forward_query",)
+
+
 def _problem_identity(experiment_config: Mapping[str, Any]) -> dict[str, Any]:
     """The problem triple (+ problem_type) that identifies an Experiment (ADR-0022).
 
     Two configs differing only in features, grid, imputation, source pins, or name/description
     are the SAME experiment (one problem) attacked by different runs. Only the cohort, label,
     and temporal config — the matrix rows, target, and splits — define the problem.
+
+    ``cohort_config.forward_query`` is stripped before hashing (ADR-0032): the training cohort
+    defines the problem, while the production cohort only says which entities a *later* scoring
+    run visits. Adding it must not fork an existing experiment.
     """
-    return {k: experiment_config.get(k) for k in _PROBLEM_KEYS}
+    identity = {k: experiment_config.get(k) for k in _PROBLEM_KEYS}
+    cohort = identity.get("cohort_config")
+    if isinstance(cohort, Mapping) and any(
+        k in cohort for k in _COHORT_IDENTITY_NEUTRAL_KEYS
+    ):
+        identity["cohort_config"] = {
+            k: v for k, v in cohort.items() if k not in _COHORT_IDENTITY_NEUTRAL_KEYS
+        }
+    return identity
 
 
 def experiment_hash_for(experiment_config: Mapping[str, Any]) -> str:
@@ -311,6 +330,25 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
                 "cohort_config.query",
                 "the cohort query must contain the {as_of_date} placeholder",
             )
+        # The production cohort a forward score runs over (ADR-0032, #10). Optional, and
+        # identity-neutral — see _problem_identity. Held to the same placeholder rule as the
+        # training query, because build_cohort renders both the same way.
+        forward_query = (
+            cohort_config.get("forward_query")
+            if isinstance(cohort_config, Mapping)
+            else None
+        )
+        if forward_query is not None:
+            if not isinstance(forward_query, str) or not forward_query.strip():
+                _err(
+                    "cohort_config.forward_query",
+                    "forward_query must be a non-empty SQL string returning entity_id",
+                )
+            elif "{as_of_date}" not in forward_query:
+                _err(
+                    "cohort_config.forward_query",
+                    "the forward cohort query must contain the {as_of_date} placeholder",
+                )
 
     label_config = experiment_config.get("label_config")
     if label_config is not None:

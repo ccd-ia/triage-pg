@@ -345,6 +345,9 @@ def build_model(
             artifact_uri=artifact_uri,
             model_size_bytes=model_size_bytes,
             random_seed=random_seed,
+            # x_columns, not feature_list: the columns _design_X actually selected, so the
+            # recorded geometry is the fitted geometry by construction (#14).
+            feature_list=x_columns,
             train_duration_ms=train_duration_ms,
         )
         _persist_feature_importances(db_engine, model_id, estimator, x_columns)
@@ -655,6 +658,7 @@ def _insert_model_row(
     artifact_uri: str,
     model_size_bytes: int,
     random_seed: int,
+    feature_list: Sequence[str],
     train_duration_ms: int | None = None,
 ) -> int:
     """INSERT (or reclaim) the ``triage.models`` row; return its ``model_id``.
@@ -665,6 +669,11 @@ def _insert_model_row(
     leaves the artifact rebuildable — the retry rebuilds it under the same identity and
     must reclaim the existing row (refreshing the rebuild's run/uri/size), not collide
     with it.
+
+    ``feature_list`` is the **ordered** column list this estimator was fitted on — not sorted
+    here, not re-derived, just the list the caller passed to ``fit`` (migration 0021, #14).
+    Scoring reads it back; ``matrices.feature_names`` is the matrix's build order and differs
+    from the fit order whenever the two are not coincidentally equal.
     """
     with db_engine.connection() as conn:
         model_id = returned_row(
@@ -672,16 +681,19 @@ def _insert_model_row(
                 "insert into triage.models"
                 + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
                 + "  train_end_time, training_label_timespan, artifact_uri,"
-                + "  artifact_format, model_size_bytes, random_seed, train_duration_ms)"
+                + "  artifact_format, model_size_bytes, random_seed, train_duration_ms,"
+                + "  feature_list)"
                 + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
                 + "  cast(%(train_end_time)s as date),"
                 + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
-                + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s)"
+                + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s,"
+                + "  %(feature_list)s)"
                 + " on conflict (model_hash) do update set"
                 + "  run_id = excluded.run_id,"
                 + "  artifact_uri = excluded.artifact_uri,"
                 + "  model_size_bytes = excluded.model_size_bytes,"
-                + "  train_duration_ms = excluded.train_duration_ms"
+                + "  train_duration_ms = excluded.train_duration_ms,"
+                + "  feature_list = excluded.feature_list"
                 + " returning model_id",
                 {
                     "model_group_id": model_group_id,
@@ -694,6 +706,7 @@ def _insert_model_row(
                     "model_size_bytes": model_size_bytes,
                     "random_seed": random_seed,
                     "train_duration_ms": train_duration_ms,
+                    "feature_list": list(feature_list),
                 },
             ).fetchone()
         )["model_id"]

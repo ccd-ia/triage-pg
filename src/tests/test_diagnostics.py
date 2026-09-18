@@ -130,14 +130,18 @@ def test_insert_model_row_records_train_duration(db_pool_greenfield):
         artifact_uri="file:///m",
         model_size_bytes=1,
         random_seed=0,
+        feature_list=["f1"],
         train_duration_ms=1234,
     )
     with db_pool_greenfield.connection() as conn:
         row = conn.execute(
-            "select train_duration_ms from triage.models where model_id = %(m)s",
+            "select train_duration_ms, feature_list from triage.models"
+            " where model_id = %(m)s",
             {"m": model_id},
         ).fetchone()
     assert row["train_duration_ms"] == 1234
+    # The fit geometry is recorded on the row, not re-derived at score time (#14, 0021).
+    assert list(row["feature_list"]) == ["f1"]
 
 
 # ------------------------------------------------------------- crosstabs / error tree
