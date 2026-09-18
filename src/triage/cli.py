@@ -1193,6 +1193,26 @@ def retrain_predict_command(
     console.print("[green]Retrain and predict completed.[/green]")
 
 
+def _read_cohort_query(path: "Optional[pathlib.Path]") -> Optional[str]:
+    """Read a ``--cohort-query`` SQL file, failing loudly rather than scoring the wrong rows.
+
+    A path rather than an inline string: a cohort query is multi-line SQL with quotes in it,
+    and a shell-quoted one-liner is how it gets mangled (#10).
+    """
+    if path is None:
+        return None
+    if not path.exists():
+        raise typer.BadParameter(f"--cohort-query file not found: {path}")
+    sql = path.read_text().strip()
+    if not sql:
+        raise typer.BadParameter(f"--cohort-query file is empty: {path}")
+    if "{as_of_date}" not in sql:
+        raise typer.BadParameter(
+            f"--cohort-query {path} must contain the {{as_of_date}} placeholder"
+        )
+    return sql
+
+
 @app.command("predictlist")
 def predictlist_command(
     ctx: typer.Context,
@@ -1203,6 +1223,14 @@ def predictlist_command(
         "--project-path",
         help="Artifact storage path. Omitted = the model's existing artifact root.",
     ),
+    cohort_query: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--cohort-query",
+        help="Path to a SQL file holding the PRODUCTION cohort to score over, overriding"
+        " cohort_config.forward_query and the training cohort. Needs the {as_of_date}"
+        " placeholder. Use it when the entities to score are not the ones the model"
+        " trained on — an unplayed game, an open case (#10).",
+    ),
 ) -> None:
     engine = get_pool(ctx)
     predict_forward(
@@ -1210,6 +1238,7 @@ def predictlist_command(
         model_id,
         as_of_date.date(),
         storage_dir=str(project_path) if project_path is not None else None,
+        cohort_query_template=_read_cohort_query(cohort_query),
     )
     console.print("[green]Prediction list generated.[/green]")
 
@@ -1229,6 +1258,14 @@ def score_command(
         help="Artifact storage path. Omitted = the model's existing artifact root —"
         " so a bare cron line never scatters Parquets into the scheduler's CWD.",
     ),
+    cohort_query: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--cohort-query",
+        help="Path to a SQL file holding the PRODUCTION cohort to score over, overriding"
+        " cohort_config.forward_query and the training cohort. Needs the {as_of_date}"
+        " placeholder. Use it when the entities to score are not the ones the model"
+        " trained on — an unplayed game, an open case (#10).",
+    ),
 ) -> None:
     """Forward-score a model (the ADR-0027 monitoring entrypoint; alias of predictlist).
 
@@ -1247,6 +1284,7 @@ def score_command(
         model_id,
         when,
         storage_dir=str(project_path) if project_path is not None else None,
+        cohort_query_template=_read_cohort_query(cohort_query),
     )
     console.print(
         f"[green]Forward-scored model {model_id} at {when} (append-only).[/green]"

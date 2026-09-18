@@ -132,6 +132,32 @@ def close_run(
         )
 
 
+def _forward_cohort_query(
+    cohort_config: Mapping[str, Any], override: str | None = None
+) -> str:
+    """Which cohort a forward score runs over (#10, ADR-0032).
+
+    Precedence: an explicit ``--cohort-query`` override, then the config's
+    ``cohort_config.forward_query``, then the training ``query``.
+
+    The training cohort is the wrong default and was the only option. A supervised cohort
+    normally selects **outcome-bearing** rows — it has to, because the label query needs a
+    realized outcome — so it excludes, by construction, exactly the entities forward scoring
+    exists to score. Reusing it silently truncated the production cohort to whatever happened to
+    have resolved already.
+
+    It remains the *fallback* so no existing config changes behaviour: a config with no
+    ``forward_query`` scores exactly the rows it scored before.
+    """
+    if override:
+        return override
+    forward = cohort_config.get("forward_query")
+    if forward:
+        logger.info("Forward scoring over cohort_config.forward_query")
+        return str(forward)
+    return str(cohort_config["query"])
+
+
 def predict_forward(
     db_engine: DictRowPool,
     model_id: int,
@@ -143,6 +169,7 @@ def predict_forward(
     cache_policy: str = "exact",
     split_kind: str = "production",
     problem_type_override: str | None = None,
+    cohort_query_template: str | None = None,
 ) -> ForwardResult:
     """Forward-score an existing model at a new ``as_of_date`` (append-only, ADR-0006).
 
@@ -161,6 +188,9 @@ def predict_forward(
         split_kind: prediction ``split_kind`` (default ``'production'``).
         problem_type_override: passed to lineage recovery when the model's run/experiment link
             is gone.
+        cohort_query_template: the production cohort to score over, overriding both the
+            config's ``forward_query`` and its training ``query``. The per-invocation escape
+            hatch behind ``triage score --cohort-query`` (#10).
 
     Returns:
         A :class:`ForwardResult` with the appended-prediction count and the artifact ids.
@@ -190,12 +220,17 @@ def predict_forward(
         random_seed=lineage.random_seed,
     )
     try:
+        forward_cohort_query = _forward_cohort_query(
+            lineage.cohort_config, cohort_query_template
+        )
         cohort_artifact_id = build_cohort(
             db_engine,
             run_id,
-            cohort_query_template=lineage.cohort_config["query"],
+            cohort_query_template=forward_cohort_query,
             as_of_dates=[as_of_date],
-            config=dated_config(lineage.cohort_config, as_of_date),
+            config=dated_config(
+                {**lineage.cohort_config, "query": forward_cohort_query}, as_of_date
+            ),
             source_pins=pins,
             policy=cache_policy,
         )
