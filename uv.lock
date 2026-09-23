@@ -682,8 +682,8 @@ wheels = [
 
 [[package]]
 name = "featurizer"
-version = "1.1.0"
-source = { git = "https://github.com/ccd-ia/featurizer.git?rev=v1.1.0#d43bf9912deeba9bf7333d044094aaf254b5c665" }
+version = "1.3.0"
+source = { git = "https://github.com/ccd-ia/featurizer.git?rev=v1.3.0#cec5ce6981e026508c5d0eeaf0889843faa831e2" }
 dependencies = [
     { name = "icecream" },
     { name = "loguru" },
@@ -3002,7 +3002,7 @@ requires-dist = [
     { name = "dickens", specifier = ">=2.1.1" },
     { name = "factory-boy", marker = "extra == 'dev'", specifier = "==3.2.1" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = ">=0.115" },
-    { name = "featurizer", extras = ["parquet"], git = "https://github.com/ccd-ia/featurizer.git?rev=v1.1.0" },
+    { name = "featurizer", extras = ["parquet"], git = "https://github.com/ccd-ia/featurizer.git?rev=v1.3.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.25" },
     { name = "httpx", marker = "extra == 'dashboard'", specifier = ">=0.27" },

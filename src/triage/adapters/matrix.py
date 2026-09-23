@@ -338,6 +338,48 @@ def _target_temporal_ix(featurizer_config: Mapping[str, Any] | None) -> str | No
     return None
 
 
+def _cohort_rows_without_features(cohort, features, as_of_dates: Sequence[date]):
+    """The cohort rows on this build's ``as_of_dates`` that featurizer emitted no row for.
+
+    The features ⋈ cohort inner join drops them. The known cause is featurizer's ADR-0017
+    (since 1.3.0): a target that declares a ``temporal_ix`` emits no row dated on or after the
+    as-of date — triage-pg forces the ``exclusive`` boundary — so a cohort member whose own
+    clock is not yet knowable leaves the matrix. ``_load_cohort`` returns every date of the
+    cohort artifact, so the check is restricted to the dates this matrix was built for.
+    """
+    import polars as pl
+
+    in_build = cohort.filter(pl.col(_AS_OF_COL).is_in(list(as_of_dates)))
+    return in_build.join(
+        features.select("entity_id", _AS_OF_COL),
+        on=["entity_id", _AS_OF_COL],
+        how="anti",
+    )
+
+
+def _unmatched_cohort_message(
+    unmatched, matrix_kind: str, target_temporal_ix: str | None
+) -> str:
+    """The warning for cohort rows the features ⋈ cohort join dropped (see above)."""
+    sample = ", ".join(
+        f"({row['entity_id']}, {row[_AS_OF_COL]})"
+        for row in unmatched.head(3).iter_rows(named=True)
+    )
+    if target_temporal_ix:
+        cause = (
+            f"the target declares temporal_ix={target_temporal_ix!r}, and featurizer (1.3.0+,"
+            + f" its ADR-0017) emits no target row whose {target_temporal_ix} is on or after"
+            + " the as_of_date. Remove the target's temporal_ix to keep every cohort row, or"
+            + " restrict the cohort query to entities already known on the date."
+        )
+    else:
+        cause = "the cohort names entity ids the featurizer target table does not hold."
+    return (
+        f"{unmatched.height} cohort row(s) of the {matrix_kind} matrix have no feature row and"
+        + f" are dropped (e.g. {sample}): {cause}"
+    )
+
+
 def _feature_columns(
     column_names: Sequence[str],
     target_id_col: str,
@@ -994,6 +1036,11 @@ def _assemble(
     )
 
     target_temporal_ix = _target_temporal_ix(featurizer_config)
+    unmatched = _cohort_rows_without_features(cohort, features, as_of_dates)
+    if unmatched.height:
+        logger.warning(
+            _unmatched_cohort_message(unmatched, matrix_kind, target_temporal_ix)
+        )
     feature_columns = _feature_columns(
         features.columns, "entity_id", target_temporal_ix
     )

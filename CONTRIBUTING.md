@@ -51,7 +51,7 @@ which changes are yours to make from where you are.
    session fixes it and cuts the tag; a pull request opened from elsewhere is
    the wrong shape for it. That covers:
    - a dependency floor or cap, and a bump of a pinned engine —
-     `requires-python = ">=3.12"`, `featurizer @ …@v1.1.0`,
+     `requires-python = ">=3.12"`, `featurizer @ …@v1.3.0`,
      `lynkeus @ …@v1.1.0`;
    - `uv.lock`;
    - a schema default: any Alembic revision under
@@ -100,7 +100,7 @@ which changes are yours to make from where you are.
    already carry the shape:
 
    ```toml
-   "featurizer[parquet] @ git+https://github.com/ccd-ia/featurizer.git@v1.1.0",
+   "featurizer[parquet] @ git+https://github.com/ccd-ia/featurizer.git@v1.3.0",
    "lynkeus @ git+https://github.com/nanounanue/lynkeus.git@v1.1.0",
    ```
 
