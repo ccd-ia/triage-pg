@@ -163,3 +163,30 @@ def pinball_loss(y_true, y_pred, quantile):
         raise ValueError(f"pinball quantile must be in (0, 1), got {quantile!r}")
     diff = np.asarray(y_true, dtype=float) - np.asarray(y_pred, dtype=float)
     return float(np.mean(np.where(diff >= 0, tau * diff, (tau - 1) * diff)))
+
+
+def expected_calibration_error(y_true, y_prob, n_bins):
+    """Expected calibration error over ``n_bins`` equal-width bins — lower is better (#6).
+
+    The numpy parity of ``triage.probability_metric``'s ``ece@<bins>`` branch (migration 0023):
+    ``Σ_b |Σ y − Σ p| / N``, which is ``Σ_b (n_b / N) · |mean y_b − mean p_b|``. The bins are
+    ``sklearn.calibration.calibration_curve``'s ``strategy='uniform'`` bins, so a score on an
+    inner edge falls in the lower bin and 1.0 in the last.
+
+    Args:
+        y_true: binary ground truth (a positive is ``> 0``).
+        y_prob: predicted probabilities in ``[0, 1]``.
+        n_bins: number of bins, at least 1.
+
+    Returns:
+        float: the expected calibration error.
+    """
+    if int(n_bins) != n_bins or n_bins < 1:
+        raise ValueError(f"ece needs a positive whole number of bins, got {n_bins!r}")
+    y = (np.asarray(y_true, dtype=float) > 0).astype(float)
+    p = np.asarray(y_prob, dtype=float)
+    bins = np.searchsorted(np.linspace(0.0, 1.0, int(n_bins) + 1)[1:-1], p)
+    gap = np.bincount(bins, weights=y, minlength=int(n_bins)) - np.bincount(
+        bins, weights=p, minlength=int(n_bins)
+    )
+    return float(np.abs(gap).sum() / len(p))

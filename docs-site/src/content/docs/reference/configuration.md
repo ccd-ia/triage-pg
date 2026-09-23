@@ -437,6 +437,29 @@ bias_config:
 quantile-loss metric a τ-quantile forecaster minimizes, migration 0020);
 survival → `[c_index]`.
 
+**Probability metrics (classification, opt-in, migration 0023).** `brier`,
+`log_loss` and `ece@<bins>` (expected calibration error, e.g. `ece@10`) score the
+probability a model emits, not only its ranking. List them under `metrics`; they
+are not in the default set. They match scikit-learn to 1e-9: `brier_score_loss`,
+`log_loss` with its `[ε, 1−ε]` clipping, and `calibration_curve`'s equal-width
+bins for `ece`. All three are losses (lower is better). When any score in the
+evaluated population lies outside `[0, 1]` (a `decision_function` margin, a
+heuristic ranker), the row is written with a NULL value, and the run goes on.
+
+**Metric direction.** Audition and the leaderboards rank a metric by
+`triage.higher_is_better(metric)`. It knows the built-in metrics, and treats any
+other metric as higher-is-better. Register a custom metric's direction in
+`triage.metric_directions`:
+
+```sql
+insert into triage.metric_directions (metric, higher_is_better, note)
+values ('my_loss', false, 'a loss: lower is better'),
+       ('cost@', false, 'every cost@<x> metric');
+```
+
+A row matches its exact metric name, or every metric of a family when it ends in
+`@`. The longest match wins, and a registered row overrides the built-in list.
+
 **Shape.** The `triage.evaluate_model` jsonb shape
 (`metrics` / `thresholds` / `regression_metrics` / `survival_metrics`), plus
 `subsets`:

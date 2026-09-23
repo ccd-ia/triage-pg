@@ -35,7 +35,7 @@ end to end with worked configs.
 
 | `problem_type` | ① score is… | ② rank by… | ③ primary metrics | label columns |
 |---|---|---|---|---|
-| `classification` | `P(y=1)` | descending probability | `auc_roc`, `precision@k`, `recall@k`, `average_precision` | `outcome` (0/1) |
+| `classification` | `P(y=1)` | descending probability | `auc_roc`, `precision@k`, `recall@k`, `average_precision`; `brier`, `log_loss`, `ece@<bins>` when declared | `outcome` (0/1) |
 | `regression_ranking` | predicted value | descending predicted value | `rmse` / `mae` / `r2`; `precision@k` when declared | `outcome` (continuous) |
 | `regression` | predicted value | (ranking incidental) | `rmse`, `mae`, `r2` | `outcome` (continuous) |
 | `survival` | predicted risk / hazard | descending risk | `c_index` (Brier deferred) | `duration`, `event_observed` |
