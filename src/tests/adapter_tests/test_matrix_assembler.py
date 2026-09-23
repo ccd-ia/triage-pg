@@ -739,3 +739,69 @@ def test_cohort_row_the_target_clock_hides_is_dropped_loudly(
     assert dropped[0].startswith("1 cohort row(s) of the train matrix")
     assert "(3, 2014-01-01)" in dropped[0]
     assert "temporal_ix='signup_date'" in dropped[0]
+
+
+def _cohort_of(engine, run_id, query, as_of_dates) -> str:
+    return build_cohort(
+        engine,
+        run_id,
+        cohort_query_template=query,
+        as_of_dates=as_of_dates,
+        config={"query": query, "as_of_dates": [str(d) for d in as_of_dates]},
+        source_pins={"customers": "v1"},
+    )
+
+
+def test_featurizer_computes_only_the_cohort_pairs(db_pool_greenfield):
+    """#8: featurizer reads the cohort's (as_of_date, entity) pairs, not target × dates.
+
+    The cohort holds customer 1 on the train date and customers 1 and 2 on the test date;
+    the target table holds three customers. The dense product would be six rows, and the
+    cohort artifact spans both dates, so a build for one date must see only that date's pairs.
+    """
+    from triage.adapters.matrix import _run_featurizer
+
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    cohort = _cohort_of(
+        engine,
+        run_id,
+        "select customer_id as entity_id from customers"
+        " where customer_id <= case when {as_of_date} < '2014-06-01' then 1 else 2 end",
+        [TRAIN_AS_OF, TEST_AS_OF],
+    )
+
+    table, target_id = _run_featurizer(
+        engine, _featurizer_config(), [TRAIN_AS_OF], cohort
+    )
+    frame = pl.from_arrow(table)
+    assert isinstance(frame, pl.DataFrame)
+    assert frame.select(target_id, "as_of_date").rows() == [(1, TRAIN_AS_OF)]
+
+    table, target_id = _run_featurizer(
+        engine, _featurizer_config(), [TEST_AS_OF], cohort
+    )
+    frame = pl.from_arrow(table)
+    assert isinstance(frame, pl.DataFrame)
+    assert sorted(frame.get_column(target_id).to_list()) == [1, 2]
+
+
+def test_a_permanent_as_of_dates_table_survives_a_matrix_build(db_pool_greenfield):
+    """The adapter clears its runtime table by the ``pg_temp`` name. Unqualified, on a
+    connection with no temp table yet, the name resolves to ``public.as_of_dates``, a table
+    the adapter does not own (#8)."""
+    from triage.adapters.matrix import _run_featurizer
+
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    with engine.connection() as conn:
+        conn.execute("create table public.as_of_dates (as_of_date date)")
+    cohort, _ = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF])
+
+    _run_featurizer(engine, _featurizer_config(), [TRAIN_AS_OF], cohort)
+
+    with engine.connection() as conn:
+        found = conn.execute("select to_regclass('public.as_of_dates') as t").fetchone()
+    assert found is not None and found["t"] is not None
