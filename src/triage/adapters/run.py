@@ -826,6 +826,7 @@ def _feature_subsets(
         definitions=definitions,
         target_alias=feature_config.get("target"),
         labels=labels,
+        relationships=feature_config.get("relationships") or [],
     )
     return mix_strategies(
         groups,
