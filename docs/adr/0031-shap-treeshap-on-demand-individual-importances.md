@@ -69,3 +69,10 @@ extra.**
 - This ADR records scope only — no SHAP code exists in the tree yet. Implementation is
   the v1.2.0 plan's job; the post-v1.1.0 close-out plan's Phase 6 gate is
   `git diff --stat` showing no changes under `src/triage/component/catwalk/`.
+
+## Status note (2026-09-22, milestone renumbered)
+
+The milestone this ADR scopes is now **v1.3.0**, not v1.2.0. v1.2.0 carried the fixes for
+issues #10–#15 and the featurizer v1.3.0 bump, a minor release because they add public
+surface (the windowed audition and `cohort_config.forward_query`). The scope above is
+unchanged. Where the body says "the v1.2.0 plan", read v1.3.0.

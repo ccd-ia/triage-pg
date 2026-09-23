@@ -689,3 +689,53 @@ def test_target_temporal_ix_dropped_from_feature_set(db_pool_greenfield, tmp_pat
         )
     # the leaked Date column is dropped from the Parquet entirely (not merely excluded)
     assert "signup_date" not in frame.columns
+
+
+def test_cohort_row_the_target_clock_hides_is_dropped_loudly(
+    db_pool_greenfield, tmp_path, monkeypatch
+):
+    """A cohort member whose target ``temporal_ix`` falls after the as_of_date gets no feature
+    row from featurizer 1.3.0 (its ADR-0017). The features ⋈ cohort inner join then drops it,
+    which must be said, not done silently.
+
+    Customer 3 signs up on 2014-03-01, after the train as_of_date; the date-independent cohort
+    query still lists it. Up to featurizer 1.1.0 it came back as a row of NULL aggregates.
+    """
+    import triage.adapters.matrix as matrix_module
+
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    with engine.connection() as conn:
+        conn.execute(
+            "update customers set signup_date = date '2014-03-01' where customer_id = 3"
+        )
+    warnings: list[str] = []
+    monkeypatch.setattr(matrix_module.logger, "warning", warnings.append)
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF, TEST_AS_OF])
+
+    train = build_matrix(
+        engine,
+        run_id,
+        featurizer_config=_featurizer_config(),
+        cohort_artifact_id=cohort,
+        labels_artifact_id=labels,
+        temporal_config=_temporal_config(),
+        imputation_policy=policy,
+        matrix_kind="train",
+        as_of_dates=[TRAIN_AS_OF],
+        label_timespan=LABEL_TIMESPAN,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "matrices"),
+        source_pins={"customers": "v1", "orders": "v1", "label_src": "v1"},
+    )
+
+    frame = pl.read_parquet(train.storage_uri)
+    assert sorted(frame.get_column("entity_id").to_list()) == [1, 2]
+    dropped = [w for w in warnings if "have no feature row" in w]
+    # One row, and only this build's date: the cohort also holds all three on TEST_AS_OF.
+    assert len(dropped) == 1
+    assert dropped[0].startswith("1 cohort row(s) of the train matrix")
+    assert "(3, 2014-01-01)" in dropped[0]
+    assert "temporal_ix='signup_date'" in dropped[0]
