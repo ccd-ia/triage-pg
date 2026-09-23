@@ -13,14 +13,16 @@ sklearn-computed) reference values.
 import json
 import math
 
+import numpy as np
 import pytest
 from sklearn import metrics as skmetrics
+from sklearn.calibration import calibration_curve
 
 from triage.component.catwalk.in_pg_evaluation import (
     compute_bias_in_db,
     evaluate_in_db,
 )
-from triage.component.catwalk.metrics import pinball_loss
+from triage.component.catwalk.metrics import expected_calibration_error, pinball_loss
 from triage.component.results_schema import downgrade_db, upgrade_db
 
 LABEL_TIMESPAN = "6 months"
@@ -392,6 +394,172 @@ def test_migration_0020_round_trips(db_pool_greenfield, db_url):
         metric_config={"regression_metrics": ["pinball@0.9"]},
     )
     assert written == 1
+
+
+# ------------------------------------------------------------- probability metrics (#6)
+
+
+def _evaluate(engine, model_id, metrics):
+    return evaluate_in_db(
+        engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, metric_config={"metrics": metrics}
+    )
+
+
+def test_probability_metrics_match_sklearn(greenfield_engine):
+    """``brier``, ``log_loss`` and ``ece@<bins>`` equal their references to 1e-9.
+
+    The fixture's scores sit exactly on bin edges (0.2 at 10 bins; 0.5 and 0.75 at 4), where
+    a binning convention shows: calibration_curve puts an edge score in the lower bin.
+    """
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+
+    written = _evaluate(engine, model_id, ["brier", "log_loss", "ece@10", "ece@4"])
+    assert written == 4
+
+    expected = {
+        "brier": skmetrics.brier_score_loss(LABELS, SCORES),
+        "log_loss": skmetrics.log_loss(LABELS, SCORES, labels=[0, 1]),
+        "ece@10": expected_calibration_error(LABELS, SCORES, 10),
+        "ece@4": expected_calibration_error(LABELS, SCORES, 4),
+    }
+    for metric, value in expected.items():
+        row = _eval_row(engine, model_id, metric)
+        assert row is not None, f"no evaluation row for {metric}"
+        assert row["value"] == pytest.approx(value, abs=1e-9), metric
+        assert (row["num_labeled"], row["num_positive"]) == (10, 5)
+        assert row["value_worst"] is None and row["value_expected"] is None
+
+
+@pytest.mark.parametrize("n_bins", [1, 2, 4, 10])
+def test_ece_bins_are_calibration_curves_bins(n_bins):
+    """The reference bins the way sklearn does: per non-empty bin, its mean label and mean
+    score are calibration_curve's ``prob_true`` and ``prob_pred``."""
+    y = (np.asarray(LABELS) > 0).astype(float)
+    p = np.asarray(SCORES)
+    bins = np.searchsorted(np.linspace(0.0, 1.0, n_bins + 1)[1:-1], p)
+    filled = sorted(set(bins))
+    prob_true, prob_pred = calibration_curve(LABELS, SCORES, n_bins=n_bins)
+    assert prob_true == pytest.approx([y[bins == b].mean() for b in filled])
+    assert prob_pred == pytest.approx([p[bins == b].mean() for b in filled])
+    weights = [np.sum(bins == b) / len(p) for b in filled]
+    assert expected_calibration_error(LABELS, SCORES, n_bins) == pytest.approx(
+        float(np.dot(weights, np.abs(prob_true - prob_pred)))
+    )
+
+
+def test_ece_by_hand():
+    # 2 bins: {0.1, 0.4, 0.5} (0.5 is the inner edge, so the lower bin) and {0.9}.
+    # Lower: |1 − 1.0| = 0; upper: |1 − 0.9| = 0.1; ECE = 0.1 / 4.
+    assert expected_calibration_error(
+        [0, 1, 0, 1], [0.1, 0.4, 0.5, 0.9], 2
+    ) == pytest.approx(0.025)
+
+
+def test_log_loss_clips_certain_wrong_scores_like_sklearn(greenfield_engine):
+    """A score of exactly 0 or 1 on the wrong label is clipped to [eps, 1 − eps], not ±inf."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    scores = [1.0, 0.0, 1.0, 0.0, 0.5]
+    labels = [0, 1, 1, 0, 1]
+    _seed_predictions_and_labels(engine, model_id, scores, labels, [1, 2, 3, 4, 5])
+
+    _evaluate(engine, model_id, ["log_loss"])
+
+    row = _eval_row(engine, model_id, "log_loss")
+    assert row["value"] == pytest.approx(
+        skmetrics.log_loss(labels, scores, labels=[0, 1]), abs=1e-9
+    )
+
+
+def test_probability_metrics_are_null_for_scores_that_are_not_probabilities(
+    greenfield_engine,
+):
+    """A margin or a raw ranking score has no probability to score. The row is written with a
+    NULL value, as r2 is on a constant target, so a mixed grid does not fail the run."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    margins = [2.5, 1.0, -0.3, 0.8, -1.2, 0.1, 0.4, -2.0, 0.9, 0.0]
+    _seed_predictions_and_labels(engine, model_id, margins, LABELS, ENTITY_IDS)
+
+    assert _evaluate(engine, model_id, ["brier", "log_loss", "ece@10"]) == 3
+    for metric in ("brier", "log_loss", "ece@10"):
+        row = _eval_row(engine, model_id, metric)
+        assert row["value"] is None, metric
+        assert row["num_labeled"] == 10
+
+
+@pytest.mark.parametrize("metric", ["ece@0", "ece@ten", "ece@", "ece@2.5"])
+def test_ece_rejects_a_bin_count_that_is_not_a_positive_whole_number(
+    greenfield_engine, metric
+):
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+    with pytest.raises(Exception, match="positive whole number of bins"):
+        _evaluate(engine, model_id, [metric])
+
+
+def test_probability_metrics_are_losses_and_a_custom_direction_can_be_registered(
+    greenfield_engine,
+):
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+    _evaluate(engine, model_id, ["brier", "ece@10"])
+
+    def hib(conn, metric):
+        return conn.execute(
+            "select triage.higher_is_better(%(m)s) as h", {"m": metric}
+        ).fetchone()["h"]
+
+    with engine.connection() as conn:
+        for loss in ("brier", "log_loss", "ece@10", "ece@15", "rmse", "pinball@0.9"):
+            assert hib(conn, loss) is False, loss
+        assert hib(conn, "auc_roc") is True
+        # An unregistered, unknown metric keeps the old default.
+        assert hib(conn, "my_loss") is True
+        assert hib(conn, "custom@3") is True
+
+        conn.execute(
+            "insert into triage.metric_directions (metric, higher_is_better, note) values"
+            " ('my_loss', false, 'exact name'),"
+            " ('custom@', false, 'a family: every custom@<x>'),"
+            " ('custom@7', true, 'a longer, exact row wins over its family'),"
+            " ('brier', true, 'a registered row overrides the built-in list')"
+        )
+        assert hib(conn, "my_loss") is False
+        assert hib(conn, "my_loss_2") is True  # exact, not a prefix
+        assert hib(conn, "custom@3") is False
+        assert hib(conn, "custom@7") is True
+        assert hib(conn, "brier") is True
+        # The catalog audition ranks on reads the registered direction.
+        catalog = conn.execute(
+            "select higher_is_better from triage.metric_catalog where metric = 'brier'"
+        ).fetchone()
+        assert catalog is not None and catalog["higher_is_better"] is True
+
+
+def test_migration_0023_round_trips(db_pool_greenfield, db_url):
+    """0023 downgrades (the metrics are unknown again, the directions table is gone, the
+    function is immutable again) and re-upgrades cleanly."""
+    engine = db_pool_greenfield
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, SCORES, LABELS, ENTITY_IDS)
+
+    downgrade_db(dburl=db_url, revision="0022_audition_window")
+    with pytest.raises(Exception, match="unknown classification metric"):
+        _evaluate(engine, model_id, ["brier"])
+    with engine.connection() as conn:
+        state = conn.execute(
+            "select to_regclass('triage.metric_directions') as t,"
+            " (select provolatile from pg_proc where proname = 'higher_is_better') as v"
+        ).fetchone()
+    assert state["t"] is None and state["v"] == "i"
+
+    upgrade_db(dburl=db_url, revision="head")
+    assert _evaluate(engine, model_id, ["brier", "log_loss", "ece@10"]) == 3
 
 
 # ------------------------------------------------------------------------- bias
