@@ -10,7 +10,7 @@
 
 triage-pg builds end-to-end early-warning and resource-prioritization models — cohort selection, temporally-correct feature generation, training, prediction, and in-database evaluation — with PostgreSQL as the single substrate, aimed at teaching, consulting, and production monitoring.
 
-> **Status: `v1.2.0` released.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival) — each with baseline floors — plus in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is live-validated: a full Batch E2E gated the `v1.0.0` release. The accepted architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
+> **Status: `v1.2.1` released.** The full pipeline runs end-to-end on three real tutorial datasets across all four problem types (including survival) — each with baseline floors — plus in-PG evaluation, fairness auditing, audition, postmodeling diagnostics, a read dashboard + write webapp, and production monitoring. The cloud profile (RDS + S3 + AWS Batch) is live-validated: a full Batch E2E gated the `v1.0.0` release. The accepted architecture decisions are audited against the code in [`docs/adr-conformance.md`](docs/adr-conformance.md).
 
 **New here?** Start at the [docs site](https://ccd-ia.github.io/triage-pg/) — or jump straight to the [onboarding one-pager](https://ccd-ia.github.io/triage-pg/onboarding.html) · **Coming from DSSG triage?** The [honest side-by-side](https://ccd-ia.github.io/triage-pg/triage-pg-vs-dssg-triage.html). (Sources live in the repo under [`docs/`](docs/).)
 
@@ -128,9 +128,9 @@ Prefer to be taught rather than shown commands? The **[tutorials](https://ccd-ia
 
 Installation reality: not on PyPI — clone and `uv sync`. Needs PostgreSQL 11+ (plain, no extensions). Optional extras: `dashboard` (FastAPI + SPA), `survival` (scikit-survival), `oidc` (real webapp auth).
 
-The dashboard's SPA is built into the wheel when Node is available at build time, so `uv add "triage @ git+https://github.com/ccd-ia/triage-pg.git@v1.2.0"` gives you a working dashboard. Built without Node, the package still installs and the dashboard serves a page telling you to run `cd frontend && npm ci && npm run build` and point `TRIAGE_DASHBOARD_STATIC` at `frontend/dist` — which is what `just serve` does from a checkout. The container image always carries the bundle.
+The dashboard's SPA is built into the wheel when Node is available at build time, so `uv add "triage @ git+https://github.com/ccd-ia/triage-pg.git@v1.2.1"` gives you a working dashboard. Built without Node, the package still installs and the dashboard serves a page telling you to run `cd frontend && npm ci && npm run build` and point `TRIAGE_DASHBOARD_STATIC` at `frontend/dist` — which is what `just serve` does from a checkout. The container image always carries the bundle.
 
-No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.2.0` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
+No local Python at all: every release ships a public container — `docker pull ghcr.io/ccd-ia/triage-pg:v1.2.1` gives you the `triage` CLI (and a `dashboard` image stage) against any PostgreSQL you point it at.
 
 ## Acknowledgment — built on DSSG's triage
 

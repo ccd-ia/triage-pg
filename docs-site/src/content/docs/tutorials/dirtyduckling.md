@@ -28,7 +28,7 @@ uv run triage --version
 **PASS:** the version prints:
 
 ```text
-triage-pg 1.2.0
+triage-pg 1.2.1
 ```
 
 **If it fails:** `uv: command not found` → install uv
