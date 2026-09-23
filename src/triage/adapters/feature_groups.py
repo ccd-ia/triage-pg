@@ -12,7 +12,8 @@ Grouping:
 
 * ``group_by='source_entity'`` (default) — partition by the *source* entity in each column
   name (``facilities.facility_type=…`` → ``facilities``;
-  ``COUNT(inspections.result|interval=P3M)`` → ``inspections``). This reads the entity from the
+  ``COUNT(inspections.result|interval=P3M)`` → ``inspections``; over a relationship with a
+  ``name:``, the name is resolved to its entity from the config). This reads the entity from the
   feature **name**, NOT featurizer's manifest ``entity`` field, which stamps aggregations with
   the *target* entity and would collapse everything into one group (ADR-0023).
 * explicit ``definitions={group: [globs]}`` — each column is matched against the globs; every
@@ -29,9 +30,11 @@ Strategies (ported verbatim from triage's mixer): ``all``, ``leave-one-out``, ``
 from __future__ import annotations
 
 import fnmatch
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import combinations
+from typing import Any
 
 from triage.logging import get_logger
 
@@ -88,21 +91,81 @@ def matches_globs(
     )
 
 
-def _source_entity(column: str, entity_aliases: Sequence[str]) -> str | None:
-    """The source entity of a feature column = the earliest ``<alias>.`` token in its name.
+#: A ``<token>.`` qualifier that starts at an identifier boundary, so ``team_games.`` is not
+#: found inside ``home_team_games.`` (#9).
+_QUALIFIER = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\.")
 
-    Direct features start with ``<alias>.``; aggregations embed it as ``AGG(<alias>.col…``.
-    With several aliases present (deep graphs) the *earliest* (outermost source) wins — a
-    predictable default; finer control is the explicit ``definitions`` path.
+
+def qualifier_entities(
+    entity_aliases: Sequence[str],
+    relationships: Sequence[Mapping[str, Any]] = (),
+    target_alias: str | None = None,
+) -> dict[str, str]:
+    """Map every token featurizer can put before a ``.`` in a column name to its entity.
+
+    An entity alias names itself. A relationship with a ``name:`` replaces the alias in the
+    columns it produces (featurizer requires one on parallel edges), so the name has to be
+    resolved to an entity from the config (#9). Which end it stands for follows featurizer's
+    own rule, the distance to the target: the end farther from the target is the one being
+    read, aggregated when it is the child, transferred when it is the parent.
     """
-    best_alias: str | None = None
-    best_pos = len(column) + 1
-    for alias in entity_aliases:
-        pos = column.find(f"{alias}.")
-        if pos != -1 and pos < best_pos:
-            best_pos = pos
-            best_alias = alias
-    return best_alias
+    tokens = {alias: alias for alias in entity_aliases}
+    ends: list[tuple[str, str, str]] = []
+    for rel in relationships:
+        parent, child = rel.get("parent"), rel.get("child")
+        if not (isinstance(parent, Mapping) and isinstance(child, Mapping)):
+            continue
+        ends.append(
+            (str(rel.get("name") or ""), str(parent["entity"]), str(child["entity"]))
+        )
+    distance = _distances(target_alias, [(p, c) for _, p, c in ends])
+    for name, parent, child in ends:
+        if not name or name in tokens:
+            continue
+        far = distance.get(parent, 0) > distance.get(child, 0)
+        tokens[name] = parent if far else child
+    return tokens
+
+
+def _distances(target: str | None, edges: Sequence[tuple[str, str]]) -> dict[str, int]:
+    """Breadth-first hop count from ``target`` over the undirected relationship graph."""
+    if target is None:
+        return {}
+    distance = {target: 0}
+    frontier = [target]
+    while frontier:
+        nxt: list[str] = []
+        for node in frontier:
+            for a, b in edges:
+                for here, there in ((a, b), (b, a)):
+                    if here == node and there not in distance:
+                        distance[there] = distance[node] + 1
+                        nxt.append(there)
+        frontier = nxt
+    return distance
+
+
+def _source_entity(column: str, qualifiers: Mapping[str, str]) -> str | None:
+    """The source entity of a feature column = the entity of its earliest known qualifier.
+
+    Direct features start with ``<alias>.``; aggregations embed it as ``AGG(<alias>.col…``,
+    or ``AGG(<relationship name>.col…`` over a named relationship. With several qualifiers
+    present (deep graphs) the *earliest* (outermost source) wins — a predictable default;
+    finer control is the explicit ``definitions`` path.
+    """
+    for match in _QUALIFIER.finditer(column):
+        entity = qualifiers.get(match.group(1))
+        if entity is not None:
+            return entity
+    return None
+
+
+def _unknown_qualifier(column: str) -> str | None:
+    """The token of a qualifier in featurizer's position (column start or after ``(``)."""
+    for match in _QUALIFIER.finditer(column):
+        if match.start() == 0 or column[match.start() - 1] == "(":
+            return match.group(1)
+    return None
 
 
 def partition_features(
@@ -113,6 +176,7 @@ def partition_features(
     definitions: Mapping[str, Sequence[str]] | None = None,
     target_alias: str | None = None,
     labels: Mapping[str, str] | None = None,
+    relationships: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, list[str]]:
     """Partition ``feature_names`` into ``{group_name: [columns]}``.
 
@@ -125,6 +189,10 @@ def partition_features(
     target entity's *plain* direct variables carry no ``<alias>.`` prefix (featurizer names them
     bare, e.g. ``age``); these are attributed to ``target_alias``. A column that matches no alias
     and has no ``target_alias`` to fall back on is a loud error.
+
+    ``relationships`` is the config's ``relationships:`` list. A relationship ``name:`` stands
+    in for the entity alias in the columns it produces, so without it those columns would
+    fall through to the target group (#9); :func:`qualifier_entities` resolves each name.
 
     ``labels`` (physical column → full featurizer label) is consulted **only** on the
     explicit-definitions path, where globs may target any part of a name that PostgreSQL's
@@ -139,14 +207,30 @@ def partition_features(
             f"feature_groups.group_by={group_by!r} is not supported"
             " (expected 'source_entity', or provide explicit 'definitions')"
         )
+    qualifiers = qualifier_entities(entity_aliases, relationships, target_alias)
     groups: dict[str, list[str]] = {}
     unmatched: list[str] = []
+    unresolved: dict[str, int] = {}
     for column in feature_names:
-        alias = _source_entity(column, entity_aliases) or target_alias
+        alias = _source_entity(column, qualifiers)
+        if alias is None:
+            token = _unknown_qualifier(column)
+            if token is not None and target_alias is not None:
+                unresolved[token] = unresolved.get(token, 0) + 1
+            alias = target_alias
         if alias is None:
             unmatched.append(column)
             continue
         groups.setdefault(alias, []).append(column)
+    if unresolved:
+        # A warning, not an error: spatial and graph relationships also name their columns,
+        # and a config that ran before must not stop running. It must not stay silent (#9).
+        logger.warning(
+            "feature_groups group_by='source_entity' put columns qualified by "
+            f"{sorted(unresolved)!r} ({sum(unresolved.values())} column(s)) in the target "
+            f"group {target_alias!r}: no entity alias or relationship name matches those "
+            "qualifiers. Declare explicit feature_groups.definitions if they belong elsewhere."
+        )
     if unmatched:
         raise ValueError(
             "feature_groups group_by='source_entity' could not map "
