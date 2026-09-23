@@ -65,6 +65,10 @@ WORKDIR /opt/triage
 # Dependency metadata first so the heavy `uv sync` layer caches across source
 # edits. uv.lock pins the exact featurizer commit (ADR-0016).
 COPY --chown=triage:triage pyproject.toml uv.lock ./
+# pyproject.toml names this file as a hatchling build hook (#15); without it `uv sync`
+# cannot build the project at all. There is no node here and no frontend/, so the hook
+# leaves the placeholder; the dashboard stage serves the SPA it builds itself.
+COPY --chown=triage:triage build_frontend.py ./
 COPY --chown=triage:triage README.md LICENSE ./
 COPY --chown=triage:triage src/ src/
 
