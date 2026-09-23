@@ -183,7 +183,14 @@ def _reconstruct_derivation(
     )
 
 
-def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
+#: The column of the runtime ``as_of_dates`` table that holds the cohort's entity id, named
+#: to featurizer as ``as_of_dates.id_column`` (a paired cohort, featurizer 1.3.0+).
+_COHORT_ID_COL = "triage_cohort_id"
+
+
+def _featurizer_config_yaml(
+    featurizer_config: Mapping[str, Any], *, paired: bool = False
+) -> str:
     """Render the featurizer config with ``as_of_boundary: exclusive`` forced on.
 
     triage-pg requires data knowable *strictly before* ``as_of_date`` (CLAUDE.md cardinal
@@ -191,6 +198,11 @@ def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
     every triage-pg featurizer run cuts on ``<`` — the smoke-tested
     ``where <ts> < aod.as_of_date`` / ``daterange(..., '[)')`` shape. A caller that sets a
     different boundary is overridden with a warning (the strict rule is not negotiable).
+
+    ``as_of_dates`` belongs to the adapter too, because the adapter writes that table.
+    ``paired=True`` declares its cohort-id column so featurizer computes only the cohort's
+    ``(as_of_date, entity)`` pairs (#8). It is added here, at render time, and never to the
+    config that feature_group identity hashes, so pairing moves no hash.
     """
     cfg = dict(featurizer_config)
     requested = cfg.get("as_of_boundary")
@@ -200,6 +212,13 @@ def _featurizer_config_yaml(featurizer_config: Mapping[str, Any]) -> str:
             + " 'exclusive' (strictly-before point-in-time correctness, ADR-0008/§2.4)"
         )
     cfg["as_of_boundary"] = "exclusive"
+    if cfg.pop("as_of_dates", None) is not None:
+        logger.warning(
+            "featurizer_config declares as_of_dates; triage-pg ignores it — the adapter"
+            + " writes that table from the cohort and pairs each date with its entities"
+        )
+    if paired:
+        cfg["as_of_dates"] = {"id_column": _COHORT_ID_COL}
     return yaml.safe_dump(cfg, sort_keys=True)
 
 
@@ -244,17 +263,19 @@ def _run_featurizer(
     db_engine: DictRowPool,
     featurizer_config: Mapping[str, Any],
     as_of_dates: Sequence[date],
+    cohort_artifact_id: str,
 ):
-    """Run featurizer over the split's as_of_dates; return (pyarrow.Table, target_id_col).
+    """Run featurizer over the split's cohort pairs; return (pyarrow.Table, target_id_col).
 
-    Materializes ``as_of_dates`` and runs ``Featurizer.to_arrow(impute=True)`` on the *same*
-    psycopg connection (the table is connection-visible), so the fit-free pass (zero-fill
+    Materializes ``as_of_dates`` as the cohort's ``(as_of_date, entity)`` pairs on this
+    build's dates and runs ``Featurizer.to_arrow(impute=True)`` on the *same* psycopg
+    connection (the table is connection-visible), so the fit-free pass (zero-fill
     count-likes, NULL-preserve measures, ``__missing`` flags) is applied by featurizer and
     the keys ``(as_of_date, <target id>)`` are left untouched.
     """
     from featurizer import Featurizer
 
-    config_yaml = _featurizer_config_yaml(featurizer_config)
+    config_yaml = _featurizer_config_yaml(featurizer_config, paired=True)
     with tempfile.NamedTemporaryFile(
         "w", suffix=".yaml", delete=False, encoding="utf-8"
     ) as handle:
@@ -272,7 +293,7 @@ def _run_featurizer(
         # to_arrow so featurizer's own queries see it on the same connection.
         with db_engine.connection() as conn:
             with conn.cursor() as cur:
-                _materialize_as_of_dates_psycopg(cur, as_of_dates)
+                _materialize_as_of_dates_psycopg(cur, as_of_dates, cohort_artifact_id)
             conn.commit()
             table = featurizer.to_arrow(connection=conn, impute=True)
             if not hasattr(table, "column_names"):  # an OrderedDict of column groups
@@ -282,8 +303,10 @@ def _run_featurizer(
     return table, target_id_col
 
 
-def _materialize_as_of_dates_psycopg(cur, as_of_dates: Sequence[date]) -> None:
-    """(Re)create the runtime ``as_of_dates(as_of_date)`` table featurizer reads by bare name.
+def _materialize_as_of_dates_psycopg(
+    cur, as_of_dates: Sequence[date], cohort_artifact_id: str
+) -> None:
+    """(Re)create the runtime ``as_of_dates`` table featurizer reads by bare name.
 
     adapter-spec §2.3: featurizer's rendered SQL is
     ``select aod.as_of_date, t.* from as_of_dates as aod cross join lateral (...)`` — it
@@ -291,18 +314,27 @@ def _materialize_as_of_dates_psycopg(cur, as_of_dates: Sequence[date]) -> None:
     owns this table; we drop+recreate it for the split's dates so one matrix build sees
     exactly its own as_of_dates and nothing leaks between builds on a shared db.
 
+    It holds the cohort's ``(as_of_date, entity_id)`` pairs, restricted to this build's
+    dates, in the column the rendered config names (``as_of_dates.id_column``). featurizer
+    then computes only those pairs instead of every target row under every date: the dense
+    product kept about one row in a few thousand on a date-defined cohort (#8). The date
+    filter is not optional: the cohort artifact spans every split's dates.
+
     It is a **TEMP** table (``pg_temp``, first on the search_path so featurizer resolves it):
     session-scoped, auto-dropped, invisible to other connections — never pollutes ``public``
     and cannot collide/race with a concurrent build on another connection (DB-audit #1).
-    featurizer reads it on this *same* connection, so visibility is guaranteed.
+    featurizer reads it on this *same* connection, so visibility is guaranteed. The drop
+    names ``pg_temp``: unqualified, on a connection with no temp table yet, it would resolve
+    to a permanent ``public.as_of_dates``.
     """
-    cur.execute("drop table if exists as_of_dates")
-    cur.execute("create temp table as_of_dates (as_of_date date primary key)")
-    for as_of_date in as_of_dates:
-        cur.execute(
-            "insert into as_of_dates (as_of_date) values (%s) on conflict do nothing",
-            (as_of_date,),
-        )
+    cur.execute("drop table if exists pg_temp.as_of_dates")
+    cur.execute(
+        "create temp table as_of_dates as"
+        + f" select distinct as_of_date, entity_id as {_COHORT_ID_COL}"
+        + " from triage.cohorts"
+        + " where cohort_hash = %(h)s and as_of_date = any(%(dates)s)",
+        {"h": cohort_artifact_id, "dates": list(as_of_dates)},
+    )
 
 
 def _merge_arrow_groups(groups, target_id_col: str):
@@ -1011,7 +1043,7 @@ def _assemble(
     import polars as pl
 
     feature_table, target_id_col = _run_featurizer(
-        db_engine, featurizer_config, as_of_dates
+        db_engine, featurizer_config, as_of_dates, cohort_artifact_id
     )
     features = pl.from_arrow(feature_table)
     assert isinstance(features, pl.DataFrame)  # from_arrow(Table) is a frame

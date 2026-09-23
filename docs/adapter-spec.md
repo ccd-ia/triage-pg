@@ -188,27 +188,29 @@ order by aod.as_of_date
 Three facts drive the mapping:
 
 1. **`as_of_dates` is a runtime table, not config.** featurizer reads a table named
-   `as_of_dates(as_of_date)` that must exist when the query runs (the config even says so:
-   *“There is a table called as_of_dates”*). The **adapter materializes it** from the
-   timechop split — `TemporalConfig` → `Timechop.chop_time()` → the split's `as_of_times`
-   (§1) — one featurizer run per split-side.
+   `as_of_dates` that must exist when the query runs (the config even says so:
+   *“There is a table called as_of_dates”*). The **adapter materializes it** as a `TEMP`
+   table from the split-side's dates — `TemporalConfig` → `Timechop.chop_time()` → the
+   split's `as_of_times` (§1) — one featurizer run per split-side.
 2. **`target` is the cohort's entity.** The `target` entity's `id` column is triage's
-   universal `entity_id`; its `table` is the entity/source table. featurizer computes a
-   **dense** matrix: every target-entity row × every `as_of_date`, indexed
-   `(as_of_date, entity_id)`.
-3. **The cohort is a selection mask, applied after.** A triage cohort is a *per-as_of_date*
-   roster (`triage.cohorts(cohort_hash, entity_id, as_of_date)`) — a **subset** of that
-   dense product. The adapter selects it with an inner join:
-   `featurizer_matrix INNER JOIN triage.cohorts USING (entity_id, as_of_date)` (filtered to
-   the split's `cohort_hash`). Labels join the same way on `(entity_id, as_of_date)`
-   (+`label_timespan`). This is the correct, no-featurizer-change v1 contract.
+   universal `entity_id`; its `table` is the entity/source table. Left to its default,
+   featurizer computes a **dense** matrix: every target-entity row × every `as_of_date`,
+   indexed `(as_of_date, entity_id)`.
+3. **The cohort is paired into `as_of_dates` (#8, featurizer 1.3.0+).** A triage cohort is
+   a *per-as_of_date* roster (`triage.cohorts(cohort_hash, entity_id, as_of_date)`). The
+   adapter fills `as_of_dates(as_of_date, triage_cohort_id)` with the cohort's pairs on the
+   split-side's dates, and the rendered config declares
+   `as_of_dates: {id_column: triage_cohort_id}`, so featurizer computes only those pairs
+   and returns the dense run's values on them. On a date-defined cohort the dense product
+   kept about one row in a few thousand. The block is added at render time, never to the
+   config feature_group identity hashes, and a user-supplied `as_of_dates` block is ignored
+   with a warning.
 
-   **Open / scale (ADR-0008).** Computing features for all entities then discarding
-   non-cohort rows is wasteful when the cohort is a small fraction. The optimization is a
-   **cohort-scoped target**: make featurizer's outer relation the `(as_of_date, entity_id)`
-   *cohort* pairs rather than `as_of_dates × all entities`. That is a **featurizer-side
-   coordination item**, tied directly to the open featurizer-scale risk — not a triage-pg
-   blocker, but the lever if scale validation fails.
+   The cohort inner join (`features ⋈ triage.cohorts USING (entity_id, as_of_date)`) stays,
+   as a guard that now removes nothing. Labels join on `(entity_id, as_of_date)`
+   (+`label_timespan`). A cohort row with no feature row (a target that declares a
+   `temporal_ix` later than the as-of date, featurizer's ADR-0017) is dropped with a warning
+   that names the count.
 
 ### 2.4 Point-in-time correctness (the cardinal rule)
 
