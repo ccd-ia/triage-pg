@@ -59,6 +59,12 @@ sup { color: var(--muted); }
             nothing leaves the database; dashboards read views directly. Per-prediction-date rows
             + windowed rollups. <span class="src">ADR-0007</span></td>
         <td>pandas/sklearn in Python workers, persisted to the results schema.</td></tr>
+    <tr><td class="dim">Top-k with unlabeled rows</td>
+        <td>Parity since v1.3.0: the cut ranks every scored row, metrics count the labeled ones
+            inside it (<code>num_labeled_above_threshold</code>). Percentage thresholds round up,
+            and tie bounds are analytic extremes. <span class="src">ADR-0033, migration 0024</span></td>
+        <td>Rank all, cut at k, drop NaN labels; <code>int()</code> for percentages; worst/best
+            as label sort orders.</td></tr>
     <tr><td class="dim">Subset evaluations</td>
         <td>Parity: named cohort slices, the subset re-ranked as its own population.
             <span class="src">migration 0015</span></td>
@@ -154,6 +160,10 @@ sup { color: var(--muted); }
             but <code>feature_aggregations</code> (Collate) becomes a featurizer
             entity-relationship graph under <code>feature_config</code>, sources must be declared
             (<code>sources:</code>, ADR-0014), and <code>problem_type</code> is explicit.</td></tr>
+    <tr><td><code>label_config.include_missing_labels_in_train_as</code></td>
+        <td>Same key, same meaning: absent drops unlabeled train rows, <code>false</code>/<code>true</code>
+            fill them with 0/1, train matrices only (classification). Any other key in
+            <code>label_config</code> or <code>cohort_config</code> is an error, not ignored.</td></tr>
     <tr><td><code>triage experiment config.yaml</code></td>
         <td><code>triage run experiment.yaml --project-path …</code>; inspect with
             <code>triage leaderboard/models/audition/model show</code> or the dashboard.</td></tr>

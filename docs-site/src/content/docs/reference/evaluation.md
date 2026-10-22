@@ -90,6 +90,35 @@ cadence means "of the 100 we can actually inspect this week". Evaluating at a
 monthly k while acting weekly is the old pooled-metric category error relocated
 into your config — the number is computed correctly and answers nothing.
 
+## Top-k cuts the whole population, metrics count the labeled rows
+
+A threshold metric (`precision@`, `recall@`, the bias audit, the dashboard's
+threshold curve, the error tree) ranks **every scored row** at the
+`as_of_date`, cuts the list at k, and only then looks at labels. An entity with
+no label still takes a place in the top k. It is left out of the metric itself.
+This is how DSSG triage computed them (ADR-0033). Since migration 0024,
+triage-pg does the same.
+
+| Parameter | k | precision@k | recall@k |
+|---|---|---|---|
+| `100_abs` | 100 | TP ÷ labeled rows among the 100 | TP ÷ labeled positives |
+| `10_pct` | ⌈0.10 × scored rows⌉ | TP ÷ labeled rows in the cut | TP ÷ labeled positives |
+
+The difference matters when labels are selective. In an inspection problem
+(`task_framing: resource_prioritization`), a facility nobody inspected has no
+label. The top 100 can hold 40 such facilities, and precision@100 then rests on
+60 labels. `triage.evaluations.num_labeled_above_threshold` stores that
+denominator, so read it next to the value. Precision is NULL when the cut holds
+no labeled row.
+
+Two deliberate differences from DSSG remain. Percentage thresholds round up
+(`ceil`) where DSSG truncated, so `10_pct` can select one more row. The tie
+bounds `value_worst`/`value_best` are the extremes over every ordering of the
+rows tied at the cutoff, not a sort convention.
+
+Rank-free metrics (AUC, average precision, Brier, log loss, ECE, the regression
+metrics, the C-index) use the labeled rows only, as before.
+
 ## Two surfaces, two grains
 
 The CLI serves both grains, and they answer different questions:
@@ -116,12 +145,12 @@ dates. Every test `as_of_date` satisfies
 
 The residual risk is a **data** problem the config cannot see: if
 `label_end_time` claims a horizon your loaded data does not actually reach,
-late dates have labels that *should* exist but don't. The failure is safe but
-silent — the metric functions count only labeled entities (`outcome is not
-null`), so those dates produce fewer or no evaluation rows rather than wrong
-ones. The tell is `num_labeled`: a late date whose `num_labeled` drops off a
-cliff is immature data, not a bad model. Don't average blindly across dates
-without looking at it.
+late dates have labels that *should* exist but don't. The failure is quiet.
+Those entities still take places in the top k, but the metric counts only
+labeled entities, so precision rests on fewer labels and recall on fewer
+positives. The tells are `num_labeled` and `num_labeled_above_threshold`: a late
+date where either drops off a cliff is immature data, not a bad model. Don't
+average blindly across dates without looking at them.
 
 ## See also
 

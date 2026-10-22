@@ -117,7 +117,9 @@ problem_type: classification   # | regression_ranking | regression | survival
 
 **Required.** Part of experiment identity.
 
-**Shape.** A mapping with a `query` (and an optional cosmetic `name`):
+**Shape.** A mapping with a `query`, an optional cosmetic `name` and
+`description`, and an optional `forward_query` (the production cohort that
+`triage score` visits, ADR-0032). No other key is accepted:
 
 ```yaml
 cohort_config:
@@ -131,6 +133,10 @@ cohort_config:
 **Contract.**
 
 - Must carry a non-empty `query` string: `cohort_config needs a 'query'`.
+- **An unknown key is an error**, for example
+  `cohort_config: unknown key 'filepath' — accepted keys are description,
+  forward_query, name, query`. The block enters experiment identity, so a key
+  nothing reads would change the hash and do nothing else.
 - **The cohort query must contain the `{as_of_date}` placeholder** —
   `the cohort query must contain the {as_of_date} placeholder`. The query
   returns one column, `entity_id`.
@@ -162,8 +168,10 @@ cohort entity per as-of date.
 
 **Required.** Part of experiment identity.
 
-**Shape.** A mapping with a `query` (and an optional cosmetic `name`). The
-returned **columns follow `problem_type`**:
+**Shape.** A mapping with a `query`, an optional cosmetic `name` and
+`description`, and the optional `include_missing_labels_in_train_as` described
+below. No other key is accepted. The query's returned **columns follow
+`problem_type`**:
 
 - `classification` / `regression_ranking` / `regression` → an `outcome` column
   (integer 0/1 for classification; a continuous value for the regression
@@ -187,6 +195,7 @@ label_config:
 **Contract.**
 
 - Must carry a non-empty `query` string: `label_config needs a 'query'`.
+- **An unknown key is an error**, as in `cohort_config`.
 - **The label query must contain both `{as_of_date}` and `{label_timespan}`** —
   each missing placeholder is its own error
   (`the label query must contain the {as_of_date} placeholder`,
@@ -197,6 +206,41 @@ label_config:
   knowable strictly before the `as_of_date` — is the cardinal rule this query
   and the feature graph must respect (see
   [point-in-time correctness](/triage-pg/concepts/point-in-time-correctness/)).
+
+### Entities with no label: `include_missing_labels_in_train_as`
+
+A cohort row for which the label query returns no row has a NULL label. In an
+inspection problem that is the normal case: a facility nobody inspected has an
+unknown outcome, not a passing one. By default triage-pg does not fit on those
+rows, and evaluation leaves them out of every metric's denominator.
+
+`include_missing_labels_in_train_as` is DSSG triage's key, with DSSG's meaning.
+It changes the **train** matrices only. Test and production matrices always keep
+the NULL, so evaluation never counts an unlabeled row as a negative.
+
+| Value | Unlabeled train rows | Use it when |
+|---|---|---|
+| absent (default) | not fitted on | a missing label means "unknown" (inspections) |
+| `false` | fitted on as 0 | a missing label means the event did not happen |
+| `true` | fitted on as 1 | a missing record means the bad outcome (a student who does not re-enroll) |
+
+Take five facilities at one `as_of_date`: A was inspected and failed, B was
+inspected and passed, and C, D and E were not inspected.
+
+| Value | Train labels A B C D E | Fitted on |
+|---|---|---|
+| absent | `1 0 – – –` | A, B |
+| `false` | `1 0 0 0 0` | all five |
+| `true` | `1 0 1 1 1` | all five |
+
+- Classification only. On any other `problem_type` the key is an error, because
+  a 0/1 fill would corrupt a continuous outcome.
+- The value must be a YAML boolean. `0`, `1` and quoted strings are errors.
+- Setting it gives the train matrices a new identity, and the experiment a new
+  `experiment_hash`. The labels are unchanged and keep their identity.
+- Writing `coalesce(…, 0)` in the label query is **not** the same thing. It
+  zeroes the test labels too, so evaluation would count every uninspected
+  facility as a pass.
 
 ## `temporal_config`
 

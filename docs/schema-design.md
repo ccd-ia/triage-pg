@@ -263,6 +263,8 @@ create table triage.evaluations (
     value_std      double precision,     -- exact hypergeometric SD (confidence band on the metric)
     num_labeled integer,                 -- generic
     num_positive integer,                -- classification only (null otherwise)
+    num_labeled_above_threshold integer, -- labeled rows inside the top-k cut: the precision
+                                         --   denominator (threshold metrics only; 0024, ADR-0033)
     computed_at timestamptz not null default now(),
     primary key (model_id, split_kind, as_of_date, subset_hash, metric, parameter)
 );
