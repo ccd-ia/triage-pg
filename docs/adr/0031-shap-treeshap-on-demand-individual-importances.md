@@ -76,3 +76,8 @@ The milestone this ADR scopes is now **v1.3.0**, not v1.2.0. v1.2.0 carried the 
 issues #10–#15 and the featurizer v1.3.0 bump, a minor release because they add public
 surface (the windowed audition and `cohort_config.forward_query`). The scope above is
 unchanged. Where the body says "the v1.2.0 plan", read v1.3.0.
+
+Renumbered again on 2026-10-22: the milestone is now **v1.4.0**. v1.3.0 carries issue #21
+(threshold metrics over the full population, ADR-0033), a minor release because it changes
+stored metric values. The scope above is unchanged. Where the body says "the v1.2.0 plan"
+or "v1.3.0", read v1.4.0.
