@@ -83,7 +83,7 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 |---|---|
 | **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch (ADR-0010/0026) |
 | **Features** | [`featurizer`](https://github.com/ccd-ia/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins (ADR-0008) |
-| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices (ADR-0007) |
+| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, Brier/log loss/ECE, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices (ADR-0007). A top-k cut ranks every scored row and the metric counts the labeled ones, as DSSG did — so selective-labels problems (inspections) read correctly (ADR-0033) |
 | **Fairness** | SQL group-bys over `protected_groups`: 8 per-group metrics with disparity + τ verdicts, config-driven ingestion, and the Aequitas **fairness tree** as a guidance wizard ([`docs/fairness.md`](docs/fairness.md)) |
 | **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
 | **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)) |

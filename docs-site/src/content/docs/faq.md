@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: The questions users actually hit — 0-entity matrices, stale scores, adding an estimator, ignored feature groups, and the editable-install estimator error.
+description: The questions users actually hit — 0-entity matrices, precision@k against DSSG, unlabeled entities, stale scores, adding an estimator, ignored feature groups, and the editable-install estimator error.
 sidebar:
   order: 2
 ---
@@ -30,6 +30,34 @@ outside the normal `run` path, make sure the dates are part of what you hash.
 
 See [identity and caching](/triage-pg/concepts/identity-and-caching/) and
 [point-in-time correctness](/triage-pg/concepts/point-in-time-correctness/).
+
+---
+
+## My precision@k does not match DSSG triage's, or changed after upgrading to v1.3.0.
+
+Check how many of your test rows have a label. Since v1.3.0 (migration 0024,
+ADR-0033) triage-pg computes threshold metrics the way DSSG triage did: rank
+every scored row, cut at k, then count only the labeled rows inside the cut.
+Before v1.3.0 it dropped the unlabeled rows first, so `precision@100_abs` meant
+"the top 100 among labeled entities". When every test row is labeled the two
+agree. When labels are selective (an inspection nobody made), they do not, and
+`triage db upgrade` recomputes the stored values.
+
+`num_labeled_above_threshold` in `triage.evaluations` is the precision
+denominator: how many labels the number rests on. The remaining difference from
+DSSG is rounding: percentage thresholds round up (`ceil`) where DSSG truncated,
+so `10_pct` can select one more row. See [evaluation](/triage-pg/reference/evaluation/).
+
+---
+
+## Are entities with no label treated as 0?
+
+No. A cohort row the label query returns nothing for keeps a NULL label.
+Training skips it and evaluation leaves it out of every denominator. To train on
+those rows as 0 (or 1), set `label_config.include_missing_labels_in_train_as`.
+It is DSSG's key with DSSG's meaning, and it never touches the test labels. Any
+other unknown key in `label_config` or `cohort_config` is an error. See
+[configuration](/triage-pg/reference/configuration/#entities-with-no-label-include_missing_labels_in_train_as).
 
 ---
 
