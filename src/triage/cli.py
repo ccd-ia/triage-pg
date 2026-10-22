@@ -367,6 +367,26 @@ def load_experiment_config(config_path: str) -> Dict[str, Any]:
     return load_yaml_from_store(config_path)
 
 
+def _exit_on_bad_problem_blocks(config_data: Mapping[str, Any]) -> None:
+    """Exit 1 on an unknown key or a bad value in cohort_config / label_config (#21)."""
+    from triage.adapters.problem_config import (
+        cohort_config_errors,
+        label_config_errors,
+    )
+
+    errors = []
+    if "cohort_config" in config_data:
+        errors += cohort_config_errors(config_data["cohort_config"])
+    if "label_config" in config_data:
+        errors += label_config_errors(
+            config_data["label_config"], config_data.get("problem_type")
+        )
+    for _, message in errors:
+        console.print(f"[red]{message}[/red]")
+    if errors:
+        raise typer.Exit(code=1)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         from triage import __version__
@@ -470,6 +490,9 @@ def run_command(
         storage_root=str(project_path) if profile == "local" else None,
     )
     config_data = load_experiment_config(config)
+    # Checked here as well as in run_experiment: a cloud submit hands the config to a Batch
+    # job, and the error belongs in this terminal, not in the job's log.
+    _exit_on_bad_problem_blocks(config_data)
 
     # Open a DB pool only when we run the experiment in THIS process: local always, and cloud
     # when we ARE the Batch worker (load_profile returns InProcessExecution inside the job — it
@@ -1522,6 +1545,7 @@ def analyze_config(
     if not temporal:
         console.print("[red]temporal_config block is required.[/red]")
         raise typer.Exit(code=1)
+    _exit_on_bad_problem_blocks(config_data)
 
     try:
         plan = plan_experiment(config_data)

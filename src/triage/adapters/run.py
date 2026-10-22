@@ -70,6 +70,14 @@ from triage.adapters.imputation import ImputationPolicy
 from triage.adapters.labels import build_labels
 from triage.adapters.matrix import MatrixResult, build_matrix, feature_labels
 from triage.adapters.model import build_model, score_and_evaluate
+from triage.adapters.problem_config import (
+    cohort_config_errors,
+    label_config_errors,
+    labels_identity_config,
+    missing_label_fill,
+    validate_cohort_config,
+    validate_label_config,
+)
 from triage.adapters.subsets import register_subsets, validate_subsets_config
 from triage.adapters.target_history import (
     DEFAULT_HISTORY_SERIES_WIDTH,
@@ -320,48 +328,17 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
         query = block.get("query")
         return query if isinstance(query, str) and query else None
 
+    # The problem blocks: accepted keys, query placeholders, and the train-label fill (#21).
+    # The same (path, message) pairs run_experiment raises on, from problem_config.
     cohort_config = experiment_config.get("cohort_config")
     if cohort_config is not None:
-        cohort_query = _query_of(cohort_config)
-        if cohort_query is None:
-            _err("cohort_config.query", "cohort_config needs a 'query'")
-        elif "{as_of_date}" not in cohort_query:
-            _err(
-                "cohort_config.query",
-                "the cohort query must contain the {as_of_date} placeholder",
-            )
-        # The production cohort a forward score runs over (ADR-0032, #10). Optional, and
-        # identity-neutral — see _problem_identity. Held to the same placeholder rule as the
-        # training query, because build_cohort renders both the same way.
-        forward_query = (
-            cohort_config.get("forward_query")
-            if isinstance(cohort_config, Mapping)
-            else None
-        )
-        if forward_query is not None:
-            if not isinstance(forward_query, str) or not forward_query.strip():
-                _err(
-                    "cohort_config.forward_query",
-                    "forward_query must be a non-empty SQL string returning entity_id",
-                )
-            elif "{as_of_date}" not in forward_query:
-                _err(
-                    "cohort_config.forward_query",
-                    "the forward cohort query must contain the {as_of_date} placeholder",
-                )
+        for path, message in cohort_config_errors(cohort_config):
+            _err(path, message)
 
     label_config = experiment_config.get("label_config")
     if label_config is not None:
-        label_query = _query_of(label_config)
-        if label_query is None:
-            _err("label_config.query", "label_config needs a 'query'")
-        else:
-            for placeholder in ("{as_of_date}", "{label_timespan}"):
-                if placeholder not in label_query:
-                    _err(
-                        "label_config.query",
-                        f"the label query must contain the {placeholder} placeholder",
-                    )
+        for path, message in label_config_errors(label_config, problem_type):
+            _err(path, message)
 
     n_splits: int | None = None
     raw_temporal = experiment_config.get("temporal_config")
@@ -1009,13 +986,15 @@ def _build_split(
     target_history_lags: int = 0,
     history_query: str | None = None,
     history_series_width: int = 0,
+    missing_label_fill: int | None = None,
 ) -> tuple[MatrixResult, MatrixResult, list[date], list[date], str, str]:
     """Build a split's train + test matrices; return both + their dates + label timespans.
 
     The train matrix uses the split's train ``as_of_times`` and ``max_training_history`` as
     the lookback; the test matrix uses the (single, by convention) test matrix definition's
     ``as_of_times`` and is given the train matrix as its parent so the train-fitted imputation
-    statistics flow to it without refitting (ADR-0009).
+    statistics flow to it without refitting (ADR-0009). ``missing_label_fill`` (#21) reaches
+    the train matrix only; the test matrix keeps its unlabeled rows NULL.
     """
     train_def = split["train_matrix"]
     train_dates = _as_dates(train_def["as_of_times"])
@@ -1053,6 +1032,7 @@ def _build_split(
         target_history_lags=target_history_lags,
         history_query=history_query,
         history_series_width=history_series_width,
+        missing_label_fill=missing_label_fill,
     )
     test_matrix = build_matrix(
         db_engine,
@@ -1175,6 +1155,10 @@ def run_experiment(
     label_config = _require(experiment_config, "label_config")
     feature_config = _require(experiment_config, "feature_config")
     grid_config = _require(experiment_config, "grid_config")
+    # Before anything is built: an unknown key would enter the experiment and labels identity
+    # while doing nothing, and a bad label fill would only surface at matrix assembly (#21).
+    validate_cohort_config(cohort_config)
+    validate_label_config(label_config, problem_type)
     declared_sources = experiment_config.get("sources", [])
     _require_survival_extra(problem_type)
     metric_config = _resolve_metric_config(
@@ -1254,7 +1238,9 @@ def run_experiment(
             as_of_dates=all_as_of_dates,
             label_timespans=label_timespans,
             problem_type=problem_type,
-            config=label_config,
+            # Without the train-only fill (#21): it changes no labels row, so it must not move
+            # the labels hash. The train matrix carries it in its own identity.
+            config=labels_identity_config(label_config),
             source_pins=frozen_pins,
             policy=cache_policy,
         )
@@ -1288,6 +1274,8 @@ def run_experiment(
             else 0
         )
 
+        train_label_fill = missing_label_fill(label_config)
+
         # Build the FULL (all-features) matrices once per split, under the first run. featurizer
         # runs here; every feature-group subset is then a column PROJECTION of these same Parquet
         # files (ADR-0023) — no featurizer re-run, no projected copies. feature_names come from
@@ -1308,6 +1296,7 @@ def run_experiment(
                 target_history_lags=target_history_lags,
                 history_query=history_query,
                 history_series_width=history_series_width,
+                missing_label_fill=train_label_fill,
             )
             for split in splits
         ]

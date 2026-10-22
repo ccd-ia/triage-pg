@@ -114,6 +114,27 @@ def test_validate_broken_config_reports_path_addressed_errors(client):
     assert all(e["message"] for e in body["errors"])
 
 
+def test_validate_reports_unknown_problem_keys_and_a_bad_label_fill(client):
+    """#21: problem-block keys are checked, path-addressed, like every other error."""
+    c, _ = client
+    config = yaml.safe_load(CHI311_YAML.read_text(encoding="utf-8"))
+    config["cohort_config"]["filepath"] = "cohort.sql"
+    config["label_config"]["include_missing_labels_in_train_as"] = 0
+    r = c.post("/api/validate-config", json={"config": config}, headers=HEADERS)
+    body = r.json()
+    assert body["valid"] is False
+    paths = {e["path"] for e in body["errors"]}
+    assert paths == {
+        "cohort_config.filepath",
+        "label_config.include_missing_labels_in_train_as",
+    }
+
+    config["cohort_config"].pop("filepath")
+    config["label_config"]["include_missing_labels_in_train_as"] = False
+    r = c.post("/api/validate-config", json={"config": config}, headers=HEADERS)
+    assert r.json()["errors"] == []
+
+
 def test_validate_yaml_parse_error_is_a_verdict_not_a_500(client):
     c, _ = client
     r = c.post(

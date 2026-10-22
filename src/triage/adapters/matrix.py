@@ -758,6 +758,7 @@ def build_matrix(
     target_history_lags: int = 0,
     history_query: str | None = None,
     history_series_width: int = 0,
+    missing_label_fill: int | None = None,
 ) -> MatrixResult:
     """Assemble (or reuse) a Parquet design matrix and register it in the artifact DAG.
 
@@ -790,6 +791,9 @@ def build_matrix(
             for a test matrix — the leakage-boundary parent that carries the fitted stats.
         source_pins: declared-source → version pins (volatile if unpinned, ADR-0014).
         policy: cache lookup policy ('exact' default).
+        missing_label_fill: ``label_config.include_missing_labels_in_train_as`` resolved to
+            ``0``/``1`` (#21): the ``outcome`` written for a cohort row with no label. Train
+            matrices only. ``None`` keeps the NULL, and the fit drops the row.
 
     Returns:
         A :class:`MatrixResult` (the matrix + feature-group ids, storage uri, shape, the
@@ -808,6 +812,11 @@ def build_matrix(
         )
     if matrix_kind == "train" and train_matrix_artifact_id is not None:
         raise ValueError("a train matrix must not take a train_matrix parent")
+    if missing_label_fill is not None and matrix_kind != "train":
+        raise ValueError(
+            f"missing_label_fill applies to train matrices only, not {matrix_kind!r} — a"
+            + " filled test label would count an unlabeled row as a negative (#21)"
+        )
     if not as_of_dates:
         raise ValueError("build_matrix requires at least one as_of_date")
 
@@ -846,6 +855,10 @@ def build_matrix(
         "history_query": history_query,
         "history_series_width": history_series_width,
     }
+    # The train-label fill (#21) changes the Parquet's outcome column, so it is identity — but
+    # only when set: a matrix built without it hashes exactly as it did before the key existed.
+    if missing_label_fill is not None:
+        matrix_config["missing_label_fill"] = missing_label_fill
     matrix_parent_derivs = [fg_derivation, cohort_deriv, labels_deriv]
     if train_matrix_artifact_id is not None:
         matrix_parent_derivs.append(
@@ -934,6 +947,7 @@ def build_matrix(
             target_history_lags=target_history_lags,
             history_query=history_query,
             history_series_width=history_series_width,
+            missing_label_fill=missing_label_fill,
         )
         if not fg_built:
             mark_built(
@@ -1038,6 +1052,7 @@ def _assemble(
     target_history_lags: int = 0,
     history_query: str | None = None,
     history_series_width: int = 0,
+    missing_label_fill: int | None = None,
 ) -> MatrixResult:
     """The assembly itself: features ⋈ cohort ⋈ labels, impute, write Parquet."""
     import polars as pl
@@ -1066,6 +1081,17 @@ def _assemble(
     design = features.join(cohort, on=["entity_id", _AS_OF_COL], how="inner").join(
         labels, on=["entity_id", _AS_OF_COL], how="left"
     )
+    # include_missing_labels_in_train_as (#21, DSSG semantics): a train matrix may count its
+    # unlabeled rows as 0 or 1. build_matrix refuses the fill on any other kind of matrix.
+    if missing_label_fill is not None:
+        n_filled = design.get_column("outcome").null_count()
+        design = design.with_columns(
+            pl.col("outcome").fill_null(float(missing_label_fill))
+        )
+        logger.info(
+            f"Filled {n_filled} unlabeled train row(s) with {missing_label_fill}"
+            + " (label_config.include_missing_labels_in_train_as)"
+        )
 
     target_temporal_ix = _target_temporal_ix(featurizer_config)
     unmatched = _cohort_rows_without_features(cohort, features, as_of_dates)

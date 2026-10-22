@@ -161,6 +161,8 @@ def retrain(
             storage_root=storage_dir,
             source_pins=pins,
             policy=cache_policy,
+            # Same training target as the model being retrained (#21).
+            missing_label_fill=lineage.missing_label_fill,
         )
         # Project onto the group's fit geometry before fitting (#14). build_matrix returns every
         # column in BUILD order; without this the retrained estimator is fitted on a different

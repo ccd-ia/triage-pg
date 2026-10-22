@@ -66,6 +66,9 @@ class ModelLineage:
     label_config: dict[str, Any]  # carries 'query'
     problem_type: str
     source_pins: dict[str, str | None]
+    # include_missing_labels_in_train_as as the train matrix applied it (#21): 0, 1, or None
+    # (unlabeled rows dropped). Read from the matrix, because the labels config never has it.
+    missing_label_fill: int | None = None
 
 
 def matrix_result_from_uuid(db_engine: DictRowPool, matrix_uuid: Any) -> MatrixResult:
@@ -297,4 +300,5 @@ def reconstruct_model_lineage(
         label_config=dict(labels_artifact["config"]),
         problem_type=problem_type,
         source_pins=source_pins,
+        missing_label_fill=matrix_cfg.get("missing_label_fill"),
     )
