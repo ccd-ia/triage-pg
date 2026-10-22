@@ -805,3 +805,97 @@ def test_a_permanent_as_of_dates_table_survives_a_matrix_build(db_pool_greenfiel
     with engine.connection() as conn:
         found = conn.execute("select to_regclass('public.as_of_dates') as t").fetchone()
     assert found is not None and found["t"] is not None
+
+
+# v1.2.1's train-matrix identity keys. A matrix built without the label fill must hash from
+# exactly these, so no existing matrix id moves when include_missing_labels_in_train_as ships.
+_V121_MATRIX_IDENTITY_KEYS = {
+    "temporal_config",
+    "feature_group",
+    "imputation_policy",
+    "matrix_kind",
+    "label_timespan",
+    "as_of_dates",
+    "lookback",
+    "target_history_lags",
+    "history_query",
+    "history_series_width",
+}
+
+
+def _matrix_artifact_config(engine, artifact_id) -> dict[str, Any]:
+    with engine.connection() as conn:
+        return conn.execute(
+            "select config from triage.artifacts where artifact_id = %(a)s",
+            {"a": artifact_id},
+        ).fetchone()["config"]
+
+
+def test_missing_label_fill_reaches_the_train_matrix_only(db_pool_greenfield, tmp_path):
+    """#21, DSSG's include_missing_labels_in_train_as: a train matrix may count its unlabeled
+    rows as 0 or 1; the test matrix keeps them NULL, and so does a train matrix without it."""
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    with (
+        engine.connection() as conn
+    ):  # entity 2 is never "inspected": no label in any window
+        conn.execute("delete from label_src where entity_id = 2")
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF, TEST_AS_OF])
+    policy = ImputationPolicy.model_validate(
+        {"all": {"type": "zero"}, "mean": {"type": "mean"}}
+    )
+    pins = {"customers": "v1", "orders": "v1", "label_src": "v1"}
+
+    def build(kind, as_of, fill=None, parent=None):
+        return build_matrix(
+            engine,
+            run_id,
+            featurizer_config=_featurizer_config(),
+            cohort_artifact_id=cohort,
+            labels_artifact_id=labels,
+            temporal_config=_temporal_config(),
+            imputation_policy=policy,
+            matrix_kind=kind,
+            as_of_dates=[as_of],
+            label_timespan=LABEL_TIMESPAN,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "matrices"),
+            train_matrix_artifact_id=parent,
+            source_pins=pins,
+            missing_label_fill=fill,
+        )
+
+    def outcomes(result) -> dict[int, float | None]:
+        frame = pl.read_parquet(result.storage_uri)
+        return dict(zip(frame["entity_id"].to_list(), frame["outcome"].to_list()))
+
+    dropped = build("train", TRAIN_AS_OF)
+    as_zero = build("train", TRAIN_AS_OF, fill=0)
+    as_one = build("train", TRAIN_AS_OF, fill=1)
+    test = build("test", TEST_AS_OF, parent=as_zero.matrix_artifact_id)
+
+    assert outcomes(dropped) == {1: 1.0, 2: None, 3: 1.0}
+    assert outcomes(as_zero) == {1: 1.0, 2: 0.0, 3: 1.0}
+    assert outcomes(as_one) == {1: 1.0, 2: 1.0, 3: 1.0}
+    assert outcomes(test)[2] is None  # evaluation must never see a filled label
+
+    # Identity: the fill is part of a train matrix only when set.
+    ids = {m.matrix_artifact_id for m in (dropped, as_zero, as_one)}
+    assert len(ids) == 3
+    assert set(_matrix_artifact_config(engine, dropped.matrix_artifact_id)) == (
+        _V121_MATRIX_IDENTITY_KEYS
+    )
+    assert (
+        _matrix_artifact_config(engine, as_zero.matrix_artifact_id)[
+            "missing_label_fill"
+        ]
+        == 0
+    )
+
+    for kind, parent in (
+        ("test", as_zero.matrix_artifact_id),
+        ("production", as_zero.matrix_artifact_id),
+    ):
+        with pytest.raises(ValueError, match="train matrices only"):
+            build(kind, TEST_AS_OF, fill=0, parent=parent)

@@ -8,8 +8,10 @@ matrices, and a grid × split of models scored + evaluated.
 
 import json
 import os
+from datetime import date
 from typing import Any
 
+import polars as pl
 import pytest
 
 from triage.adapters.feature_groups import mix_strategies, partition_features
@@ -674,3 +676,110 @@ def test_run_refuses_a_baseline_pinned_to_a_column_that_does_not_exist(
     message = str(excinfo.value)
     assert "does not produce" in message
     assert message.count("COUNT(orders.does_not_exist)") == 1
+
+
+@pytest.mark.parametrize(
+    ("block", "key"),
+    [
+        ("label_config", "include_missing_label_in_train_as"),  # a typo of the DSSG key
+        ("cohort_config", "filepath"),  # a DSSG key triage-pg never read
+    ],
+)
+def test_run_refuses_an_unknown_problem_key_before_anything_is_built(
+    db_pool_greenfield, tmp_path, block, key
+):
+    """#21: an unknown key in a problem block moved identity and did nothing else."""
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    config = _experiment_config()
+    config[block] = {**config[block], key: False}
+
+    with pytest.raises(ValueError, match=f"unknown key '{key}'"):
+        run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "store"),
+            random_seed=42,
+        )
+
+    with engine.connection() as conn:
+        for table in ("experiments", "runs", "cohorts", "labels", "matrices"):
+            n = conn.execute(f"select count(*) as n from triage.{table}").fetchone()[
+                "n"
+            ]
+            assert n == 0, f"triage.{table} was written before the refusal"
+
+
+def test_the_train_label_fill_moves_only_what_it_changes(db_pool_greenfield, tmp_path):
+    """#21: include_missing_labels_in_train_as is a training choice. The labels rows are the
+    same either way, so the labels id must not move; the train matrices differ, and so does
+    the experiment (model groups do not hash the training target, so a shared experiment would
+    mix the two in audition). A test matrix's id chains over its train parent (ADR-0009), so it
+    moves too — but its rows, unlabeled NULLs included, are identical. Retrain reproduces the
+    fill."""
+    from triage.adapters.lineage import reconstruct_model_lineage
+    from triage.adapters.retrain import retrain
+
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    with (
+        engine.connection() as conn
+    ):  # two never-labeled customers, one of each class left
+        conn.execute("delete from label_src where entity_id in (3, 6)")
+    storage = str(tmp_path / "store")
+
+    def run(config):
+        return run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=storage,
+            random_seed=42,
+        )
+
+    plain = run(_experiment_config())
+    filled_config = _experiment_config()
+    filled_config["label_config"] = {
+        **filled_config["label_config"],
+        "include_missing_labels_in_train_as": False,
+    }
+    filled = run(filled_config)
+
+    assert filled.labels_artifact_id == plain.labels_artifact_id
+    assert filled.experiment_hash != plain.experiment_hash
+    plain_splits, filled_splits = plain.runs[0].splits, filled.runs[0].splits
+    for p, f in zip(plain_splits, filled_splits, strict=True):
+        assert f.train_matrix.matrix_artifact_id != p.train_matrix.matrix_artifact_id
+        plain_test = pl.read_parquet(p.test_matrix.storage_uri)
+        assert plain_test["outcome"].null_count() > 0
+        assert pl.read_parquet(f.test_matrix.storage_uri).equals(plain_test)
+        plain_outcome = pl.read_parquet(p.train_matrix.storage_uri)["outcome"]
+        filled_outcome = pl.read_parquet(f.train_matrix.storage_uri)["outcome"]
+        assert plain_outcome.null_count() > 0
+        assert filled_outcome.null_count() == 0
+        assert (filled_outcome == 0.0).sum() == (
+            plain_outcome.null_count() + (plain_outcome == 0.0).sum()
+        )
+
+    filled_model = filled_splits[0].model_ids[0]
+    assert reconstruct_model_lineage(engine, filled_model).missing_label_fill == 0
+    assert (
+        reconstruct_model_lineage(
+            engine, plain_splits[0].model_ids[0]
+        ).missing_label_fill
+        is None
+    )
+
+    with engine.connection() as conn:
+        group_id = conn.execute(
+            "select model_group_id from triage.models where model_id = %(m)s",
+            {"m": filled_model},
+        ).fetchone()["model_group_id"]
+    retrained = retrain(engine, group_id, date(2014, 10, 1), storage_dir=storage)
+    with engine.connection() as conn:
+        config = conn.execute(
+            "select config from triage.artifacts where artifact_id = %(a)s",
+            {"a": retrained.train_matrix_artifact_id},
+        ).fetchone()["config"]
+    assert config["missing_label_fill"] == 0
