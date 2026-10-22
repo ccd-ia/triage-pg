@@ -914,7 +914,8 @@ def score_and_evaluate(
             set (precision@/recall@ + auc_roc + average_precision).
         subset_hash: subset discriminator for THIS evaluation pass — since migration
             0015 it both filters (ranks recomputed within the subset population) and
-            stamps the rows. ``''`` = the full labeled cohort.
+            stamps the rows. ``''`` = the full cohort. A top-k cut ranks every scored
+            row, labeled or not, and the metric counts the labeled ones (ADR-0033).
         subset_hashes: additional subsets to evaluate AFTER the ``subset_hash`` pass —
             one extra evaluation row-set per (eval date × subset), same append-only
             shape (the ``evaluation.subsets`` config, materialized by

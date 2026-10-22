@@ -28,11 +28,18 @@ _TOP_CONTRIBUTIONS = 10
 
 
 def _labeled_ranks(db_engine, model_id, split_kind, date, timespan):
+    """The labeled rows, each with its rank among ALL scored rows (ADR-0033).
+
+    ``top_k_entities``' k is a cut over the whole population, so the rank compared with it
+    must be a population rank too — a rank among labeled rows only would shift the cut
+    wherever unlabeled rows sit above it.
+    """
     with db_engine.connection() as conn:
         return conn.execute(
             "select entity_id, rank_abs, outcome"
-            " from triage.labeled_ranks(%(m)s, cast(%(s)s as triage.split_kind),"
-            "        cast(%(d)s as date), cast(%(t)s as interval))",
+            " from triage.population_ranks(%(m)s, cast(%(s)s as triage.split_kind),"
+            "        cast(%(d)s as date), cast(%(t)s as interval))"
+            " where outcome is not null",
             {"m": model_id, "s": split_kind, "d": str(date), "t": timespan},
         ).fetchall()
 
