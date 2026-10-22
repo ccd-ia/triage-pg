@@ -33,22 +33,24 @@ Set `bias_config.intervention` to preseed it.
 
 ## The metrics (exactly as the SQL computes them)
 
-For each protected group at the top-k cut (`selected` = `rank_abs <= k`), with
-`tp/fp/fn/tn` counted inside the group and `group_pos`/`group_neg` the group's
-labeled positives/negatives:
+For each protected group at the top-k cut (`selected` = `rank_abs <= k`, where
+`rank_abs` ranks every scored row, labeled or not — ADR-0033), with `tp/fp/fn/tn`
+counted over the group's **labeled** rows and `group_pos`/`group_neg` the group's
+labeled positives/negatives. `group_size`, `num_selected` and `selection_rate`
+count every row, because selection does not depend on a label:
 
 | Metric | Formula | Reads as |
 |---|---|---|
 | `group_size` | count | — (no disparity) |
 | `num_selected` | count selected | — (no disparity) |
 | `selection_rate` | `num_selected / group_size` | how much of the group gets picked |
-| `precision` | `tp / num_selected` | correctness among the group's selected |
+| `precision` | `tp / (tp + fp)` | correctness among the group's labeled selected |
 | `tpr` | `tp / group_pos` | recall: positives caught |
 | `fpr` | `fp / group_neg` | innocents wrongly flagged |
-| `fdr` | `fp / num_selected` | wrong flags among those acted on |
+| `fdr` | `fp / (tp + fp)` | wrong flags among the labeled ones acted on |
 | `fnr` | `fn / group_pos` | positives missed |
-| `for` | `fn / (group_size − num_selected)` | need among the passed-over |
-| `npv` | `tn / (group_size − num_selected)` | correct clearances among the passed-over |
+| `for` | `fn / (fn + tn)` | need among the labeled passed-over |
+| `npv` | `tn / (fn + tn)` | correct clearances among the labeled passed-over |
 
 Every rate carries a **disparity** = group value ÷ reference-group value, and a
 **fairness verdict**: `passes_fairness` = disparity ∈ [τ, 1/τ] (`tau`, default 0.8 —

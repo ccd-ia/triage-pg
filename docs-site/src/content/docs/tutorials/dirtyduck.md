@@ -91,10 +91,14 @@ in the config), and it shows up everywhere downstream:
 - **~54% labeled** — the %-labeled card carries the "selective labels —
   <100% expected" note instead of an alarm;
 - **base rate 0.277** — *among inspected facilities*, 28% fail;
-- training and evaluation use only labeled rows, so the model learns
-  "conditional on being the kind of place that gets inspected…" — with all
-  the selection bias that implies. (Inspections aren't random: complaints,
-  risk schedules, and history drive who gets visited.)
+- training uses only labeled rows, so the model learns "conditional on
+  being the kind of place that gets inspected…" — with all the selection bias
+  that implies. (Inspections aren't random: complaints, risk schedules, and
+  history drive who gets visited.)
+- evaluation ranks **every** active facility and cuts the list at k, as the
+  inspectors would, then measures precision over the inspected ones inside
+  the cut. `num_labeled_above_threshold` says how many labels a precision@k
+  rests on (ADR-0033).
 
 ### Formulation 2 — early warning (the EIS twin)
 
