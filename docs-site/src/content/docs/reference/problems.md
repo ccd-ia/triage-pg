@@ -367,6 +367,22 @@ the scarce resource. Fairness auditing matters most here (the intervention is
 often a burden — the fairness tree's "punitive" branch), and next period's
 labels will come from whomever you chose.
 
+**How the pipeline treats the missing labels.** An entity the label query
+returns no row for keeps a NULL label, and nothing turns it into a 0:
+
+- *Training* fits on the labeled rows only. To fit on all of them, set
+  `label_config.include_missing_labels_in_train_as` (`false` counts an
+  unlabeled row as 0, `true` as 1). It changes the train matrices only.
+  [Configuration](/triage-pg/reference/configuration/#entities-with-no-label-include_missing_labels_in_train_as)
+  has the table.
+- *Evaluation* ranks every entity in the cohort, because that is the list you
+  act on, cuts it at k, and computes precision over the inspected entities
+  inside the cut. `num_labeled_above_threshold` says how many there were
+  ([evaluation](/triage-pg/reference/evaluation/), ADR-0033).
+- Do **not** write `coalesce(…, 0)` into this regime's label query to "fill" the
+  gaps. That is the early-warning query above, and it turns every uninspected
+  entity into a pass in the test labels too.
+
 **Config + example.**
 
 ```yaml

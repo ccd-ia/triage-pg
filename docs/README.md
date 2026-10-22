@@ -88,3 +88,10 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0026](adr/0026-survival-estimators-and-c-index.md) Survival: scikit-survival estimators, C-index in PL/pgSQL
 - [0027](adr/0027-monitoring-architecture.md) Monitoring: external scheduler → CLI; drift as SQL over append-only predictions
 - [0028](adr/0028-oidc-auth-backend.md) Real webapp auth: in-app OIDC Authorization Code flow
+- [0029](adr/0029-cloud-validation-self-contained-rds-iam.md) Cloud validation on triage-pg's own RDS + IAM
+
+**Post-v1 decisions**
+- [0030](adr/0030-target-history-point-in-time-path.md) Target-history point-in-time path (two shapes, one leakage boundary)
+- [0031](adr/0031-shap-treeshap-on-demand-individual-importances.md) SHAP is TreeSHAP-only, on demand (milestone v1.4.0)
+- [0032](adr/0032-forward-scoring-cohort.md) A separate, identity-neutral cohort for forward scoring
+- [0033](adr/0033-threshold-metrics-rank-the-full-population.md) Threshold metrics rank the full population; metrics count the labeled rows

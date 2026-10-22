@@ -217,26 +217,34 @@ grid_config:
     rules: [['COUNT(inspections.result) > 5']]
 ```
 
-Read the **gap** on the leaderboard (per-algorithm averages across the 4 splits):
+Read the **gap** on the leaderboard (per-algorithm averages across the 4 splits;
+the last column is how many of the top 100 were actually inspected, i.e. how
+many labels the precision rests on):
 
-| model | precision@100 | AUC |
-| --- | --- | --- |
-| `BaselineRankMultiFeature` (heuristic) | **0.403** | 0.546 |
-| ScaledLogisticRegression | 0.388 | **0.584** |
-| `SimpleThresholder` (heuristic) | 0.340 | 0.517 |
-| RandomForestClassifier | 0.338 | 0.568 |
-| DecisionTreeClassifier | 0.335 | 0.561 |
-| `DummyClassifier` (constant floor) | 0.260 | 0.500 |
+| model | precision@100 | AUC | labeled in top 100 |
+| --- | --- | --- | --- |
+| ScaledLogisticRegression | **0.405** | **0.584** | 59 |
+| `BaselineRankMultiFeature` (heuristic) | 0.376 | 0.546 | 67 |
+| DecisionTreeClassifier | 0.369 | 0.561 | 48 |
+| `SimpleThresholder` (heuristic) | 0.364 | 0.517 | 60 |
+| RandomForestClassifier | 0.352 | 0.568 | 65 |
+| `DummyClassifier` (constant floor) | 0.295 | 0.500 | 56 |
 
 Two floors, two lessons. Every real model clears the constant-prior
-`DummyClassifier` (0.260 / 0.500), so the features carry signal. But the
-DSSG-original `BaselineRankMultiFeature` — which does nothing but rank facilities
-by their prior inspection count — actually **edges out the ML on precision@100**
-(0.403 vs 0.388). The model only pulls ahead on **AUC** (0.584 vs 0.546): it
-ranks the *whole list* better, not its top. That is the honest verdict these
-heuristic baselines exist to deliver — at the operational top-k, "sort by the
-obvious column" is hard to beat here, and the ML earns its complexity in overall
-ranking quality, not at precision@100.
+`DummyClassifier` (0.295 / 0.500), so the features carry signal. The
+DSSG-original `BaselineRankMultiFeature`, which only ranks facilities by their
+prior inspection count, is the harder floor: it beats the decision tree and
+the random forest at precision@100, and only the logistic regression clears it
+on both metrics (0.405 vs 0.376, AUC 0.584 vs 0.546). At the operational top-k,
+"sort by the obvious column" is close to what most of the ML delivers here.
+
+Mind the last column. The heuristic puts the most-inspected facilities on top,
+so 67 of its 100 have a label; the logistic regression's list holds more
+facilities nobody inspected, and its precision rests on 59 labels. Before
+v1.3.0, triage-pg ranked only the inspected facilities and this table read the
+other way round (heuristic 0.403, logistic regression 0.388). That ranking left
+out every uninspected facility the model would have sent an inspector to. See
+[evaluation](/triage-pg/reference/evaluation/) and ADR-0033.
 
 The **regression** variant (`experiment-regression.yaml`) tells the opposite,
 equally useful story. It ships **time-series** baselines that forecast each

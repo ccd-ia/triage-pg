@@ -185,21 +185,23 @@ two opposite — and equally useful — verdicts:
 ```
 classification (experiment.yaml)              regression (experiment-regression.yaml)
 model                        prec@100  AUC     model            RMSE  pinball@0.95
-BaselineRankMultiFeature        0.403  0.546   Ridge            4.325     1.358
-ScaledLogisticRegression        0.388  0.584   DummyRegressor   4.462     1.675
-SimpleThresholder               0.340  0.517   Persistence      5.332     1.585
-RandomForestClassifier          0.338  0.568
-DecisionTreeClassifier          0.335  0.561
-DummyClassifier (floor)         0.260  0.500
+ScaledLogisticRegression        0.405  0.584   Ridge            4.325     1.358
+BaselineRankMultiFeature        0.376  0.546   DummyRegressor   4.462     1.675
+DecisionTreeClassifier          0.369  0.561   Persistence      5.332     1.585
+SimpleThresholder               0.364  0.517
+RandomForestClassifier          0.352  0.568
+DummyClassifier (floor)         0.295  0.500
 ```
 
 Classification tells the subtler story. Every model clears the constant-prior
-`DummyClassifier` (0.260 / 0.500), so the features carry signal — but the
+`DummyClassifier` (0.295 / 0.500), so the features carry signal — but the
 DSSG-original `BaselineRankMultiFeature`, which does nothing but rank facilities
-by their prior inspection count, **beats the ML on precision@100** (0.403 vs
-0.388). The model only wins on **AUC** (0.584 vs 0.546): it ranks the whole list
-better, not the operational top-k. That is exactly the humility these heuristic
-floors are for. Regression's Ridge barely beats the constant floor (4.325 vs
+by their prior inspection count, **beats the tree and the forest on
+precision@100** (0.376 vs 0.369 and 0.352). Only the logistic regression clears
+it on both metrics (0.405 vs 0.376, AUC 0.584 vs 0.546). That is exactly the
+humility these heuristic floors are for. (Precision@k ranks every facility and
+counts the inspected ones in the cut, ADR-0033; before v1.3.0 this table ranked
+only inspected facilities and put the heuristic first.) Regression's Ridge barely beats the constant floor (4.325 vs
 4.462) and the time-series baselines are *worse* — the target's own history isn't
 predictive here, so the ML earns very little. Note the quantile nuance: at the
 0.95 tail Ridge (1.358) beats the `DummyRegressor` (1.675), even though the dummy
