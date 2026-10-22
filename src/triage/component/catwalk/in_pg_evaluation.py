@@ -88,7 +88,8 @@ def evaluate_in_db(
             "regression_metrics": [...]}``. Defaults to the classification set.
         subset_hash (str): subset discriminator — since migration 0015 it FILTERS
             (metrics treat the subset as the population, ranks recomputed within it)
-            and stamps the rows. ``''`` = the full labeled cohort.
+            and stamps the rows. ``''`` = the full cohort. A top-k cut ranks every scored
+            row, labeled or not, and the metric counts the labeled ones (ADR-0033).
 
     Returns:
         int: number of evaluation rows written.

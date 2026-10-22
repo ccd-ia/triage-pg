@@ -9,6 +9,8 @@ suite, which now records a positive duration on every built model).
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import pytest
 
 AS_OF = "2014-01-01"
@@ -156,7 +158,7 @@ POSITIVE = {1, 2, 6, 7}  # e1,e2 caught; e6,e7 missed (FN); e3,e4,e5 wrong flags
 ERRORY = {3, 4, 5, 6, 7}
 
 
-def _seed_matrix_model(pool, tmp_path):
+def _seed_matrix_model(pool, tmp_path, unlabeled: Collection[int] = ()):
     import polars as pl
 
     from triage.adapters.model import as_uuid
@@ -213,6 +215,8 @@ def _seed_matrix_model(pool, tmp_path):
                     "u": matrix_uuid,
                 },
             )
+            if eid in unlabeled:
+                continue
             conn.execute(
                 "insert into triage.labels"
                 " (label_hash, entity_id, as_of_date, label_timespan, outcome)"
@@ -276,6 +280,30 @@ def test_error_tree_recovers_the_planted_rule(db_pool_greenfield, tmp_path):
     assert "f_sep >" in top_fn["rule"]
     assert top_fn["n_matched"] == 2 and top_fn["n_errors"] == 2
     assert top_fn["error_rate"] == pytest.approx(1.0)
+
+
+def test_error_tree_cuts_at_the_population_rank(db_pool_greenfield, tmp_path):
+    """#21: e1 has no label but is still the best-scored row, so the 5_abs cut is e1..e5 and
+    the labeled rows inside it are e2..e5. A rank among labeled rows only would pull e6 — a
+    missed positive — into the selection, diluting the fp rule and hiding one fn."""
+    from triage.diagnostics import compute_error_analysis
+
+    model_id = _seed_matrix_model(db_pool_greenfield, tmp_path, unlabeled={1})
+    compute_error_analysis(
+        db_pool_greenfield, model_id, parameter="5_abs", max_depth=2, min_samples_leaf=1
+    )
+    with db_pool_greenfield.connection() as conn:
+        rows = conn.execute(
+            "select error_kind, n_matched, n_errors, error_rate"
+            " from triage.error_analysis where model_id = %(m)s"
+            " order by error_kind, error_rate desc",
+            {"m": model_id},
+        ).fetchall()
+    fp = [r for r in rows if r["error_kind"] == "fp"]
+    fn = [r for r in rows if r["error_kind"] == "fn"]
+    assert sum(r["n_matched"] for r in fp) == 4  # e2..e5
+    assert (fp[0]["n_matched"], fp[0]["n_errors"]) == (3, 3)
+    assert (fn[0]["n_matched"], fn[0]["n_errors"]) == (2, 2)  # e6 and e7
 
 
 def test_linear_contributions_persisted_for_selected(db_pool_greenfield, tmp_path):
