@@ -7,11 +7,15 @@
   implemented, so they get table rows now, alongside the ADRs written after
   the audit (0029 cloud-validation target, 0030 target-history path, 0031 SHAP
   scope — written and audited the same day).
+- Updated: 2026-10-23 — extended through ADR-0033: 0032 (forward-scoring cohort,
+  v1.2.0) and 0033 (threshold metrics over the full population, v1.3.0). The 0031
+  gate was re-checked and still holds.
 - Auditor: claude-fable-5 (Claude Code), per `specs/triage-pg-v1-completion.html` Phase 1
 - Method: every ADR re-read against the tree at `76eb46fc`; evidence spot-verified by
   running the cited greps/tests, not by trusting status lines. The full suite was run
   green at the end of the audit (see Verification at the bottom). The 2026-08-07 rows
-  were verified the same way against the tree at `81d17111`.
+  were verified the same way against the tree at `81d17111`, and the 2026-10-23 rows
+  against `d159037f` (v1.3.0).
 
 Verdicts: **fulfilled** (implemented + evidence verified) · **partial** (a named gap
 remains) · **holding** (a deliberate deferral that still holds) · **code-complete,
@@ -49,7 +53,9 @@ unexercised** (built + mock-tested, never run against the real environment).
 | 0028 | OIDC behind the AuthBackend seam | fulfilled (2026-08-07) | `dashboard/oidc.py` (`TRIAGE_AUTH=oidc`, 401-with-login_url for the SPA, logout); `dashboard_tests/test_oidc.py` — 9 stub-IdP tests, re-run green for this audit |
 | 0029 | Cloud validation on triage-pg's own RDS + IAM, not shared egobytp | fulfilled (2026-08-07) | Self-contained footprint: `infra/terraform/{rds,iam,batch,ecr,endpoints,s3}.tf`; `token_provider` seam in `profiles/auth.py` (ADR-0004) unchanged, as the ADR requires. The validation it records ran 2026-07-19: live Batch E2E succeeded (20 models / 268,860 predictions / 120 evaluations into the `cloudtest` RDS), then the footprint was torn down (23 triage-only resources; no tfstate/tfplan tracked in git). The standing-posture question (shared RDS + SET ROLE) remains deliberately deferred per the ADR's own Consequences — that is conformance, not a gap |
 | 0030 | Target-history path: two shapes, one leakage boundary | fulfilled (2026-08-07) | `adapters/target_history.py` (windowed-label lags `t + w ≤ as_of_date` + optional `history_query` raw series `knowledge_date < as_of_date`); reserved `_target_lag_*`/`_hist_*` columns excluded from features, encoding, and both imputation passes (`adapters/matrix.py`, `adapters/model.py`); consumed by `catwalk/baselines/timeseries.py`; leak boundaries tested in `adapter_tests/test_target_history.py` (7 tests) + `test_target_history_seam.py` (4) |
-| 0031 | SHAP scope (v1.4.0; was v1.3.0, v1.2.0): TreeSHAP-only, on demand, into `individual_importances` | holding (2026-08-07) | Scope-only ADR written 2026-08-07; deliberately no implementation yet (that is the v1.4.0 plan's job). Conformance today = the gate held: no SHAP code in the tree, `shap` not in `pyproject.toml`, no changes under `catwalk/` |
+| 0031 | SHAP scope (v1.4.0; was v1.3.0, v1.2.0): TreeSHAP-only, on demand, into `individual_importances` | holding (2026-08-07; re-checked 2026-10-23) | Scope-only ADR written 2026-08-07; deliberately no implementation yet (that is the v1.4.0 plan's job). Conformance today = the gate held: no SHAP code in the tree, `shap` not in `pyproject.toml`, no changes under `catwalk/` |
+| 0032 | A separate, identity-neutral cohort for forward scoring (`cohort_config.forward_query`) | fulfilled (2026-10-23) | `_COHORT_IDENTITY_NEUTRAL_KEYS` strips the key in `_problem_identity` (`adapters/run.py`), so adding it keeps the `experiment_hash`; precedence `--cohort-query` → `forward_query` → training `query` in `adapters/forward.py`; `triage score` / `predictlist` take `--cohort-query PATH`, refused when missing, empty or without `{as_of_date}` (`cli.py`); the placeholder rule is enforced by `adapters/problem_config.py` (since v1.3.0, where `forward_query` is also the one extra key `cohort_config` accepts); `adapter_tests/test_forward_cohort.py` — 8 tests, re-run green |
+| 0033 | Threshold metrics rank the full population; metrics count the labeled rows | fulfilled (2026-10-23) | Migration `0024_population_topk.py`: `triage.population_ranks` (left join to labels, same pin as `labeled_ranks`) under `precision_at_k`, `recall_at_k`, `compute_bias_metrics`, `model_threshold_curve`; `diagnostics/error_tree.py` compares population ranks with the population k; `evaluations.num_labeled_above_threshold`; rank-free metrics stay on `labeled_ranks`. `catwalk_tests/test_population_topk.py` — 28 tests (DSSG-reference parity, exact random-ranking std, tie-bound brute force, 0024 round trip and recompute), re-run green; `test_diagnostics.py::test_error_tree_cuts_at_the_population_rank`. Live: DirtyDuck 1,048 rows recomputed, 0 skipped, max diff from a DSSG reference 0; Chicago 311 + DonorsChoose (fully labeled) 0 of 416 rows moved |
 
 ## Contradiction found (1)
 
