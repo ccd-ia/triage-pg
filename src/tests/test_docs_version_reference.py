@@ -255,3 +255,25 @@ def test_package_version_matches_pyproject():
         f"pyproject.toml says {pyproject['project']['version']},"
         f" triage.__version__ says {triage.__version__}"
     )
+
+
+def test_citation_cff_names_only_the_concept_doi():
+    """A release cannot carry its own version DOI: Zenodo mints it after the release.
+
+    The v1.1.6 DOI was recorded by a follow-up commit; v1.2.0, v1.2.1 and v1.3.0 then
+    shipped `version: 1.x` next to "Version 1.1.6", and the archives keep it. Only the
+    concept DOI is true in every release (it resolves to the latest version, and the
+    Zenodo record lists every version DOI).
+    """
+    cff = _cff()
+    concept = cff["doi"]
+    other = [
+        i["value"]
+        for i in cff.get("identifiers", [])
+        if i.get("type") == "doi" and i["value"] != concept
+    ]
+    assert not other, (
+        f"CITATION.cff names DOIs other than the concept DOI {concept}: {other}."
+        " A version DOI is minted after its release, so any copy shipped in a"
+        " release names an older version."
+    )
