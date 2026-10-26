@@ -28,7 +28,8 @@ the unmodified `Timechop` engine (`src/triage/component/timechop/timechop.py`). 
 
 ### 1.2 Fields
 
-The eleven inherited keys, with types. Dates are `YYYY-MM-DD`. Intervals are Postgres
+The eleven inherited keys, with types. `TemporalConfig` (`src/triage/adapters/temporal.py`)
+requires all eleven, and none has a default. Dates are `YYYY-MM-DD`. Intervals are Postgres
 interval strings (`'6month'`, `'1 day'`, `'2years'`, `'0day'`); the six list-valued fields
 accept a single interval **or** a list of them.
 
