@@ -795,3 +795,48 @@ def test_stream_forwards_notify(seeded, db_pool_greenfield):
     payload = json.loads(data_frames[-1].split("data: ", 1)[1].strip())
     assert payload["run_id"] == run_id
     assert payload["kind"] == "model"
+
+
+def test_model_predictions_read_labels_at_the_scored_horizon(
+    client, db_pool_greenfield
+):
+    """The predicted list labels each row as its evaluation did, not at the training horizon."""
+    from tests.catwalk_tests.test_population_topk import (
+        ENTITY_IDS,
+        LABELS,
+        SCORES,
+        _link_run,
+        _seed,
+    )
+
+    pool = db_pool_greenfield
+    model_id = _seed(pool, SCORES, LABELS, ENTITY_IDS)
+    _link_run(pool, model_id)
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.models set training_label_timespan = interval '1 year'"
+            " where model_id = %(m)s",
+            {"m": model_id},
+        )
+        # a forward score at the test date belongs to another list
+        conn.execute(
+            "insert into triage.predictions (model_id, entity_id, as_of_date, split_kind,"
+            " score) values (%(m)s, 99, date '2014-01-01', 'production', 0.99)",
+            {"m": model_id},
+        )
+
+    body = client.get(
+        f"/api/models/{model_id}/predictions", params={"limit": 100}
+    ).json()
+    assert body["total"] == len(SCORES)
+    outcomes = {r["entity_id"]: r["outcome"] for r in body["rows"]}
+    assert outcomes == {
+        e: (None if label is None else float(label))
+        for e, label in zip(ENTITY_IDS, LABELS, strict=True)
+    }
+
+    forward = client.get(
+        f"/api/models/{model_id}/predictions", params={"split_kind": "production"}
+    ).json()
+    assert forward["total"] == 1
+    assert [(r["entity_id"], r["rank_abs"]) for r in forward["rows"]] == [(99, 1)]
