@@ -119,6 +119,19 @@ rows tied at the cutoff, not a sort convention.
 Rank-free metrics (AUC, average precision, Brier, log loss, ECE, the regression
 metrics, the C-index) use the labeled rows only, as before.
 
+The dashboard's threshold curve is one test date:
+`triage.model_threshold_curve(model_id, as_of_date)`, or the model's latest test
+date when `as_of_date` is NULL. It reads the same population ranks, labels
+artifact and label horizon as `precision@`, so the curve at k is the stored
+`precision@k_abs` (migration 0025, v1.3.1). The label horizon is the scored test
+matrix's `label_timespan`, which need not equal the model's training horizon.
+
+The predicted list and the score histogram read their labels the same way,
+through `triage.scored_labels(model_id, split_kind)` (migration 0026, v1.3.2):
+one row per latest score in that split, labeled from the scored matrix's labels
+artifact. A date whose predictions have no matrix lineage falls back to the
+training horizon and the run's labels artifact.
+
 ## Two surfaces, two grains
 
 The CLI serves both grains, and they answer different questions:
