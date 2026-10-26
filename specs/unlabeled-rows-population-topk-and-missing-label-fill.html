@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: Unlabeled rows — population top-k, missing-label fill, strict label/cohort keys (#21)</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:        #fbfbfa;
+    --surface:   #ffffff;
+    --surface-2: #f3f4f2;
+    --ink:       #1b1d1a;
+    --ink-muted: #5c6159;
+    --rule:      #dcdfd8;
+    --accent:    #2f6f4f;   /* triage green: labeled rows, new behaviour */
+    --accent-2:  #8a5a2b;   /* unlabeled rows, divergence */
+    --danger:    #a8321f;
+    --ok:        #2f6f4f;
+    --code-bg:   #f3f4f2;
+    --mono: "SF Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --measure: 74ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14161a;
+      --surface:   #1b1e23;
+      --surface-2: #22262c;
+      --ink:       #e6e8e3;
+      --ink-muted: #9aa196;
+      --rule:      #31363e;
+      --accent:    #6bbd90;
+      --accent-2:  #d3a163;
+      --danger:    #e2705c;
+      --ok:        #6bbd90;
+      --code-bg:   #22262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #14161a;
+    --surface:   #1b1e23;
+    --surface-2: #22262c;
+    --ink:       #e6e8e3;
+    --ink-muted: #9aa196;
+    --rule:      #31363e;
+    --accent:    #6bbd90;
+    --accent-2:  #d3a163;
+    --danger:    #e2705c;
+    --ok:        #6bbd90;
+    --code-bg:   #22262c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 68rem; margin: 0 auto; padding: 3rem 16px 6rem; }
+
+  h1 { font-size: 1.95rem; line-height: 1.22; letter-spacing: -0.02em; margin: 0 0 .5rem; font-weight: 640; }
+  h2 {
+    font-size: 1.28rem; letter-spacing: -0.01em; font-weight: 620;
+    margin: 3.2rem 0 .9rem; padding-bottom: .4rem; border-bottom: 1px solid var(--rule);
+  }
+  h3 { font-size: 1.06rem; font-weight: 620; margin: 2rem 0 .6rem; }
+  h4 { font-size: .95rem; font-weight: 620; margin: 1.4rem 0 .4rem; color: var(--ink); }
+  p  { max-width: var(--measure); margin: 0 0 1rem; }
+  a  { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  code {
+    font-family: var(--mono); font-size: .855em;
+    background: var(--code-bg); border: 1px solid var(--rule);
+    border-radius: 4px; padding: .08em .34em;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; font-size: .82rem; line-height: 1.55;
+    font-family: var(--mono); margin: 0 0 1.1rem;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 1em; }
+
+  header .meta { margin: 1.2rem 0 0; font-size: .86rem; }
+  header .meta summary { cursor: pointer; color: var(--ink-muted); }
+  header .meta dl {
+    display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1.1rem;
+    margin: .7rem 0 0; padding: .9rem 1rem;
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  }
+  header .meta dt { color: var(--ink-muted); font-family: var(--mono); font-size: .8rem; }
+  header .meta dd { margin: 0; font-family: var(--mono); font-size: .8rem; word-break: break-word; }
+
+  .lede { font-size: 1.04rem; color: var(--ink-muted); max-width: var(--measure); }
+
+  figure { margin: 1.8rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    font-size: .84rem; color: var(--ink-muted); margin-top: .7rem;
+    max-width: 62ch; margin-left: auto; margin-right: auto;
+  }
+
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: .68rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: .1em .45em; border-radius: 4px; border: 1px solid var(--rule);
+    background: var(--surface-2); color: var(--ink-muted); margin-right: .45rem;
+  }
+  .tag.new { border-color: var(--accent); color: var(--accent); }
+  .tag.existing { border-color: var(--rule); }
+  .tag.sql { border-color: var(--accent-2); color: var(--accent-2); }
+
+  .files ul { list-style: none; padding: 0; }
+  .files li { padding: .3rem 0; border-bottom: 1px dotted var(--rule); font-size: .92rem; }
+
+  .phase {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 1.4rem 1.6rem; margin: 1.6rem 0;
+  }
+  .phase > h3 { margin-top: 0; }
+  .phase .issue {
+    font-family: var(--mono); font-size: .78rem; color: var(--ink-muted);
+    display: block; margin: -.35rem 0 .9rem;
+  }
+  .status { color: var(--ink-muted); font-weight: 600; }
+
+  ul.checklist { list-style: none; padding: 0; margin: .4rem 0 1rem; }
+  ul.checklist li {
+    padding: .22rem 0 .22rem 0; font-size: .92rem;
+    max-width: var(--measure);
+  }
+  ul.checklist li code.status { margin-right: .45rem; }
+
+  .loop {
+    background: var(--surface-2); border-left: 3px solid var(--accent);
+    padding: .7rem .95rem; border-radius: 0 6px 6px 0;
+    font-size: .88rem; margin: 1rem 0 0;
+  }
+  .warn { border-left-color: var(--danger); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; margin: 0 0 1.2rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 620; color: var(--ink-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+  .table-wrap { overflow-x: auto; }
+
+  #questionables details, #amendments details {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 8px; padding: .75rem 1rem; margin: .6rem 0;
+  }
+  #questionables summary, #amendments summary { cursor: pointer; font-weight: 560; }
+  .qa-answer { margin: .6rem 0 0; font-size: .92rem; color: var(--ink-muted); }
+
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--accent-2);
+    border-radius: 0 8px 8px 0; padding: .9rem 1.1rem; margin: 1.3rem 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout strong { color: var(--ink); }
+
+  /* inline-SVG text inherits the page palette */
+  svg text { font-family: var(--sans); fill: var(--ink); }
+  svg .muted { fill: var(--ink-muted); }
+  svg .mono { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: Unlabeled rows — population top-k, missing-label fill, strict label/cohort keys</h1>
+    <p class="lede">Issue <a href="https://github.com/ccd-ia/triage-pg/issues/21">#21</a>. An inspection
+      problem has entities with no label because nobody looked. triage-pg already keeps those labels NULL and
+      out of training. This plan aligns the threshold metrics with DSSG triage. It also adds DSSG's
+      <code>include_missing_labels_in_train_as</code> and makes a mistyped <code>label_config</code> key fail
+      before anything is built. Target release: <strong>v1.3.0</strong> (SHAP moves to v1.4.0).</p>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-10-22T13:40:00-06:00</dd>
+        <dt>modified</dt>     <dd>2026-10-22T13:40:00-06:00, 2026-10-22T14:15:00-06:00</dd>
+        <dt>commits</dt>      <dd>4c16d748 (base: v1.2.1), ddcf3b03, c16b50df, 52474c07, 94c37344, 461e10ec (PR #22); on main after rebase merge: 52fc75be, 698c0386, b5bca485, 8bd4f835, d159037f; tag v1.3.0</dd>
+        <dt>agent name</dt>   <dd>Claude Opus 5.5 (claude-opus-5-5[1m]) — plan skill, Create Plan, Claude Opus 5.5 (claude-opus-5-5[1m]) — Build Plan</dd>
+        <dt>session id</dt>   <dd>session_01BpdZoVpxnW1FMYq8eypj3T, session_01BpdZoVpxnW1FMYq8eypj3T</dd>
+        <dt>back refs</dt>    <dd>issue #21; ADR-0007 (evaluation in Postgres); ADR-0009 (imputation leakage boundary); ADR-0013/0015 (artifact identity); ADR-0022 (experiment identity); migrations 0002, 0007, 0014, 0015, 0023; specs/close-every-open-issue-geometry-contracts-and-docs.html (v1.2.0 plan, same migration-derivation pattern)</dd>
+        <dt>forward refs</dt> <dd>docs/adr/0033-threshold-metrics-rank-the-full-population.md; PR https://github.com/ccd-ia/triage-pg/pull/22; release v1.3.0 https://github.com/ccd-ia/triage-pg/releases/tag/v1.3.0 (merge d159037f)</dd>
+      </dl>
+    </details>
+  </header>
+
+  <!-- Hero image -->
+  <figure>
+    <svg viewBox="0 0 880 210" role="img" aria-label="Three decisions: D1 population top-k, D2 train-only fill, D3 strict keys">
+      <rect x="20" y="30" width="260" height="150" rx="10" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <text x="40" y="66" font-size="22" font-weight="650">D1</text>
+      <text x="40" y="104" font-size="17">Rank every row</text>
+      <text x="40" y="132" font-size="14" class="muted mono">evaluation SQL</text>
+      <rect x="310" y="30" width="260" height="150" rx="10" fill="none" stroke="var(--accent-2)" stroke-width="2"/>
+      <text x="330" y="66" font-size="22" font-weight="650">D2</text>
+      <text x="330" y="104" font-size="17">Train-only label fill</text>
+      <text x="330" y="132" font-size="14" class="muted mono">matrix assembly</text>
+      <rect x="600" y="30" width="260" height="150" rx="10" fill="none" stroke="var(--ink-muted)" stroke-width="2"/>
+      <text x="620" y="66" font-size="22" font-weight="650">D3</text>
+      <text x="620" y="104" font-size="17">Unknown keys fail</text>
+      <text x="620" y="132" font-size="14" class="muted mono">config validation</text>
+    </svg>
+    <figcaption>Three decisions the maintainer settled on 2026-10-22. D1 changes stored metric values. D2 adds an
+      optional key. D3 rejects configs that are accepted silently today.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>A user porting a food-inspection problem from DSSG triage needs two things. First, triage-pg must treat
+      facilities that were never inspected as "unknown", not as "passed". Second, triage-pg must report
+      precision@k and recall@k with the definition she has been comparing against. Today the first holds by
+      default. The second does not, and nothing tells her so. This plan closes issue #21 and ships the fix as
+      v1.3.0.</p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>Three gaps, all verified against the code on 2026-10-22:</p>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Gap</th><th>Where</th><th>Effect</th></tr>
+      <tr><td><strong>Top-k ranks only labeled rows.</strong> <code>labeled_ranks</code> filters
+        <code>outcome is not null</code> before <code>row_number()</code>. <code>resolve_k</code> turns
+        <code>N_pct</code> into a count of labeled rows.</td>
+        <td><code>0015_subset_evaluation.py:91-123</code>, <code>0002_metric_functions.py:110-113</code></td>
+        <td>precision@100 means "top 100 among inspected facilities". DSSG ranked all test rows, cut at k, and
+          then dropped NaN labels (<code>catwalk/evaluation.py:454-457</code>, <code>dssg/master</code>). On
+          DirtyDuck (about 54% labeled) the two numbers differ. The diagnostics already use population ranks
+          (<code>diagnostics/matrixio.py:97</code>), so crosstabs and precision@k disagree on what "top-k" is
+          today.</td></tr>
+      <tr><td><strong><code>include_missing_labels_in_train_as</code> does not exist.</strong></td>
+        <td>only <code>src/tests/utils.py:312</code>, in a fixture nothing calls</td>
+        <td>No way to say "count unlabeled train rows as 0 (or 1), keep test rows NULL". A <code>coalesce</code>
+          in the label query cannot express this, because it would also change the test labels and therefore
+          the evaluation.</td></tr>
+      <tr><td><strong>Unknown keys in <code>label_config</code> / <code>cohort_config</code> are accepted
+        without a message.</strong></td>
+        <td><code>run.py:353-364</code> checks only <code>query</code>. The unknown-key warning at
+          <code>run.py:517</code> covers top-level keys only.</td>
+        <td>A ported DSSG key changes the labels hash (<code>run.py:1257</code>) and does nothing else.
+          <code>include_missing_labels_in_train_as: true</code> gives dropped rows, with no warning.</td></tr>
+    </table>
+    </div>
+    <figure>
+      <svg viewBox="0 0 880 300" role="img" aria-label="Labeled-only ranking versus full-population ranking at k equals 4">
+        <text x="130" y="30" font-size="16" font-weight="620" text-anchor="middle">Today: labeled only</text>
+        <text x="610" y="30" font-size="16" font-weight="620" text-anchor="middle">DSSG: all rows</text>
+        <!-- left: labeled only, 6 rows -->
+        <g>
+          <rect x="60"  y="50"  width="140" height="30" rx="5" fill="var(--accent)"/>
+          <rect x="60"  y="86"  width="140" height="30" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="60"  y="122" width="140" height="30" rx="5" fill="var(--accent)"/>
+          <rect x="60"  y="158" width="140" height="30" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="60"  y="194" width="140" height="30" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="60"  y="230" width="140" height="30" rx="5" fill="var(--accent)"/>
+          <line x1="44" y1="190" x2="216" y2="190" stroke="var(--danger)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="226" y="195" font-size="14" class="muted">k = 4</text>
+        </g>
+        <!-- right: all rows, 10 rows in two columns, labeled + unlabeled -->
+        <g>
+          <rect x="470" y="50"  width="140" height="22" rx="5" fill="var(--accent)"/>
+          <rect x="470" y="76"  width="140" height="22" rx="5" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-dasharray="4 3"/>
+          <rect x="470" y="102" width="140" height="22" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="470" y="128" width="140" height="22" rx="5" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-dasharray="4 3"/>
+          <rect x="470" y="154" width="140" height="22" rx="5" fill="var(--accent)"/>
+          <rect x="470" y="180" width="140" height="22" rx="5" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-dasharray="4 3"/>
+          <rect x="470" y="206" width="140" height="22" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="470" y="232" width="140" height="22" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="470" y="258" width="140" height="22" rx="5" fill="var(--accent)"/>
+          <line x1="454" y1="152" x2="626" y2="152" stroke="var(--danger)" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="636" y="157" font-size="14" class="muted">k = 4</text>
+        </g>
+        <!-- legend -->
+        <rect x="700" y="210" width="16" height="12" rx="2" fill="var(--accent)"/><text x="724" y="221" font-size="13">positive</text>
+        <rect x="700" y="232" width="16" height="12" rx="2" fill="none" stroke="var(--accent)" stroke-width="2"/><text x="724" y="243" font-size="13">negative</text>
+        <rect x="700" y="254" width="16" height="12" rx="2" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-dasharray="4 3"/><text x="724" y="265" font-size="13">no label</text>
+      </svg>
+      <figcaption>The same scores ranked two ways. On the left, unlabeled rows are dropped before ranking, so
+        the top 4 are the 4 best-scored inspected facilities: precision 2/4. On the right, the top 4 include
+        2 facilities nobody inspected. Precision is computed over the 2 labeled ones: 1/2.</figcaption>
+    </figure>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p><strong>D1.</strong> Migration <code>0024</code> adds <code>triage.population_ranks</code>. It is
+      <code>labeled_ranks</code> with a <em>left</em> join to labels and no <code>outcome is not null</code>
+      filter, so <code>rank_abs</code> ranks every scored row in the population (the subset, when one is
+      given). <code>precision_at_k</code>, <code>recall_at_k</code>, <code>compute_bias_metrics</code> and
+      <code>model_threshold_curve</code> move onto it. <code>k</code> resolves against the population size
+      (ceil kept). Precision becomes TP / labeled rows inside k, and the evaluation row records that
+      denominator in a new <code>num_labeled_above_threshold</code> column. Rank-free metrics (AUC, average
+      precision, Brier, log loss, ECE, regression metrics, C-index) stay on <code>labeled_ranks</code> and are
+      untouched. The same migration recomputes every stored precision@/recall@ row and every bias row in
+      place, then refreshes the leaderboard.</p>
+    <p><strong>D2.</strong> <code>label_config.include_missing_labels_in_train_as</code> (boolean,
+      classification only) becomes a <code>missing_label_fill</code> of 0 or 1 that
+      <code>build_matrix</code> applies to the <em>train</em> matrix's <code>outcome</code> after the label
+      join. The fill enters the train matrix's identity only when set, so no existing hash moves. It is
+      removed from the labels identity, because the labels rows do not change. Retrain reads it back from the
+      train matrix artifact. Test and production matrices never fill.</p>
+    <p><strong>D3.</strong> <code>validate_label_config</code> / <code>validate_cohort_config</code> raise on an
+      unknown key before anything is built, in <code>run_experiment</code> and <code>analyze-config</code>.
+      <code>validate_experiment_config</code> (the dashboard dry run) mirrors them as path-addressed
+      errors.</p>
+    <figure>
+      <svg viewBox="0 0 880 250" role="img" aria-label="Label query to train and test matrices, then population ranks to precision">
+        <rect x="20" y="95" width="150" height="56" rx="8" fill="none" stroke="var(--ink-muted)" stroke-width="2"/>
+        <text x="95" y="128" font-size="15" text-anchor="middle">labels (NULL kept)</text>
+        <line x1="170" y1="110" x2="250" y2="62" stroke="var(--ink-muted)" stroke-width="2"/>
+        <line x1="170" y1="136" x2="250" y2="186" stroke="var(--ink-muted)" stroke-width="2"/>
+        <rect x="250" y="34" width="190" height="56" rx="8" fill="none" stroke="var(--accent-2)" stroke-width="2"/>
+        <text x="345" y="60" font-size="15" text-anchor="middle">train matrix</text>
+        <text x="345" y="80" font-size="13" text-anchor="middle" class="muted mono">drop | 0 | 1</text>
+        <rect x="250" y="158" width="190" height="56" rx="8" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <text x="345" y="184" font-size="15" text-anchor="middle">test matrix</text>
+        <text x="345" y="204" font-size="13" text-anchor="middle" class="muted mono">NULL stays</text>
+        <line x1="440" y1="186" x2="510" y2="186" stroke="var(--accent)" stroke-width="2"/>
+        <rect x="510" y="158" width="160" height="56" rx="8" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <text x="590" y="191" font-size="15" text-anchor="middle">rank all rows</text>
+        <line x1="670" y1="186" x2="720" y2="186" stroke="var(--accent)" stroke-width="2"/>
+        <rect x="720" y="158" width="145" height="56" rx="8" fill="var(--accent)" fill-opacity=".12" stroke="var(--accent)" stroke-width="2"/>
+        <text x="792" y="191" font-size="15" text-anchor="middle" class="mono">TP / labeled</text>
+      </svg>
+      <figcaption>D2 acts only on the train matrix. D1 acts only on evaluation. The labels artifact is the same
+        under every setting of the key.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/results_schema/alembic/versions/0015_subset_evaluation.py</code> — current <code>labeled_ranks</code> (lines 52-123), <code>precision_at_k</code> / <code>recall_at_k</code> (198-382) and <code>METRICS_DDL</code>, whose two functions are sliced out for the 0024 downgrade.</li>
+      <li><span class="tag existing">existing</span> <code>.../versions/0002_metric_functions.py</code> — <code>resolve_k</code> (ceil, lines 110-113). Unchanged. It is called with the population size instead.</li>
+      <li><span class="tag existing">existing</span> <code>.../versions/0014_bias_completeness.py</code> — current <code>compute_bias_metrics</code> (line 46 onward). Its upgrade body is the downgrade target.</li>
+      <li><span class="tag existing">existing</span> <code>.../versions/0007_rayid_curve_labeled.py</code> — current <code>model_threshold_curve</code> (<code>CURVE_LABELED</code>). It re-ranks within labeled rows, so it must follow D1 or the dashboard slider disagrees with the leaderboard again.</li>
+      <li><span class="tag existing">existing</span> <code>.../versions/0023_probability_metrics.py</code> — <code>_revision_ddl</code> and the current <code>evaluate_model</code> (<code>_evaluate_model_probability()</code>), which 0024 derives from by one anchored replacement.</li>
+      <li><span class="tag existing">existing</span> <code>.../versions/0001_initial_triage_schema.py</code> — <code>triage.evaluations</code> (line 246), <code>triage.bias_metrics</code> (264), <code>triage.matrices.label_timespan</code> (125), <code>prediction_ranks</code> view (310).</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/matrix.py</code> — <code>build_matrix</code> (741) builds the identity at 835-848, and <code>_assemble</code> (1025) does the label left join at 1064-1068. The fill goes there.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/model.py</code> — <code>_fit</code> drops NULL outcomes (477-490). Unchanged, and the plan relies on it for the "key absent" path.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/run.py</code> — <code>validate_experiment_config</code> (261), <code>run_experiment</code> (1118; <code>_require</code> at 1173-1177; <code>build_labels</code> at 1247), <code>_build_split</code> (996; <code>build_matrix</code> calls at 1038 and 1057).</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/lineage.py</code> — <code>ModelLineage</code> (around line 50) gains <code>missing_label_fill</code>, read from the train matrix artifact's config.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/retrain.py</code> — <code>build_matrix(matrix_kind="train")</code> at 147 passes the recovered fill.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/forward.py</code> — the production matrix (249). It must never fill. A test asserts that.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py</code> — <code>analyze-config</code> (around 1480-1530) calls the new validators before <code>plan_experiment</code>.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/diagnostics/error_tree.py</code> — <code>_labeled_ranks</code> (30) compares a <em>labeled</em> rank with the <em>population</em> k from <code>top_k_entities</code> (119-131). This is a latent mismatch that D1 removes by switching to <code>population_ranks</code>.</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/component/catwalk/in_pg_evaluation.py</code> — the <code>evaluate_in_db</code> docstring ("the full labeled cohort") is updated.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/catwalk_tests/test_in_pg_metrics.py</code> — metric parity tests, migration round trips (0020, 0023 patterns) and bias tests.</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/adapter_tests/test_matrix_assembler.py</code>, <code>test_model_builder.py</code>, <code>test_retrain.py</code>, <code>test_forward.py</code>, <code>test_run_orchestration.py</code>, <code>test_experiment_identity.py</code>, <code>src/tests/dashboard_tests/test_validate_config.py</code>, <code>src/tests/test_diagnostics.py</code> — where the D2/D3/diagnostic tests go.</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/reference/evaluation.md</code>, <code>reference/configuration.md</code> (cohort 113-155, label 158-200), <code>tutorials/dirtyduck.md</code> (85-96), <code>docs/fairness.md</code>, <code>docs/schema-design.md</code> (§3 and the evaluations DDL near 262), <code>docs/triage-pg-vs-dssg-triage.html</code> — documentation that states the old semantics.</li>
+      <li><span class="tag existing">existing</span> <code>pyproject.toml</code>, <code>src/triage/__init__.py</code>, <code>uv.lock</code> — version 1.2.1 → 1.3.0. <code>release.yml</code>'s guard checks the tag against <code>pyproject.toml</code>.</li>
+      <li><span class="tag existing">existing</span> <code>docs/adr/0031-shap-treeshap-on-demand-individual-importances.md</code> — status note 75-78 (milestone renumbered to v1.4.0). <code>TODO.org</code> and <code>CLAUDE.md</code> are gitignored here, so they are edited locally and not committed.</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <code>src/triage/component/results_schema/alembic/versions/0024_population_topk.py</code> — evaluations column, <code>metric_result</code> attribute, <code>population_ranks</code>, <code>precision_random_std</code>, the four rewritten functions, the derived <code>evaluate_model</code>, the in-place recompute and the leaderboard refresh, plus a full downgrade.</li>
+      <li><span class="tag new">new</span> <code>src/triage/adapters/problem_config.py</code> — <code>LABEL_CONFIG_KEYS</code>, <code>COHORT_CONFIG_KEYS</code>, <code>validate_label_config</code>, <code>validate_cohort_config</code>, <code>missing_label_fill</code>, <code>labels_identity_config</code>. A small module, so that <code>run.py</code>, <code>cli.py</code> and the tests share one definition, the same way <code>bias.validate_bias_config</code> does.</li>
+      <li><span class="tag new">new</span> <code>src/tests/catwalk_tests/test_population_topk.py</code> — the D1 parity suite against a vendored DSSG reference, plus the recompute-migration test.</li>
+      <li><span class="tag new">new</span> <code>src/tests/adapter_tests/test_problem_config.py</code> — D2 value rules and D3 key rules.</li>
+      <li><span class="tag new">new</span> <code>docs/adr/0033-threshold-metrics-rank-the-full-population.md</code> — the D1 decision (hard to reverse: stored values; surprising: 0007 went the other way; real trade-off). D2 and D3 do not meet the three ADR criteria.</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+    <p>Phases 2 and 3 touch disjoint files from Phases 4 and 5 (Python adapters versus SQL migration and
+      diagnostics). A parallel build may run 2–3 and 4–5 side by side. Phase 6 depends on all of them.</p>
+
+    <!-- Phase 1 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 1: Worktree and baseline</h3>
+      <span class="issue">owner: any · depends-on: none</span>
+      <p>main is protected (PR, five contexts, strict, linear). Record the numbers the Definition of Done
+        compares against <em>before</em> changing anything.</p>
+
+      <h4>1. Branch</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>git fetch origin &amp;&amp; git worktree add .worktrees/unlabeled-rows -b adolfo/unlabeled-rows-21 origin/main</code></li>
+        <li><code class="status">[x]</code> In the worktree: <code>export UV_PROJECT_ENVIRONMENT="$PWD/.venv"</code>, then <code>uv sync --all-extras</code>. Plain <code>--extra dev</code> strips extras and fakes 36 basedpyright errors.</li>
+      </ul>
+
+      <h4>2. Baseline numbers</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code>, <code>just lint</code>, <code>just typecheck</code> on the untouched branch. Record the pass count, for example "N passed, M skipped".</li>
+        <li><code class="status">[x]</code> <code>just tutorial-up</code> (DirtyDuck, port 5440). Confirm <code>PGHOST</code>/<code>PGDATABASE</code> point at it, and stop if they do not.</li>
+        <li><code class="status">[x]</code> Snapshot the DirtyDuck threshold rows to the scratchpad. Record the row count and the count of rows whose model's test split has unlabeled rows:
+<pre><code>\copy (select model_id, split_kind, as_of_date, subset_hash, metric, parameter,
+             value, num_labeled, num_positive
+      from triage.evaluations
+      where metric in ('precision@','recall@')) to 'evals-before.csv' csv header</code></pre></li>
+        <li><code class="status">[x]</code> Record the artifact ids that <code>experiment.yaml</code> uses (cohort, labels, matrices). Phase 3 proves they do not move when the key is absent.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>No code changes. The phase only records state.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code> — green on the base commit, so a later red run is ours.</li>
+        <li><code class="status">[x]</code> <code>wc -l evals-before.csv</code> — the snapshot exists and is non-empty.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 2: D3 — strict <code>label_config</code> / <code>cohort_config</code> keys</h3>
+      <span class="issue">owner: python · depends-on: Phase 1 · files: problem_config.py, run.py, cli.py, tests</span>
+      <p>The smallest change, and Phase 3 needs it: the D2 key must be a <em>known</em> key whose value is
+        checked.</p>
+
+      <h4>1. <code>src/triage/adapters/problem_config.py</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>LABEL_CONFIG_KEYS = frozenset({"name", "description", "query", "include_missing_labels_in_train_as"})</code> and <code>COHORT_CONFIG_KEYS = frozenset({"name", "description", "query", "forward_query"})</code>. These are every key the code reads (<code>cli.py:1567-1569</code> reads <code>name</code> and <code>description</code>, and <code>forward_query</code> is ADR-0032). They are also every key in the 13 shipped YAMLs, which use only <code>name</code> and <code>query</code>.</li>
+        <li><code class="status">[x]</code> <code>validate_cohort_config(cfg)</code> and <code>validate_label_config(cfg, problem_type)</code> raise <code>ValueError</code>. The unknown-key message names the key and lists the accepted ones, sorted:
+<pre><code>label_config: unknown key 'include_missing_label_in_train_as' — accepted keys are
+description, include_missing_labels_in_train_as, name, query</code></pre></li>
+        <li><code class="status">[x]</code> The value rules for <code>include_missing_labels_in_train_as</code> live in <code>validate_label_config</code>. Absent or <code>null</code> means absent. Otherwise the value must be a YAML boolean (<code>isinstance(v, bool)</code>, so 0/1 and strings are errors, as in DSSG's <code>else: raise</code>), and <code>problem_type</code> must be <code>classification</code>. The error for other problem types says why: a 0/1 fill is not meaningful for a continuous target, and survival has no <code>outcome</code>.</li>
+        <li><code class="status">[x]</code> Move the existing query/placeholder checks for both blocks into these functions, so that one definition serves all three callers. <code>run.py</code>'s mirror reuses the messages.</li>
+      </ul>
+
+      <h4>2. Wire the callers</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>run_experiment</code>: call both validators right after the <code>_require</code> block (<code>run.py:1173-1177</code>), before <code>_require_survival_extra</code> and before any build. The failure must happen before a run row exists.</li>
+        <li><code class="status">[x]</code> <code>validate_experiment_config</code>: replace lines 323-364 with path-addressed errors, one per unknown key (<code>label_config.&lt;key&gt;</code>), plus <code>label_config.include_missing_labels_in_train_as</code> for value errors. Keep collecting errors and do not raise. This is the dashboard's dry run.</li>
+        <li><code class="status">[x]</code> <code>cli.py</code> <code>analyze-config</code>: call both validators after <code>load_experiment_config</code>, and exit 1 with the message, as the <code>temporal_config</code> check does.</li>
+        <li><code class="status">[x]</code> Do <em>not</em> validate configs read back from artifacts (<code>lineage.label_config</code> in retrain/forward). Those were accepted when they were built, and rejecting them now would strand existing models.</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>pytest, no database for the pure validators. One <code>run_experiment</code> test proves that the
+        failure happens before any artifact or run row is written (count <code>triage.runs</code> and
+        <code>triage.artifacts</code> before and after). Red run: delete the unknown-key loop and watch the
+        tests fail.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_problem_config.py</code> — unknown key on each block; a typo of the D2 key; <code>null</code> means absent; <code>0</code>, <code>"false"</code> and <code>1</code> are rejected; <code>true</code>/<code>false</code> are accepted for classification; rejection for <code>regression</code>, <code>regression_ranking</code> and <code>survival</code>; <code>forward_query</code> is accepted on cohort and rejected on label.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/dashboard_tests/test_validate_config.py</code> — path-addressed errors (<code>label_config.foo</code>). The valid DirtyDuck config still has 0 errors.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_run_orchestration.py -k unknown_key</code> — raises before <code>triage.runs</code> gains a row.</li>
+        <li><code class="status">[x]</code> <code>for f in example/*/*.yaml; do uv run triage analyze-config "$f" &gt;/dev/null || echo "FAIL $f"; done</code> — no shipped example is rejected.</li>
+        <li><code class="status">[x]</code> <code>just lint &amp;&amp; just typecheck</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 3: D2 — <code>include_missing_labels_in_train_as</code> on the train matrix</h3>
+      <span class="issue">owner: python · depends-on: Phase 2 · files: problem_config.py, matrix.py, run.py, lineage.py, retrain.py, tests</span>
+      <p>DSSG semantics (<code>architect/builders.py:215-229, 439-446</code> at <code>ca9b9410^</code>).
+        Absent means unlabeled train rows are not fitted on (today's behaviour, unchanged). <code>false</code>
+        fills them with 0 and <code>true</code> with 1, in the train matrix only.</p>
+
+      <h4>1. Helpers in <code>problem_config.py</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>missing_label_fill(label_config) -&gt; int | None</code>: <code>None</code> when absent or <code>null</code>, <code>0</code> for <code>false</code>, <code>1</code> for <code>true</code>.</li>
+        <li><code class="status">[x]</code> <code>labels_identity_config(label_config) -&gt; dict</code>: the block without the D2 key. The labels rows are identical under every setting, so the key must not move the labels hash, and test matrices built on those labels must not move either.</li>
+      </ul>
+
+      <h4>2. <code>build_matrix</code> / <code>_assemble</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> New keyword <code>missing_label_fill: int | None = None</code> on <code>build_matrix</code> and <code>_assemble</code>. Raise <code>ValueError</code> if it is not <code>None</code> and <code>matrix_kind != "train"</code>, so a test, validation or production matrix can never fill.</li>
+        <li><code class="status">[x]</code> Identity: add <code>matrix_config["missing_label_fill"] = fill</code> <strong>only when fill is not None</strong>. When the key is absent, <code>matrix_config</code> is byte-identical to v1.2.1, so every existing matrix id is unchanged.</li>
+        <li><code class="status">[x]</code> In <code>_assemble</code>, right after the label left join (<code>matrix.py:1066-1068</code>), add <code>design = design.with_columns(pl.col("outcome").fill_null(float(fill)))</code>, and log at info level how many rows were filled ("filled 4,212 unlabeled train rows with 0 (include_missing_labels_in_train_as: false)").</li>
+        <li><code class="status">[x]</code> No change to imputation. Fit-based statistics already run over every train-matrix row, labeled or not (ADR-0009 is about features, not labels), and target-history lags read <code>triage.labels</code>, which is not filled.</li>
+      </ul>
+
+      <h4>3. Thread it through run and retrain</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>run_experiment</code>: compute <code>fill = missing_label_fill(label_config)</code>. Pass <code>config=labels_identity_config(label_config)</code> to <code>build_labels</code> (<code>run.py:1257</code>) and <code>missing_label_fill=fill</code> to <code>_build_split</code>, which hands it to the train <code>build_matrix</code> call only (1038), not to the test call (1057).</li>
+        <li><code class="status">[x]</code> Experiment identity (<code>_PROBLEM_KEYS</code>, ADR-0022) keeps the full <code>label_config</code>. A different training target is a different problem, so setting the key gives a new <code>experiment_hash</code>. That is intended, and a test records it.</li>
+        <li><code class="status">[x]</code> <code>lineage.py</code>: <code>ModelLineage.missing_label_fill</code> is read from <code>triage.artifacts.config-&gt;'missing_label_fill'</code> of the train matrix artifact, and is <code>None</code> when the key is missing. <code>retrain.py:147</code> passes it, so that a retrain reproduces the original training target.</li>
+        <li><code class="status">[x]</code> <code>forward.py</code>: no change. Assert in a test that the production matrix config never carries the key.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <p>pytest with <code>pytest-postgresql</code> (the existing matrix fixtures). Every test runs first
+        without the fill line in <code>_assemble</code> and must fail. Then it runs with the line and must
+        pass.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_matrix_assembler.py -k missing_label</code> — <code>false</code> gives the train matrix 0 NULL outcomes and exactly the expected count of 0.0s; <code>true</code> gives 1.0s; the test matrix built from the same labels keeps its NULLs; absent equals today's NULLs; <code>fill</code> on a test or production matrix raises.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_experiment_identity.py -k missing_label</code> — absent: matrix and labels derivation ids equal the v1.2.1 ids, pinned as literals in the test; set: train matrix id changes, labels id and test matrix id do not, <code>experiment_hash</code> changes.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_model_builder.py -k missing_label</code> — <code>_fit</code> sees <code>frame.height</code> labeled rows when filled, and only the labeled rows when absent.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_retrain.py src/tests/adapter_tests/test_forward.py -k missing_label</code> — retrain rebuilds a train matrix with the same fill; the forward/production matrix has no fill.</li>
+        <li><code class="status">[x]</code> Live, against DirtyDuck: <code>uv run triage run example/dirtyduck/experiment.yaml</code> after this phase reports cache hits for the cohort, labels and every matrix recorded in Phase 1, with 0 rebuilt.</li>
+        <li><code class="status">[x]</code> <code>just test &amp;&amp; just lint &amp;&amp; just typecheck</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 4: D1 — migration 0024, population ranks and threshold metrics</h3>
+      <span class="issue">owner: sql · depends-on: Phase 1 · files: 0024_population_topk.py, test_population_topk.py</span>
+      <p>The functions only. The recompute, the bias function, the curve and the diagnostics are Phase 5,
+        so this phase can be verified on fresh data first.</p>
+
+      <h4>1. Schema additions</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>alter table triage.evaluations add column num_labeled_above_threshold integer</code>, with a column comment: "labeled rows inside the top-k cut: the precision denominator. NULL for metrics without a threshold."</li>
+        <li><code class="status">[x]</code> <code>alter type triage.metric_result add attribute num_labeled_above_threshold integer</code>. Functions that never set it return NULL there, which is correct for rank-free metrics.</li>
+      </ul>
+
+      <h4>2. <code>triage.population_ranks</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Same signature and return columns as <code>labeled_ranks</code> (0015:54-66). Same label-pin block (0015:74-89, including the "ambiguous labels lineage" exception). Written out in full in 0024 with a comment that points at <code>labeled_ranks</code>, because it is a new function and not an edit, so there is nothing to derive from.</li>
+        <li><code class="status">[x]</code> Body difference: <code>left join triage.labels l on … and (v_pin is null or l.label_hash = v_pin)</code>, and the <code>where</code> keeps only the subset predicate. <code>row_number() over (order by p.score desc, p.entity_id)</code> runs after the subset filter, so the subset is still the population (0015 semantics), now including its unlabeled members.</li>
+      </ul>
+
+      <h4>3. <code>precision_at_k</code> / <code>recall_at_k</code> rewritten over <code>population_ranks</code></h4>
+<pre><code>N  = rows in the population          L = rows with outcome is not null      P = outcome &gt; 0
+k  = resolve_k(p_parameter, N)       -- ceil kept; was resolve_k(.., L)
+m  = labeled rows with rank_abs &lt;= k -- r.num_labeled_above_threshold
+tp = positives with rank_abs &lt;= k
+r.num_labeled = L;  r.num_positive = P
+precision = tp / m      (NULL when m = 0 or k = 0; NULL-but-counts when L = 0)
+recall    = tp / P      (unchanged guards: NULL-but-counts when L = 0 or P = 0; 0 when k = 0)</code></pre>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Random-ranking baselines. Recall: TP ~ Hypergeom(N, P, k), so <code>value_expected = k/N</code> and <code>value_std = sqrt(k·(P/N)·(1−P/N)·(N−k)/(N−1)) / P</code>, which is today's formula with N for L. Precision: <code>value_expected = P/L</code>, exact conditional on m &gt; 0. <code>value_std</code> comes from a new <code>triage.precision_random_std(N, L, P, k)</code>:
+<pre><code>m ~ Hypergeom(N, L, k) restricted to m &gt; 0;   given m, TP ~ Hypergeom(L, P, m)
+E[prec | m] = b = P/L  (constant)  ⇒  Var = E_m[ b(1−b)(L−m) / ((L−1)·m) ]
+pmf(m) built in log space by the ratio recurrence
+  log w(m+1) = log w(m) + ln((L−m)(k−m)) − ln((m+1)(N−L−k+m+1))
+from m_lo = max(1, k−(N−L)) to m_hi = min(k, L), normalised by log-sum-exp.
+No lgamma: PostgreSQL has none before 18, and the project supports 11+.</code></pre>
+          When L = N (fully labeled), this reduces to today's formula. A test asserts that.</li>
+        <li><code class="status">[x]</code> Tie bounds are analytic extremes over the boundary tie block, now with three kinds of row (positive, negative, unlabeled). Let <code>s = k − fixed_n</code>, where fixed_n counts every row above the cutoff.
+<pre><code>precision worst: fill s with tie negatives, then tie unlabeled, then tie positives
+precision best : fill s with tie positives, then tie unlabeled, then tie negatives
+   value = (fixed_pos + t) / (fixed_lab + negatives_taken + t),  NULL if the denominator is 0
+recall  : same TP extremes as today, with tie_n including unlabeled rows</code></pre>
+          Fill order is how the extremes are reached: a negative raises the denominator without a TP, and an unlabeled row changes neither.</li>
+      </ul>
+
+      <h4>4. <code>evaluate_model</code> derived, not retyped</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Load 0023 by path with a local copy of <code>_revision_ddl</code>, call <code>_evaluate_model_probability()</code>, and replace exactly one anchor: the threshold branch's <code>insert … on conflict … do update …</code> block (16-space indent, the only one inside <code>if v_metric in ('precision@', 'recall@')</code>). Raise <code>RuntimeError</code> unless the anchor count is 1. The replacement adds <code>num_labeled_above_threshold</code> to the column list, the values and the <code>do update</code>.</li>
+        <li><code class="status">[x]</code> The other branches are untouched. They write NULL through the column default. The probability metrics stay on <code>labeled_ranks</code>.</li>
+      </ul>
+
+      <h4>5. Downgrade</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Restore <code>precision_at_k</code>/<code>recall_at_k</code> by slicing 0015's <code>METRICS_DDL</code> from <code>drop function if exists triage.precision_at_k</code> up to <code>drop function if exists triage.auc_roc</code>, asserting each anchor occurs once. Re-running all of <code>METRICS_DDL</code> would put back 0015's <code>regression_metric</code> and erase 0020's pinball.</li>
+        <li><code class="status">[x]</code> Restore <code>evaluate_model</code> from 0023's function, drop <code>population_ranks</code> and <code>precision_random_std</code>, drop the type attribute and the column. Recomputed values are not reversed (see Questionables).</li>
+      </ul>
+
+      <h4>6. Testing Strategy</h4>
+      <p>A vendored DSSG reference in the test module builds the expected values from the same rows the SQL
+        reads: sort by <code>(score desc, entity_id)</code>, take the top k with <code>ceil</code>, then apply
+        <code>_filter_nan_labels</code> and <code>sklearn.metrics.precision_score</code>/<code>recall_score</code>.
+        It is a copy of <code>generate_binary_at_x</code> + <code>_filter_nan_labels</code> from
+        <code>dssg/master</code>, with the one documented rounding difference. Fixtures have about 40% unlabeled
+        rows and score ties that straddle k.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_population_topk.py</code> — parity to 1e-12 on <code>100_abs</code>, <code>5_abs</code>, <code>10_pct</code> and <code>50_pct</code>; <code>num_labeled_above_threshold == m</code>; precision NULL when the top-k is all unlabeled; subset ranking includes the subset's unlabeled members; the fully labeled fixture gives values identical to v1.2.1's functions (regression guard); <code>precision_random_std</code> equals a <code>scipy.stats.hypergeom</code> sum to 1e-9 and equals the old closed form when L = N; tie bounds match brute force over every ordering of a small tie block.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_in_pg_metrics.py</code> — the existing suite. Its fixtures are fully labeled, so every expected value holds unchanged. A failure here means the rewrite changed the labeled case.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_population_topk.py -k round_trip</code> — upgrade, downgrade to 0023 and upgrade again, following <code>test_migration_0023_round_trips</code>. After the downgrade, <code>regression_metric</code> still computes pinball.</li>
+        <li><code class="status">[x]</code> Red run: point <code>precision_at_k</code> back at <code>labeled_ranks</code>. The parity tests must fail.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 5: D1 — bias, curve and diagnostics, then recompute stored rows</h3>
+      <span class="issue">owner: sql · depends-on: Phase 4 · files: 0024_population_topk.py, error_tree.py, in_pg_evaluation.py, tests</span>
+
+      <h4>1. <code>compute_bias_metrics</code> on population ranks</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Full new body in 0024 (reviewable as one piece). The downgrade restores 0014's body sliced from <code>create or replace function triage.compute_bias_metrics(</code> to the end of <code>UPGRADE_DDL</code>. The signature is unchanged.</li>
+        <li><code class="status">[x]</code> <code>k = resolve_k(p_parameter, N)</code> over <code>population_ranks</code>, and <code>selected = rank_abs &lt;= k</code>. <code>group_size</code>, <code>num_selected</code> and <code>selection_rate</code> count every row in the group, as Aequitas did with DSSG's full test frame. Rates that compare a prediction with a label use labeled denominators: <code>precision = tp/(tp+fp)</code>, <code>fdr = fp/(tp+fp)</code>, <code>for = fn/(fn+tn)</code>, <code>npv = tn/(fn+tn)</code>. <code>tpr</code>/<code>fnr</code> divide by <code>group_pos</code> and <code>fpr</code> by <code>group_neg</code>, as today. When everything is labeled, these equal today's formulas.</li>
+      </ul>
+
+      <h4>2. <code>model_threshold_curve</code></h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> The same return columns, so <code>dashboard/routes.py:737</code> and <code>frontend/src/api/types.ts:791</code> need no change. <code>ranked</code> left-joins labels (no <code>outcome is not null</code>). <code>flagged</code> is the row number over <em>all</em> rows, <code>pct = flagged / N</code>, <code>prec = tp / labeled_flagged</code> (NULL when 0), <code>rec = tp / P</code>, and <code>fp</code>, <code>fn</code> and <code>tn</code> count labeled rows only. The curve at x% then equals the leaderboard's precision@x_pct, which is the property 0007 restored.</li>
+        <li><code class="status">[x]</code> The downgrade restores 0007's <code>CURVE_LABELED</code> via <code>_revision_ddl</code>.</li>
+      </ul>
+
+      <h4>3. Diagnostics and docstrings</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>error_tree._labeled_ranks</code> queries <code>triage.population_ranks(…)</code> with <code>where outcome is not null</code>. The labeled rows keep their <em>population</em> rank, which is what <code>top_k_entities</code>' k is measured in. That removes the mismatch at <code>error_tree.py:119-131</code>.</li>
+        <li><code class="status">[x]</code> <code>in_pg_evaluation.evaluate_in_db</code> and <code>model.score_and_evaluate</code> docstrings: "<code>''</code> = the full cohort; top-k ranks every scored row, metrics count labeled rows (ADR-0033)".</li>
+      </ul>
+
+      <h4>4. Recompute stored rows inside 0024 (after the functions exist)</h4>
+<pre><code>-- evaluations: one pass per (model, split, date, subset) that has threshold rows
+for key in select distinct model_id, split_kind, as_of_date, subset_hash
+           from triage.evaluations where metric in ('precision@','recall@') loop
+    -- label_timespan from the scored matrix (predictions.matrix_uuid → matrices)
+    select count(distinct mx.label_timespan), min(mx.label_timespan) into n_ts, ts ...;
+    if n_ts &lt;&gt; 1 then skipped := skipped + 1; continue; end if;   -- no lineage: left as is
+    for row in the key's threshold rows loop
+        res := precision_at_k(...) | recall_at_k(...);
+        update triage.evaluations set value…num_labeled_above_threshold, computed_at = now() where pk;
+    end loop;
+end loop;
+-- bias: one pass per (model, split, date, parameter)
+pins := jsonb_object_agg(attribute_name, ref_group_value) filter (where ref_group_value is not null)
+delete the key's rows;  perform compute_bias_metrics(model, split, date, ts, parameter, pins, coalesce(tau, 0.8));
+if the old rows had tau null: update set tau = null, passes_fairness = null   -- keep 0014's honesty
+raise notice 'recomputed % evaluation rows, % bias keys; skipped % keys without matrix lineage', ...;
+refresh materialized view triage.leaderboard;</code></pre>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Implement the block above as one <code>DO</code> statement in <code>upgrade()</code>, after every <code>create</code>. The skipped keys are a knowable residue. The 0021 docstring pattern applies: print the query that lists them in the migration docstring.</li>
+        <li><code class="status">[x]</code> The stored <code>ref_group_value</code> becomes an explicit pin, so a reference group chosen as "largest" stays the group it was. Recorded in Questionables.</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>The recompute test seeds a database at 0023 with threshold and bias rows computed by the old
+        functions, over a fixture that has unlabeled rows. It upgrades and asserts that every row now equals
+        what the new functions return when called directly. A second key with no matrix lineage must be
+        skipped and counted.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_population_topk.py -k "recompute or bias or curve"</code> — recompute equality; skip count; bias <code>group_size</code> includes unlabeled rows and <code>precision</code> uses <code>tp+fp</code>; bias equals v1.2.1 on fully labeled data; curve at 10% equals <code>precision@10_pct</code>.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/catwalk_tests/test_in_pg_metrics.py -k bias</code> — the existing bias tests are unchanged (fully labeled fixtures).</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/test_diagnostics.py</code> — plus a new case: a model whose test split has unlabeled rows gets its FP population from the population top-k.</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/dashboard_tests</code> — the curve route still serialises.</li>
+        <li><code class="status">[x]</code> <code>just test &amp;&amp; just lint &amp;&amp; just typecheck</code></li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+
+    <!-- Phase 6 -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 6: Live verification, docs, ADR, release v1.3.0</h3>
+      <span class="issue">owner: any · depends-on: Phases 2–5</span>
+
+      <h4>1. Live DirtyDuck verification</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run triage db upgrade</code> against DirtyDuck (5440). Record the NOTICE counts, which should show 0 skipped keys.</li>
+        <li><code class="status">[x]</code> A scratch script reads <code>predictions</code> + <code>labels</code> for every threshold row, computes the DSSG reference (the same function as the Phase 4 tests) and reports the max |stored − reference| and the number of rows compared. Target: equal to the Phase 1 row count, max diff ≤ 1e-12.</li>
+        <li><code class="status">[x]</code> Diff against <code>evals-before.csv</code>: how many rows moved, the largest move, and which <code>task_framing</code> they belong to. Expected: resource_prioritization rows move, and early_warning rows (fully labeled) do not. A moved early_warning row is a bug.</li>
+      </ul>
+
+      <h4>2. Documentation</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>docs/adr/0033-threshold-metrics-rank-the-full-population.md</code> (dispatch <code>adr-writer</code>): it states that ranking covers the population and denominators the labeled rows, the DSSG parity reason, the rejected alternative (labeled-only, 0007's rationale), the ceil-versus-floor note, and the consequence that stored values were recomputed in 0024.</li>
+        <li><code class="status">[x]</code> <code>reference/evaluation.md</code>: top-k semantics, <code>num_labeled_above_threshold</code>, and the paragraph at 120-122. <code>reference/configuration.md</code>: accepted keys for both blocks, the strict-key error, and <code>include_missing_labels_in_train_as</code> with the A–E example table. <code>tutorials/dirtyduck.md:93-96</code>: training uses labeled rows, evaluation ranks every facility and measures the labeled ones. <code>docs/fairness.md</code>: group_size versus labeled denominators. <code>docs/schema-design.md</code>: the evaluations column and §3. <code>docs/triage-pg-vs-dssg-triage.html</code>: rows for missing labels and pct rounding.</li>
+        <li><code class="status">[x]</code> <code>CONTEXT.md</code> "Subset" (line 108): "precision@k on a subset is the top-k of the subset's own ranking" stays true. Add "unlabeled members included" only if the glossary format keeps it to one line.</li>
+      </ul>
+
+      <h4>3. Release</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Version 1.3.0 in <code>pyproject.toml</code> and <code>src/triage/__init__.py</code>, then <code>uv lock</code>. The ADR-0031 status note becomes v1.4.0. Locally only (gitignored): the <code>TODO.org</code> SHAP milestone and <code>CLAUDE.md</code>'s "the v1.3.0 milestone" become v1.4.0.</li>
+        <li><code class="status">[x]</code> PR titled as the release line, for example <code>feat(eval): rank the full population for top-k, include_missing_labels_in_train_as, strict label/cohort keys (#21)</code>, with a body that ends "Closes #21". <code>gh pr checks --watch --fail-fast</code>, then <code>gh pr merge --rebase --delete-branch</code>.</li>
+        <li><code class="status">[x]</code> Tag <code>v1.3.0</code> on the merge commit. <code>release.yml</code> runs. Prepend an "Upgrading" section to the GitHub Release: <code>triage db upgrade</code> recomputes precision@/recall@ and bias rows, values move where test rows are unlabeled, unknown keys in <code>label_config</code>/<code>cohort_config</code> now fail, and a config that carried the D2 key gets new labels and matrix ids.</li>
+      </ul>
+
+      <h4>4. Testing Strategy</h4>
+      <p>Everything below runs on the merge candidate, and the release job is the final check.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>just test</code> — Phase 1 count plus the new tests, 0 failed.</li>
+        <li><code class="status">[x]</code> <code>cd docs-site &amp;&amp; npm run build</code> — <code>starlight-links-validator</code> passes with the new ADR in the sidebar.</li>
+        <li><code class="status">[x]</code> <code>docker build .</code> locally, because the <code>docker</code> context is skipped on PRs.</li>
+        <li><code class="status">[x]</code> <code>gh run list --workflow release.yml -L 1</code> — both jobs green and an anonymous pull of <code>ghcr.io/ccd-ia/triage-pg:v1.3.0</code> works.</li>
+      </ul>
+      <div class="loop">🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.</div>
+    </div>
+  </section>
+
+  <!-- ===== DEFINITION OF DONE ===== -->
+  <section id="definition-of-done">
+    <h2>Definition of Done</h2>
+    <p>Every precision@k and recall@k that triage-pg stores, for new runs and for rows that existed before
+      the upgrade, equals what DSSG triage would report from the same predictions and labels. The one
+      exception is <code>N_pct</code> rounding, which stays ceil and is documented. A user can write
+      <code>include_missing_labels_in_train_as: false</code> or <code>true</code> and get DSSG's train-only
+      fill. A user who leaves it out gets exactly today's matrices, under the same artifact ids. A misspelled
+      key in <code>label_config</code> or <code>cohort_config</code> stops the run before anything is built and
+      names the key.</p>
+    <p>The evidence is four checks. On DirtyDuck, the Phase 6 reference script compares every threshold row
+      (the count recorded in Phase 1) and reports a max |stored − DSSG reference| ≤ 1e-12. Rows from fully
+      labeled (early_warning) experiments move by exactly 0 against <code>evals-before.csv</code>. Re-running
+      <code>example/dirtyduck/experiment.yaml</code> after Phase 3 rebuilds 0 artifacts. The 0024 NOTICE
+      reports 0 skipped keys on DirtyDuck. <code>just test</code> reports the Phase 1 pass count plus the new
+      tests, with 0 failed, and every new test has been seen to fail once with its fix removed.</p>
+    <p>Non-goals: DSSG's floor rounding; DSSG's sort-convention tie-breaks (triage-pg keeps analytic
+      extremes); the <code>prediction_ranks</code> view not partitioning by <code>split_kind</code>; the curve
+      merging all as-of dates; SHAP; any frontend change; exact Aequitas parity for <code>for</code> and
+      <code>npv</code> when labels are missing.</p>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[x]</code> <code>just test</code> — full suite green, including the new test modules.</li>
+      <li><code class="status">[x]</code> <code>just lint &amp;&amp; just typecheck</code> — ruff and basedpyright clean with <code>--all-extras</code>.</li>
+      <li><code class="status">[x]</code> <code>just alembic upgrade head &amp;&amp; just alembic downgrade 0023_probability_metrics &amp;&amp; just alembic upgrade head</code> on a scratch project DB — 0024 round-trips.</li>
+      <li><code class="status">[x]</code> <code>uv run triage db upgrade</code> on DirtyDuck, then the reference script — max diff ≤ 1e-12 over all threshold rows, 0 skipped keys.</li>
+      <li><code class="status">[x]</code> <code>uv run triage run example/dirtyduck/experiment.yaml</code> — 0 artifacts rebuilt (key absent).</li>
+      <li><code class="status">[x]</code> <code>for f in example/*/*.yaml; do uv run triage analyze-config "$f" &gt;/dev/null || echo FAIL $f; done</code> — no output.</li>
+      <li><code class="status">[x]</code> <code>cd docs-site &amp;&amp; npm run build</code> — the link validator passes.</li>
+      <li><code class="status">[x]</code> <code>gh issue view 21 --json state -q .state</code> — <code>CLOSED</code> by the merged PR.</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+    <details>
+      <summary>[asked] Top-k semantics for threshold metrics (D1)</summary>
+      <p class="qa-answer">DSSG semantics: rank all test rows in the population, cut at k, then drop
+        unlabeled rows from the metric and record <code>num_labeled_above_threshold</code>. The other options
+        were keeping labeled-only ranking with an ADR, or storing both.</p>
+    </details>
+    <details>
+      <summary>[asked] What to do with <code>include_missing_labels_in_train_as</code> (D2)</summary>
+      <p class="qa-answer">Implement DSSG semantics: absent means drop, <code>false</code> means 0,
+        <code>true</code> means 1, train matrix only. The other options were rejecting the key or warning.</p>
+    </details>
+    <details>
+      <summary>[asked] Unknown keys inside <code>label_config</code> / <code>cohort_config</code> (D3)</summary>
+      <p class="qa-answer">Fail validation, naming the key and listing the accepted ones.</p>
+    </details>
+    <details>
+      <summary>[asked] Existing evaluations after the upgrade</summary>
+      <p class="qa-answer">Migration 0024 recomputes the precision@/recall@ and bias rows in place, so the
+        leaderboard never mixes the two semantics. The other options were an explicit
+        <code>triage evaluate --recompute</code> command, or deleting the rows.</p>
+    </details>
+    <details>
+      <summary>[asked] Release</summary>
+      <p class="qa-answer">v1.3.0. SHAP moves to v1.4.0. This is its second renumbering (ADR-0031 note,
+        TODO.org, CLAUDE.md).</p>
+    </details>
+    <details>
+      <summary>[asked] <code>N_pct</code> rounding</summary>
+      <p class="qa-answer">Keep ceil and document it. DSSG used <code>int()</code> (floor). k differs by at
+        most one row.</p>
+    </details>
+    <details>
+      <summary>[decided] Add <code>population_ranks</code> instead of changing <code>labeled_ranks</code></summary>
+      <p class="qa-answer">Ten callers use <code>labeled_ranks</code>: AUC, average precision, the
+        probability and regression metrics, calibration, and the 0014/0015 bias and metric bodies. Every
+        rank-free metric needs labeled rows only. Changing <code>labeled_ranks</code> would force
+        <code>outcome is not null</code> into all of them. A second function confines D1 to the four
+        threshold consumers.</p>
+    </details>
+    <details>
+      <summary>[decided] Tie bounds stay analytic extremes</summary>
+      <p class="qa-answer">DSSG's "worst"/"best" were sort conventions: <code>na_position='first'</code> for
+        worst and <code>'last'</code> for best (<code>catwalk/utils.py</code>, <code>dssg/master</code>). They
+        are not true extremes once unlabeled rows sit in the tie block. <code>docs/schema-design.md</code> §3
+        already chose analytic bounds over DSSG's sampled ones. The two agree whenever the boundary tie block
+        has no unlabeled rows.</p>
+    </details>
+    <details>
+      <summary>[decided] The D2 key is classification-only and boolean-only</summary>
+      <p class="qa-answer">DSSG had no problem types, and its key filled a binary label. A 0/1 fill of a
+        continuous <code>outcome</code> is a silent modelling error, and survival has no <code>outcome</code>.
+        A non-boolean value is rejected, as DSSG's <code>else: raise ValueError</code> did.
+        <code>null</code> means absent, as DSSG's <code>None</code> did.</p>
+    </details>
+    <details>
+      <summary>[decided] Identity: the fill is in the train matrix and not in the labels; the experiment hash moves</summary>
+      <p class="qa-answer">The labels rows do not change, so the key is stripped from the labels config. Test
+        matrices built on those labels keep their ids. The train matrix carries the fill in its config only
+        when set, so no existing id moves. ADR-0022's problem identity hashes the full
+        <code>label_config</code>, so setting the key starts a new experiment. That is intended, because the
+        training target differs. A config that already carried the key, such as a ported DSSG config, gets a
+        new labels id once and is otherwise unaffected. This goes in the Upgrading note.</p>
+    </details>
+    <details>
+      <summary>[decided] Bias denominators</summary>
+      <p class="qa-answer">Group size and selection count every row, as Aequitas did with DSSG's full test
+        frame. Precision, FDR, FOR and NPV divide by labeled rows only, so an unlabeled selected row is not
+        counted as a false positive. Exact Aequitas parity for FOR/NPV with missing labels is not verified,
+        because Aequitas is not installed. This is a non-goal.</p>
+    </details>
+    <details>
+      <summary>[decided] Recomputed bias rows pin their old reference group</summary>
+      <p class="qa-answer"><code>bias_metrics</code> stores <code>ref_group_value</code> but not whether it
+        was pinned or chosen as the largest group. Group sizes now include unlabeled rows, so "largest" could
+        change. Passing the stored value as an explicit pin keeps each row's reference stable. New runs use
+        the configured rule.</p>
+    </details>
+    <details>
+      <summary>[decided] The downgrade restores functions but not values</summary>
+      <p class="qa-answer">Values recomputed in 0024 stay after a downgrade, because the old values are not
+        kept. Re-running the experiment recomputes them with 0015's functions. The migration docstring says
+        this, so a downgrade is never mistaken for a value rollback.</p>
+    </details>
+    <details>
+      <summary>[decided] Leave <code>sample_config</code> in <code>src/tests/utils.py</code> alone</summary>
+      <p class="qa-answer">It is the only place the key appears today, and nothing calls it (checked with
+        grep). After D2 its <code>False</code> would mean "fill 0". It is dead code either way, and deleting
+        it is cleanup outside this issue.</p>
+    </details>
+    <details>
+      <summary>[decided] Validators live in a new <code>problem_config.py</code></summary>
+      <p class="qa-answer"><code>run.py</code>, <code>cli.py</code> and the tests need one definition. The
+        same split already exists for bias (<code>bias.validate_bias_config</code> plus its mirror in
+        <code>validate_experiment_config</code>).</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>The key, by example</h3>
+    <p>One <code>as_of_date</code>, a 6-month window, five active facilities. A was inspected and failed, B
+      was inspected and passed, and C, D and E were not inspected (the label query returns no row for
+      them).</p>
+    <div class="table-wrap">
+    <table>
+      <tr><th>Key</th><th>Train A B C D E</th><th>Fitted on</th><th>Test C D E</th></tr>
+      <tr><td>absent</td><td><code>1 0 – – –</code></td><td>A, B</td><td>NULL: scored, ranked, not in the denominator</td></tr>
+      <tr><td><code>false</code></td><td><code>1 0 0 0 0</code></td><td>all five</td><td>NULL</td></tr>
+      <tr><td><code>true</code></td><td><code>1 0 1 1 1</code></td><td>all five</td><td>NULL</td></tr>
+    </table>
+    </div>
+    <p>For inspections, "absent" is the right framing. <code>false</code> turns the target into "inspected
+      and failed", which mixes the inspectors' selection into the label. <code>true</code> fits problems where
+      no record means the bad outcome, such as a student who does not re-enroll counting as a dropout.</p>
+
+    <h3>Why 0007 went the other way, and why that does not hold now</h3>
+    <p>0007 moved the dashboard curve onto labeled-only ranks because the curve mixed a population rank with
+      a labeled total, which pushed <code>pct</code> to 228%. The fault was the mixed denominators, not the
+      population rank. Under D1 both the cut and <code>pct</code> are population-based and precision is
+      labeled-based, so the curve and the leaderboard agree again on a single definition.</p>
+
+    <h3>Observed, out of scope</h3>
+    <ul>
+      <li><code>triage.prediction_ranks</code> partitions by <code>(model_id, as_of_date)</code> but not by
+        <code>split_kind</code>. A model with validation and test predictions on the same date would
+        interleave them.</li>
+      <li><code>model_threshold_curve</code> joins test labels on <code>m.training_label_timespan</code> and
+        merges every test date into one curve.</li>
+      <li><code>specs/</code> is not gitignored in this repo, unlike the
+        session-start assumption. The untracked v1.2.0 plan shows up in <code>git status</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <details>
+      <summary>2026-10-22 — what the build changed in the plan</summary>
+      <ul>
+        <li><strong>Test-matrix identity moves with the fill.</strong> The plan said test matrices keep their ids. They do not: a test matrix chains over its train-matrix parent (ADR-0009). The test now asserts identical test-matrix <em>content</em>, unlabeled NULLs included, and an unchanged labels id.</li>
+        <li><strong>"0 artifacts rebuilt" became a key-set test.</strong> The triage-pg version enters every derivation (ADR-0016), so the v1.3.0 bump moves every id by design. The guard is now that a matrix built without the key hashes from exactly v1.2.1's identity keys (<code>test_missing_label_fill_reaches_the_train_matrix_only</code>).</li>
+        <li><strong>No fully labeled control on DirtyDuck.</strong> All 262 models are resource_prioritization (41–47% labeled), so "early_warning rows move by 0" could not be measured live. The fully labeled regression guard is the unchanged <code>test_in_pg_metrics.py</code> suite (33 passed on 0024).</li>
+        <li><strong>The D2 key also checks in <code>triage run</code></strong> before a cloud submit, not only in <code>run_experiment</code>.</li>
+        <li><strong><code>precision_random_std</code> guards <code>exp()</code> underflow</strong>, which PostgreSQL raises as an error. It was found by the 13,000-row scipy test.</li>
+        <li><strong>ADRs are not in this site's sidebar</strong>, and <code>adr-conformance.md</code> stops at 0031 (0032 is missing too). Neither was changed; only the 0031 row was renumbered.</li>
+        <li><strong>Local environment:</strong> the locked scipy 1.15.3 wheel does not load on Darwin 27. The build used scipy 1.16.3 in the worktree's own <code>.venv</code> with <code>UV_NO_SYNC=1</code>. The lock is unchanged, and CI runs on Linux.</li>
+        <li>Live DirtyDuck (0022 → 0024): 1,048 threshold rows recomputed, 0 skipped, max |stored − DSSG reference| = 0, and 1,042 rows moved (largest 0.259, median 0.014). There are no bias rows in that database.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>2026-10-22 — fully labeled control on Chicago 311 and DonorsChoose; docs and README (maintainer request)</summary>
+      <ul>
+        <li>Both databases had no triage schema. Each was upgraded to 0023, its tutorial experiment was run with the branch code (old evaluation functions), and the database was then upgraded to 0024. Moved: 0 of 224 (Chicago 311) and 0 of 192 (DonorsChoose) threshold rows in every column. <code>num_labeled_above_threshold</code> = k on every key. DSSG reference diff 0. This closes the "fully labeled rows move by 0" item that DirtyDuck could not measure.</li>
+        <li>Chicago 311 was re-run at 0024 with <code>bias_config</code>, the <code>austin</code> subset and <code>task_framing</code>. Its 588 bias values equal both the 0014 and the 0024 formulas (Python), and its 112 subset rows equal the DSSG reference.</li>
+        <li>The DirtyDuck tutorial verdict reversed: ScaledLogisticRegression 0.405 vs heuristic 0.376 at precision@100 (it was 0.388 vs 0.403). The tutorial, the baselines reference, the README evaluation row, the FAQ (two entries), the <code>resource_prioritization</code> regime text and the docs ADR index (0029–0033) were updated in commit 461e10ec.</li>
+      </ul>
+    </details>
+  </section>
+
+</main>
+</body>
+</html>

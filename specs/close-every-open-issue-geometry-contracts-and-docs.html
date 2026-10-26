@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan: Close every open issue — fit geometry, placeholder contracts, forward cohort</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:        #fbfbfa;
+    --surface:   #ffffff;
+    --surface-2: #f3f4f2;
+    --ink:       #1b1d1a;
+    --ink-muted: #5c6159;
+    --rule:      #dcdfd8;
+    --accent:    #2f6f4f;   /* triage green */
+    --accent-2:  #8a5a2b;   /* retrain / divergence */
+    --danger:    #a8321f;
+    --ok:        #2f6f4f;
+    --code-bg:   #f3f4f2;
+    --mono: "SF Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --measure: 74ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14161a;
+      --surface:   #1b1e23;
+      --surface-2: #22262c;
+      --ink:       #e6e8e3;
+      --ink-muted: #9aa196;
+      --rule:      #31363e;
+      --accent:    #6bbd90;
+      --accent-2:  #d3a163;
+      --danger:    #e2705c;
+      --ok:        #6bbd90;
+      --code-bg:   #22262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #14161a;
+    --surface:   #1b1e23;
+    --surface-2: #22262c;
+    --ink:       #e6e8e3;
+    --ink-muted: #9aa196;
+    --rule:      #31363e;
+    --accent:    #6bbd90;
+    --accent-2:  #d3a163;
+    --danger:    #e2705c;
+    --ok:        #6bbd90;
+    --code-bg:   #22262c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 68rem; margin: 0 auto; padding: 3rem 16px 6rem; }
+
+  h1 { font-size: 1.95rem; line-height: 1.22; letter-spacing: -0.02em; margin: 0 0 .5rem; font-weight: 640; }
+  h2 {
+    font-size: 1.28rem; letter-spacing: -0.01em; font-weight: 620;
+    margin: 3.2rem 0 .9rem; padding-bottom: .4rem; border-bottom: 1px solid var(--rule);
+  }
+  h3 { font-size: 1.06rem; font-weight: 620; margin: 2rem 0 .6rem; }
+  h4 { font-size: .95rem; font-weight: 620; margin: 1.4rem 0 .4rem; color: var(--ink); }
+  p  { max-width: var(--measure); margin: 0 0 1rem; }
+  a  { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  code {
+    font-family: var(--mono); font-size: .855em;
+    background: var(--code-bg); border: 1px solid var(--rule);
+    border-radius: 4px; padding: .08em .34em;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; font-size: .82rem; line-height: 1.55;
+    font-family: var(--mono); margin: 0 0 1.1rem;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 1em; }
+
+  header .meta { margin: 1.2rem 0 0; font-size: .86rem; }
+  header .meta summary { cursor: pointer; color: var(--ink-muted); }
+  header .meta dl {
+    display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1.1rem;
+    margin: .7rem 0 0; padding: .9rem 1rem;
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  }
+  header .meta dt { color: var(--ink-muted); font-family: var(--mono); font-size: .8rem; }
+  header .meta dd { margin: 0; font-family: var(--mono); font-size: .8rem; word-break: break-word; }
+
+  .lede { font-size: 1.04rem; color: var(--ink-muted); max-width: var(--measure); }
+
+  figure { margin: 1.8rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    font-size: .84rem; color: var(--ink-muted); margin-top: .7rem;
+    max-width: 62ch; margin-left: auto; margin-right: auto;
+  }
+
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: .68rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: .1em .45em; border-radius: 4px; border: 1px solid var(--rule);
+    background: var(--surface-2); color: var(--ink-muted); margin-right: .45rem;
+  }
+  .tag.new { border-color: var(--accent); color: var(--accent); }
+  .tag.existing { border-color: var(--rule); }
+  .tag.sql { border-color: var(--accent-2); color: var(--accent-2); }
+
+  .files ul { list-style: none; padding: 0; }
+  .files li { padding: .3rem 0; border-bottom: 1px dotted var(--rule); font-size: .92rem; }
+
+  .phase {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 1.4rem 1.6rem; margin: 1.6rem 0;
+  }
+  .phase > h3 { margin-top: 0; }
+  .phase .issue {
+    font-family: var(--mono); font-size: .78rem; color: var(--ink-muted);
+    display: block; margin: -.35rem 0 .9rem;
+  }
+  .status { color: var(--ink-muted); font-weight: 600; }
+
+  ul.checklist { list-style: none; padding: 0; margin: .4rem 0 1rem; }
+  ul.checklist li {
+    padding: .22rem 0 .22rem 0; font-size: .92rem;
+    max-width: var(--measure);
+  }
+  ul.checklist li code.status { margin-right: .45rem; }
+
+  .loop {
+    background: var(--surface-2); border-left: 3px solid var(--accent);
+    padding: .7rem .95rem; border-radius: 0 6px 6px 0;
+    font-size: .88rem; margin: 1rem 0 0;
+  }
+  .warn { border-left-color: var(--danger); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; margin: 0 0 1.2rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 620; color: var(--ink-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+
+  #questionables details, #amendments details {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 8px; padding: .75rem 1rem; margin: .6rem 0;
+  }
+  #questionables summary, #amendments summary { cursor: pointer; font-weight: 560; }
+  .qa-answer { margin: .6rem 0 0; font-size: .92rem; color: var(--ink-muted); }
+
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--accent-2);
+    border-radius: 0 8px 8px 0; padding: .9rem 1.1rem; margin: 1.3rem 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout strong { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== HEADER + UPDATABLE METADATA ===== -->
+  <header>
+    <h1>Plan: Close every open issue — fit geometry, placeholder contracts, forward cohort</h1>
+    <p class="lede">Six open issues on <code>ccd-ia/triage-pg</code>, all verified against the
+    source on 2026-09-17. One of them silently produces wrong predictions, and the fix the issue
+    recommends would have broken a second path. Seven phases on one branch, one pull request, one release.</p>
+    <details class="meta">
+      <summary>Metadata</summary>
+      <dl>
+        <dt>created</dt>      <dd>2026-09-17T17:38:00-06:00</dd>
+        <dt>modified</dt>     <dd>2026-09-17T17:38:00-06:00, 2026-09-17T18:06:00-06:00, 2026-09-17T19:20:00-06:00</dd>
+        <dt>commits</dt>      <dd>e5604cc4, be3ee32a, b3491f91, b528be8b, 7791def0, dec53c41 (PR #17)</dd>
+        <dt>agent name</dt>   <dd>Claude Opus 5 (1M context), Claude Opus 5 (1M context)</dd>
+        <dt>session id</dt>   <dd>59b15a0f-4aaa-4a7c-a8d0-1519c2757e65, 59b15a0f-4aaa-4a7c-a8d0-1519c2757e65</dd>
+        <dt>back refs</dt>    <dd>issues #10 #11 #12 #13 #14 #15, docs/adr/0006, 0008, 0015, 0022, 0023, 0027, docs/adr-conformance.md, CONTRIBUTING.md “Changing triage-pg from another session”</dd>
+        <dt>forward refs</dt> <dd>docs/adr/0032-forward-scoring-cohort.md (new), migrations 0021_model_feature_geometry, 0022_audition_window, build_frontend.py (new), ccd-ia/featurizer next tag (release gate)</dd>
+      </dl>
+    </details>
+  </header>
+
+  <figure>
+    <svg viewBox="0 0 900 250" role="img" aria-label="Six issues grouped into three classes, feeding seven phases and one release">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-muted)"/>
+        </marker>
+      </defs>
+      <rect x="18" y="30" width="196" height="54" rx="8" fill="var(--surface)" stroke="var(--danger)" stroke-width="1.5"/>
+      <text x="116" y="52" text-anchor="middle" font-family="var(--mono)" font-size="15" font-weight="700" fill="var(--danger)">#14</text>
+      <text x="116" y="72" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">wrong predictions</text>
+
+      <rect x="18" y="98" width="196" height="54" rx="8" fill="var(--surface)" stroke="var(--accent-2)" stroke-width="1.5"/>
+      <text x="116" y="120" text-anchor="middle" font-family="var(--mono)" font-size="15" font-weight="700" fill="var(--accent-2)">#12 · #11</text>
+      <text x="116" y="140" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">silent loss · late failure</text>
+
+      <rect x="18" y="166" width="196" height="54" rx="8" fill="var(--surface)" stroke="var(--rule)" stroke-width="1.5"/>
+      <text x="116" y="188" text-anchor="middle" font-family="var(--mono)" font-size="15" font-weight="700" fill="var(--ink)">#10 · #13 · #15</text>
+      <text x="116" y="208" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">missing surface</text>
+
+      <line x1="222" y1="57"  x2="290" y2="105" stroke="var(--ink-muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="222" y1="125" x2="290" y2="125" stroke="var(--ink-muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="222" y1="193" x2="290" y2="145" stroke="var(--ink-muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+
+      <rect x="300" y="88" width="330" height="74" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5"/>
+      <text x="465" y="114" text-anchor="middle" font-family="var(--sans)" font-size="14" font-weight="620" fill="var(--ink)">7 phases · one pull request</text>
+      <text x="465" y="136" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink-muted)">worktree → PR → 5 checks → rebase</text>
+      <text x="465" y="153" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink-muted)">six Closes #N lines</text>
+
+      <line x1="638" y1="125" x2="700" y2="125" stroke="var(--ink-muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+
+      <rect x="710" y="88" width="172" height="74" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"/>
+      <text x="796" y="118" text-anchor="middle" font-family="var(--mono)" font-size="16" font-weight="700" fill="var(--accent)">v1.2.0</text>
+      <text x="796" y="140" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">all six issues,</text>
+      <text x="796" y="155" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">one tag</text>
+    </svg>
+    <figcaption>Six verified issues in three severity classes, closed over seven sequential phases on one branch against a protected <code>main</code>.</figcaption>
+  </figure>
+
+  <!-- ===== PURPOSE / PROBLEM / SOLUTION ===== -->
+  <section id="purpose">
+    <h2>Purpose</h2>
+    <p>Close issues <a href="https://github.com/ccd-ia/triage-pg/issues/10">#10</a>,
+    <a href="https://github.com/ccd-ia/triage-pg/issues/11">#11</a>,
+    <a href="https://github.com/ccd-ia/triage-pg/issues/12">#12</a>,
+    <a href="https://github.com/ccd-ia/triage-pg/issues/13">#13</a>,
+    <a href="https://github.com/ccd-ia/triage-pg/issues/14">#14</a> and
+    <a href="https://github.com/ccd-ia/triage-pg/issues/15">#15</a> — every open issue on the
+    repository. All six were filed by the HockeyPredicts rebuild against v1.1.5 and all six were
+    independently verified against the source in this session; none is a misreading of the
+    documentation.</p>
+    <p>The work divides cleanly. Three are defects that produce a wrong or missing result with no
+    error (#14, #12, #11). Two are surfaces that were never built — a production cohort for
+    forward scoring (#10) and a date window for model selection (#13). One is documentation that
+    describes a source checkout as though it described an install (#15).</p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>The centre of this plan is #14, and it is worse than reported. A model is fitted on one
+    column order and forward-scored on another. Nothing raises, because the column <em>sets</em>
+    are identical and <code>_design_X</code> checks only for missing columns before calling
+    <code>frame.select(feature_names)</code>, which happily reorders.</p>
+    <p>The reporter traced it to feature groups (ADR-0023). It is broader than that:
+    <code>run.py:759</code> sorts the columns even when the config declares <em>no</em>
+    <code>feature_groups</code> block, so every experiment whose matrix build order is not already
+    sorted is affected. The reporter measured a max scoring error of 0.7420 on an
+    <code>MLPClassifier</code> and 0.2895 on a logistic baseline over a ten-column rotation.</p>
+
+    <div class="callout">
+      <p><strong>The finding that reshaped this plan.</strong> The issue's preferred fix — read the
+      geometry from <code>triage.model_groups.feature_list</code> — is correct for models built by
+      <code>triage run</code> and <em>wrong</em> for models built by <code>triage retrain</code>.
+      <code>retrain.py</code> calls <code>build_matrix</code> with no feature-group projection at
+      all, so <code>build_model</code> records and fits on the matrix's <strong>build</strong>
+      order. Because <code>_model_group_hash</code> sorts the list before hashing, that retrained
+      model rejoins the group whose stored <code>feature_list</code> is the original
+      <strong>sorted</strong> order. Adopting the issue's fix unmodified would repair every
+      run-path model and silently break every retrained one — which is currently, by accident,
+      the only scoring path that is right.</p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 900 300" role="img" aria-label="Two build paths disagree about which recorded list is the fit order">
+        <text x="30" y="26" font-family="var(--sans)" font-size="13" font-weight="620" fill="var(--ink-muted)">what the estimator was fitted on</text>
+
+        <!-- column headers -->
+        <text x="372" y="72" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink-muted)">matrices.feature_names</text>
+        <text x="600" y="72" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink-muted)">model_groups.feature_list</text>
+        <text x="806" y="72" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--accent)">models.feature_list</text>
+        <text x="806" y="87" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--accent)">(new)</text>
+
+        <!-- run row -->
+        <rect x="30" y="100" width="210" height="58" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="135" y="124" text-anchor="middle" font-family="var(--mono)" font-size="13" font-weight="700" fill="var(--accent)">triage run</text>
+        <text x="135" y="144" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">sorted subset</text>
+
+        <text x="372" y="136" text-anchor="middle" font-size="20" fill="var(--danger)">✗</text>
+        <text x="600" y="136" text-anchor="middle" font-size="20" fill="var(--ok)">✓</text>
+        <text x="806" y="136" text-anchor="middle" font-size="20" fill="var(--ok)">✓</text>
+
+        <!-- retrain row -->
+        <rect x="30" y="182" width="210" height="58" rx="8" fill="var(--surface)" stroke="var(--accent-2)" stroke-width="1.5"/>
+        <text x="135" y="206" text-anchor="middle" font-family="var(--mono)" font-size="13" font-weight="700" fill="var(--accent-2)">triage retrain</text>
+        <text x="135" y="226" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">build order, all columns</text>
+
+        <text x="372" y="218" text-anchor="middle" font-size="20" fill="var(--ok)">✓</text>
+        <text x="600" y="218" text-anchor="middle" font-size="20" fill="var(--danger)">✗</text>
+        <text x="806" y="218" text-anchor="middle" font-size="20" fill="var(--ok)">✓</text>
+
+        <line x1="290" y1="88" x2="290" y2="252" stroke="var(--rule)" stroke-width="1"/>
+        <line x1="700" y1="88" x2="700" y2="252" stroke="var(--rule)" stroke-width="1"/>
+
+        <text x="30" y="282" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">Neither existing column is right for both paths. Today forward scoring reads the left one.</text>
+      </svg>
+      <figcaption>Two build paths, two different fit orders, and no single existing column that
+      records either honestly. This is why the fix is a new per-model column rather than a
+      one-line swap.</figcaption>
+    </figure>
+
+    <p>The remaining five are smaller but each has the same shape — something the configuration
+    declares that the system quietly does not honour:</p>
+    <table>
+      <tr><th>Issue</th><th>What the config says</th><th>What actually happens</th></tr>
+      <tr><td>#12</td><td>a <code>boolean</code> feature column</td><td><code>pl.Boolean</code> is absent from <code>_numeric_dtypes()</code>, so the column is dropped from the design matrix and only a warning says so</td></tr>
+      <tr><td>#11</td><td><code>{as_of_date}</code>, the same token used by cohort and label queries</td><td><code>subsets.py:89</code> interpolates it bare while <code>cohort.py:144</code> and <code>labels.py:196</code> interpolate it quoted; the cohort spelling is a syntax error in a subset, mid-run</td></tr>
+      <tr><td>#10</td><td>a cohort that selects outcome-bearing rows, for training</td><td><code>predict_forward</code> reuses that same query at score time, so the unresolved entities forward scoring exists for are excluded by construction</td></tr>
+      <tr><td>#13</td><td>—</td><td><code>triage.audition</code> aggregates every evaluated split; <code>audition_pick</code> takes no dates, so “select on the last two seasons” cannot be said</td></tr>
+      <tr><td>#15</td><td><code>uv sync --extra dashboard</code> then <code>just serve</code></td><td>the wheel packages <code>src/triage</code> only, so a non-source install serves the 620-byte placeholder with HTTP 200 and looks like an empty dashboard</td></tr>
+    </table>
+  </section>
+
+  <section id="solution">
+    <h2>Solution</h2>
+    <p>Record each model's fit geometry on the model row, at the moment it is fitted, and read it
+    back when scoring. <code>triage.models</code> gains a nullable
+    <code>feature_list text[]</code> written by <code>build_model</code> from the order it actually
+    passed to <code>fit</code>, so the run path and the retrain path each record the truth about
+    themselves and <code>predict_forward</code> stops having to guess which stored list to
+    believe. Existing rows are backfilled from <code>triage.runs.purpose</code>, which
+    distinguishes the two paths exactly.</p>
+    <p>In the same phase, <code>retrain.py</code> starts projecting onto the group's recorded
+    feature list before <code>build_model</code>, so a retrained model is fitted on its group's
+    spec rather than on every column of the matrix — and rejoins its group for the right reason
+    instead of because the hash sorts both lists.</p>
+    <p>The other five are local and additive. A boolean cast before the numeric guard (#12); a
+    regex that strips a quote pair around the placeholder so both spellings render identically
+    (#11); an identity-neutral <code>cohort_config.forward_query</code> with a CLI override and an
+    ADR (#10); two defaulted date parameters on <code>audition_pick</code> and
+    <code>selected_model</code> (#13); and documentation plus a placeholder page that names the
+    two commands a reader needs (#15).</p>
+
+    <figure>
+      <svg viewBox="0 0 900 220" role="img" aria-label="build_model records the fit order on the model row and predict_forward reads it back">
+        <rect x="24" y="76" width="188" height="66" rx="8" fill="var(--surface)" stroke="var(--rule)" stroke-width="1.5"/>
+        <text x="118" y="104" text-anchor="middle" font-family="var(--mono)" font-size="12.5" font-weight="700" fill="var(--ink)">build_model</text>
+        <text x="118" y="125" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">fits in some order</text>
+
+        <line x1="220" y1="109" x2="300" y2="109" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="260" y="98" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--accent)">writes</text>
+
+        <rect x="308" y="62" width="248" height="94" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="432" y="94" text-anchor="middle" font-family="var(--mono)" font-size="13" font-weight="700" fill="var(--accent)">models.feature_list</text>
+        <text x="432" y="116" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">one row, one geometry,</text>
+        <text x="432" y="133" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">true for either build path</text>
+
+        <line x1="564" y1="109" x2="644" y2="109" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="604" y="98" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--accent)">reads</text>
+
+        <rect x="652" y="76" width="224" height="66" rx="8" fill="var(--surface)" stroke="var(--rule)" stroke-width="1.5"/>
+        <text x="764" y="104" text-anchor="middle" font-family="var(--mono)" font-size="12.5" font-weight="700" fill="var(--ink)">predict_forward</text>
+        <text x="764" y="125" text-anchor="middle" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">scores in that order</text>
+
+        <text x="450" y="192" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-muted)">The geometry is never re-derived, so it cannot drift from the fit.</text>
+      </svg>
+      <figcaption>The fit order becomes a recorded fact about the model instead of something
+      reconstructed from whichever table happens to be closest.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== RELEVANT FILES ===== -->
+  <section id="files" class="files">
+    <h2>Relevant Files</h2>
+
+    <h3>Existing Files</h3>
+    <ul>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/forward.py</code> — <code>predict_forward</code>; line 237 is the geometry bug (#14) and line 196 the cohort reuse (#10)</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/model.py</code> — <code>build_model</code> (241: <code>feature_list</code> from the train matrix), <code>_insert_model_row</code>, <code>_design_X</code> (the reorder that never complains)</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/retrain.py</code> — builds a full matrix with no feature-group projection; gains the projection in Phase 1</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/lineage.py</code> — <code>ModelLineage</code> already carries <code>model_group_id</code>; gains <code>fit_feature_list</code></li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/run.py</code> — 759 (the default sorted subset), 1352–1353 (the subset projection), 442–470 (<code>validate_experiment_config</code> subset checks)</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/matrix.py</code> — <code>_numeric_dtypes()</code> (342) and <code>_numeric_feature_columns</code> (357); the boolean cast goes in before line 956</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/subsets.py</code> — <code>register_subsets</code> line 89, the bare <code>str.format</code></li>
+      <li><span class="tag existing">existing</span> <code>src/triage/adapters/cohort.py</code> · <code>labels.py</code> — the quoted-literal rendering the subset path must match</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/cli.py</code> — <code>score_command</code> (1218), <code>audition_command</code> (991); both gain options</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/dashboard/app.py</code> — <code>_STATIC_DIR</code> (50) and <code>_SpaStaticFiles</code> (56); gains the placeholder warning</li>
+      <li><span class="tag existing">existing</span> <code>src/triage/dashboard/static/index.html</code> — the 620-byte placeholder to rewrite</li>
+      <li><span class="tag existing">existing</span> <code>src/tests/adapter_tests/test_forward.py</code> — three tests, none touching <code>feature_names</code>; this is why #14 escaped</li>
+      <li><span class="tag existing">existing</span> <code>docs-site/src/content/docs/tutorials/chicago311.md</code> — line 192 teaches the quoted subset spelling</li>
+      <li><span class="tag existing">existing</span> <code>CONTRIBUTING.md</code> — the six rules the branch/PR flow must obey</li>
+    </ul>
+
+    <h3>New Files</h3>
+    <ul>
+      <li><span class="tag new">new</span> <span class="tag sql">sql</span> <code>src/triage/component/results_schema/alembic/versions/0021_model_feature_geometry.py</code> — adds <code>triage.models.feature_list</code> and backfills it</li>
+      <li><span class="tag new">new</span> <span class="tag sql">sql</span> <code>src/triage/component/results_schema/alembic/versions/0022_audition_window.py</code> — dated <code>audition_pick</code> / <code>selected_model</code> and a windowed view</li>
+      <li><span class="tag new">new</span> <code>src/tests/adapter_tests/test_model_geometry.py</code> — the fit-order contract, run path and retrain path</li>
+      <li><span class="tag new">new</span> <code>src/tests/adapter_tests/test_subsets_placeholder.py</code> — the three subset spellings, each rendered and executed</li>
+      <li><span class="tag new">new</span> <code>docs/adr/0032-forward-scoring-cohort.md</code> — why <code>forward_query</code> is identity-neutral</li>
+    </ul>
+  </section>
+
+  <!-- ===== IMPLEMENTATION PHASES ===== -->
+  <section id="phases">
+    <h2>Implementation Phases</h2>
+    <p><strong>IMPORTANT:</strong> Execute every phase and task step by step, in order, top to bottom.</p>
+    <p>Status markers: <code>[]</code> idle · <code>[wip]</code> in progress · <code>[x]</code> complete · <code>[f]</code> failed. All start as <code>[]</code>; the Build Plan workflow updates them as it works.</p>
+
+    <div class="callout">
+      <p><strong>All seven phases share one branch and one pull request</strong>, per the
+      answered Questionable. <code>main</code> takes no direct pushes
+      (<code>CONTRIBUTING.md</code>, protected-<code>main</code> policy).</p>
+<pre><code>git worktree add .worktrees/close-open-issues \
+    -b claude/close-open-issues origin/main
+cd .worktrees/close-open-issues &amp;&amp; export UV_PROJECT_ENVIRONMENT="$PWD/.venv"
+uv sync --all-extras              # --extra dev alone fakes 36 basedpyright errors
+
+# one commit per phase, each body ending with its own closing keyword
+git commit                        # … Closes #14
+git commit                        # … Closes #12   (etc.)
+
+gh pr create                      # title = the release line; body repeats all six
+gh pr checks --watch --fail-fast  # docker SKIPS on a PR; 4 pass + 1 skipped is green
+gh pr merge --rebase --delete-branch
+git worktree remove .worktrees/close-open-issues</code></pre>
+      <p><strong>One commit per phase, not one squashed commit.</strong> The merge is a rebase, so
+      every commit lands on <code>main</code> individually and each <code>Closes #N</code> is
+      honoured — that is what closes six issues from a single pull request, and it keeps
+      <code>git bisect</code> useful across a change this wide. The PR body repeats all six
+      keywords as a safety net. Do not force-push the branch: the permission layer denies it, so
+      fix a pushed commit with a follow-up commit.</p>
+      <p>Because everything is on one branch, the Alembic ordering is a file-level fact rather than
+      a merge-order constraint: <code>0022</code> sets
+      <code>down_revision = "0021_model_feature_geometry"</code> and Phase 5 simply comes after
+      Phase 1 in the sequence. Run <code>just alembic heads</code> before opening the PR — one
+      head, not two.</p>
+      <div class="loop warn" style="margin-top:1rem">
+        ⚠ <strong>The cost of one PR is that CI runs once, at the end, over ~15 files.</strong>
+        Run <code>just test</code> · <code>just lint</code> · <code>just typecheck</code> locally at
+        the close of <em>every</em> phase, not just before pushing. A phase that leaves the suite red
+        and is discovered five phases later is the failure mode this shape invites.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 1 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 1: Record each model's fit geometry, and make retrain honour its group</h3>
+      <span class="issue">closes #14 · commit 1 of 6 · the critical one</span>
+      <p>Add <code>triage.models.feature_list</code>, write it from the order
+      <code>build_model</code> actually fitted, backfill the existing rows from the run purpose,
+      read it in <code>predict_forward</code>, and stop <code>retrain</code> from training on
+      columns its group's spec excludes.</p>
+
+      <h4>1. Prove the bug before fixing it</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Read <code>src/tests/adapter_tests/test_forward.py</code> and the seeded fixture it uses; establish whether the fixture's feature names are already in sorted order</li>
+        <li><code class="status">[x]</code> <strong>If they are, the fixture must change.</strong> A test whose build order happens to equal its sorted order proves nothing about this bug — force at least two feature columns whose emission order differs from their sort order (e.g. a name beginning <code>z_</code> emitted first)</li>
+        <li><code class="status">[x]</code> Write the failing test first: fit an order-sensitive estimator, forward-score, assert the stored scores equal <code>estimator.predict_proba(frame.select(fit_order))</code>; confirm it FAILS on unmodified <code>main</code></li>
+      </ul>
+
+      <h4>2. Migration 0021 — the column and the backfill</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Create <code>0021_model_feature_geometry.py</code> with <code>down_revision = "0020_pinball_metric"</code></li>
+        <li><code class="status">[x]</code> <code>alter table triage.models add column feature_list text[]</code> — nullable, so the upgrade cannot fail on existing rows</li>
+        <li><code class="status">[x]</code> Backfill: a model whose run <code>purpose = 'retrain'</code> was fitted in build order, so take <code>triage.matrices.feature_names</code>; every other model was fitted on the sorted subset, so take <code>triage.model_groups.feature_list</code></li>
+        <li><code class="status">[x]</code> Handle <code>models.run_id is null</code> (the run row is <code>on delete set null</code>): fall back to the model-group list and record the ambiguity in the migration's docstring</li>
+        <li><code class="status">[x]</code> Write the downgrade (<code>drop column</code>) and confirm <code>upgrade → downgrade → upgrade</code> round-trips</li>
+      </ul>
+
+      <h4>3. Write the geometry at fit time</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>model.py</code>: pass <code>feature_list</code> through <code>_insert_model_row</code> into the new column — the same list already handed to <code>_fit_estimator</code>, never a re-derivation</li>
+        <li><code class="status">[x]</code> Leave <code>_model_group_hash</code> alone: it sorts deliberately, so group identity is unchanged and no existing <code>model_group_id</code> moves</li>
+        <li><code class="status">[x]</code> Confirm no experiment hash changes — this phase must be identity-neutral (ADR-0022)</li>
+      </ul>
+
+      <h4>4. Read it back when scoring</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>lineage.py</code>: add <code>fit_feature_list: list[str]</code> to <code>ModelLineage</code>, selected from <code>triage.models.feature_list</code></li>
+        <li><code class="status">[x]</code> Fall back to <code>model_groups.feature_list</code> when the column is null, with a <code>logger.warning</code> naming the model id and saying the database predates migration 0021</li>
+        <li><code class="status">[x]</code> <code>forward.py:237</code>: score against <code>lineage.fit_feature_list</code> instead of <code>lineage.train_matrix.feature_names</code></li>
+      </ul>
+
+      <h4>5. Make retrain honour the group's spec</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>retrain.py</code>: after <code>build_matrix</code>, project with <code>replace(train_matrix, feature_names=list(lineage.fit_feature_list))</code> before <code>build_model</code></li>
+        <li><code class="status">[x]</code> Update the module docstring — the “rejoins its original group iff its feature_list is unchanged” paragraph now holds for the right reason</li>
+        <li><code class="status">[x]</code> Test: retraining a model group whose spec is a feature-group subset produces a model with that subset's column count, not the full matrix width</li>
+      </ul>
+
+      <h4>6. Testing Strategy</h4>
+      <p>pytest against <code>pytest-postgresql</code>'s throwaway database, with the seeded
+      experiment fixture. The decisive property is that build order and sorted order must
+      <em>differ</em> in the fixture; everything else follows. Edge cases: a model with a null
+      <code>feature_list</code> (pre-migration row), a retrained model, and a model group whose
+      feature set is the full matrix (where the two orders coincide and the test must still pass).</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_model_geometry.py -v</code> — the fit-order contract holds on both build paths</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_forward.py -v</code> — forward scoring reproduces the estimator applied to the recorded order</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_retrain.py -v</code> — a retrained subset model keeps its subset width</li>
+        <li><code class="status">[x]</code> <code>git stash</code> the fix, re-run, watch the new tests FAIL, restore — the red-green check that proves the tests can detect the bug</li>
+        <li><code class="status">[x]</code> <code>just alembic upgrade head</code> then <code>just alembic downgrade -1</code> then <code>upgrade head</code> — the migration round-trips</li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code> · <code>just typecheck</code> — full suite, ruff, basedpyright (baseline is 2 pre-existing errors)</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 2 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 2: Cast boolean features instead of dropping them</h3>
+      <span class="issue">closes #12 · commit 2 of 6</span>
+      <p>A PostgreSQL <code>boolean</code> is already a 0/1 feature. Cast it before the
+      non-numeric guard runs, so the column the config declares is the column the model sees.</p>
+
+      <h4>1. Cast before the guard, not inside the dtype tuple</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add <code>_cast_boolean_features(frame, feature_columns)</code> to <code>matrix.py</code>: cast every <code>pl.Boolean</code> feature column to <code>pl.Int8</code>, returning the frame and the names cast</li>
+        <li><code class="status">[x]</code> Call it in <code>build_matrix</code> immediately BEFORE <code>_numeric_feature_columns</code> (around line 956)</li>
+        <li><code class="status">[x]</code> <strong>Do not add <code>pl.Boolean</code> to <code>_numeric_dtypes()</code></strong> — that tuple is shared with <code>_apply_fit_free</code> "so the two never drift", and widening it would change imputation behaviour as a side effect</li>
+        <li><code class="status">[x]</code> <code>logger.info</code> the cast columns, so the matrix log says what happened rather than staying silent</li>
+      </ul>
+
+      <h4>2. Make the remaining warning followable</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> The current advice ("mark it role:identifier in the featurizer config") cannot be followed for <code>knowledge_date</code>, because the target entity's <code>temporal_ix</code> is not in the <code>variables:</code> map</li>
+        <li><code class="status">[x]</code> Exclude the target entity's <code>temporal_ix</code> by name in <code>_feature_columns</code>, reading it from the featurizer config the matrix was built from</li>
+        <li><code class="status">[x]</code> Reword the drop warning so it only advises <code>role: identifier</code> for columns that are actually declared variables</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>pytest over a matrix build whose featurizer output includes one <code>Boolean</code>, one
+      <code>Date</code> and one <code>String</code> column. Edge cases: a boolean that is NULL
+      before imputation (must reach the fit-free fill as an Int8, not be dropped), and an
+      all-false column (must not be mistaken for a constant to drop).</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_matrix.py -k boolean -v</code> — the boolean survives as 0/1 and appears in <code>feature_names</code></li>
+        <li><code class="status">[x]</code> Assert <code>Date</code> and <code>String</code> are still dropped — the guard keeps its purpose</li>
+        <li><code class="status">[x]</code> Revert the cast, watch the new test FAIL, restore</li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code> · <code>just typecheck</code></li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 3 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 3: One <code>{as_of_date}</code> spelling everywhere</h3>
+      <span class="issue">closes #11 · commit 3 of 6</span>
+      <p>Strip a quote pair sitting immediately around the placeholder, then render the quoted
+      literal exactly as <code>cohort.py</code> and <code>labels.py</code> do. Both spellings then
+      produce identical SQL, so the cohort spelling starts working in a subset and every existing
+      subset config — including the Chicago 311 tutorial we ship — keeps working.</p>
+
+      <h4>1. Normalise, then render</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> In <code>subsets.py</code>, add <code>_QUOTED = re.compile(r"'\{as_of_date\}'")</code> — anchored on the placeholder, so no other quoted literal in the query is touched</li>
+        <li><code class="status">[x]</code> Replace line 89's bare <code>.format(as_of_date=date_str)</code> with <code>_QUOTED.sub("{as_of_date}", query).format(as_of_date=f"'{as_of_date}'")</code></li>
+        <li><code class="status">[x]</code> Update the module docstring: state that the placeholder renders as a quoted literal, the same as cohort and label queries, and that a quoted spelling in the template is accepted and normalised</li>
+        <li><code class="status">[x]</code> Keep <code>date_str</code> for the <code>subset_members</code> insert — that path binds a parameter and is unaffected</li>
+      </ul>
+
+      <h4>2. Teach one spelling</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Update <code>docs-site/.../tutorials/chicago311.md:192</code> to <code>{as_of_date}::date</code>, so every documented query in the repo uses one form</li>
+        <li><code class="status">[x]</code> Check <code>docs/schema-design.md</code> §8.6 and any other subset example for the old spelling</li>
+        <li><code class="status">[x]</code> Leave <code>validate_subsets_config</code>'s presence check as it is — with both spellings valid there is nothing left to reject</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>pytest against a real database: render each spelling the way <code>register_subsets</code>
+      renders it and <em>execute</em> it, because the failure mode is a PostgreSQL parse error, not
+      a Python one. Edge cases: a query containing another single-quoted literal next to the
+      placeholder, and a placeholder appearing twice.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_subsets_placeholder.py -v</code> — <code>{as_of_date}::date</code>, <code>'{as_of_date}'</code> and <code>date '{as_of_date}'</code> all render and execute</li>
+        <li><code class="status">[x]</code> Assert an unrelated quoted literal (<code>where status = 'OPEN'</code>) is untouched by the regex</li>
+        <li><code class="status">[x]</code> Revert the <code>sub</code>, watch the first case FAIL with <code>cannot cast type integer to date</code>, restore</li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code> · docs-site <code>npm run build</code> (link validator)</li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 4 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 4: A production cohort for forward scoring</h3>
+      <span class="issue">closes #10 · commit 4 of 6 · adds public surface</span>
+      <p>An optional <code>cohort_config.forward_query</code>, identity-neutral so no existing
+      experiment hash moves, plus a <code>--cohort-query</code> override on the CLI for the
+      one-off case. The training cohort stays the default, so every current config behaves
+      exactly as it does today.</p>
+
+      <h4>1. The ADR first</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Write <code>docs/adr/0032-forward-scoring-cohort.md</code>: Status / Date / Deciders / Context / Decision / Consequences</li>
+        <li><code class="status">[x]</code> The decision to record is the <em>identity-neutrality</em> — <code>forward_query</code> observes the problem at score time, it does not define the problem, so it stays out of the ADR-0022 experiment hash exactly as <code>task_framing</code> does (ADR-0019)</li>
+        <li><code class="status">[x]</code> Name the consequence plainly: two experiments differing only in <code>forward_query</code> share an <code>experiment_hash</code>, and the forward cohort is distinguished at the artifact level instead</li>
+      </ul>
+
+      <h4>2. Config key</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Accept <code>cohort_config.forward_query</code> in <code>validate_experiment_config</code>, with the same <code>{as_of_date}</code> presence check the training query gets</li>
+        <li><code class="status">[x]</code> Exclude it from the experiment-identity envelope; add the assertion to <code>test_experiment_identity.py</code> that adding the key leaves the hash unchanged</li>
+        <li><code class="status">[x]</code> <code>forward.py</code>: <code>lineage.cohort_config.get("forward_query") or lineage.cohort_config["query"]</code></li>
+      </ul>
+
+      <h4>3. CLI override</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add <code>cohort_query_template: str | None = None</code> to <code>predict_forward</code>, taking precedence over both config values</li>
+        <li><code class="status">[x]</code> Add <code>--cohort-query PATH</code> to <code>score_command</code> and to <code>predictlist</code>; a path, read as SQL, so the shell never has to quote a multi-line query</li>
+        <li><code class="status">[x]</code> Leave the <code>lynkeus</code> action hint to derive itself — it reads typer's required arguments, and this is an option</li>
+      </ul>
+
+      <h4>4. Say it in the docs</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>docs/monitoring.md</code> — the forward-scoring runbook is where an operator will look</li>
+        <li><code class="status">[x]</code> The config reference page and <code>CONTEXT.md</code> if the glossary needs a Forward cohort entry</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>pytest over the seeded experiment, scoring at a date where the training cohort and the
+      production cohort genuinely differ — a cohort row with no outcome yet. Edge cases: both
+      config key and CLI flag supplied (flag wins), <code>forward_query</code> absent (today's
+      behaviour, byte for byte), and a <code>forward_query</code> that returns entities with no
+      label rows (the labels build must not fail the run).</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_forward.py -k cohort -v</code> — an unresolved entity is scored when <code>forward_query</code> is set and skipped when it is not</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_experiment_identity.py -v</code> — the hash does not move</li>
+        <li><code class="status">[x]</code> <code>uv run triage score --help</code> — the option is documented where an operator will find it</li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code> · <code>just typecheck</code></li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 5 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 5: A date window for audition</h3>
+      <span class="issue">closes #13 · commit 5 of 6 · migration 0022, after 0021</span>
+      <p>Two defaulted date parameters on <code>audition_pick</code> and
+      <code>selected_model</code>, threaded into the <code>audition_distances</code> filter, plus a
+      windowed view with the same columns as <code>triage.audition</code>. Existing five-argument
+      calls keep resolving through the defaults.</p>
+
+      <h4>1. Migration 0022</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>down_revision = "0021_model_feature_geometry"</code> — Phase 1 is earlier on the same branch; confirm with <code>just alembic heads</code> that there is exactly one head</li>
+        <li><code class="status">[x]</code> <code>drop function if exists</code> the current <code>audition_pick(text, text, text, text, jsonb)</code> and <code>selected_model(text, text, text, text)</code> signatures, following the pattern migrations 0005 and 0013 already use</li>
+        <li><code class="status">[x]</code> Recreate both with <code>p_from date default null, p_to date default null</code> appended, filtering every rule's <code>audition_distances</code> read on <code>as_of_date between coalesce(p_from, '-infinity') and coalesce(p_to, 'infinity')</code></li>
+        <li><code class="status">[x]</code> Check <strong>every</strong> rule body, not just <code>best_current_value</code> — <code>best_avg_recency_weight</code> computes weights relative to the first date, so the window must be applied before the weighting, or the weights silently change meaning</li>
+        <li><code class="status">[x]</code> Add <code>triage.audition_windowed(p_experiment, p_metric, p_parameter, p_from, p_to)</code> returning the same columns as <code>triage.audition</code></li>
+        <li><code class="status">[x]</code> Write the downgrade restoring the 0013/0005 definitions verbatim</li>
+      </ul>
+
+      <h4>2. CLI and dashboard</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>audition_command</code> gains <code>--from</code> / <code>--to</code>, passed straight through to the function — no date arithmetic in Python</li>
+        <li><code class="status">[x]</code> Print the window in the CLI header, so a narrowed table never reads like a smaller experiment</li>
+        <li><code class="status">[x]</code> Check whether the dashboard's audition route and the TUI's Audition screen should expose it; if not, say so in the PR body rather than leaving it ambiguous</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>pytest over the seeded experiment, which has several evaluated as-of dates. Edge cases: a
+      window containing no splits (must return null, not raise), a window containing exactly one
+      split (<code>stddev_samp</code> is null over one row), both bounds null (identical to
+      today's result), and an existing five-argument call (must still resolve).</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/ -k audition -v</code> — a window changes the pick when the ranking differs inside it, and does not when it does not</li>
+        <li><code class="status">[x]</code> Assert <code>select triage.audition_pick(h, 'auc_roc', '', 'best_current_value', '{}')</code> — the pre-migration five-argument call — still resolves</li>
+        <li><code class="status">[x]</code> <code>just alembic upgrade head</code> · <code>downgrade -1</code> · <code>upgrade head</code></li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code></li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 6 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 6: Ship the dashboard bundle in the wheel</h3>
+      <span class="issue">closes #15 · commit 6 of 6 · build hook + docs</span>
+      <p>Build the SPA into the wheel with a hatchling build hook, so a git or wheel install
+      carries the dashboard instead of the 620-byte placeholder. The Dockerfile already has a
+      <code>frontend-build</code> stage on <code>node:22</code> and CI already runs
+      <code>npm ci &amp;&amp; npm run build</code>, so the bundle exists in both places today — the
+      hook's job is to get it into the distribution, not to invent a new build.</p>
+
+      <h4>1. The build hook</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> Add <code>build_frontend.py</code> at the repo root implementing a hatchling <code>BuildHookInterface</code>, registered under <code>[tool.hatch.build.targets.wheel.hooks.custom]</code></li>
+        <li><code class="status">[x]</code> <strong>Reuse before rebuilding:</strong> if <code>frontend/dist/index.html</code> already exists, use it as-is. CI and the Docker stage have already built it, and a second <code>npm ci</code> inside the wheel build would be pure latency</li>
+        <li><code class="status">[x]</code> Otherwise run <code>npm ci &amp;&amp; npm run build</code> in <code>frontend/</code>, when <code>npm</code> is on PATH</li>
+        <li><code class="status">[x]</code> Force-include the result: <code>"frontend/dist" = "triage/dashboard/static"</code></li>
+        <li><code class="status">[x]</code> Resolve the overlap with the packaged <code>src/triage/dashboard/static/index.html</code> — hatchling may refuse a force-include that collides with an existing file. If it does, rename the placeholder (<code>_placeholder.html</code>) and have <code>_SpaStaticFiles</code> fall back to it</li>
+        <li><code class="status">[x]</code> Add <code>frontend/</code> to <code>[tool.hatch.build.targets.sdist] include</code>, so a wheel built from the sdist can still produce a bundle</li>
+      </ul>
+
+      <h4>2. Decide what happens with no node and no prebuilt bundle</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <strong>Fall back to the placeholder with a loud build-time warning</strong> rather than failing the build — see the Questionables entry. The wheel still installs; it simply has no SPA, exactly as today</li>
+        <li><code class="status">[x]</code> Make the warning name what is missing and what fixes it: no <code>npm</code> on PATH, no <code>frontend/dist</code>, and the two commands that produce one</li>
+        <li><code class="status">[x]</code> Keep the runtime placeholder honest too: rewrite <code>static/index.html</code> — it currently reads "wired at integration", an internal note — to name the build commands and <code>TRIAGE_DASHBOARD_STATIC</code>, and log a startup warning when the server is serving it</li>
+        <li><code class="status">[x]</code> Keep the SPA fallback returning 200; a 404 would break deep links in a correctly-installed deployment, which is the case that matters more</li>
+      </ul>
+
+      <h4>3. Reconcile the two delivery paths</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> The Docker <code>dashboard</code> stage copies <code>frontend/dist</code> to <code>/opt/triage/dashboard-static</code> and points <code>TRIAGE_DASHBOARD_STATIC</code> at it. With the wheel now carrying the bundle, that is a second mechanism for one job</li>
+        <li><code class="status">[x]</code> Pick one and say which in the PR body: drop the copy and let the packaged bundle serve, or keep it and document that the env var wins. Do not leave both undocumented</li>
+        <li><code class="status">[x]</code> Check the <code>development</code> stage still builds — it installs from source, so the hook runs there too</li>
+      </ul>
+
+      <h4>4. Documentation, in uv terms</h4>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> README Quick start and <code>docs/quickstart.md</code>: an install now ships the dashboard, and building from source needs node — state the version floor CI uses (20) and the Dockerfile uses (22)</li>
+        <li><code class="status">[x]</code> Write it as <code>uv</code>, not <code>pip</code> — this repo is not on PyPI and the README already says "clone and <code>uv sync</code>". The original failure was installer-agnostic, but the instructions should match the workspace</li>
+        <li><code class="status">[x]</code> Note the fallback explicitly: a machine with no node still installs, and gets the placeholder</li>
+      </ul>
+
+      <h4>5. Testing Strategy</h4>
+      <p>The hook is build-time, so it is tested by building — twice: once with <code>frontend/dist</code>
+      present, once with it removed and <code>npm</code> hidden from PATH. The runtime half is pytest
+      over the FastAPI app with <code>TRIAGE_DASHBOARD_STATIC</code> set and unset. Edge cases: a
+      stale <code>frontend/dist</code> left by an old commit (it is reused, which is exactly why CI
+      must build it fresh), and an sdist-to-wheel build.</p>
+      <ul class="checklist">
+        <li><code class="status">[x]</code> <code>uv build</code> with <code>frontend/dist</code> present — inspect the wheel: <code>triage/dashboard/static/</code> holds the SPA, not the placeholder</li>
+        <li><code class="status">[x]</code> <code>uv build</code> with <code>frontend/dist</code> removed and <code>npm</code> absent — the build SUCCEEDS, warns, and ships the placeholder</li>
+        <li><code class="status">[x]</code> Install the built wheel into a scratch venv and start the dashboard — the SPA renders, with <code>&lt;script&gt;</code> tags present (the reporter's nine identical screenshots had zero)</li>
+        <li><code class="status">[x]</code> <code>uv run pytest src/tests/dashboard_tests/ -k static -v</code> — the placeholder path logs the warning, a real bundle does not</li>
+        <li><code class="status">[x]</code> <code>docker build --target dashboard .</code> — the image still serves its SPA, whichever mechanism won in task 3</li>
+        <li><code class="status">[x]</code> <code>npm run build</code> in <code>docs-site/</code> · <code>check-readme.py .</code> — 0 errors (2 pre-existing warnings are the baseline)</li>
+        <li><code class="status">[x]</code> <code>just test</code> · <code>just lint</code></li>
+      </ul>
+      <div class="loop">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        If any command fails, fix the cause and re-run — loop until all pass.
+      </div>
+    </div>
+
+    <!-- ============ PHASE 7 ============ -->
+    <div class="phase">
+      <h3><code class="status">[x]</code> Phase 7: Release</h3>
+      <span class="issue">v1.2.0 · gated on the featurizer bump · verify the published artifacts</span>
+      <p>One tag carries all six issues: <strong>v1.2.0</strong>, a minor because phases 4 and 5 add
+      public surface. SHAP interpretability (ADR-0031) moves from v1.2.0 to <strong>v1.3.0</strong>,
+      which means editing the milestone in <code>TODO.org</code>. The tag waits on featurizer.</p>
+
+      <div class="loop warn">
+        ⛔ <strong>Gate: featurizer is bumping its own version. Do not move triage-pg's version
+        until that lands.</strong> <code>pyproject.toml</code> pins featurizer to a git tag
+        (currently <code>v1.1.0</code>, ADR-0008/0016), and a release that ships against a pin about
+        to move would be stale the day it is cut. Phases 1–6 can merge to <code>main</code>
+        regardless; only this phase is blocked.
+      </div>
+
+      <h4>1. Take the featurizer bump first</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Wait for the featurizer release, then move the pin in <code>pyproject.toml</code> to the new tag — a tag, never a branch or a commit (<code>CONTRIBUTING.md</code> rule 6)</li>
+        <li><code class="status">[]</code> <code>uv lock</code> and confirm the diff touches featurizer only — version, source rev, <code>requires-dist</code></li>
+        <li><code class="status">[]</code> <strong>Update <code>CONTRIBUTING.md</code> in the same commit.</strong> It quotes both git pins verbatim as the worked example of its own rule 6; bumping <code>pyproject.toml</code> alone leaves the file teaching the old tag. This was the lesson of the lynkeus v1.1.0 bump</li>
+        <li><code class="status">[]</code> <strong>Verify the bump by reading its changelog against this codebase, not by a green suite.</strong> Name each behaviour the release changes and prove whether it is visible here — the adapters in <code>adapters/</code> are the whole seam, and <code>adapters/preflight.py</code> depends on <code>planner.plan()</code> running in <code>Featurizer.__init__</code> with no database</li>
+        <li><code class="status">[]</code> Re-check the two documented featurizer behaviours in <code>CLAUDE.md</code>: the queryable manifest resolving globs against untruncated labels, and <code>transformations: []</code> resolving to <code>identity</code> while <code>aggregations: []</code> means zero</li>
+        <li><code class="status">[]</code> If the bump changes matrix column names or order, re-run Phase 1's geometry tests before anything else — that is the one interaction that could invalidate a backfill</li>
+      </ul>
+
+      <h4>2. Cut v1.2.0</h4>
+      <ul class="checklist">
+        <li><code class="status">[]</code> Confirm all six issues auto-closed on the rebase merge. Any that did not means a <code>Closes #N</code> was missing or malformed in that phase's commit — close it by hand and note why</li>
+        <li><code class="status">[]</code> Bump <code>version</code> in <code>pyproject.toml</code> to <code>1.2.0</code>; <code>release.yml</code>'s version guard compares it against the tag</li>
+        <li><code class="status">[]</code> Move the SHAP milestone in <code>TODO.org</code> from v1.2.0 to v1.3.0, so the task list and the tags agree</li>
+        <li><code class="status">[]</code> Re-capture any documentation screenshot whose numbers moved</li>
+        <li><code class="status">[]</code> Tag, watch <code>release.yml</code>, confirm both jobs green and <code>verify-anonymous-pull</code> reports <code>triage-pg 1.2.0</code></li>
+        <li><code class="status">[]</code> Read the generated release notes: <code>generate_release_notes: true</code> builds them from merged PR titles, and this release is <em>one</em> PR — so the title must carry the whole change, and the body is what a reader will actually consult</li>
+      </ul>
+
+      <h4>3. Testing Strategy</h4>
+      <p>The release is verified by the published artifacts, not by the local tree: an anonymous
+      container pull, a wheel that contains the SPA, and a schema upgrade from v1.1.6 against a
+      database holding both a run-path and a retrain-path model. The decisive check is behavioural —
+      forward scores for a run-path model must <em>move</em>, because that is the bug being fixed.</p>
+      <ul class="checklist">
+        <li><code class="status">[]</code> <code>docker pull ghcr.io/ccd-ia/triage-pg:v1.2.0</code> with no credentials — the anonymous-pull check</li>
+        <li><code class="status">[]</code> Download the released wheel and confirm <code>triage/dashboard/static/</code> holds the SPA — the #15 acceptance, checked on the published artifact rather than a local build</li>
+        <li><code class="status">[]</code> Upgrade a copy of a v1.1.6 database through <code>0021</code> and <code>0022</code>; spot-check that a backfilled <code>models.feature_list</code> length matches the estimator's own <code>n_features_in_</code></li>
+        <li><code class="status">[]</code> Forward-score one pre-existing model before and after: scores MOVE for a run-path model, stay put for a retrained one</li>
+        <li><code class="status">[]</code> <code>gh issue list</code> — empty</li>
+      </ul>
+      <div class="loop warn">
+        🔁 <strong>Do not exit this phase until every box above is checked.</strong>
+        A release that closes six issues but leaves a seventh open reads as a release that missed one.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== DEFINITION OF DONE ===== -->
+  <section id="definition-of-done">
+    <h2>Definition of Done</h2>
+
+    <figure>
+      <svg viewBox="0 0 900 200" role="img" aria-label="Scoring error before and after the geometry fix">
+        <text x="30" y="34" font-family="var(--sans)" font-size="13" font-weight="620" fill="var(--ink-muted)">max scoring error, six model groups (reporter's measurement)</text>
+
+        <!-- before -->
+        <text x="30" y="76" font-family="var(--mono)" font-size="12" fill="var(--danger)">before</text>
+        <rect x="112" y="62" width="520" height="20" rx="4" fill="var(--danger)" opacity="0.82"/>
+        <text x="648" y="77" font-family="var(--mono)" font-size="13" font-weight="700" fill="var(--danger)">0.7420</text>
+        <text x="716" y="77" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">MLPClassifier</text>
+
+        <!-- after -->
+        <text x="30" y="126" font-family="var(--mono)" font-size="12" fill="var(--ok)">after</text>
+        <rect x="112" y="112" width="4" height="20" rx="2" fill="var(--ok)"/>
+        <text x="132" y="127" font-family="var(--mono)" font-size="13" font-weight="700" fill="var(--ok)">0.0000</text>
+        <text x="204" y="127" font-family="var(--sans)" font-size="11.5" fill="var(--ink-muted)">all six groups, exactly</text>
+
+        <line x1="112" y1="152" x2="860" y2="152" stroke="var(--rule)" stroke-width="1"/>
+        <text x="112" y="172" font-family="var(--sans)" font-size="11" fill="var(--ink-muted)">0.0</text>
+        <text x="860" y="172" text-anchor="end" font-family="var(--sans)" font-size="11" fill="var(--ink-muted)">1.0 (a probability's full range)</text>
+      </svg>
+      <figcaption>The target is exact agreement, not a tolerance: scoring a stored matrix through
+      the recorded geometry must reproduce the experiment's own predictions bit for bit.</figcaption>
+    </figure>
+
+    <p><code>gh issue list</code> on <code>ccd-ia/triage-pg</code> returns nothing, and each of the
+    six issues was closed by the merge of a pull request that carried a test failing without its
+    fix. A model forward-scored through <code>triage score</code> produces the same numbers as the
+    estimator applied by hand to its own recorded column order, whether that model came from
+    <code>triage run</code> or <code>triage retrain</code>; a boolean column declared in a
+    featurizer config appears in <code>matrices.feature_names</code>; the same
+    <code>{as_of_date}</code> spelling works in a cohort, a label and a subset query; a forward
+    score can reach an entity whose outcome has not happened yet; an audition can be restricted to
+    a date window; and a reader who installed from git knows why their dashboard is blank before
+    they open a browser.</p>
+
+    <p>The numbers that make it checkable. Scoring error: the reporter measured a max absolute
+    difference of 0.7420 (MLPClassifier), 0.4189 (LGBM) and 0.2885–0.2965 across four more groups
+    when scoring through <code>matrices.feature_names</code>; after this plan the equivalent check
+    is <strong>0.0 for every group</strong>, asserted exactly rather than within a tolerance,
+    because the same column order through the same estimator is the same arithmetic. Feature
+    count: the reporter's five boolean flags went from dropped to present, and their workaround's
+    141 one-hot columns collapse back to the 136 the config declares. Test coverage:
+    <code>src/tests/adapter_tests/test_forward.py</code> currently has three tests and
+    <strong>zero</strong> references to <code>feature_names</code> or <code>feature_list</code> —
+    which is why this shipped — and must not return to zero. Migrations: two new revisions,
+    <code>0021</code> and <code>0022</code>, each round-tripping
+    <code>upgrade → downgrade → upgrade</code> on a copy of a real v1.1.6 database. Dashboard: the
+    published wheel's <code>triage/dashboard/static/</code> holds the built SPA rather than the
+    620-byte placeholder, and a page served from it carries <code>&lt;script&gt;</code> tags — the
+    reporter's nine screenshots had zero.</p>
+
+    <p>Not included. No SHAP — ADR-0031 moves to v1.3.0 and keeps its own milestone; no change to
+    the ADR-0022 experiment hash, which every phase must leave untouched; and no rewrite of
+    <code>_design_X</code> into a strict order-checking API, which would be the belt-and-braces
+    version of Phase 1 and is deliberately left for a follow-up. The release itself is gated on
+    featurizer's own version bump: phases 1–6 are done when they merge, but <em>this plan</em> is
+    not done until v1.2.0 is tagged against the new featurizer pin.</p>
+  </section>
+
+  <!-- ===== GLOBAL VALIDATION ===== -->
+  <section id="validation">
+    <h2>Validation Commands</h2>
+    <p>Execute these commands to validate the entire plan is complete:</p>
+    <ul class="checklist">
+      <li><code class="status">[x]</code> <code>just test</code> — the full suite, green, with the new tests in it (535 passed / 2 skipped was the v1.1.4 baseline; the count only goes up)</li>
+      <li><code class="status">[x]</code> <code>just lint</code> — ruff check and <code>ruff format --check</code> clean</li>
+      <li><code class="status">[x]</code> <code>just typecheck</code> — basedpyright at or below the 2-error pre-existing baseline, measured on the same checkout, not remembered</li>
+      <li><code class="status">[x]</code> <code>just alembic upgrade head</code> — both new revisions apply to a v1.1.6 database</li>
+      <li><code class="status">[x]</code> <code>uv run pytest src/tests/adapter_tests/test_model_geometry.py src/tests/adapter_tests/test_subsets_placeholder.py -v</code> — the two new contract suites</li>
+      <li><code class="status">[x]</code> <code>npm run build</code> in <code>docs-site/</code> — pages built, <code>starlight-links-validator</code> reports all internal links valid</li>
+      <li><code class="status">[x]</code> <code>gh issue list --repo ccd-ia/triage-pg</code> — <strong>holds for scope (2026-09-23).</strong> #8 and #9 were triaged into v1.2.0 and closed by PR #18; the one open issue is #6, triaged and scheduled for v1.3.0 with SHAP</li>
+      <li><code class="status">[x]</code> <code>uv build</code> — the wheel contains <code>triage/dashboard/static/assets/</code>, not just the placeholder</li>
+      <li><code class="status">[x]</code> <code>git log --oneline origin/main -8</code> — six commits on <code>main</code>, one per issue, each carrying its own <code>Closes #N</code> (pending the merge of PR #17)</li>
+    </ul>
+    <div class="loop">
+      🔁 <strong>The plan is not complete until every box is checked and every command passes. If for some reason a step is not possible to complete, mark it with [f] and move on if possible.</strong>
+    </div>
+  </section>
+
+  <!-- ===== QUESTIONABLES ===== -->
+  <section id="questionables">
+    <h2>Questionables</h2>
+
+    <details open>
+      <summary>[asked] #14 — where should the ordered fit geometry come from?</summary>
+      <p class="qa-answer"><strong>Chosen: persist per-model.</strong> A new nullable
+      <code>triage.models.feature_list text[]</code>, written by <code>build_model</code> from the
+      order actually fitted and backfilled from <code>triage.runs.purpose</code>. The question was
+      asked because investigation showed the issue's own preferred fix
+      (<code>model_groups.feature_list</code>) is correct for the run path and wrong for the
+      retrain path — it would have repaired one set of models and broken another, in a way no test
+      currently covers. The cost is one migration and a backfill; the benefit is that neither
+      caller has to infer which stored list to believe.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] Does retrain's missing feature-group projection belong in this plan?</summary>
+      <p class="qa-answer"><strong>Chosen: fix it here, in Phase 1.</strong>
+      <code>retrain.py</code> contains no reference to feature groups at all, so retraining a model
+      whose group is a subset trains on every column. It is unreported, it is the same class of
+      defect as #14, and separating them would mean writing the geometry tests twice. No new issue
+      is filed; the PR body explains the extra scope.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] #11 — which <code>{as_of_date}</code> contract wins?</summary>
+      <p class="qa-answer"><strong>Chosen: accept both spellings.</strong> Strip a quote pair
+      immediately around the placeholder, then render quoted as cohort and labels do. The
+      alternative of making subsets match cohort outright would break the Chicago 311 tutorial we
+      ship, which teaches the quoted form; the alternative of validating and rejecting keeps the
+      asymmetry that caused the issue. Normalising is strictly widening — there is no legitimate
+      bare rendering, since it is always a syntax error.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] #10 — how should the production cohort be expressed?</summary>
+      <p class="qa-answer"><strong>Chosen: identity-neutral config key plus a CLI override</strong>
+      (<code>cohort_config.forward_query</code> and <code>--cohort-query</code>), with
+      ADR-0032 recording why the key stays out of the experiment hash. The config key makes the
+      production cohort a property of the problem and puts it in the artifact DAG; the flag covers
+      the one-off without forcing a config edit.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] #15 — ship the built SPA in the wheel, or document?</summary>
+      <p class="qa-answer"><strong>Chosen: a hatchling build hook that ships
+      <code>frontend/dist</code> in the wheel</strong>, overriding the documentation-only option
+      this plan first proposed. The objection raised at the time — that a build hook needs node at
+      install time — was heard and overruled, so Phase 6 builds the bundle rather than explaining
+      its absence. The objection is answered rather than ignored: the hook reuses an existing
+      <code>frontend/dist</code> before attempting a build, which covers CI and the Docker
+      <code>frontend-build</code> stage, both of which already produce one.</p>
+    </details>
+
+    <details>
+      <summary>[decided] …and what the hook does with no node and no prebuilt bundle</summary>
+      <p class="qa-answer"><strong>Decided: warn loudly and ship the placeholder, rather than
+      failing the build.</strong> A sub-decision the override did not cover. Hard-failing would
+      turn today's blank-looking dashboard into a failed install for a node-less machine — a worse
+      outcome for the very reporter who filed #15, and the wheel still carries the SPA on every
+      normal path (CI, Docker, a developer machine with node). Hard-failing instead is a one-line
+      change in <code>build_frontend.py</code> if that is preferred; say so and Phase 6 task 2
+      flips.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] One pull request, or one per issue?</summary>
+      <p class="qa-answer"><strong>Chosen: a single pull request closing all six</strong>, against
+      the per-issue split this plan first proposed on the strength of <code>CONTRIBUTING.md</code>
+      rule 3. One branch, one CI round, one review. Two consequences are designed around rather
+      than accepted silently. First, the merge stays a <strong>rebase</strong> and the branch keeps
+      <strong>one commit per phase</strong>, so each <code>Closes #N</code> lands on
+      <code>main</code> individually and <code>git bisect</code> still works across a change this
+      wide. Second, rule 4 makes the PR title the release line and there is now only one title, so
+      the PR body carries the six-issue breakdown a reader would otherwise get from six titles.</p>
+    </details>
+
+    <details>
+      <summary>[asked] Phase 1 does not add a strict order-checking API to <code>_design_X</code></summary>
+      <p class="qa-answer">The tempting belt-and-braces move is to make <code>_design_X</code>
+      refuse a geometry it cannot verify, or to store a hash of the ordered list and assert on it.
+      Once the fit order is recorded per model and read back directly there is nothing left to
+      cross-check it against, so the assertion would compare a value to itself. The regression test
+      is the guard. Put to the user and confirmed: no runtime assertion, no
+      <code>feature_list_sha256</code> column, no change to <code>_design_X</code>'s signature.
+      Recorded here because a reviewer will reasonably ask.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] Which tag ships what?</summary>
+      <p class="qa-answer"><strong>Chosen: one <code>v1.2.0</code> carrying all six issues</strong>,
+      with SHAP (ADR-0031) moving to <code>v1.3.0</code> — so <code>TODO.org</code>'s milestone gets
+      renamed in Phase 7. The cost, named when the question was put and accepted: the critical
+      wrong-predictions fix does not ship until the audition migration and the forward-cohort ADR
+      have also landed. A single tag means one release-notes pass and one verification pass.</p>
+    </details>
+
+    <details open>
+      <summary>[asked] The release waits on featurizer's own version bump</summary>
+      <p class="qa-answer"><strong>Constraint added mid-plan:</strong> featurizer is releasing a new
+      version, and <code>pyproject.toml</code> pins it to a git tag (currently <code>v1.1.0</code>,
+      ADR-0008/0016). Phase 7 therefore takes the featurizer bump <em>first</em> — pin, lock,
+      re-quote the pin in <code>CONTRIBUTING.md</code>, and verify the bump by reading its changelog
+      against this codebase rather than by a green suite — and only then tags v1.2.0.
+      <strong>Blocks:</strong> Phase 7 alone. Phases 1–6 merge regardless.</p>
+    </details>
+  </section>
+
+  <!-- ===== NOTES ===== -->
+  <section id="notes">
+    <h2>Notes</h2>
+
+    <h3>How each issue was verified</h3>
+    <p>Every claim below was read in the source on 2026-09-17, not inferred from the issue text.
+    Two of the six reports contain an inaccuracy that matters to the fix, and both are corrected in
+    the phases above.</p>
+    <table>
+      <tr><th>Issue</th><th>Verified at</th><th>Correction to the report</th></tr>
+      <tr>
+        <td>#14</td>
+        <td><code>run.py:759, 1352–1353</code> · <code>feature_groups.py:270</code> · <code>model.py:241, 630</code> · <code>forward.py:237</code> · <code>lineage.py:92</code></td>
+        <td>Broader than reported (the default no-<code>feature_groups</code> path sorts too), and the recommended fix is wrong for retrained models</td>
+      </tr>
+      <tr>
+        <td>#11</td>
+        <td><code>subsets.py:89</code> · <code>cohort.py:144</code> · <code>labels.py:196</code> · <code>run.py:465</code></td>
+        <td>Cohort and labels do not <em>bind</em> the date — they <code>str.format</code> it <em>quoted</em>. Same bug, different mechanism, and it rules out the report's preferred fix</td>
+      </tr>
+      <tr><td>#12</td><td><code>matrix.py:342–383, 956</code></td><td>None. Note only that <code>_numeric_dtypes()</code> is shared with the fit-free fill</td></tr>
+      <tr><td>#13</td><td><code>0013_audition_regret_next_time.py:34–68</code> · <code>0005_experiment_dashboard.py:114</code></td><td>None</td></tr>
+      <tr><td>#10</td><td><code>forward.py:194–200</code></td><td>None</td></tr>
+      <tr><td>#15</td><td><code>pyproject.toml:151–152</code> · <code>dashboard/app.py:50</code> · <code>justfile:16–18</code></td><td>Installer-agnostic — <code>uv add</code>, <code>uv pip install</code> and <code>pip</code> all hit it</td></tr>
+    </table>
+
+    <h3>Why this was invisible for so long</h3>
+    <p><code>src/tests/adapter_tests/test_forward.py</code> holds three tests and mentions neither
+    <code>feature_names</code> nor <code>feature_list</code>. The seeded fixtures use small feature
+    sets whose build order plausibly coincides with their sorted order, and when the two orders
+    coincide the bug is invisible by construction — which is exactly the reporter's observation
+    that "an experiment whose names happen to sort into build order is silently fine". Phase 1
+    task 1 exists because of this: if the fixture is not changed first, every test in the phase
+    will pass against the unfixed code and prove nothing.</p>
+
+    <h3>Environment</h3>
+    <p>No new runtime dependencies. Work happens in a worktree with
+    <code>UV_PROJECT_ENVIRONMENT="$PWD/.venv"</code> and <code>uv sync --all-extras</code> —
+    <code>--extra dev</code> alone omits the dashboard, survival and oidc extras and produces
+    36 phantom basedpyright errors. A local Postgres executable is required for
+    <code>pytest-postgresql</code>. For anything needing real data, the DirtyDuck tutorial
+    database (<code>just tutorial-up</code>, port <strong>5440</strong>) currently holds 19 runs,
+    262 models in 34 groups and 1,572 evaluations; note that this repository's <code>.envrc</code>
+    exports <code>PGPORT=5435</code>, which belongs to another project, so a bare <code>psql</code>
+    here fails with a misleading authentication error.</p>
+
+    <h3>Risks</h3>
+    <table>
+      <tr><th>Risk</th><th>Where</th><th>Mitigation</th></tr>
+      <tr><td>The backfill guesses wrong for a model whose <code>run_id</code> is null</td><td>Phase 1</td><td>Fall back to the group list, log it, and document the ambiguity in the migration docstring — a wrong geometry must never be silent twice</td></tr>
+      <tr><td>Fixing #14 changes the numbers a user already has</td><td>Phase 1</td><td>Intended: the old numbers were wrong. Predictions are append-only (ADR-0006), so nothing is overwritten — but the release notes must say plainly that forward scores move</td></tr>
+      <tr><td>The subset regex catches a quote it should not</td><td>Phase 3</td><td>Anchored on the placeholder itself; a test asserts an unrelated <code>'OPEN'</code> literal is untouched</td></tr>
+      <tr><td><code>best_avg_recency_weight</code> weights become relative to the window's first date</td><td>Phase 5</td><td>Called out as its own checklist item; the window is applied before the weighting and the behaviour change is documented</td></tr>
+      <tr><td>The two migrations conflict on <code>down_revision</code></td><td>Phases 1 and 5</td><td>Same branch, so it is a file-level fact: 0022 chains off 0021. <code>just alembic heads</code> must report one head before the PR opens</td></tr>
+    </table>
+
+    <h3>Follow-ups this plan deliberately does not take</h3>
+    <ul>
+      <li>A strict order-checking design-matrix API (see Questionables)</li>
+            <li>A <code>docs-site/scripts/capture-tui.py</code> for repeatable screenshot capture — the release checklist calls for a re-capture and there is no committed tooling for it</li>
+      <li>Whether <code>predict_forward</code> should skip the label build entirely when the forward cohort has no resolvable outcomes (surfaced by #10, not caused by it)</li>
+    </ul>
+  </section>
+
+  <!-- ===== AMENDMENTS ===== -->
+  <section id="amendments">
+    <h2>Amendments</h2>
+    <details open>
+      <summary>2026-09-17T18:06 — four Questionables answered; three overrode the plan's own decisions</summary>
+      <p>The Questionables section was put to the maintainer with <code>AskUserQuestion</code>
+      rather than left as a decision log to read. Three of the four answers went against what this
+      plan had decided for itself, and the phases were rewritten to match:</p>
+      <ul>
+        <li><strong>#15 — build hook, not documentation.</strong> Phase 6 was "say that an install
+        ships no bundle"; it is now "ship the dashboard bundle in the wheel", via a hatchling build
+        hook with force-include. The node-at-build-time objection stands but was overruled; the hook
+        reuses an existing <code>frontend/dist</code> (which CI and the Docker
+        <code>frontend-build</code> stage already produce) and falls back to the placeholder rather
+        than failing the build. Also new: reconciling the hook against the Docker stage's
+        <code>TRIAGE_DASHBOARD_STATIC</code> copy, which is now a second mechanism for one job.</li>
+        <li><strong>One pull request, not six.</strong> All seven phases share
+        <code>claude/close-open-issues</code>. Kept deliberately: one commit per phase and a rebase
+        merge, so six <code>Closes #N</code> keywords still land individually. The Alembic ordering
+        stopped being a merge-order constraint and became a file-level one. A warning was added that
+        CI now runs once, at the end, over ~15 files.</li>
+        <li><strong>One <code>v1.2.0</code>, not <code>v1.1.7</code> then a minor.</strong> Every
+        issue ships in one tag; SHAP (ADR-0031) moves to <code>v1.3.0</code> and Phase 7 renames the
+        milestone in <code>TODO.org</code>. The accepted cost is that the critical #14 fix waits for
+        phases 4 and 5.</li>
+        <li><strong>Unchanged:</strong> no runtime geometry assertion — the regression test is the
+        guard.</li>
+      </ul>
+    </details>
+
+    <details open>
+      <summary>2026-09-17T19:20 — Phases 1–6 built and merged into PR #17; three more issues found out of scope</summary>
+      <p>All six phases implemented on <code>claude/close-open-issues</code>, one commit each,
+      opened as <a href="https://github.com/ccd-ia/triage-pg/pull/17">PR #17</a> with all five CI
+      contexts green (615 passed / 1 skipped, up from 580 on <code>main</code>). Phase 7 remains
+      <strong>not started</strong>, blocked on the featurizer gate.</p>
+      <p><strong>Three findings the issues did not contain</strong>, each of which changed an
+      implementation:</p>
+      <ul>
+        <li><strong>#14's recommended fix was wrong for retrained models</strong> (known before
+        building — it is why the plan chose the per-model column), and <code>retrain</code> never
+        applied the feature-group projection at all. Fixed in the same commit.</li>
+        <li><strong>#11 affects two config blocks, not one.</strong> <code>bias_config</code>
+        carried the identical bare substitution at <code>bias.py:110</code>, unreported. Both now
+        share one renderer. Two committed example SQL files were also rendering a doubled quote
+        and would have failed if anyone had used them.</li>
+        <li><strong>#15's force-include collided with the packaged placeholder</strong> — a hard
+        hatchling error — so the placeholder moved to its own <code>_placeholder/</code>
+        directory, and the wheel target needed <code>sources = ["src"]</code> to stop the global
+        sources mapping burying the bundle at <code>src/triage/dashboard/static/</code>.</li>
+      </ul>
+      <p><strong>Scope correction.</strong> This plan was built on six issues (#10–#15), which is
+      what a per-issue <code>gh issue view</code> sweep surfaced. A plain
+      <code>gh issue list</code> at the end of the build shows <strong>nine</strong>:
+      <strong>#6</strong> (probability metrics — brier/log_loss/ece and custom metric direction),
+      <strong>#8</strong> (matrix build computes the dense target × as_of_date product; measured
+      ~50 h for a 184-split experiment) and <strong>#9</strong> (<code>feature_groups
+      group_by: source_entity</code> misattributes columns from named relationships) were never
+      reviewed and are not addressed here. The Definition of Done's "<code>gh issue list</code>
+      returns nothing" therefore does <strong>not</strong> hold, and cannot until those three are
+      triaged on their own terms.</p>
+    </details>
+
+    <details open>
+      <summary>2026-09-17T18:06 — Phase 7 gated on featurizer's version bump</summary>
+      <p>featurizer is releasing a new version of its own. Because <code>pyproject.toml</code> pins
+      it to a git tag (ADR-0008/0016), tagging triage-pg v1.2.0 against the old pin would ship a
+      release that is stale on day one. Phase 7 now takes the featurizer bump as its first task —
+      pin, <code>uv lock</code>, re-quote the pin in <code>CONTRIBUTING.md</code> (which reproduces
+      it verbatim as the worked example of its own rule 6), and verify the bump by reading its
+      changelog against this codebase rather than by a green suite, the lesson of the lynkeus
+      v1.1.0 round. Phases 1–6 are unaffected and merge regardless.</p>
+    </details>
+  </section>
+
+</main>
+</body>
+</html>
