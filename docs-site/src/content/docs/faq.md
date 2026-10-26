@@ -61,6 +61,27 @@ other unknown key in `label_config` or `cohort_config` is an error. See
 
 ---
 
+## My feature count dropped after upgrading to v1.3.1.
+
+featurizer v1.3.1 stops emitting window features on an entity without a
+`temporal_ix`: `cum_sum`, `cum_mean`, `cum_max`, `cum_min`, `cum_count`,
+`first`, `last`, `previous`, `cdf`, `percent_rank` and `ntile`. Two cases lose
+columns:
+
+- **An undated target.** The target holds one row per id under each as-of date,
+  so `CUM_SUM(<target>.X)` equalled `X`. The dropped columns were copies, and no
+  remaining column changes value. DirtyDuck goes from 147 to 107 columns, all 40
+  of them `CUM_SUM(facilities.…)`.
+- **An undated child whose `id` several rows share.** `last`, `first`, `previous`
+  and `ntile` depended on the order PostgreSQL read the rows in. Retrain a model
+  that used one of them.
+
+The engine version is part of every artifact's identity, so the first run after
+upgrading rebuilds features, matrices and models on its own. To keep a window
+feature, give the entity a `temporal_ix`.
+
+---
+
 ## Why isn't my latest score the latest?
 
 Because predictions are **append-only**. Every scoring run *inserts*
@@ -70,14 +91,18 @@ and the table is time-partitioned. Re-scoring the same model at the same
 entity, as_of_date)` is **not** unique, and a naive read gives you whichever row
 the planner returned, not the newest.
 
-To read "current", pick the maximum `scored_at` per key:
+To read "current", pick the maximum `scored_at` per key. Keep `split_kind` in
+the key, so a `triage score` row (`production`) at a test date stays apart from
+that date's test row.
 
 ```sql
-select distinct on (model_id, entity_id, as_of_date)
-       model_id, entity_id, as_of_date, score, scored_at
+select distinct on (model_id, entity_id, as_of_date, split_kind)
+       model_id, entity_id, as_of_date, split_kind, score, scored_at
 from triage.predictions
-order by model_id, entity_id, as_of_date, scored_at desc
+order by model_id, entity_id, as_of_date, split_kind, scored_at desc
 ```
+
+`triage.latest_predictions` is this query (since migration 0025, v1.3.1).
 
 This is a concept to teach, not a bug: "a score is not the latest score." The
 payoff is that prediction history, drift, and trajectories are already recorded

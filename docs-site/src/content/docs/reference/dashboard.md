@@ -43,6 +43,13 @@ k, what do we get?". Score histogram, calibration deciles, persisted feature
 importances, and the postmodeling panels (crosstabs, error tree) when
 `triage postmodel` has run.
 
+The curve shows the model's latest test date; `GET
+/api/models/{id}/curve?as_of_date=YYYY-MM-DD` returns another one. At every k it
+equals the stored `precision@k_abs` ([evaluation](/triage-pg/reference/evaluation/)).
+The score histogram counts every test date. The predicted list
+(`/api/models/{id}/predictions`) shows the test split unless `split_kind=` names
+another one, such as `production` for `triage score` output.
+
 ## Audition — model selection with discipline
 
 ![The audition tab: DSSG's selection rules computed in PostgreSQL](../../../assets/tutorials/audition-tab.png)
