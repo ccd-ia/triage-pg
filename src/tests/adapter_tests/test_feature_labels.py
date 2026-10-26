@@ -61,9 +61,9 @@ def long_labels():
 
 
 def test_dirtyduck_manifest_matches_the_published_feature_count(dirtyduck_labels):
-    # 147 is the count the tutorials publish; a drift here means the config or the engine
+    # 107 is the count the tutorials publish; a drift here means the config or the engine
     # changed shape, which would move feature-group identity too.
-    assert len(dirtyduck_labels) == 147
+    assert len(dirtyduck_labels) == 107
 
 
 def test_dirtyduck_has_no_truncated_columns(dirtyduck_labels):

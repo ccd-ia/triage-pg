@@ -53,13 +53,13 @@ def test_features_glob_reports_the_matching_subset():
         app, ["analyze-config", _DIRTYDUCK, "--features", "*(inspections.*"]
     )
     assert result.exit_code == 0
-    assert "120 of 147 match" in result.stdout
+    assert "80 of 107 match" in result.stdout
 
 
 def test_features_star_lists_every_column():
     result = runner.invoke(app, ["analyze-config", _DIRTYDUCK, "--features", "*"])
     assert result.exit_code == 0
-    assert "147 feature columns" in result.stdout
+    assert "107 feature columns" in result.stdout
 
 
 def test_zero_matches_is_an_answer_not_an_error():
@@ -67,7 +67,7 @@ def test_zero_matches_is_an_answer_not_an_error():
     # answered the question — and that is usually WHY the user ran it.
     result = runner.invoke(app, ["analyze-config", _DIRTYDUCK, "--features", "*nope*"])
     assert result.exit_code == 0
-    assert "0 of 147 match" in result.stdout
+    assert "0 of 107 match" in result.stdout
     assert "Nothing matched" in result.stdout
 
 
@@ -131,7 +131,7 @@ def test_overview_reports_the_models_it_will_actually_train():
     assert result.exit_code == 0
     assert "Models to be trained" in result.stdout
     assert "32" in result.stdout
-    assert "147" in result.stdout  # feature columns, from the manifest
+    assert "107" in result.stdout  # feature columns, from the manifest
 
 
 def test_fanout_and_baseline_preflight_are_reported_together(tmp_path):

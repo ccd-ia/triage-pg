@@ -349,7 +349,7 @@ feature_config:
   ```console
   $ triage analyze-config experiment.yaml --features '*(inspections.*'
 
-  120 of 147 match '*(inspections.*'  (0 truncated)
+  80 of 107 match '*(inspections.*'  (0 truncated)
     ABS(facilities.COUNT(inspections.date))
     ABS(facilities.COUNT(inspections.date|interval=P1M))
     ...
