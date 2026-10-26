@@ -56,7 +56,7 @@ $ triage analyze-config example/dirtyduck/experiment.yaml
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Config Version                            v8
   Problem type                  classification
-  Feature columns                          147
+  Feature columns                          107
   Cohorts                                    1
   Temporal splits                            4
   Distinct as_of dates                       5
@@ -114,9 +114,9 @@ $ triage analyze-config experiment-fanout.yaml
 
   Run                           Groups                Columns   Models
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  all                           facility_attrs,           147       32
+  all                           facility_attrs,           107       32
                                 inspection_history
-  leave-one-out:facility_att…   inspection_history        120       32
+  leave-one-out:facility_att…   inspection_history         80       32
   leave-one-out:inspection_h…   facility_attrs             27       32
 
 ╭──────────── Baseline pre-flight ────────────╮
@@ -185,7 +185,7 @@ so what it prints is what the run would group. Needs no database.
 ```console
 $ triage analyze-config example/dirtyduck/experiment.yaml --features '*(inspections.*'
 
-120 of 147 match '*(inspections.*'  (0 truncated)
+80 of 107 match '*(inspections.*'  (0 truncated)
   ABS(facilities.COUNT(inspections.date))
   ABS(facilities.COUNT(inspections.date|interval=P1M))
   …

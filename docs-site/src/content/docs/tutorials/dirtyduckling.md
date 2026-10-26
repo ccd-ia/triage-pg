@@ -95,7 +95,7 @@ of 8, the 32 models that grid will actually produce, and the cohort/label SQL
 summaries:
 
 ```text
-  Feature columns                          147
+  Feature columns                          107
   Temporal splits                            4
   Matrices to build      8  (4 train + 4 test)
   Model grid size                            8

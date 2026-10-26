@@ -69,7 +69,7 @@ def test_plan_reproduces_the_canonical_dirtyduck_numbers(dirtyduck_config):
     assert plan.n_splits == 4
     assert plan.n_runs == 1
     assert plan.n_models == 32
-    assert plan.n_feature_columns == 147
+    assert plan.n_feature_columns == 107
     assert plan.feature_error is None
 
 
@@ -84,10 +84,10 @@ def test_plan_multiplies_the_feature_group_fan_out(fanout_config):
     ]
     assert plan.n_runs == 3
     assert plan.n_models == 96
-    # The partition itself: 27 + 120 = 147, the live-verified split.
+    # The partition itself: 27 + 80 = 107, the live-verified split.
     by_label = {s.label: s.n_columns for s in plan.subsets}
-    assert by_label["all"] == 147
-    assert by_label["leave-one-out:facility_attrs"] == 120
+    assert by_label["all"] == 107
+    assert by_label["leave-one-out:facility_attrs"] == 80
     assert by_label["leave-one-out:inspection_history"] == 27
 
 
@@ -142,7 +142,7 @@ def test_baseline_preflight_catches_the_column_a_leave_one_out_drops(fanout_conf
 
 
 def test_baseline_preflight_is_silent_when_every_run_keeps_the_column(dirtyduck_config):
-    """No fan-out ⇒ one run holding all 147 columns ⇒ nothing to report."""
+    """No fan-out ⇒ one run holding all 107 columns ⇒ nothing to report."""
     plan = plan_experiment(dirtyduck_config)
 
     assert plan.baseline_issues == ()
