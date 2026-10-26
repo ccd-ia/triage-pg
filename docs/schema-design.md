@@ -421,20 +421,21 @@ create index run_artifacts_artifact_idx on triage.run_artifacts (artifact_id);
 ## 5. Representative views (the in-PG compute surface — ADR-0007)
 
 ```sql
--- Latest scoring run per (model, as_of_date), then ranked — feeds top-k lists + precision@k.
+-- Latest scoring run per (model, entity, as_of_date, split_kind), then ranked — feeds top-k
+-- lists. A production score never replaces a test score of the same date (migration 0025).
 create view triage.latest_predictions as
-select distinct on (model_id, entity_id, as_of_date)
+select distinct on (model_id, entity_id, as_of_date, split_kind)
        model_id, entity_id, as_of_date, split_kind, score, scored_at
 from   triage.predictions
-order  by model_id, entity_id, as_of_date, scored_at desc;
+order  by model_id, entity_id, as_of_date, split_kind, scored_at desc;
 
--- Prioritization list: rank entities for a model at an as_of_date (deterministic tiebreak).
+-- Prioritization list: rank entities for a model, split and as_of_date (deterministic tiebreak).
 create view triage.prediction_ranks as
 select p.*,
        row_number()  over w as rank_abs,
        percent_rank() over w as rank_pct
 from   triage.latest_predictions p
-window w as (partition by model_id, as_of_date order by score desc, entity_id);
+window w as (partition by model_id, split_kind, as_of_date order by score desc, entity_id);
 
 -- Leaderboard: best model per group by a chosen metric (a materialized view for the dashboard).
 create materialized view triage.leaderboard as

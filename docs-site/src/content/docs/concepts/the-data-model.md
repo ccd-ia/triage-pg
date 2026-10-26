@@ -99,7 +99,8 @@ The concept a user must internalize is the flip side of that guarantee:
 > prediction for an entity must pick the row with the greatest `scored_at`.
 
 triage-pg does this for you in the `latest_predictions` view (a
-`distinct on (model_id, entity_id, as_of_date) … order by scored_at desc`), and
+`distinct on (model_id, entity_id, as_of_date, split_kind) … order by scored_at desc`,
+so a forward score never hides the test score of the same date), and
 the ranked and monitoring views build on top of it. But if you query
 `triage.predictions` directly, remember that you are looking at *every* scoring
 generation at once, not a snapshot.
