@@ -274,12 +274,15 @@ temporal_config:
 
 **Contract.**
 
-- All four dates plus `model_update_frequency` are required; the six
-  frequency/history/duration/timespan fields each accept a single interval or a
-  non-empty list of intervals (an empty list is rejected).
+- The validator requires all eleven fields, and none has a default: a missing
+  one fails with `temporal_config.<field>: Field required`. This includes
+  `test_as_of_date_frequencies`, `test_durations` and the two label timespans.
+  The six frequency/history/duration/timespan fields each accept a single
+  interval or a non-empty list of intervals (an empty list is rejected).
 - A convenience key `label_timespans` is accepted and expands to both
   `training_label_timespans` and `test_label_timespans` unless an explicit
-  per-side value is already present.
+  per-side value is already present. It is the only way to leave a field out;
+  there is no equivalent for the as-of-date frequencies.
 - `feature_start_time` must not be after `feature_end_time` (same for the label
   window). Pydantic validation errors are surfaced path-addressed under
   `temporal_config.<field>`.
