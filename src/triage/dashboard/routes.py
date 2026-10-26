@@ -728,14 +728,20 @@ def model_detail(model_id: int, pool: DictRowPool = Depends(_pool)) -> dict[str,
 
 @router.get("/models/{model_id}/curve")
 def model_curve(
-    model_id: int, pool: DictRowPool = Depends(_pool)
+    model_id: int,
+    as_of_date: Optional[str] = None,
+    pool: DictRowPool = Depends(_pool),
 ) -> list[dict[str, Any]]:
-    """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this)."""
+    """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this).
+
+    One test date: ``as_of_date``, or the model's latest test date when omitted.
+    """
     return _rows(
         pool,
         "select k, pct, prec, rec, tp, fp, fn, tn"
-        " from triage.model_threshold_curve(%(model_id)s) order by k",
-        {"model_id": model_id},
+        " from triage.model_threshold_curve(%(model_id)s, %(as_of_date)s::date)"
+        " order by k",
+        {"model_id": model_id, "as_of_date": as_of_date},
     )
 
 

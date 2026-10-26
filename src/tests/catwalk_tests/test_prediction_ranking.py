@@ -304,3 +304,54 @@ def test_single_row_percent_rank_is_zero(greenfield_engine):
     assert len(ranks) == 1
     assert ranks[0]["rank_abs"] == 1
     assert ranks[0]["rank_pct"] == pytest.approx(0.0)
+
+
+def test_ranks_keep_each_split_kind_apart(greenfield_engine):
+    """A later ``production`` score at a test date must not replace the test score.
+
+    ``triage score`` appends ``split_kind='production'`` rows (ADR-0006). Before 0025,
+    ``latest_predictions`` kept one row per (model, entity, as_of_date) whatever the split, so
+    the newer production row hid entity 1's test score, and ``prediction_ranks`` ranked test
+    and production rows in one list.
+    """
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    record_predictions(
+        engine,
+        model_id,
+        "test",
+        [
+            {"entity_id": 1, "as_of_date": AS_OF_DATE, "score": 0.2},
+            {"entity_id": 2, "as_of_date": AS_OF_DATE, "score": 0.5},
+            {"entity_id": 3, "as_of_date": AS_OF_DATE, "score": 0.4},
+        ],
+    )
+    record_predictions(
+        engine,
+        model_id,
+        "production",
+        [
+            {"entity_id": 1, "as_of_date": AS_OF_DATE, "score": 0.9},
+            {"entity_id": 4, "as_of_date": AS_OF_DATE, "score": 0.1},
+        ],
+    )
+
+    def ranks(split_kind):
+        with engine.connection() as conn:
+            rows = conn.execute(
+                "select entity_id, score, rank_abs from triage.prediction_ranks"
+                " where model_id = %(m)s and split_kind = %(s)s and as_of_date = %(d)s",
+                {"m": model_id, "s": split_kind, "d": AS_OF_DATE},
+            ).fetchall()
+        return {r["entity_id"]: (r["score"], r["rank_abs"]) for r in rows}
+
+    assert ranks("test") == {2: (0.5, 1), 3: (0.4, 2), 1: (0.2, 3)}
+    assert ranks("production") == {1: (0.9, 1), 4: (0.1, 2)}
+    # fetch_ranks reads one split when asked, so a caller never gets two rank-1 rows
+    assert [
+        r["entity_id"] for r in fetch_ranks(engine, model_id, AS_OF_DATE, "test")
+    ] == [
+        2,
+        3,
+        1,
+    ]

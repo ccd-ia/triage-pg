@@ -160,17 +160,21 @@ def fetch_ranks(
     db_engine: DictRowPool,
     model_id: int,
     as_of_date: date | str,
+    split_kind: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read deterministic ranks for one (model, as_of_date) from the view.
 
     Reads ``triage.prediction_ranks`` (latest score per entity, ranked by
-    ``score desc, entity_id``). Returns rows ordered by ``rank_abs`` so the
-    caller gets a ready-to-use prioritization list (ADR-0010).
+    ``score desc, entity_id`` within each ``split_kind``). Returns rows ordered
+    by ``rank_abs`` so the caller gets a ready-to-use prioritization list
+    (ADR-0010).
 
     Args:
         db_engine: engine bound to the per-project results database.
         model_id: ``triage.models.model_id``.
         as_of_date: the scoring date to rank within.
+        split_kind: one of :data:`VALID_SPLIT_KINDS` to read that list only.
+            ``None`` returns every split's list at the date, each ranked from 1.
 
     Returns:
         A list of dicts with keys ``entity_id``, ``as_of_date``,
@@ -182,11 +186,18 @@ def fetch_ranks(
         "rank_abs, rank_pct "
         "from triage.prediction_ranks "
         "where model_id = %(model_id)s and as_of_date = %(as_of_date)s "
-        "order by rank_abs"
+        "and (cast(%(split_kind)s as triage.split_kind) is null"
+        " or split_kind = cast(%(split_kind)s as triage.split_kind)) "
+        "order by split_kind, rank_abs"
     )
     with db_engine.connection() as conn:
         result = conn.execute(
-            query, {"model_id": int(model_id), "as_of_date": as_of_date}
+            query,
+            {
+                "model_id": int(model_id),
+                "as_of_date": as_of_date,
+                "split_kind": split_kind,
+            },
         )
         return result.fetchall()
 
@@ -215,4 +226,4 @@ def rank_predictions(
         scores,
         matrix_uuid=matrix_uuid,
     )
-    return fetch_ranks(db_engine, model_id, as_of_date)
+    return fetch_ranks(db_engine, model_id, as_of_date, split_kind)

@@ -522,3 +522,142 @@ def test_0024_leaves_a_key_without_matrix_lineage_as_it_was(db_pool_greenfield, 
     assert row["value"] == before["value"]
     assert row["num_labeled_above_threshold"] is None
     assert computed_at == before["computed_at"]
+
+
+# A second test date in the same matrix: different scores, every row labeled.
+AS_OF_DATE_2 = "2014-02-01"
+SCORES_2 = [0.1, 0.9, 0.5, 0.3]
+LABELS_2 = [1, 0, 1, 0]
+ENTITY_IDS_2 = [1, 2, 3, 4]
+
+
+def _add_second_test_date(pool, model_id) -> None:
+    with pool.connection() as conn:
+        matrix_uuid = conn.execute(
+            "select distinct matrix_uuid from triage.predictions where model_id = %(m)s",
+            {"m": model_id},
+        ).fetchone()["matrix_uuid"]
+        for eid, score, label in zip(ENTITY_IDS_2, SCORES_2, LABELS_2, strict=True):
+            conn.execute(
+                "insert into triage.predictions"
+                " (model_id, entity_id, as_of_date, split_kind, score, matrix_uuid)"
+                " values (%(m)s, %(e)s, %(d)s, 'test', %(s)s, %(u)s)",
+                {
+                    "m": model_id,
+                    "e": eid,
+                    "d": AS_OF_DATE_2,
+                    "s": score,
+                    "u": matrix_uuid,
+                },
+            )
+            conn.execute(
+                "insert into triage.labels"
+                " (label_hash, entity_id, as_of_date, label_timespan, outcome)"
+                " values ('labels-art', %(e)s, %(d)s, cast(%(ts)s as interval), %(o)s)",
+                {"e": eid, "d": AS_OF_DATE_2, "ts": LABEL_TIMESPAN, "o": float(label)},
+            )
+
+
+def _curve(pool, model_id, as_of_date=None):
+    with pool.connection() as conn:
+        return conn.execute(
+            "select * from triage.model_threshold_curve(%(m)s, %(d)s::date) order by k",
+            {"m": model_id, "d": as_of_date},
+        ).fetchall()
+
+
+def _assert_curve_is_dssg(curve, scores, labels, entity_ids) -> None:
+    assert [p["k"] for p in curve] == list(range(1, len(scores) + 1))
+    for point in curve:
+        expected = dssg_reference(scores, labels, entity_ids, f"{point['k']}_abs")
+        assert point["pct"] == pytest.approx(point["k"] / len(scores))
+        if expected["precision"] is None:
+            assert point["prec"] is None
+        else:
+            assert point["prec"] == pytest.approx(expected["precision"], abs=1e-12)
+        assert point["rec"] == pytest.approx(expected["recall"], abs=1e-12)
+
+
+def test_the_curve_is_one_test_date_not_every_date_pooled(db_pool_greenfield):
+    """Evaluations are stored per as_of_date, so the curve that reads them must be too.
+
+    Before 0025 the curve took every test row of the model and ordered them by their per-date
+    rank, interleaving the dates: k = 2 held the two rank-1 rows of two different lists.
+    """
+    pool = db_pool_greenfield
+    model_id = _seed(pool, SCORES, LABELS, ENTITY_IDS)
+    _link_run(pool, model_id)
+    _add_second_test_date(pool, model_id)
+
+    _assert_curve_is_dssg(
+        _curve(pool, model_id, AS_OF_DATE), SCORES, LABELS, ENTITY_IDS
+    )
+    _assert_curve_is_dssg(
+        _curve(pool, model_id, AS_OF_DATE_2), SCORES_2, LABELS_2, ENTITY_IDS_2
+    )
+    # no date given: the model's latest test date
+    assert _curve(pool, model_id) == _curve(pool, model_id, AS_OF_DATE_2)
+
+
+def test_the_curve_reads_labels_at_the_scored_matrix_horizon(db_pool_greenfield):
+    """Test labels carry the test matrix's label_timespan, which need not be the training one.
+
+    Before 0025 the curve joined on ``models.training_label_timespan``: with a 1-year training
+    horizon and 6-month test labels it found no label at all and drew precision as NULL.
+    """
+    pool = db_pool_greenfield
+    model_id = _seed(pool, SCORES, LABELS, ENTITY_IDS)
+    _link_run(pool, model_id)
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.models set training_label_timespan = interval '1 year'"
+            " where model_id = %(m)s",
+            {"m": model_id},
+        )
+
+    _assert_curve_is_dssg(_curve(pool, model_id), SCORES, LABELS, ENTITY_IDS)
+
+
+def test_the_curve_of_a_model_without_test_predictions_is_empty(db_pool_greenfield):
+    pool = db_pool_greenfield
+    model_id = _seed(pool, SCORES, LABELS, ENTITY_IDS)
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.predictions set split_kind = 'production' where model_id = %(m)s",
+            {"m": model_id},
+        )
+    assert _curve(pool, model_id) == []
+
+
+def test_migration_0025_round_trips(db_pool_greenfield, db_url):
+    """Down to 0024: the one-argument curve and the split-blind views again. Up: both fixed."""
+    pool = db_pool_greenfield
+    model_id = _seed(pool, SCORES, LABELS, ENTITY_IDS)
+    _link_run(pool, model_id)
+    _add_second_test_date(pool, model_id)
+
+    def signatures():
+        with pool.connection() as conn:
+            return {
+                r["args"]
+                for r in conn.execute(
+                    "select pg_get_function_identity_arguments(p.oid) as args"
+                    " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                    " where n.nspname = 'triage' and p.proname = 'model_threshold_curve'"
+                ).fetchall()
+            }
+
+    downgrade_db(dburl=db_url, revision="0024_population_topk")
+    assert signatures() == {"p_model bigint"}
+    with pool.connection() as conn:
+        pooled = conn.execute(
+            "select count(*) as n from triage.model_threshold_curve(%(m)s)",
+            {"m": model_id},
+        ).fetchone()["n"]
+    assert pooled == len(SCORES) + len(SCORES_2)
+
+    upgrade_db(dburl=db_url, revision="head")
+    assert signatures() == {"p_model bigint, p_as_of_date date"}
+    _assert_curve_is_dssg(
+        _curve(pool, model_id, AS_OF_DATE_2), SCORES_2, LABELS_2, ENTITY_IDS_2
+    )
