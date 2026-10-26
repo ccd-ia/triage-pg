@@ -918,18 +918,21 @@ def model_predictions(
     model_id: int,
     limit: int = 20,
     offset: int = 0,
+    split_kind: str = "test",
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
-    """Ranked predictions (page) joined to outcome via the model's run's labels artifact.
+    """Ranked predictions (page) of one split, each with the outcome its evaluation read.
 
     Returns ``{rows, total}`` — ``rows`` is the requested ``limit``/``offset`` page ordered by
-    rank, ``total`` the full prediction count for the model (so the SPA can page the "View all"
-    list without over-fetching). Empty-state when the model has no predictions yet.
+    rank, ``total`` the full prediction count for the model and split (so the SPA can page the
+    "View all" list without over-fetching). Empty-state when there are no predictions yet.
     """
     total_row = _one(
         pool,
-        "select count(*) as n from triage.prediction_ranks where model_id = %(model_id)s",
-        {"model_id": model_id},
+        "select count(*) as n from triage.prediction_ranks"
+        " where model_id = %(model_id)s"
+        "   and split_kind = cast(%(split)s as triage.split_kind)",
+        {"model_id": model_id, "split": split_kind},
     )
     total = (total_row or {}).get("n", 0)
     if not total:
@@ -938,27 +941,15 @@ def model_predictions(
             "predictions are written by a completed scoring run (append-only, ADR-0006).",
         )
 
-    # rank_abs over the latest scores, LEFT-joined to the outcome from the model's run's single
-    # labels artifact (greenfield: one labels per run) on (entity_id, as_of_date) at the model's
-    # training_label_timespan. The labels artifact id is resolved as a *scalar* subselect (not a
-    # run_artifacts join) so an unlabeled prediction stays one row instead of fanning out across
-    # every artifact the run touched.
+    # scored_labels (migration 0026) labels each row from its scored matrix's lineage, at the
+    # horizon precision@ was computed with — not the training horizon.
     rows = _rows(
         pool,
-        "select pr.entity_id, pr.as_of_date, pr.score, pr.rank_abs, pr.rank_pct, l.outcome"
-        " from triage.prediction_ranks pr"
-        " join triage.models m on m.model_id = pr.model_id"
-        " left join triage.labels l"
-        "      on l.label_hash = (select ra.artifact_id from triage.run_artifacts ra"
-        "           join triage.artifacts a on a.artifact_id = ra.artifact_id"
-        "                and a.kind = 'labels'"
-        "           where ra.run_id = m.run_id limit 1)"
-        "      and l.entity_id = pr.entity_id and l.as_of_date = pr.as_of_date"
-        "      and l.label_timespan = m.training_label_timespan"
-        " where pr.model_id = %(model_id)s"
-        " order by pr.as_of_date, pr.rank_abs"
+        "select entity_id, as_of_date, score, rank_abs, rank_pct, outcome"
+        " from triage.scored_labels(%(model_id)s, cast(%(split)s as triage.split_kind))"
+        " order by as_of_date, rank_abs"
         " limit %(limit)s offset %(offset)s",
-        {"model_id": model_id, "limit": limit, "offset": offset},
+        {"model_id": model_id, "split": split_kind, "limit": limit, "offset": offset},
     )
     return {"rows": rows, "total": total}
 
