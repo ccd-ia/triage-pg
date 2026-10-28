@@ -83,8 +83,7 @@ jobs:
       - run: terraform validate
 
   docker:
-    # main only: the image build is the release path's dress rehearsal — no PR churn.
-    if: github.event_name == 'push'
+    # PRs too: a push-only build let #17 merge green with an image that could not build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
