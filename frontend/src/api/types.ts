@@ -761,18 +761,64 @@ export interface CrosstabRow {
 }
 export type CrosstabsResponse = CrosstabRow[] | EmptyState
 
+/** The three error trees (migration 0027 added confusion: TP/FP/FN/TN over all labeled rows). */
+export type ErrorKind = 'fp' | 'fn' | 'confusion'
+
 /** GET /api/models/{id}/error-rules — the error-tree rules (triage postmodel). */
 export interface ErrorRuleRow {
   as_of_date: string
   parameter: string
-  error_kind: 'fp' | 'fn'
+  error_kind: ErrorKind
   rule: string
   n_matched: number
   n_errors: number
   error_rate: number
   depth: number
+  /** {tp, fp} on fp leaves, {fn, tn} on fn leaves, all four on confusion leaves; null before 0027. */
+  class_counts: Record<string, number> | null
+  /** Sorted feature+op pairs without thresholds, e.g. "age>|visits<="; null before 0027. */
+  signature: string | null
 }
 export type ErrorRulesResponse = ErrorRuleRow[] | EmptyState
+
+/** GET /api/models/{id}/error-rules?suspicious=true — triage.error_rules_suspicious. */
+export interface SuspiciousRuleRow {
+  split_kind: string
+  as_of_date: string
+  parameter: string
+  error_kind: 'fp' | 'confusion'
+  rule_id: number
+  rule: string
+  n_matched: number
+  n_errors: number
+  error_rate: number
+  tp_share: number | null
+  class_counts: Record<string, number> | null
+  signature: string | null
+  precision_at_k: number | null
+  /** (1 − error_rate) / precision@ at the same date and cut; null when that cut was not evaluated. */
+  lift: number | null
+}
+
+/** GET /api/model-groups/{id}/error-recurrence — triage.error_rule_recurrence. */
+export interface ErrorRecurrenceRow {
+  signature: string
+  n_dates: number
+  n_dates_total: number
+  mean_error_rate: number
+  mean_support: number
+  example_rule: string
+}
+export type ErrorRecurrenceResponse =
+  | {
+      model_group_id: number
+      parameter: string
+      error_kind: ErrorKind
+      /** The cuts this group's error trees were fitted at, most recently analysed first. */
+      parameters: string[]
+      rules: ErrorRecurrenceRow[]
+    }
+  | EmptyState
 
 /** GET /api/models/{a}/overlap/{b} — top-k list overlap (migration 0016). */
 export interface ListOverlapRow {

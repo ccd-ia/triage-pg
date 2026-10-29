@@ -22,6 +22,9 @@ import type {
   CrosstabRow,
   CrosstabsResponse,
   EntityProfileResponse,
+  ErrorKind,
+  ErrorRecurrenceResponse,
+  ErrorRuleRow,
   ErrorRulesResponse,
   ListOverlapRow,
   EntityScorePoint,
@@ -55,6 +58,7 @@ import type {
   SourcePinsResponse,
   StatusResponse,
   SummaryResponse,
+  SuspiciousRuleRow,
   ThresholdCurvePoint,
 } from '../api/types'
 
@@ -833,31 +837,93 @@ export function modelCrosstabs(id: number): CrosstabsResponse {
   ]
 }
 
-/** Two planted failure modes (fixture). */
-export function modelErrorRules(id: number): ErrorRulesResponse {
+/** Planted failure modes (fixture): one leaf per error tree, plus a suspiciously-right one. */
+const ERROR_RULES: ErrorRuleRow[] = [
+  {
+    as_of_date: SPLITS[SPLITS.length - 1],
+    parameter: '10_pct',
+    error_kind: 'fp',
+    rule: 'inspections__entity_id__count_none__all <= 1.5 AND facility__age__identity_none__all <= 2.5',
+    n_matched: 64,
+    n_errors: 51,
+    error_rate: 0.797,
+    depth: 2,
+    class_counts: { tp: 13, fp: 51 },
+    signature: 'facility__age__identity_none__all<=|inspections__entity_id__count_none__all<=',
+  },
+  {
+    as_of_date: SPLITS[SPLITS.length - 1],
+    parameter: '10_pct',
+    error_kind: 'fp',
+    rule: 'inspections__failed__sum_none__1y > 2.5',
+    n_matched: 41,
+    n_errors: 0,
+    error_rate: 0,
+    depth: 1,
+    class_counts: { tp: 41, fp: 0 },
+    signature: 'inspections__failed__sum_none__1y>',
+  },
+  {
+    as_of_date: SPLITS[SPLITS.length - 1],
+    parameter: '10_pct',
+    error_kind: 'fn',
+    rule: 'inspections__failed__sum_none__1y > 0.5',
+    n_matched: 38,
+    n_errors: 22,
+    error_rate: 0.579,
+    depth: 1,
+    class_counts: { fn: 22, tn: 16 },
+    signature: 'inspections__failed__sum_none__1y>',
+  },
+  {
+    as_of_date: SPLITS[SPLITS.length - 1],
+    parameter: '10_pct',
+    error_kind: 'confusion',
+    rule: 'inspections__failed__sum_none__1y <= 0.5 AND facility__age__identity_none__all > 7.5',
+    n_matched: 212,
+    n_errors: 31,
+    error_rate: 0.146,
+    depth: 2,
+    class_counts: { tp: 4, fp: 9, fn: 22, tn: 177 },
+    signature: 'facility__age__identity_none__all>|inspections__failed__sum_none__1y<=',
+  },
+]
+
+export function modelErrorRules(id: number, kind?: ErrorKind): ErrorRulesResponse {
   void id
+  return kind ? ERROR_RULES.filter((r) => r.error_kind === kind) : ERROR_RULES
+}
+
+/** The fixture's fp leaf with no error, as triage.error_rules_suspicious returns it. */
+export function modelSuspiciousRules(id: number): SuspiciousRuleRow[] {
+  void id
+  const leaf = ERROR_RULES[1]
   return [
     {
-      as_of_date: SPLITS[SPLITS.length - 1],
-      parameter: '10_pct',
+      ...leaf,
       error_kind: 'fp',
-      rule: 'inspections__entity_id__count_none__all <= 1.5 AND facility__age__identity_none__all <= 2.5',
-      n_matched: 64,
-      n_errors: 51,
-      error_rate: 0.797,
-      depth: 2,
-    },
-    {
-      as_of_date: SPLITS[SPLITS.length - 1],
-      parameter: '10_pct',
-      error_kind: 'fn',
-      rule: 'inspections__failed__sum_none__1y > 0.5',
-      n_matched: 38,
-      n_errors: 22,
-      error_rate: 0.579,
-      depth: 1,
+      split_kind: 'test',
+      rule_id: 1,
+      tp_share: 1,
+      precision_at_k: 0.31,
+      lift: 1 / 0.31,
     },
   ]
+}
+
+/** One rule on every test date, one on a single date (fixture). */
+export function modelGroupErrorRecurrence(id: number, kind?: ErrorKind): ErrorRecurrenceResponse {
+  const k = kind ?? 'fp'
+  const total = SPLITS.length - 1
+  const rules = ERROR_RULES.filter((r) => r.error_kind === k).map((r, i) => ({
+    signature: r.signature ?? '',
+    n_dates: i === 0 ? total : 1,
+    n_dates_total: total,
+    mean_error_rate: r.error_rate,
+    mean_support: r.n_matched,
+    example_rule: r.rule,
+  }))
+  return { model_group_id: id, parameter: '10_pct', error_kind: k, parameters: ['10_pct'], rules }
 }
 
 /** Two fixture models share most of their top list. */

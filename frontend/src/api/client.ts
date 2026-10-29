@@ -13,6 +13,8 @@ import type {
   CrosstabsResponse,
   DerivationResponse,
   EntityProfileResponse,
+  ErrorKind,
+  ErrorRecurrenceResponse,
   ErrorRulesResponse,
   ExampleConfig,
   ListOverlapRow,
@@ -45,6 +47,7 @@ import type {
   Submission,
   SubmissionResult,
   SummaryResponse,
+  SuspiciousRuleRow,
   TemporalVizResult,
   ValidateConfigResult,
 } from './types'
@@ -345,10 +348,30 @@ export const api = {
     return get<CrosstabsResponse>(`/models/${id}/crosstabs`)
   },
 
-  /** Error-tree rules (persisted by `triage postmodel error-tree`). */
-  modelErrorRules(id: number): Promise<ErrorRulesResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelErrorRules(id))
-    return get<ErrorRulesResponse>(`/models/${id}/error-rules`)
+  /** Error-tree rules of one kind (persisted by `triage postmodel error-tree`). */
+  modelErrorRules(id: number, kind?: ErrorKind): Promise<ErrorRulesResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelErrorRules(id, kind))
+    const q = kind ? `?error_kind=${kind}` : ''
+    return get<ErrorRulesResponse>(`/models/${id}/error-rules${q}`)
+  },
+
+  /** Leaves that are suspiciously right, at the route's default thresholds (migration 0027). */
+  modelSuspiciousRules(id: number): Promise<SuspiciousRuleRow[]> {
+    if (USE_FIXTURE) return fake(fixture.modelSuspiciousRules(id))
+    return get<SuspiciousRuleRow[]>(`/models/${id}/error-rules?suspicious=true`)
+  },
+
+  /** How often each error rule recurs across a model group's test dates (migration 0027). */
+  modelGroupErrorRecurrence(
+    id: number,
+    opts?: { parameter?: string; kind?: ErrorKind },
+  ): Promise<ErrorRecurrenceResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelGroupErrorRecurrence(id, opts?.kind))
+    const q = new URLSearchParams()
+    if (opts?.parameter) q.set('parameter', opts.parameter)
+    if (opts?.kind) q.set('error_kind', opts.kind)
+    const qs = q.toString()
+    return get<ErrorRecurrenceResponse>(`/model-groups/${id}/error-recurrence${qs ? `?${qs}` : ''}`)
   },
 
   /** Top-k list overlap between two models (migration 0016). */

@@ -23,11 +23,11 @@ telemetry emitters own the NOTIFY).
 from __future__ import annotations
 
 import json
-from typing import Any, LiteralString, Optional
+from typing import Any, Literal, LiteralString, Optional
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from triage.component.catwalk.in_pg_evaluation import AUDITION_RULES as _AUDITION_RULES
@@ -884,33 +884,115 @@ def model_crosstabs(
     return rows
 
 
+ErrorKind = Literal["fp", "fn", "confusion"]
+
+
 @router.get("/models/{model_id}/error-rules")
 def model_error_rules(
     model_id: int,
-    error_kind: Optional[str] = None,
+    error_kind: Optional[ErrorKind] = None,
+    suspicious: bool = False,
+    max_error_rate: float = Query(0.02, ge=0.0, le=1.0),
+    min_support: int = Query(30, ge=1),
     limit: int = 20,
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """The error-tree rules (where does this model fail?) — thin read over
-    ``triage.error_analysis`` (persisted by ``triage postmodel error-tree``)."""
-    sql = (
+    ``triage.error_analysis`` (persisted by ``triage postmodel error-tree``).
+
+    ``error_kind`` keeps one kind of leaf (fp | fn | confusion). ``suspicious=true`` reads
+    ``triage.error_rules_suspicious`` instead (migration 0027): the high-support leaves with
+    almost no error, each with its TP share and its lift over the model's precision@. That
+    list is a plain array — empty when nothing qualifies — since "nothing suspicious" is an
+    answer, not a missing diagnostic.
+    """
+    params: dict[str, Any] = {"m": model_id, "k": error_kind, "limit": limit}
+    if suspicious:
+        params.update(e=max_error_rate, s=min_support)
+        return _rows(
+            pool,
+            "select split_kind, as_of_date, parameter, error_kind, rule_id, rule,"
+            "       n_matched, n_errors, error_rate, tp_share, class_counts, signature,"
+            "       precision_at_k, lift"
+            " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s)"
+            " where %(k)s::text is null or error_kind = %(k)s"
+            " limit %(limit)s",
+            params,
+        )
+    rows = _rows(
+        pool,
         "select as_of_date, parameter, error_kind, rule, n_matched, n_errors,"
-        "       error_rate, depth"
-        " from triage.error_analysis where model_id = %(m)s"
+        "       error_rate, depth, class_counts, signature"
+        " from triage.error_analysis"
+        " where model_id = %(m)s and (%(k)s::text is null or error_kind = %(k)s)"
+        " order by error_rate desc, n_matched desc limit %(limit)s",
+        params,
     )
-    params: dict[str, Any] = {"m": model_id, "limit": limit}
-    if error_kind is not None:
-        sql += " and error_kind = %(k)s"
-        params["k"] = error_kind
-    sql += " order by error_rate desc, n_matched desc limit %(limit)s"
-    rows = _rows(pool, sql, params)
     if not rows:
         return _empty(
-            "no error analysis persisted for this model",
-            "run `triage postmodel error-tree <model_id>` — the CLI fits the error"
-            " tree from the matrix and persists the rules here (ADR-0011).",
+            "no error analysis persisted for this model"
+            + ("" if error_kind is None else f" ({error_kind} leaves)"),
+            "run `triage postmodel error-tree <model_id> --kind all` — the CLI fits the"
+            " error trees from the matrix and persists the rules here (ADR-0011).",
         )
     return rows
+
+
+@router.get("/model-groups/{model_group_id}/error-recurrence")
+def model_group_error_recurrence(
+    model_group_id: int,
+    parameter: Optional[str] = None,
+    error_kind: ErrorKind = "fp",
+    limit: int = 20,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """On how many of the group's test dates each error rule recurs — thin read over
+    ``triage.error_rule_recurrence`` (migration 0027).
+
+    ``parameters`` lists the cuts the group's error trees were fitted at; without
+    ``parameter`` the most recently analysed cut is read.
+    """
+    if (
+        _one(
+            pool,
+            "select 1 as found from triage.model_groups where model_group_id = %(g)s",
+            {"g": model_group_id},
+        )
+        is None
+    ):
+        raise HTTPException(status_code=404, detail="model group not found")
+    cuts = _rows(
+        pool,
+        "select ea.parameter"
+        " from triage.error_analysis ea"
+        " join triage.models m using (model_id)"
+        " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
+        " group by ea.parameter"
+        " order by max(ea.computed_at) desc, ea.parameter",
+        {"g": model_group_id},
+    )
+    if not cuts:
+        return _empty(
+            "no error analysis persisted for this model group",
+            "run `triage postmodel error-tree <model_id> --kind all` on the group's"
+            " models — recurrence counts each rule across their test dates.",
+        )
+    parameters = [c["parameter"] for c in cuts]
+    chosen = parameter if parameter is not None else parameters[0]
+    return {
+        "model_group_id": model_group_id,
+        "parameter": chosen,
+        "error_kind": error_kind,
+        "parameters": parameters,
+        "rules": _rows(
+            pool,
+            "select signature, n_dates, n_dates_total, mean_error_rate, mean_support,"
+            "       example_rule"
+            " from triage.error_rule_recurrence(%(g)s, %(p)s, %(k)s)"
+            " limit %(limit)s",
+            {"g": model_group_id, "p": chosen, "k": error_kind, "limit": limit},
+        ),
+    }
 
 
 @router.get("/models/{model_id}/predictions")

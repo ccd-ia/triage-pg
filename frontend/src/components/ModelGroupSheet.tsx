@@ -2,7 +2,8 @@
  * ModelGroupSheet — a side-sheet for ONE model group (/model-groups/{id}), surfaced
  * from the Model Groups table (the "open group" affordance) and reused by the audition
  * compare view. Shows the group's identity (algorithm + hyperparameters + features),
- * its per-split models (each opens the model sheet), and its metric-over-time line.
+ * its per-split models (each opens the model sheet), its metric-over-time line, and
+ * the error rules that recur across its test dates (ErrorRecurrencePanel).
  */
 import { useMemo, useState } from 'react'
 import {
@@ -21,6 +22,7 @@ import { useAsync } from '../hooks/useAsync'
 import { tooltipFormatter } from '../api/format'
 import { abbrevAlgo } from '../api/transforms'
 import type { ExpEvaluationRow, MetricCatalogRow } from '../api/types'
+import { ErrorRecurrencePanel } from './ErrorRecurrencePanel'
 
 const shortType = abbrevAlgo
 
@@ -226,6 +228,11 @@ export function ModelGroupSheet({
               ) : (
                 <div className="muted" style={{ fontSize: 11 }}>no evaluations yet for this metric.</div>
               )}
+            </section>
+
+            <section>
+              <h4>error rules · recurrence across test dates</h4>
+              <ErrorRecurrencePanel groupId={groupId} />
             </section>
           </>
         ) : (
