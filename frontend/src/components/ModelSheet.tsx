@@ -4,7 +4,8 @@
  *   - a SPLIT SELECTOR over the model group's models (which trained model is shown —
  *     answers "which model opens"; surfaces /model-groups/{id}, follow-up #2)
  *   - ScoreDistributionChart (/models/{id}/histogram)
- *   - RayidCurveChart + client k-slider (/models/{id}/curve)
+ *   - RayidCurveChart + client k-slider (/models/{id}/curve), with a population selector
+ *     over the experiment's subsets (/experiments/{hash}/subsets → ?subset=)
  *   - feature importance (top 20 + "View all" modal), PRETTY + RAW names
  *   - PredictedList (top 20 + "View all" modal); each entity opens the EntityDrawer
  */
@@ -43,9 +44,12 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   // pattern, so there's no setState-in-effect cascade).
   const [activeId, setActiveId] = useState(modelId)
   const [openedId, setOpenedId] = useState(modelId)
+  // The Rayid curve's population: '' = the whole scored population, else a subset_hash.
+  const [curveSubset, setCurveSubset] = useState('')
   if (modelId !== openedId) {
     setOpenedId(modelId)
     setActiveId(modelId)
+    setCurveSubset('')
   }
 
   // Sub-sheets/modals
@@ -63,7 +67,15 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   )
   const card = useAsync(() => api.model(activeId), [activeId])
   const histo = useAsync(() => api.modelHistogram(activeId), [activeId])
-  const curve = useAsync(() => api.modelCurve(activeId), [activeId])
+  const curve = useAsync(
+    () => api.modelCurve(activeId, curveSubset || undefined),
+    [activeId, curveSubset],
+  )
+  // the experiment's subsets (migration 0015) feed the curve's population selector
+  const subsets = useAsync(
+    () => (experimentHash ? api.expSubsets(experimentHash) : Promise.resolve([])),
+    [experimentHash],
+  )
   const calibration = useAsync(() => api.modelCalibration(activeId), [activeId])
   const crosstabs = useAsync(() => api.modelCrosstabs(activeId), [activeId])
   const preds = useAsync(() => api.modelPredictions(activeId, { limit: INLINE }), [activeId])
@@ -208,7 +220,32 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
 
         <section>
           <h4>Rayid curve · k-slider</h4>
-          {curve.data ? <RayidCurveChart curve={curve.data} initialPct={k} /> : <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>}
+          {(subsets.data?.length ?? 0) > 0 ? (
+            <label className="field" style={{ margin: '0 0 6px' }}>
+              <span>population</span>
+              <select value={curveSubset} onChange={(e) => setCurveSubset(e.target.value)}>
+                <option value="">full cohort</option>
+                {subsets.data?.map((s) => (
+                  <option key={s.subset_hash} value={s.subset_hash}>
+                    subset: {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {curve.error ? (
+            <div className="muted" style={{ fontSize: 11 }}>curve unavailable: {curve.error.message}</div>
+          ) : curve.data ? (
+            <RayidCurveChart
+              curve={curve.data}
+              initialPct={k}
+              emptyText={
+                curveSubset ? 'no curve: the subset has no scored rows at this date' : undefined
+              }
+            />
+          ) : (
+            <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>
+          )}
         </section>
 
         <section>

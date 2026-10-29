@@ -964,6 +964,7 @@ export function modelCurve(id: number): ModelCurveResponse {
       fp,
       fn,
       tn,
+      base_rate: POS / N,
     })
   }
   return points

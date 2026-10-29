@@ -4,7 +4,9 @@
  * SQL-computed source of truth (ADR-0012); dragging the slider is a pure lookup
  * into that series — no server round-trip, no business logic. At the slider's
  * pct it shows prec/rec and the TP/FP/FN/TN confusion counts, and moves a marker
- * on the chart. The initial k can be seeded from the experiment selection.
+ * on the chart. The initial k can be seeded from the experiment selection. The dashed
+ * horizontal line is the population's base rate, read from the route's `base_rate`
+ * (the precision a random ranking expects); a precision curve near it does not rank.
  */
 import { useMemo, useState } from 'react'
 import {
@@ -25,9 +27,15 @@ interface Props {
   curve: ThresholdCurvePoint[]
   /** Initial population fraction (0..1) for the slider. */
   initialPct?: number
+  /** Empty-state text; a subset with no rows at the date is not an unscored model. */
+  emptyText?: string
 }
 
-export function RayidCurveChart({ curve, initialPct = 0.1 }: Props) {
+export function RayidCurveChart({
+  curve,
+  initialPct = 0.1,
+  emptyText = 'no curve (model not scored yet)',
+}: Props) {
   const [pct, setPct] = useState(initialPct)
 
   const chartData = useMemo(
@@ -43,10 +51,12 @@ export function RayidCurveChart({ curve, initialPct = 0.1 }: Props) {
   const at = useMemo(() => curveAtPct(curve, pct), [curve, pct])
 
   if (curve.length === 0) {
-    return <div className="muted" style={{ fontSize: 11 }}>no curve (model not scored yet)</div>
+    return <div className="muted" style={{ fontSize: 11 }}>{emptyText}</div>
   }
 
   const pctInt = at ? Math.round(at.pct * 100) : Math.round(pct * 100)
+  // served on every point (the same value); null when the population has no labeled row
+  const baseRate = curve[0].base_rate
 
   return (
     <div>
@@ -66,6 +76,14 @@ export function RayidCurveChart({ curve, initialPct = 0.1 }: Props) {
               formatter={tooltipFormatter(4)}
             />
             <ReferenceLine x={pctInt} stroke="var(--acc)" strokeDasharray="4 3" />
+            {baseRate != null ? (
+              <ReferenceLine
+                y={baseRate}
+                stroke="var(--mut)"
+                strokeDasharray="2 3"
+                label={{ value: 'base rate', position: 'insideTopRight', fontSize: 9, fill: 'var(--mut)' }}
+              />
+            ) : null}
             <Line type="monotone" dataKey="precision" stroke="var(--acc)" strokeWidth={2} dot={false} isAnimationActive={false} />
             <Line type="monotone" dataKey="recall" stroke="var(--acc2)" strokeWidth={2} dot={false} isAnimationActive={false} />
           </LineChart>
@@ -89,8 +107,8 @@ export function RayidCurveChart({ curve, initialPct = 0.1 }: Props) {
 
       <div className="muted" style={{ fontSize: 10, margin: '2px 0 10px' }}>
         prec <b style={{ color: 'var(--acc)' }}>{at?.prec?.toFixed(3) ?? '—'}</b> · rec{' '}
-        <b style={{ color: 'var(--acc2)' }}>{at?.rec?.toFixed(3) ?? '—'}</b> · recomputes list +
-        confusion client-side
+        <b style={{ color: 'var(--acc2)' }}>{at?.rec?.toFixed(3) ?? '—'}</b> · base rate{' '}
+        <b>{baseRate?.toFixed(3) ?? '—'}</b> · recomputes list + confusion client-side
       </div>
 
       {at ? (
