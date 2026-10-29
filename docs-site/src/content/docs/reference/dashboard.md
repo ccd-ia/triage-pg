@@ -50,6 +50,27 @@ The score histogram counts every test date. The predicted list
 (`/api/models/{id}/predictions`) shows the test split unless `split_kind=` names
 another one, such as `production` for `triage score` output.
 
+When the experiment declares `evaluation.subsets`, a **population** selector sits
+above the curve: *full cohort*, or one *subset: name*. A subset becomes the
+population, ranked among its own members, so its curve at k equals
+the stored subset `precision@k_abs` (`?subset=<subset_hash>` on the curve route).
+A subset with no scored rows at that date says so instead of drawing an empty
+chart. The dashed horizontal line marked *base rate* is the population's labeled
+positives over its labeled rows, which is the precision a random ranking
+expects; the readout under the k-slider repeats it next to precision and recall.
+A precision line that stays near it means the model barely ranks that
+population. [Reading the threshold curve](/triage-pg/guides/reading-the-threshold-curve/)
+explains the shapes to look for.
+
+The error-rules panel has one tab per kind of leaf: **FP · wrong flags**,
+**FN · missed need** and **Confusion · all four** (`error_kind=` on
+`/api/models/{id}/error-rules`). The chip beside the tabs, **suspiciously right
+· N**, counts the leaves `triage.error_rules_suspicious` returns at its defaults
+(error rate at most 0.02, at least 30 rows). Clicking it lists them with their
+TP share and their lift over the model's `precision@`; at N = 0 the chip is
+disabled. See [Reading the error trees](/triage-pg/guides/reading-the-error-trees/)
+and [How to find leakage](/triage-pg/guides/finding-leakage/).
+
 ## Audition — model selection with discipline
 
 ![The audition tab: DSSG's selection rules computed in PostgreSQL](../../../assets/tutorials/audition-tab.png)
@@ -76,6 +97,17 @@ family your intervention actually implicates.
 
 The hyperparameter-family rollup (avg ± σ, max regret, fit time) — and where
 feature-group ablation runs become comparable side by side.
+
+Opening a group shows its sheet, which ends with a **recurrence** table: each
+error-rule signature with the number of the group's test dates it appears on
+(`2/6`), its mean error rate, its mean number of rows and an example rule.
+Buttons switch between fp, fn and confusion leaves, and a cut selector appears
+when `triage postmodel error-tree` ran at more than one cut on the group's
+models. The table reads `triage.error_rule_recurrence`
+(`/api/model-groups/{id}/error-recurrence`); until `error-tree` has run on the
+group's models, it names that command instead.
+[Reading the error trees](/triage-pg/guides/reading-the-error-trees/) explains
+what a recurring rule tells you.
 
 ## Monitoring
 

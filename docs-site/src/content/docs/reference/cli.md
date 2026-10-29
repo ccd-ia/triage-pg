@@ -195,6 +195,70 @@ Use `--features '*'` to list every column. Where the 63-byte identifier cap
 truncated a name, the output shows `label → column` so you can see what the
 feature really is.
 
+### `triage check leakage` — definitions that read the future
+
+`analyze-config` reads the config; `triage check leakage` runs the cohort, label
+and feature definitions against the project database and tests each one for
+data it should not know yet. For every as_of_date `t` of the
+temporal config, it builds all three on all data, deletes the rows of the
+config's `sources` that each one must not see, builds them again and compares:
+
+| component | rows deleted before the rebuild |
+|---|---|
+| cohort at `t` | rows known after `t` |
+| features at `t` | event rows known on or after `t` |
+| labels at `t` | rows known on or after `t + label_timespan` |
+
+```console
+$ triage check leakage example/dirtyduck/experiment-guides.yaml
+cohort — entities added
+      or removed
+
+  as_of_date   result
+ ━━━━━━━━━━━━━━━━━━━━━
+  2015-01-01   ok
+  …
+  2016-10-01   ok
+…
+Checked 7 as_of_date(s) in 10.7s: no differences (exit 0).
+```
+
+The check reports each difference by component and date. The counts are rows
+that appear after the cut (`+`), rows that disappear (`−`) and rows whose value
+changed (`~`); for features, the result also names the columns that moved. In a
+planted variant of the same config, the label query has no upper bound on its
+window, so it reads inspections after `t + 6 months`, and the labels differ on
+every date:
+
+```console
+  as_of_date   label timespan   result
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2015-01-01   6 months         12231 differ (+0 −10390 ~1841)
+  …
+  2016-10-01   6 months         6488 differ (+0 −5860 ~628)
+Checked 7 as_of_date(s) in 11.1s: leakage found in 7 check(s) (exit 1).
+```
+
+The exit code is 0 when nothing differs, 1 when something does (leakage), and
+2 when the check could not run: a missing privilege or Source, a broken foreign
+key, a lock held by another session, or a bad config. `--dates 2016-07-01,2016-10-01`
+checks only those dates; `--json PATH` also writes the full report.
+
+**The check never commits.** It runs on one connection, in one transaction that
+always ends in `ROLLBACK`, so other sessions never see the deletes, and it
+compares each Source's row count and latest knowledge date before and after the
+run. It still needs privileges the read commands do not: `DELETE` on every
+Source that declares a `knowledge_date_column`, and `TEMPORARY` on the database.
+A role with `SELECT` only gets exit code 2 and a message naming the relations.
+The deleted rows stay locked until the rollback, so run it when no loader is
+writing to the Sources.
+
+The check does not cut Sources without a `knowledge_date_column`, or tables the
+queries read that the config does not declare; it lists both under **Not
+checked**. Exit 0 with that list non-empty does not mean the config is clean.
+[How to find leakage](/triage-pg/guides/finding-leakage/) covers what the check
+can and cannot see.
+
 ## Run
 
 ```console
@@ -227,6 +291,34 @@ $ triage models b9e38fd8
 `triage models <hash> --group N` drills into one group's members;
 `triage model show <id>` prints a model's card with calibration deciles.
 
+`triage model curve <id>` prints the threshold (Rayid) curve of one test date:
+precision and recall at each cut of the scored population, next to that
+population's base rate. The example is model 285 of
+`example/dirtyduck/experiment-guides.yaml`, the experiment the guides use; ids
+differ on another database.
+
+```console
+$ triage model curve 285 --points 10
+Threshold curve — model 285 @ 2016-10-01
+14053 scored row(s); base rate = labeled positives ÷ labeled rows
+
+      k    % pop   Precision   Recall   Base rate
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   1406    10.0%      0.3881   0.1791      0.2627
+   2811    20.0%      0.3607   0.3266      0.2627
+   …
+  14053   100.0%      0.2627   1.0000      0.2627
+```
+
+Without `--date YYYY-MM-DD` it reads the model's latest test date. `--subset`
+takes a subset name or a `subset_hash` prefix and makes that subset the
+population, ranking its members among themselves as the subset metrics do.
+`--points N` prints the cuts at k = ⌈i × rows ÷ N⌉ for i = 1…N (default 20), so
+the row at 10% of the population is the cut `precision@10_pct` uses. `--json`
+prints the points instead of the table. A precision column that stays close to
+the base rate means the model barely ranks that population; see
+[Reading the threshold curve](/triage-pg/guides/reading-the-threshold-curve/).
+
 ## Select a model
 
 ```console
@@ -256,7 +348,72 @@ Crosstabs answer "what characterizes the top-k?"; `triage postmodel
 error-tree <id>` fits a shallow interpretable tree on the model's mistakes
 ("where does it fail?"); `triage postmodel compare <a> <b>` computes list
 overlap. Computed once from the matrix, persisted to PostgreSQL, readable
-everywhere.
+everywhere. [Reading the crosstabs](/triage-pg/guides/reading-the-crosstabs/)
+works through a real list.
+
+`error-tree --kind` chooses which mistakes the command fits a tree on. `fp`
+reads the selected top k and asks which flags are wrong; `fn` reads the rows passed over
+and asks which positives the list misses; `confusion` fits one tree over every
+labeled row with four classes (TP, FP, FN, TN), and its first splits mostly
+redraw the cut itself. `both`, the default, is `fp` and `fn`; `all` adds
+`confusion`. `--depth` (default 3) and `--min-leaf` (default 30) keep the rules
+short enough to read. The examples below are model 285 and its model group 41
+from the same experiment as the curve above.
+
+```console
+$ triage postmodel error-tree 285 -p 10_pct --kind all
+45 error rule(s) persisted.
+…
+```
+
+`triage postmodel error-rules <id>` reads the persisted leaves back without
+fitting a tree, highest error rate first. `--kind fp|fn|confusion` keeps one
+kind and `--top` (default 15) sets the number of rows:
+
+```console
+$ triage postmodel error-rules 285 --kind fn --top 3
+  As-of        Cut      Kind   Rule                                                               n    Errors   Rate
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2016-07-01   10_pct   fn     facilities.zip_code=60622 > 0.5 AND RECENCY(inspections.date) >    32   24       0.75
+                               250.5 AND COUNT(inspections.risk) > 2.5
+  2016-10-01   10_pct   fn     MAX(inspections.n_serious) > 0.5 AND RECENCY(inspections.date) >   77   38       0.49
+                               22.5 AND facilities.zip_code=60614 > 0.5
+  …
+```
+
+With `--suspicious` it lists only the leaves that are suspiciously right: fp
+leaves whose error rate is at most `--max-error` (default 0.02) and confusion
+leaves whose TP share is at least 1 − `--max-error`, each holding at least
+`--min-support` rows (default 30). Each leaf comes with its lift, the leaf's
+1 − error rate divided by the model's `precision@` at the same date and cut. A
+large leaf with almost no error can be a real signal, or a feature that knows
+the outcome:
+
+```console
+$ triage postmodel error-rules 285 --suspicious
+No suspiciously-right leaves for model 285 at error ≤ 0.02 and support ≥ 30.
+```
+
+`triage postmodel error-recurrence <group>` counts on how many of a model
+group's test dates each rule recurs. Rules are matched by signature, which keeps
+each split's feature and direction and drops its threshold. Run `error-tree` on
+the group's models first and pass the same `-p` cut; `--kind` defaults to `fp`
+and `--top` to 20.
+
+```console
+$ triage postmodel error-recurrence 41 -p 10_pct --kind fn --top 3
+  Signature                                   Dates   Mean rate   Mean n   Example rule
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TENURE(inspections.date)>|facilities.zip…   2/6     0.78        50.0     facilities.zip_code=60622 > 0.5 AND
+                                                                           TENURE(inspections.date) > 548 AND
+                                                                           TENURE(inspections.date) > 705
+  …
+```
+
+A rule present on most dates is a stable failure mode and a candidate for a
+missing feature; here the most frequent fn rules recur on 2 of 6 dates.
+[Reading the error trees](/triage-pg/guides/reading-the-error-trees/) reads
+these outputs on DirtyDuck.
 
 ## Operate
 
@@ -278,5 +435,11 @@ experiment), `triage gc` (collect artifacts unreachable from any root),
   commands read and write.
 - [The dashboard tour](/triage-pg/reference/dashboard/) — the same surfaces,
   rendered.
+- The guides on reading these outputs: the
+  [threshold curve](/triage-pg/guides/reading-the-threshold-curve/), the
+  [error trees](/triage-pg/guides/reading-the-error-trees/), the
+  [crosstabs](/triage-pg/guides/reading-the-crosstabs/), the
+  [model card](/triage-pg/guides/reading-the-model-card/), and
+  [how to find leakage](/triage-pg/guides/finding-leakage/).
 - The [Dirty Duckling smoke test](/triage-pg/tutorials/dirtyduckling/) to run
   this end to end yourself.

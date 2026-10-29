@@ -120,11 +120,25 @@ Rank-free metrics (AUC, average precision, Brier, log loss, ECE, the regression
 metrics, the C-index) use the labeled rows only, as before.
 
 The dashboard's threshold curve is one test date:
-`triage.model_threshold_curve(model_id, as_of_date)`, or the model's latest test
-date when `as_of_date` is NULL. It reads the same population ranks, labels
-artifact and label horizon as `precision@`, so the curve at k is the stored
+`triage.model_threshold_curve(model_id, as_of_date default null, subset_hash default '')`,
+or the model's latest test date when `as_of_date` is NULL. It reads the same
+population ranks, labels artifact and label horizon as `precision@`, so the
+curve at k is the stored
 `precision@k_abs` (migration 0025, v1.3.1). The label horizon is the scored test
 matrix's `label_timespan`, which need not equal the model's training horizon.
+
+The third argument selects a subset, and `base_rate` gives the reference line. With the
+default `''` the curve covers every scored row, and every other column is what
+the two-argument function returned. A `subset_hash` makes the subset the
+population, as it is for the subset metrics: the function ranks its members
+among themselves, and the curve at k is the stored subset `precision@k_abs`.
+`base_rate` is the population's labeled positives over its labeled rows, the
+same value on every row. It is the precision a random ranking expects, and the
+curve's own precision on its last row, where k is the whole population.
+`triage model curve <id> [--date] [--subset]` prints the same rows
+([CLI](/triage-pg/reference/cli/)), and
+[Reading the threshold curve](/triage-pg/guides/reading-the-threshold-curve/)
+explains how to read them.
 
 The predicted list and the score histogram read their labels the same way,
 through `triage.scored_labels(model_id, split_kind)` (migration 0026, v1.3.2):
