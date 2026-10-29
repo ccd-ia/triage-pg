@@ -139,3 +139,22 @@ most tempted to peek across the whole dataset, is structurally unable to. The
 fit-free half cannot leak because it reads no other rows; the fit-based half
 cannot leak because it only ever sees the training split. The cardinal rule ends
 up guaranteed by *where the code lives*, not by remembering to be careful.
+
+## A check for the definitions you write
+
+That guarantee covers the code triage-pg owns: timechop's splits, featurizer's
+feature windows and the imputation split. Three inputs come from you, and
+triage-pg cannot inspect them: the cohort query, the label query, and the
+`knowledge_date_column` each Source declares. `triage check leakage <config>`
+tests them against your data. For every `as_of_date` it builds the
+cohort, the labels and the features on all data, deletes the Source rows each
+one must not see, builds them again, and reports any difference by component,
+date and, for features, column. It runs inside one transaction that always
+rolls back, so no other session sees its deletes and the rollback undoes them.
+
+A clean result has limits. The check cannot tell that a declared
+`knowledge_date_column` is really the event date, and it lists tables the
+queries read but the config does not declare as *not checked* instead of
+cutting them. [How to find leakage](/triage-pg/guides/finding-leakage/) covers the
+check, its blind spots and the diagnostics that point at a leak; the
+[CLI tour](/triage-pg/reference/cli/) has its options and exit codes.

@@ -10,12 +10,15 @@
 - Updated: 2026-10-23 — extended through ADR-0033: 0032 (forward-scoring cohort,
   v1.2.0) and 0033 (threshold metrics over the full population, v1.3.0). The 0031
   gate was re-checked and still holds.
+- Updated: 2026-10-28 — extended through ADR-0034 (the leakage check,
+  `triage check leakage`), audited on its branch before merge.
 - Auditor: claude-fable-5 (Claude Code), per `specs/triage-pg-v1-completion.html` Phase 1
 - Method: every ADR re-read against the tree at `76eb46fc`; evidence spot-verified by
   running the cited greps/tests, not by trusting status lines. The full suite was run
   green at the end of the audit (see Verification at the bottom). The 2026-08-07 rows
-  were verified the same way against the tree at `81d17111`, and the 2026-10-23 rows
-  against `d159037f` (v1.3.0).
+  were verified the same way against the tree at `81d17111`, the 2026-10-23 rows
+  against `d159037f` (v1.3.0), and the 2026-10-28 row against `d64b96f4` (branch
+  `adolfo/model-validity-guides`).
 
 Verdicts: **fulfilled** (implemented + evidence verified) · **partial** (a named gap
 remains) · **holding** (a deliberate deferral that still holds) · **code-complete,
@@ -56,6 +59,7 @@ unexercised** (built + mock-tested, never run against the real environment).
 | 0031 | SHAP scope (v1.4.0; was v1.3.0, v1.2.0): TreeSHAP-only, on demand, into `individual_importances` | holding (2026-08-07; re-checked 2026-10-23) | Scope-only ADR written 2026-08-07; deliberately no implementation yet (that is the v1.4.0 plan's job). Conformance today = the gate held: no SHAP code in the tree, `shap` not in `pyproject.toml`, no changes under `catwalk/` |
 | 0032 | A separate, identity-neutral cohort for forward scoring (`cohort_config.forward_query`) | fulfilled (2026-10-23) | `_COHORT_IDENTITY_NEUTRAL_KEYS` strips the key in `_problem_identity` (`adapters/run.py`), so adding it keeps the `experiment_hash`; precedence `--cohort-query` → `forward_query` → training `query` in `adapters/forward.py`; `triage score` / `predictlist` take `--cohort-query PATH`, refused when missing, empty or without `{as_of_date}` (`cli.py`); the placeholder rule is enforced by `adapters/problem_config.py` (since v1.3.0, where `forward_query` is also the one extra key `cohort_config` accepts); `adapter_tests/test_forward_cohort.py` — 8 tests, re-run green |
 | 0033 | Threshold metrics rank the full population; metrics count the labeled rows | fulfilled (2026-10-23) | Migration `0024_population_topk.py`: `triage.population_ranks` (left join to labels, same pin as `labeled_ranks`) under `precision_at_k`, `recall_at_k`, `compute_bias_metrics`, `model_threshold_curve`; `diagnostics/error_tree.py` compares population ranks with the population k; `evaluations.num_labeled_above_threshold`; rank-free metrics stay on `labeled_ranks`. `catwalk_tests/test_population_topk.py` — 28 tests (DSSG-reference parity, exact random-ranking std, tie-bound brute force, 0024 round trip and recompute), re-run green; `test_diagnostics.py::test_error_tree_cuts_at_the_population_rank`. Live: DirtyDuck 1,048 rows recomputed, 0 skipped, max diff from a DSSG reference 0; Chicago 311 + DonorsChoose (fully labeled) 0 of 416 rows moved; migration `0025_split_ranks_and_curve.py` moves `model_threshold_curve` onto `population_ranks` for one test date at the scored matrix's label horizon (v1.3.1), and `0026_scored_labels.py` gives the score histogram and predicted list the same label pin and horizon (v1.3.2) |
+| 0034 | The leakage check tests as-of invariance by delete and rollback | fulfilled (2026-10-28) | `src/triage/diagnostics/leakage.py` + the `triage check` command group in `cli.py` (exit 0 no differences, 1 leakage, 2 could not run); relations read but not declared as Sources come from `explain (format json)` plans and are listed as not checked. `src/tests/test_leakage_check.py` — 27 tests, re-run green: the commit guard refuses any `COMMIT`, the module has no commit call, the featurizer tripwire, Source fingerprints equal before and after a run that found leaks, three planted leaks exit 1 (label window without an upper bound, cohort selected by future activity, late-arriving events named by feature column), an undeclared table exits 0 and is listed, a `SELECT`-only role exits 2. Live, re-run for this audit on DirtyDuck with `example/dirtyduck/experiment-guides.yaml` (7 as_of_dates; cohort, labels and features): exit 0 in 10.7 s. A variant of that config whose label window has no upper bound (planted, not committed) exits 1 with label differences on all 7 dates, and a variant without `temporal_ix` on the `inspections` entity (planted, not committed) exits 1 at 2016-10-01 with 9,829 feature rows moved across 18 inspection columns. Late-arriving data cannot be planted on DirtyDuck by config alone, because one date column is both its event and its knowledge date, so the synthetic test is the only evidence for that case |
 
 ## Contradiction found (1)
 
@@ -106,5 +110,5 @@ this exclusion.
   docstrings in `in_pg_evaluation.py`); count recorded in the plan's Phase 1
   checklist.
 - `grep -L 'Status' docs/adr/00*.md` — empty: every ADR carries a status line.
-- This document: 31 ADR rows (`grep -c '^| 00'`) — one per accepted ADR in
+- This document: 34 ADR rows (`grep -c '^| 00'`) — one per accepted ADR in
   `docs/adr/`; a count mismatch means an ADR landed without an audit row.

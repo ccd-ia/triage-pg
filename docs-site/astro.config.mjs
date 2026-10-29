@@ -45,6 +45,10 @@ export default defineConfig({
           autogenerate: { directory: 'concepts' },
         },
         {
+          label: 'Guides',
+          autogenerate: { directory: 'guides' },
+        },
+        {
           label: 'Tutorials',
           autogenerate: { directory: 'tutorials' },
         },
