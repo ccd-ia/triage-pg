@@ -1,0 +1,292 @@
+# DirtyDuck — the experiment behind the reading guides (docs-site guides/*).
+#
+# The guides teach how to read the threshold (Rayid) curve, the error trees, the
+# crosstabs and the rest of the model card, and how to use each one to improve and to
+# check a model. Every worked example and every "worked" figure on those pages comes
+# from this experiment, run against the DirtyDuck tutorial database.
+#
+# How it differs from experiment.yaml, and why:
+#
+#   * temporal_config: each split is tested on TWO as_of_dates, three months apart
+#     (test_durations '6month' x test_as_of_date_frequencies '3month'). Two adjacent
+#     dates scored by the same model separate a change in the data from a change in the
+#     model, which the stability and data-quality sections need. temporal_config is part
+#     of experiment identity (ADR-0022), so this file gets its own experiment_hash and
+#     leaves experiment.yaml's (b9e38fd8...) and its published tutorial numbers alone.
+#   * feature_config: identity transformations only, plus two numeric violation counts
+#     on inspections, split into two feature groups. One `triage run` then makes three
+#     Runs (ADR-0023): all features, experiment.yaml's features alone (the "before"),
+#     and the violation counts alone. The leaderboard compares them directly.
+#   * evaluation.subsets: three facility types and two zip codes, so the curve can be
+#     drawn per subset (`triage model curve --subset`, migration 0028).
+#   * bias_config: DirtyDuck has no personal demographics. Zip code stands in as a
+#     geographic proxy, as docs/fairness.md does with community area for Chicago 311.
+#   * sources: a distinct version_label, so no artifact derived from an earlier load can
+#     be reused. The matrices of earlier DirtyDuck runs lived under /tmp and are gone.
+#   * grid_config: a forest, a tree, a scaled logistic regression and a constant-prior
+#     floor in each Run: 12 model groups, 36 models. The run took under 3 minutes on a
+#     laptop (2026-10-28).
+#
+# Reproduce the guides' figures (tutorial DB up, PG* pointing at it — `just tutorial-up`):
+#
+#   uv run triage db upgrade
+#   uv run triage run example/dirtyduck/experiment-guides.yaml \
+#       --project-path "$HOME/.cache/triage-pg/dirtyduck-guides"
+#   # The best group is the audition pick (rule best_average_value) at the primary cut;
+#   # the runner-up is the next group in the same ranking:
+#   uv run triage audition <experiment_hash> -m precision@ -p 10_pct
+#   # For every model of the best group, and of its peer on experiment.yaml's features
+#   # (same estimator, the leave-one-out:severity Run):
+#   uv run triage postmodel error-tree <model_id> -p 10_pct --kind all
+#   uv run triage postmodel crosstabs <model_id> -p 10_pct
+#   # For every model of the runner-up group (list comparisons):
+#   uv run triage postmodel crosstabs <model_id> -p 10_pct
+#   just docs-figures        # checks all of the above, prints what is missing
+#
+# The same reads, headless:
+#
+#   uv run triage model curve <model_id> --subset restaurant
+#   uv run triage postmodel compare <best_model_id> <runner_up_model_id> -p 10_pct
+#   uv run triage postmodel error-rules <model_id> --suspicious
+#   uv run triage postmodel error-recurrence <model_group_id> -p 10_pct --kind fn
+#   uv run triage check leakage example/dirtyduck/experiment-guides.yaml
+#
+# The primary cut is 10_pct (bias_config.parameter, which scripts/docs_figures.py
+# reads): the error trees, the crosstabs, the list comparison and the fairness audit
+# all read the top 10% of the scored cohort.
+
+problem_type: classification
+
+task_framing: resource_prioritization
+
+temporal_config:
+  feature_start_time: '2014-01-01'
+  feature_end_time: '2017-07-01'
+  label_start_time: '2015-01-01'
+  label_end_time: '2017-07-01'
+  model_update_frequency: '6month'
+  training_as_of_date_frequencies: '6month'
+  training_label_timespans: ['6month']
+  # Two test dates per split, three months apart (months 0 and 3 of a half-open
+  # 6-month window). Timechop walks the last test date back from label_end_time, so
+  # every test as_of_date t keeps t + 6 months <= label_end_time.
+  test_as_of_date_frequencies: '3month'
+  test_durations: '6month'
+  test_label_timespans: ['6month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: active_facilities
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.activity_period @> {as_of_date}::date
+
+label_config:
+  name: failed_inspections
+  query: |
+    select
+      entity_id,
+      bool_or(result = 'fail')::integer as outcome
+    from ontology.events
+    where {as_of_date}::date <= date
+      and date < {as_of_date}::date + {label_timespan}
+    group by entity_id
+
+# The featurizer ER-graph of experiment.yaml (see that file for the commentary), with
+# two changes: identity transformations only, so no ABS() copy of a count appears
+# next to the count itself in an error-tree rule, and two numeric violation counts on
+# inspections (below).
+feature_config:
+  target: facilities
+  max_depth: 2
+  intervals:
+    - P1M
+    - P3M
+    - P6M
+  transformations: [identity]
+
+  entities:
+    - alias: facilities
+      id: entity_id
+      table: ontology.entities
+      variables:
+        facility:
+          type: text
+          role: identifier
+        facility_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "restaurant"
+            - "grocery store"
+            - "school"
+            - "unknown"
+            - "children's services facility"
+            - "bakery"
+            - "daycare (2 - 6 years)"
+            - "daycare above and under 2 years"
+            - "liquor"
+            - "long term care"
+            - "catering"
+            - "mobile food preparer"
+            - "mobile food dispenser"
+            - "daycare combo 1586"
+            - "hospital"
+        zip_code:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "60647"
+            - "60657"
+            - "60614"
+            - "60611"
+            - "60608"
+            - "60618"
+            - "60622"
+            - "60607"
+            - "60639"
+            - "60625"
+            - "60623"
+            - "60640"
+
+    - alias: inspections
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables:
+        result:
+          type: categorical
+        risk:
+          type: categorical
+        type:
+          type: categorical
+        # Not in experiment.yaml: how many critical and serious violations past
+        # inspections found. They are the "promote it to a feature and retrain" example.
+        n_critical:
+          type: numeric
+        n_serious:
+          type: numeric
+
+  relationships:
+    - parent:
+        entity: facilities
+        key: entity_id
+      child:
+        entity: inspections
+        key: entity_id
+      temporal:
+        mode: as_of
+
+  # Two feature groups, swept into three Runs of this one experiment (ADR-0023):
+  #   all                     every column
+  #   leave-one-out:severity  experiment.yaml's columns only (the "before")
+  #   leave-one-out:base      the violation counts only
+  # Comparing the first two on the leaderboard is the before/after of adding a feature.
+  feature_groups:
+    definitions:
+      base:
+        - "facilities.*"
+        - "*inspections.date*"
+        - "*inspections.result*"
+        - "*inspections.risk*"
+        - "*inspections.type*"
+      severity:
+        - "*inspections.n_critical*"
+        - "*inspections.n_serious*"
+    strategies: [all, leave-one-out]
+
+grid_config:
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [100]
+    max_depth: [8]
+    min_samples_leaf: [20]
+    max_features: ['sqrt']
+    n_jobs: [-1]
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [5]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+  # The floor: a constant prior scores every facility the same, so its curve is the
+  # "flat at the base rate" archetype drawn from real data.
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+
+evaluation:
+  # The default classification metrics, plus the probability metrics the model card's
+  # calibration section reads (migration 0023). 10_pct is the primary cut.
+  metrics: [precision@, recall@, auc_roc, average_precision, brier, 'ece@10']
+  thresholds: [100_abs, 10_pct]
+  subsets:
+    - name: restaurant
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.facility_type = 'restaurant'
+          and e.activity_period @> {as_of_date}::date
+    - name: grocery_store
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.facility_type = 'grocery store'
+          and e.activity_period @> {as_of_date}::date
+    - name: school
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.facility_type = 'school'
+          and e.activity_period @> {as_of_date}::date
+    # Two zip codes for the fairness sections: per-group curves of the bias_config
+    # attribute. 60647 is the audit's reference group (the largest zip); 60618 had the
+    # largest mean FDR disparity among the twelve vocabulary zips when this config was
+    # first run, so it is the group the audit sends you to look at.
+    - name: zip_60647
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.zip_code = '60647'
+          and e.activity_period @> {as_of_date}::date
+    - name: zip_60618
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.zip_code = '60618'
+          and e.activity_period @> {as_of_date}::date
+
+# Geographic proxy for the fairness cells. A flag sends an inspector, and a wrong flag
+# burdens a business that was compliant, so the intervention is recorded as punitive:
+# the fairness tree then points at FDR parity on the capped list. That is a choice about
+# whose harm counts, written down here so it can be argued with.
+bias_config:
+  query: |
+    select e.entity_id, e.zip_code
+    from ontology.entities as e
+    where e.start_time <= {as_of_date}::date
+  parameter: 10_pct
+  intervention: punitive
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: start_time
+    version_label: 'dirtyduck-guides-v1'
+    role: entity
+    type_column: facility_type
+    description: Active food-service facilities (DirtyDuck tutorial)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'dirtyduck-guides-v1'
+    role: event
+    type_column: type
+    description: Food inspection events with result and violations (DirtyDuck tutorial)
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero
