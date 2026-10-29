@@ -9,7 +9,9 @@ suite, which now records a positive duration on every built model).
 
 from __future__ import annotations
 
-from collections.abc import Collection
+import re
+from collections.abc import Collection, Mapping
+from typing import Any
 
 import pytest
 
@@ -158,72 +160,112 @@ POSITIVE = {1, 2, 6, 7}  # e1,e2 caught; e6,e7 missed (FN); e3,e4,e5 wrong flags
 ERRORY = {3, 4, 5, 6, 7}
 
 
-def _seed_matrix_model(pool, tmp_path, unlabeled: Collection[int] = ()):
+def _new_group(pool, tag: str, features: list[str]) -> int:
+    with pool.connection() as conn:
+        return conn.execute(
+            "insert into triage.model_groups"
+            " (model_group_hash, model_type, hyperparameters, feature_list)"
+            " values (%(h)s, 'x.Y', '{}'::jsonb, %(f)s)"
+            " returning model_group_id",
+            {"h": f"mg-{tag}", "f": features},
+        ).fetchone()["model_group_id"]
+
+
+def _seed_scored_model(
+    pool,
+    tmp_path,
+    *,
+    tag: str,
+    columns: dict[str, list[float]],
+    scores: list[float],
+    outcomes: Mapping[int, float | None],
+    as_of: str = AS_OF,
+    group_id: int | None = None,
+) -> int:
+    """One scored test matrix: entities 1..N with ``columns`` as features, one date.
+
+    ``outcomes[e] = None`` leaves entity ``e`` unlabeled. Artifact ids derive from ``tag``,
+    so several models can be seeded side by side (in one group when ``group_id`` is given).
+    """
     import polars as pl
 
     from triage.adapters.model import as_uuid
 
+    entities = list(range(1, len(scores) + 1))
+    features = list(columns)
     frame = pl.DataFrame(
-        {
-            "entity_id": ENTITIES,
-            "as_of_date": [AS_OF] * len(ENTITIES),
-            "f_sep": [1.0 if e in ERRORY else 0.0 for e in ENTITIES],
-            "f_signal": [2.0 if e in SELECTED else 1.0 for e in ENTITIES],
-        }
+        {"entity_id": entities, "as_of_date": [as_of] * len(entities), **columns}
     ).with_columns(pl.col("as_of_date").str.to_date())
-    uri = str(tmp_path / "diag-matrix.parquet")
+    uri = str(tmp_path / f"diag-matrix-{tag}.parquet")
     frame.write_parquet(uri)
 
+    if group_id is None:
+        group_id = _new_group(pool, tag, features)
     with pool.connection() as conn:
         conn.execute(
             "insert into triage.artifacts (artifact_id, logical_id, kind, config)"
-            " values ('m-art-x', 'm-log-x', 'model', '{}'::jsonb),"
-            "        ('mx-art-x', 'mx-log-x', 'matrix', '{}'::jsonb),"
-            "        ('lbl-x', 'lbl-log-x', 'labels', '{}'::jsonb)"
+            " values (%(m)s, %(m)s || '-log', 'model', '{}'::jsonb),"
+            "        (%(mx)s, %(mx)s || '-log', 'matrix', '{}'::jsonb),"
+            "        (%(l)s, %(l)s || '-log', 'labels', '{}'::jsonb)",
+            {"m": f"m-art-{tag}", "mx": f"mx-art-{tag}", "l": f"lbl-{tag}"},
         )
-        matrix_uuid = str(as_uuid("mx-art-x"))
+        matrix_uuid = str(as_uuid(f"mx-art-{tag}"))
         conn.execute(
             "insert into triage.matrices (matrix_uuid, artifact_id, matrix_kind,"
             " storage_uri, feature_names, label_timespan)"
-            " values (%(u)s::uuid, 'mx-art-x', 'test', %(uri)s,"
-            "         ARRAY['f_sep', 'f_signal'], interval '6 months')",
-            {"u": matrix_uuid, "uri": uri},
+            " values (%(u)s::uuid, %(a)s, 'test', %(uri)s, %(f)s, interval '6 months')",
+            {"u": matrix_uuid, "a": f"mx-art-{tag}", "uri": uri, "f": features},
         )
-        group_id = conn.execute(
-            "insert into triage.model_groups"
-            " (model_group_hash, model_type, hyperparameters, feature_list)"
-            " values ('mg-x', 'x.Y', '{}'::jsonb, ARRAY['f_sep', 'f_signal'])"
-            " returning model_group_id"
-        ).fetchone()["model_group_id"]
         model_id = conn.execute(
             "insert into triage.models (model_group_id, model_hash, train_end_time,"
             " training_label_timespan)"
-            " values (%(g)s, 'm-art-x', date '2013-12-01', interval '6 months')"
+            " values (%(g)s, %(h)s, cast(%(d)s as date) - 31, interval '6 months')"
             " returning model_id",
-            {"g": group_id},
+            {"g": group_id, "h": f"m-art-{tag}", "d": as_of},
         ).fetchone()["model_id"]
-        for i, eid in enumerate(ENTITIES):
+        for eid, score in zip(entities, scores):
             conn.execute(
                 "insert into triage.predictions"
                 " (model_id, entity_id, as_of_date, split_kind, score, matrix_uuid)"
                 " values (%(m)s, %(e)s, %(d)s, 'test', %(s)s, %(u)s::uuid)",
-                {
-                    "m": model_id,
-                    "e": eid,
-                    "d": AS_OF,
-                    "s": 1.0 - i * 0.01,
-                    "u": matrix_uuid,
-                },
+                {"m": model_id, "e": eid, "d": as_of, "s": score, "u": matrix_uuid},
             )
-            if eid in unlabeled:
+            if outcomes.get(eid) is None:
                 continue
             conn.execute(
                 "insert into triage.labels"
                 " (label_hash, entity_id, as_of_date, label_timespan, outcome)"
-                " values ('lbl-x', %(e)s, %(d)s, interval '6 months', %(o)s)",
-                {"e": eid, "d": AS_OF, "o": 1.0 if eid in POSITIVE else 0.0},
+                " values (%(l)s, %(e)s, %(d)s, interval '6 months', %(o)s)",
+                {"l": f"lbl-{tag}", "e": eid, "d": as_of, "o": outcomes[eid]},
             )
     return model_id
+
+
+def _seed_matrix_model(
+    pool,
+    tmp_path,
+    unlabeled: Collection[int] = (),
+    *,
+    tag: str = "x",
+    as_of: str = AS_OF,
+    group_id: int | None = None,
+) -> int:
+    return _seed_scored_model(
+        pool,
+        tmp_path,
+        tag=tag,
+        as_of=as_of,
+        group_id=group_id,
+        columns={
+            "f_sep": [1.0 if e in ERRORY else 0.0 for e in ENTITIES],
+            "f_signal": [2.0 if e in SELECTED else 1.0 for e in ENTITIES],
+        },
+        scores=[1.0 - i * 0.01 for i in range(len(ENTITIES))],
+        outcomes={
+            e: None if e in unlabeled else (1.0 if e in POSITIVE else 0.0)
+            for e in ENTITIES
+        },
+    )
 
 
 def test_crosstabs_stats_match_hand_computation(db_pool_greenfield, tmp_path):
@@ -342,6 +384,304 @@ def test_linear_contributions_persisted_for_selected(db_pool_greenfield, tmp_pat
         assert r["importance_score"] == pytest.approx(
             coef[r["feature"]] * r["feature_value"]
         )
+
+
+# ------------------------------------------- confusion tree / suspicious leaves / recurrence
+#
+# The planted perfect segment: 200 entities, one date, parameter '100_abs'.
+#   group G = e1..e100 (f_group = 1); inside G, f_leak equals the outcome (the leak); f_leak
+#   is 0 everywhere outside G.
+#   ranks 1..50   G positives      (selected, TP)
+#   ranks 51..100 e101..e150       (selected; e101..e125 positive, e126..e150 negative)
+#   ranks 101..150 G negatives     (passed over, TN)
+#   ranks 151..200 e151..e200      (passed over; e151..e160 positive, rest negative)
+# precision@100_abs = 75/100. Inside the selection the 50 G positives form a leaf with no
+# error, and the confusion tree isolates them as a pure-TP leaf: both are suspiciously right.
+PLANTED_N = 200
+PLANTED_PRECISION = 0.75
+
+
+def _seed_planted_segment(pool, tmp_path) -> int:
+    in_group = [1.0 if e <= 100 else 0.0 for e in range(1, PLANTED_N + 1)]
+    outcome = {
+        e: 1.0 if e <= 50 or 101 <= e <= 125 or 151 <= e <= 160 else 0.0
+        for e in range(1, PLANTED_N + 1)
+    }
+    rank_order = [
+        *range(1, 51),
+        *range(101, 151),
+        *range(51, 101),
+        *range(151, 201),
+    ]
+    rank_of = {e: r for r, e in enumerate(rank_order, start=1)}
+    model_id = _seed_scored_model(
+        pool,
+        tmp_path,
+        tag="planted",
+        columns={
+            "f_group": in_group,
+            "f_leak": [
+                outcome[e] if in_group[e - 1] else 0.0 for e in range(1, PLANTED_N + 1)
+            ],
+        },
+        scores=[1.0 - rank_of[e] * 0.001 for e in range(1, PLANTED_N + 1)],
+        outcomes=outcome,
+    )
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.evaluations (model_id, split_kind, as_of_date, metric,"
+            " parameter, value) values (%(m)s, 'test', %(d)s, 'precision@', '100_abs',"
+            " %(v)s)",
+            {"m": model_id, "d": AS_OF, "v": PLANTED_PRECISION},
+        )
+    return model_id
+
+
+def _error_rows(pool, model_id: int) -> list[dict[str, Any]]:
+    with pool.connection() as conn:
+        return conn.execute(
+            "select error_kind, rule, n_matched, n_errors, error_rate, class_counts,"
+            "       conditions, signature"
+            " from triage.error_analysis where model_id = %(m)s"
+            " order by error_kind, rule_id",
+            {"m": model_id},
+        ).fetchall()
+
+
+def test_confusion_tree_class_counts_sum_to_support(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+    from triage.diagnostics.error_tree import signature_of
+
+    model_id = _seed_matrix_model(db_pool_greenfield, tmp_path)
+    compute_error_analysis(
+        db_pool_greenfield,
+        model_id,
+        parameter="5_abs",
+        kind="all",
+        max_depth=2,
+        min_samples_leaf=1,
+    )
+    rows = _error_rows(db_pool_greenfield, model_id)
+    by_kind: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_kind.setdefault(r["error_kind"], []).append(r)
+    assert set(by_kind) == {"fp", "fn", "confusion"}
+
+    keys = {
+        "fp": {"tp", "fp"},
+        "fn": {"fn", "tn"},
+        "confusion": {"tp", "fp", "fn", "tn"},
+    }
+    for r in rows:
+        counts = r["class_counts"]
+        assert set(counts) == keys[r["error_kind"]]
+        assert sum(counts.values()) == r["n_matched"]
+        assert r["signature"] == signature_of(r["conditions"])
+        assert r["rule"] == " AND ".join(
+            f"{c['feature']} {c['op']} {c['threshold']:.4g}" for c in r["conditions"]
+        )
+    for r in by_kind["confusion"]:
+        assert r["n_errors"] == r["class_counts"]["fp"] + r["class_counts"]["fn"]
+
+    def totals(kind: str) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for r in by_kind[kind]:
+            for c, n in r["class_counts"].items():
+                out[c] = out.get(c, 0) + n
+        return out
+
+    # e1,e2 TP; e3..e5 FP; e6,e7 FN; the other 13 TN — every labeled row, once
+    assert totals("confusion") == {"tp": 2, "fp": 3, "fn": 2, "tn": 13}
+    assert totals("fp") == {"tp": 2, "fp": 3}
+    assert totals("fn") == {"fn": 2, "tn": 13}
+
+
+def test_error_tree_kind_both_keeps_its_meaning(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+
+    model_id = _seed_matrix_model(db_pool_greenfield, tmp_path)
+    compute_error_analysis(
+        db_pool_greenfield, model_id, parameter="5_abs", min_samples_leaf=1
+    )
+    kinds = {r["error_kind"] for r in _error_rows(db_pool_greenfield, model_id)}
+    assert kinds == {"fp", "fn"}
+    with pytest.raises(ValueError, match=re.escape("fp | fn | confusion | both | all")):
+        compute_error_analysis(db_pool_greenfield, model_id, kind="tp")
+
+
+def test_signature_does_not_depend_on_path_order():
+    """Two trees that split the same two features in opposite order give the conjunction
+    the same signature; thresholds and a repeated split do not enter it."""
+    import numpy as np
+    from sklearn.tree import DecisionTreeClassifier
+
+    from triage.diagnostics.error_tree import _rules_from_tree, signature_of
+
+    def data(first: int) -> tuple[np.ndarray, list[int]]:
+        # target = a AND b; the feature at index ``first`` is the better first split
+        rows = [(0, 0, 0)] * 10 + [(0, 1, 0)] * 10 + [(1, 0, 0)] * 2 + [(1, 1, 1)] * 8
+        x = np.array([(r[0], r[1]) for r in rows], dtype=float)
+        if first == 1:
+            x = x[:, ::-1]
+        return x, [r[2] for r in rows]
+
+    signatures, orders = [], []
+    for first in (0, 1):
+        x, y = data(first)
+        tree = DecisionTreeClassifier(max_depth=2, random_state=0).fit(x, y)
+        leaf = next(
+            r for r in _rules_from_tree(tree, ["a", "b"], "fn") if r["n_errors"] == 8
+        )
+        signatures.append(leaf["signature"])
+        orders.append([c["feature"] for c in leaf["conditions"]])
+    assert orders == [["a", "b"], ["b", "a"]], "the two trees split in opposite order"
+    assert signatures == ["a>|b>", "a>|b>"]
+
+    path = [
+        {"feature": "inspections_1y", "op": "<=", "threshold": 2.5},
+        {"feature": "facility_age", "op": ">", "threshold": 10.0},
+    ]
+    moved = [{**c, "threshold": c["threshold"] * 3} for c in path]
+    assert signature_of(path) == signature_of(moved) == "facility_age>|inspections_1y<="
+    twice = [*path, {"feature": "inspections_1y", "op": "<=", "threshold": 1.0}]
+    assert signature_of(twice) == signature_of(path)
+    assert signature_of([]) == ""
+
+
+def test_planted_perfect_segment_is_suspiciously_right(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+
+    model_id = _seed_planted_segment(db_pool_greenfield, tmp_path)
+    compute_error_analysis(
+        db_pool_greenfield, model_id, parameter="100_abs", kind="all"
+    )
+    with db_pool_greenfield.connection() as conn:
+        rows = conn.execute(
+            "select * from triage.error_rules_suspicious(%(m)s)", {"m": model_id}
+        ).fetchall()
+    by_kind = {r["error_kind"]: r for r in rows}
+    assert set(by_kind) == {"fp", "confusion"}, rows
+
+    fp = by_kind["fp"]
+    assert (fp["n_matched"], fp["n_errors"]) == (50, 0)
+    assert fp["signature"] in {"f_leak>", "f_group>"}  # identical inside the selection
+    assert fp["precision_at_k"] == pytest.approx(PLANTED_PRECISION)
+    assert fp["lift"] == pytest.approx(1 / PLANTED_PRECISION, abs=1e-12)
+
+    confusion = by_kind["confusion"]
+    assert confusion["n_matched"] == 50
+    assert confusion["class_counts"] == {"tp": 50, "fp": 0, "fn": 0, "tn": 0}
+    assert confusion["tp_share"] == pytest.approx(1.0)
+    assert "f_leak>" in confusion["signature"]
+
+
+def test_a_rule_on_every_date_recurs_on_every_date(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+
+    group_id = _new_group(db_pool_greenfield, "recur", ["f_sep", "f_signal"])
+    for i, as_of in enumerate(("2014-01-01", "2014-07-01", "2015-01-01")):
+        model_id = _seed_matrix_model(
+            db_pool_greenfield, tmp_path, tag=f"r{i}", as_of=as_of, group_id=group_id
+        )
+        compute_error_analysis(
+            db_pool_greenfield,
+            model_id,
+            parameter="5_abs",
+            kind="fp",
+            max_depth=2,
+            min_samples_leaf=1,
+        )
+    with db_pool_greenfield.connection() as conn:
+        rows = conn.execute(
+            "select * from triage.error_rule_recurrence(%(g)s, '5_abs', 'fp')",
+            {"g": group_id},
+        ).fetchall()
+    top = rows[0]
+    assert top["signature"] == "f_sep>"  # the planted wrong flags, on every date
+    assert (top["n_dates"], top["n_dates_total"]) == (3, 3)
+    assert top["mean_error_rate"] == pytest.approx(1.0)
+    assert top["mean_support"] == pytest.approx(3.0)
+    assert top["example_rule"].startswith("f_sep > ")
+
+
+def test_cli_error_rules_and_recurrence(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    import triage.cli as cli
+
+    model_id = _seed_planted_segment(db_pool_greenfield, tmp_path)
+    with db_pool_greenfield.connection() as conn:
+        group_id = conn.execute(
+            "select model_group_id from triage.models where model_id = %(m)s",
+            {"m": model_id},
+        ).fetchone()["model_group_id"]
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    env = {"DATABASE_URL": db_url}
+
+    result = runner.invoke(
+        cli.app, ["postmodel", "error-rules", str(model_id), "--suspicious"], env=env
+    )
+    assert result.exit_code == 0, result.output
+    assert "no error rules persisted" in result.output
+
+    result = runner.invoke(
+        cli.app,
+        ["postmodel", "error-tree", str(model_id), "--kind", "all"],
+        env=env,
+    )
+    assert result.exit_code == 0, result.output
+    assert "confusion" in result.output
+
+    result = runner.invoke(
+        cli.app, ["postmodel", "error-rules", str(model_id), "--suspicious"], env=env
+    )
+    assert result.exit_code == 0, result.output
+    assert "Suspiciously right" in result.output
+    assert "1.33" in result.output  # lift = 1 / precision@100_abs = 1 / 0.75
+
+    # the thresholds are options: no leaf has 60 rows, so nothing qualifies
+    result = runner.invoke(
+        cli.app,
+        [
+            "postmodel",
+            "error-rules",
+            str(model_id),
+            "--suspicious",
+            "--min-support",
+            "60",
+        ],
+        env=env,
+    )
+    assert result.exit_code == 0, result.output
+    assert "No suspiciously-right leaves" in result.output
+
+    result = runner.invoke(
+        cli.app,
+        ["postmodel", "error-rules", str(model_id), "--kind", "confusion"],
+        env=env,
+    )
+    assert result.exit_code == 0, result.output
+    body = result.output.split("Kind", 1)[1]  # the table rows, below the header
+    assert " confusion " in body
+    assert " fp " not in body and " fn " not in body
+
+    result = runner.invoke(
+        cli.app, ["postmodel", "error-recurrence", str(group_id)], env=env
+    )
+    assert result.exit_code == 0, result.output
+    assert "fp leaves" in result.output and "1/1" in result.output
+
+    result = runner.invoke(
+        cli.app,
+        ["postmodel", "error-tree", str(model_id), "--kind", "tp"],
+        env=env,
+    )
+    assert result.exit_code == 2
+    flat = " ".join(result.output.replace("│", " ").split())  # rich wraps the error box
+    assert "fp | fn | confusion | both | all" in flat
 
 
 def test_cli_postmodel_commands(db_url, db_pool_greenfield, tmp_path, monkeypatch):

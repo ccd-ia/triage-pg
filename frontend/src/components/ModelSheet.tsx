@@ -66,7 +66,6 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   const curve = useAsync(() => api.modelCurve(activeId), [activeId])
   const calibration = useAsync(() => api.modelCalibration(activeId), [activeId])
   const crosstabs = useAsync(() => api.modelCrosstabs(activeId), [activeId])
-  const errorRules = useAsync(() => api.modelErrorRules(activeId), [activeId])
   const preds = useAsync(() => api.modelPredictions(activeId, { limit: INLINE }), [activeId])
 
   const features = useMemo(() => card.data?.feature_importances ?? [], [card.data])
@@ -292,11 +291,8 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
 
         <section>
           <h4>error rules · where the model fails</h4>
-          {errorRules.data ? (
-            <ErrorRulesPanel data={errorRules.data} />
-          ) : (
-            <div className="muted" style={{ fontSize: 11 }}>loading error rules…</div>
-          )}
+          {/* the panel fetches per kind (fp | fn | confusion) and its suspicious leaves */}
+          <ErrorRulesPanel modelId={activeId} />
         </section>
 
         <section>

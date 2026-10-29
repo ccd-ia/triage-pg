@@ -2339,6 +2339,31 @@ def postmodel_crosstabs(
     console.print(table)
 
 
+#: The error kinds one persisted leaf can carry (migration 0027).
+_LEAF_KINDS = ("fp", "fn", "confusion")
+
+
+def _error_tree_kind(value: str) -> str:
+    """``--kind`` of ``postmodel error-tree``: one tree, or the ``both``/``all`` sets."""
+    from triage.diagnostics.error_tree import ERROR_TREE_KINDS
+
+    if value not in ERROR_TREE_KINDS:
+        raise typer.BadParameter(
+            f"{value!r} is not an error-tree kind — expected"
+            f" {' | '.join(ERROR_TREE_KINDS)}"
+        )
+    return value
+
+
+def _leaf_kind(value: Optional[str]) -> Optional[str]:
+    """``--kind`` of the commands that read persisted leaves: one kind of leaf."""
+    if value is not None and value not in _LEAF_KINDS:
+        raise typer.BadParameter(
+            f"{value!r} is not an error-rule kind — expected {' | '.join(_LEAF_KINDS)}"
+        )
+    return value
+
+
 @postmodel_app.command("error-tree")
 def postmodel_error_tree(
     ctx: typer.Context,
@@ -2346,7 +2371,12 @@ def postmodel_error_tree(
     parameter: str = typer.Option(
         "100_abs", "--parameter", "-p", help="Top-k cut the errors are defined at."
     ),
-    kind: str = typer.Option("both", "--kind", help="fp | fn | both."),
+    kind: str = typer.Option(
+        "both",
+        "--kind",
+        callback=_error_tree_kind,
+        help="fp | fn | confusion | both (fp + fn) | all (fp + fn + confusion).",
+    ),
     depth: int = typer.Option(3, "--depth", help="Max tree depth (keep it readable)."),
     min_leaf: int = typer.Option(
         30, "--min-leaf", help="Min samples per leaf (rule support floor)."
@@ -2355,8 +2385,10 @@ def postmodel_error_tree(
     """Characterize WHERE the model fails: a shallow tree on the errors → rules.
 
     fp: within the selected top-k, what marks the wrong flags? fn: among the
-    passed-over, what marks the missed positives? Rules persist to
-    ``triage.error_analysis`` (a diagnostic — never a score modifier). Linear models
+    passed-over, what marks the missed positives? confusion: over every labeled row,
+    what separates TP, FP, FN and TN (its first splits mostly redraw the cut itself).
+    Rules persist to ``triage.error_analysis`` with their class counts and a
+    threshold-free signature (a diagnostic — never a score modifier). Linear models
     also get per-entity β·x contributions persisted (``individual_importances``).
     """
     from triage.diagnostics import compute_error_analysis
@@ -2392,6 +2424,173 @@ def postmodel_error_tree(
             str(r["n_matched"]),
             str(r["n_errors"]),
             _fmt(r["error_rate"], 2),
+        )
+    console.print(table)
+
+
+@postmodel_app.command("error-rules")
+def postmodel_error_rules(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    suspicious: bool = typer.Option(
+        False,
+        "--suspicious",
+        help="Only the leaves that are suspiciously right: high support and almost no"
+        " error (triage.error_rules_suspicious).",
+    ),
+    max_error: float = typer.Option(
+        0.02,
+        "--max-error",
+        min=0.0,
+        max=1.0,
+        help="--suspicious: the largest error rate (fp leaves) or non-TP share"
+        " (confusion leaves) a leaf may have.",
+    ),
+    min_support: int = typer.Option(
+        30,
+        "--min-support",
+        min=1,
+        help="--suspicious: the fewest rows a leaf may hold.",
+    ),
+    kind: Optional[str] = typer.Option(
+        None,
+        "--kind",
+        callback=_leaf_kind,
+        help="Only one kind of leaf: fp | fn | confusion.",
+    ),
+    top: int = typer.Option(15, "--top", "-n", help="Rows to print."),
+) -> None:
+    """Read the persisted error-tree leaves — no tree is fitted here.
+
+    Without --suspicious: the leaves with the highest error rate first, as the
+    dashboard's error-rules panel lists them. With --suspicious: fp leaves with
+    error rate ≤ --max-error and confusion leaves whose TP share is ≥ 1 − --max-error,
+    each holding ≥ --min-support rows. Lift is the leaf's 1 − error rate over the
+    model's precision@ at the same date and cut; a leaf far above the list's own
+    precision is worth checking for leakage (a feature that knows the outcome).
+    """
+    engine = get_pool(ctx)
+    with engine.connection() as conn:
+        persisted = returned_row(
+            conn.execute(
+                "select count(*) as n from triage.error_analysis where model_id = %(m)s",
+                {"m": model_id},
+            ).fetchone()
+        )["n"]
+        if not persisted:
+            console.print(
+                f"[yellow]no error rules persisted for model {model_id} — run"
+                f" `triage postmodel error-tree {model_id} --kind all` first.[/yellow]"
+            )
+            return
+        if suspicious:
+            rows = conn.execute(
+                "select as_of_date, parameter, error_kind, rule, n_matched,"
+                "       error_rate, tp_share, lift"
+                " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s)"
+                " where %(k)s::text is null or error_kind = %(k)s"
+                " limit %(n)s",
+                {"m": model_id, "e": max_error, "s": min_support, "k": kind, "n": top},
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "select as_of_date, parameter, error_kind, rule, n_matched, n_errors,"
+                "       error_rate"
+                " from triage.error_analysis"
+                " where model_id = %(m)s and (%(k)s::text is null or error_kind = %(k)s)"
+                " order by error_rate desc, n_matched desc limit %(n)s",
+                {"m": model_id, "k": kind, "n": top},
+            ).fetchall()
+    if suspicious and not rows:
+        console.print(
+            f"[green]No suspiciously-right leaves for model {model_id} at error"
+            f" ≤ {max_error:g} and support ≥ {min_support}.[/green]"
+        )
+        return
+    if suspicious:
+        table = Table(
+            title=f"Suspiciously right — model {model_id} (error ≤ {max_error:g},"
+            f" support ≥ {min_support})",
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in ("As-of", "Cut", "Kind", "Rule", "n", "Rate", "TP share", "Lift"):
+            table.add_column(col)
+        for r in rows:
+            table.add_row(
+                str(r["as_of_date"]),
+                r["parameter"],
+                r["error_kind"],
+                r["rule"],
+                str(r["n_matched"]),
+                _fmt(r["error_rate"], 3),
+                _fmt(r["tp_share"], 3),
+                _fmt(r["lift"], 2),
+            )
+    else:
+        table = Table(title=f"Error rules — model {model_id}", box=box.SIMPLE_HEAVY)
+        for col in ("As-of", "Cut", "Kind", "Rule", "n", "Errors", "Rate"):
+            table.add_column(col)
+        for r in rows:
+            table.add_row(
+                str(r["as_of_date"]),
+                r["parameter"],
+                r["error_kind"],
+                r["rule"],
+                str(r["n_matched"]),
+                str(r["n_errors"]),
+                _fmt(r["error_rate"], 2),
+            )
+    console.print(table)
+
+
+@postmodel_app.command("error-recurrence")
+def postmodel_error_recurrence(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(
+        "100_abs", "--parameter", "-p", help="Top-k cut the error trees were fitted at."
+    ),
+    kind: str = typer.Option(
+        "fp", "--kind", callback=_leaf_kind, help="fp | fn | confusion."
+    ),
+    top: int = typer.Option(20, "--top", "-n", help="Rows to print."),
+) -> None:
+    """On how many of a model group's test dates does each error rule recur?
+
+    Rules are matched by signature — their features and split directions, without
+    thresholds — so a rule found on most dates is a stable failure mode, and a
+    candidate for a missing feature. Reads triage.error_rule_recurrence; run
+    `triage postmodel error-tree` on the group's models first.
+    """
+    engine = get_pool(ctx)
+    with engine.connection() as conn:
+        rows = conn.execute(
+            "select signature, n_dates, n_dates_total, mean_error_rate, mean_support,"
+            "       example_rule"
+            " from triage.error_rule_recurrence(%(g)s, %(p)s, %(k)s) limit %(n)s",
+            {"g": model_group_id, "p": parameter, "k": kind, "n": top},
+        ).fetchall()
+    if not rows:
+        console.print(
+            f"[yellow]no {kind} error rules with a signature for model group"
+            f" {model_group_id} at {parameter} — run `triage postmodel error-tree"
+            f" <model_id> -p {parameter} --kind all` on its models (rules written"
+            " before migration 0027 carry no signature until re-run).[/yellow]"
+        )
+        return
+    table = Table(
+        title=f"Rule recurrence — group {model_group_id} @ {parameter}, {kind} leaves",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in ("Signature", "Dates", "Mean rate", "Mean n", "Example rule"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            r["signature"] or "(all)",
+            f"{r['n_dates']}/{r['n_dates_total']}",
+            _fmt(r["mean_error_rate"], 2),
+            _fmt(r["mean_support"], 1),
+            r["example_rule"],
         )
     console.print(table)
 
