@@ -337,6 +337,27 @@ def _materialize_as_of_dates_psycopg(
     )
 
 
+def _materialize_pairs(cur, pairs: Sequence[tuple[date, int]]) -> None:
+    """(Re)create the same ``pg_temp.as_of_dates`` from explicit ``(as_of_date, entity_id)`` pairs.
+
+    The cohort-hash variant above reads the pairs from ``triage.cohorts``. This one takes them
+    from the caller, for a run that has no cohort artifact: the leakage check
+    (:mod:`triage.diagnostics.leakage`). The table has the same name, columns and temp scope,
+    so featurizer reads it the same way. It commits nothing; the caller owns the transaction.
+    """
+    cur.execute("drop table if exists pg_temp.as_of_dates")
+    cur.execute(
+        "create temp table as_of_dates as"
+        + f" select distinct p.as_of_date, p.entity_id as {_COHORT_ID_COL}"
+        + " from unnest(cast(%(dates)s as date[]), cast(%(ids)s as bigint[]))"
+        + " as p (as_of_date, entity_id)",
+        {
+            "dates": [as_of_date for as_of_date, _ in pairs],
+            "ids": [entity_id for _, entity_id in pairs],
+        },
+    )
+
+
 def _merge_arrow_groups(groups, target_id_col: str):
     """Re-join column-group Tables (wide-config sharding) on the (as_of_date, id) keys."""
     import polars as pl

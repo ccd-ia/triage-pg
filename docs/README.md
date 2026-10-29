@@ -95,3 +95,4 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0031](adr/0031-shap-treeshap-on-demand-individual-importances.md) SHAP is TreeSHAP-only, on demand (milestone v1.4.0)
 - [0032](adr/0032-forward-scoring-cohort.md) A separate, identity-neutral cohort for forward scoring
 - [0033](adr/0033-threshold-metrics-rank-the-full-population.md) Threshold metrics rank the full population; metrics count the labeled rows
+- [0034](adr/0034-leakage-check-as-of-invariance-delete-and-rollback.md) The leakage check tests as-of invariance by delete and rollback

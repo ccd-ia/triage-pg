@@ -45,7 +45,12 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["build_cohort", "COHORT_KIND", "COHORT_OUTPUT_REF"]
+__all__ = [
+    "build_cohort",
+    "render_cohort_query",
+    "COHORT_KIND",
+    "COHORT_OUTPUT_REF",
+]
 
 COHORT_KIND = "cohort"
 COHORT_OUTPUT_REF = "triage.cohorts"
@@ -67,6 +72,18 @@ def _validate_template(cohort_query_template: str) -> None:
             + " as a subquery; got: "
             + repr(cohort_query_template)
         )
+
+
+def render_cohort_query(template: str, as_of_date: date) -> str:
+    """Render the cohort template for one ``as_of_date``, exactly as the builder runs it.
+
+    ``{as_of_date}`` becomes a quoted literal (``'2014-01-01'``), so a template writes
+    ``{as_of_date}::date``. The result is plain SQL with no parameter markers: a caller that
+    wraps it in a parameterized statement must double any literal ``%`` itself (see
+    :func:`build_cohort`), while a bare SELECT run without parameters needs no doubling.
+    The leakage check (:mod:`triage.diagnostics.leakage`) runs this same rendering.
+    """
+    return template.format(as_of_date=f"'{as_of_date}'")
 
 
 def build_cohort(
@@ -141,7 +158,7 @@ def build_cohort(
     try:
         with db_engine.connection() as conn:
             for as_of_date in as_of_dates:
-                rendered = cohort_query_template.format(as_of_date=f"'{as_of_date}'")
+                rendered = render_cohort_query(cohort_query_template, as_of_date)
                 # The rendered user SQL is embedded directly; psycopg3 reads ``%`` as the
                 # parameter marker, so any literal ``%`` in the user's query (e.g. LIKE
                 # patterns) must be doubled to ``%%`` — our own binds stay ``%(name)s``.

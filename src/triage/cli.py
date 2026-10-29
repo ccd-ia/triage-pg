@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import quote as _urlquote
 
 import typer
@@ -50,6 +50,9 @@ from triage.sources import (
 )
 from triage.util.db import connection_pool, returned_row
 
+if TYPE_CHECKING:
+    from triage.diagnostics.leakage import Finding, LeakageReport
+
 logger = get_logger(__name__)
 console = Console()
 
@@ -83,6 +86,11 @@ actions_app = typer.Typer(
     help="The TUI's Actions palette, headless: just recipes + CLI verbs as subprocesses."
 )
 app.add_typer(actions_app, name="actions")
+check_app = typer.Typer(
+    help="Checks of an experiment config against the project database. They change"
+    " nothing: every check ends in ROLLBACK and never commits (ADR-0034)."
+)
+app.add_typer(check_app, name="check")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -1628,6 +1636,149 @@ def analyze_config(
 
             visualize_chops(chopper, save_target=str(plot))
         console.print(f"[green]Temporal validation plot saved to[/green] {plot}")
+
+
+#: Exit codes of ``triage check leakage``.
+_LEAKAGE_CLEAN, _LEAKAGE_FOUND, _LEAKAGE_COULD_NOT_RUN = 0, 1, 2
+
+
+def _parse_check_dates(value: Optional[str]) -> Optional[list[Any]]:
+    """``--dates 2015-01-01,2015-07-01`` → dates; ``None`` → every date."""
+    if value is None:
+        return None
+    return [
+        parse_date(part.strip()).date() for part in value.split(",") if part.strip()
+    ]
+
+
+def _print_leakage_report(report: LeakageReport) -> None:
+    """One table per component, one row per date (and timespan), then what was not checked."""
+    by_key: Dict[tuple[str, Any, Any], Finding] = {
+        (f.component, f.as_of_date, f.label_timespan): f for f in report.findings
+    }
+    for component, what in (
+        ("cohort", "entities added or removed"),
+        ("labels", "label rows that appear, disappear or change"),
+        ("features", "feature rows that differ, and the columns that moved"),
+    ):
+        table = Table(title=f"{component} — {what}", box=box.SIMPLE_HEAVY)
+        table.add_column("as_of_date")
+        if component == "labels":
+            table.add_column("label timespan")
+        table.add_column("result")
+        keys: list[tuple[Any, Optional[str]]] = (
+            list(report.label_checks)
+            if component == "labels"
+            else [(d, None) for d in report.dates_checked]
+        )
+        for as_of_date, timespan in keys:
+            finding = by_key.get((component, as_of_date, timespan))
+            if finding is None:
+                result = "[green]ok[/green]"
+            else:
+                result = (
+                    f"[red]{finding.n_entities} differ[/red]"
+                    f" (+{finding.added} −{finding.removed} ~{finding.changed})"
+                )
+                if finding.columns:
+                    names = [name for name, _ in finding.columns]
+                    result += ": " + ", ".join(names[:5])
+                    if len(names) > 5:
+                        result += f" (+{len(names) - 5} more columns)"
+            row = [as_of_date.isoformat()]
+            if component == "labels":
+                row.append(str(timespan))
+            table.add_row(*row, result)
+        console.print(table)
+    if report.not_checked:
+        console.print("[yellow]Not checked:[/yellow]")
+        for item in report.not_checked:
+            label = (
+                f"{item.relation} (Source {item.source})"
+                if item.source
+                else item.relation
+            )
+            console.print(f"  {label}: {item.reason}")
+
+
+@check_app.command("leakage")
+def check_leakage_command(
+    ctx: typer.Context,
+    config: str = typer.Argument(..., help="Experiment config YAML to check."),
+    dates: Optional[str] = typer.Option(
+        None,
+        "--dates",
+        metavar="D1,D2",
+        help="Check only these as_of_dates (YYYY-MM-DD, comma-separated). Default: every"
+        " as_of_date of the temporal_config.",
+    ),
+    json_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--json",
+        metavar="PATH",
+        help="Also write the full report to PATH as JSON.",
+    ),
+    dbfile: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--dbfile",
+        "-d",
+        help="YAML file with the project database connection (else the usual"
+        " resolution: database.yaml, DATABASE_URL, PG*).",
+    ),
+) -> None:
+    """Does the cohort, label or feature definition read data it should not know yet?
+
+    For every as_of_date t, builds the cohort, labels and features on all data, then deletes
+    the rows of the declared Sources known after the cut that must not matter and builds
+    them again: cohort at t (rows known after t), features at t (event rows known on or
+    after t), labels at (t, timespan) (rows known on or after t + timespan). Any difference
+    is reported with its date, entities and, for features, column names.
+
+    The check never commits. It runs on one connection inside one transaction that always
+    ends in ROLLBACK, so other sessions never see the deletes, and it compares every
+    Source's fingerprint before and after. It needs DELETE privilege on the Sources that
+    declare a knowledge_date_column; Sources without one, and tables the queries read but
+    the config does not declare, are listed as not checked.
+
+    Exit codes: 0 no differences; 1 differences found (leakage); 2 the check could not run.
+    """
+    from triage.diagnostics.leakage import LeakageCheckError, check_leakage
+
+    try:
+        db_url = resolve_db_url(dbfile) if dbfile else require_db_url(ctx)
+        config_data = load_experiment_config(config)
+        report = check_leakage(db_url, config_data, _parse_check_dates(dates))
+    except (LeakageCheckError, typer.BadParameter, OSError, yaml.YAMLError) as exc:
+        console.print(f"[red]The leakage check could not run:[/red] {exc}")
+        raise typer.Exit(code=_LEAKAGE_COULD_NOT_RUN) from exc
+    except Exception as exc:
+        # Exit 1 means "leakage found", so an unexpected crash must not fall through to
+        # Typer's default exit code. Log the traceback, then exit 2.
+        logger.exception(f"triage check leakage failed on {config}")
+        console.print(f"[red]The leakage check could not run:[/red] {exc}")
+        raise typer.Exit(code=_LEAKAGE_COULD_NOT_RUN) from exc
+
+    _print_leakage_report(report)
+    code = _LEAKAGE_FOUND if report.leakage_found else _LEAKAGE_CLEAN
+    if json_path is not None:
+        try:
+            json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
+        except OSError as exc:
+            console.print(
+                f"[red]Could not write the report to {json_path}:[/red] {exc}"
+            )
+            raise typer.Exit(code=_LEAKAGE_COULD_NOT_RUN) from exc
+        console.print(f"Report written to {json_path}")
+    status = (
+        f"[red]leakage found in {len(report.findings)} check(s)[/red]"
+        if report.leakage_found
+        else "[green]no differences[/green]"
+    )
+    console.print(
+        f"Checked {len(report.dates_checked)} as_of_date(s) in {report.elapsed_s:.1f}s:"
+        f" {status} (exit {code})."
+    )
+    raise typer.Exit(code=code)
 
 
 @db_app.command("upgrade")
