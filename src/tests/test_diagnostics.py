@@ -680,8 +680,10 @@ def test_cli_error_rules_and_recurrence(
         env=env,
     )
     assert result.exit_code == 2
-    flat = " ".join(result.output.replace("│", " ").split())  # rich wraps the error box
-    assert "fp | fn | confusion | both | all" in flat
+    # rich wraps the error box, and colours it on CI (it forces a terminal under
+    # GITHUB_ACTIONS), so drop the ANSI codes and the box before matching.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output).replace("│", " ")
+    assert "fp | fn | confusion | both | all" in " ".join(plain.split())
 
 
 def test_cli_postmodel_commands(db_url, db_pool_greenfield, tmp_path, monkeypatch):
