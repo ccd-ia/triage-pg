@@ -844,6 +844,9 @@ export interface ThresholdCurvePoint {
   fp: number
   fn: number
   tn: number
+  /** Labeled positives ÷ labeled rows of the population (the subset, when one is given);
+   *  the same on every point. Null when the population has no labeled row. */
+  base_rate: number | null
 }
 
 export type ModelCurveResponse = ThresholdCurvePoint[]

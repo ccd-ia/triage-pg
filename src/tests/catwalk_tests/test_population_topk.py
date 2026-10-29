@@ -656,7 +656,8 @@ def test_migration_0025_round_trips(db_pool_greenfield, db_url):
         ).fetchone()["n"]
     assert pooled == len(SCORES) + len(SCORES_2)
 
-    upgrade_db(dburl=db_url, revision="head")
+    # to 0025 itself, not head: a later revision may widen the signature again
+    upgrade_db(dburl=db_url, revision="0025_split_ranks_and_curve")
     assert signatures() == {"p_model bigint, p_as_of_date date"}
     _assert_curve_is_dssg(
         _curve(pool, model_id, AS_OF_DATE_2), SCORES_2, LABELS_2, ENTITY_IDS_2

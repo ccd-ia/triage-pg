@@ -17,6 +17,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.dashboard_tests.conftest import SPLITS
+
 # =============================================================== run-scoped (rail + monitoring)
 
 
@@ -419,11 +421,44 @@ def test_model_curve(client, seeded):
     rows = resp.json()
     assert isinstance(rows, list) and rows
     row = rows[0]
-    for key in ("k", "pct", "prec", "rec", "tp", "fp", "fn", "tn"):
+    for key in ("k", "pct", "prec", "rec", "tp", "fp", "fn", "tn", "base_rate"):
         assert key in row
     # k increases monotonically from 1
     assert [r["k"] for r in rows] == sorted(r["k"] for r in rows)
     assert rows[0]["k"] == 1
+    # outcome = entity_id % 2 over entities 1..4
+    assert {r["base_rate"] for r in rows} == {0.5}
+
+
+def test_model_curve_over_a_subset(client, seeded, db_pool_greenfield):
+    """``?subset=`` makes the subset the population: its members ranked among themselves."""
+    model_id = seeded.all_models["mg1"][0]
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "insert into triage.subsets (subset_hash, config)"
+            " values ('sub-123', '{\"name\": \"first three\"}'::jsonb)"
+        )
+        # scores 0.9 / 0.7 / 0.4, outcomes 1 / 0 / 1 (entity_id % 2)
+        for entity_id in (1, 2, 3):
+            conn.execute(
+                "insert into triage.subset_members (subset_hash, entity_id, as_of_date)"
+                " values ('sub-123', %(e)s, %(d)s)",
+                {"e": entity_id, "d": SPLITS[-1]},
+            )
+    resp = client.get(f"/api/models/{model_id}/curve", params={"subset": "sub-123"})
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [r["k"] for r in rows] == [1, 2, 3]
+    assert [r["pct"] for r in rows] == pytest.approx([1 / 3, 2 / 3, 1.0])
+    assert [r["prec"] for r in rows] == pytest.approx([1.0, 0.5, 2 / 3])
+    assert [r["base_rate"] for r in rows] == pytest.approx([2 / 3] * 3)
+
+
+def test_model_curve_unknown_subset_404(client, seeded):
+    model_id = seeded.all_models["mg1"][0]
+    resp = client.get(f"/api/models/{model_id}/curve", params={"subset": "nope"})
+    assert resp.status_code == 404
+    assert "subset" in resp.json()["detail"]
 
 
 def test_model_histogram(client, seeded):

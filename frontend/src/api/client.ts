@@ -325,9 +325,11 @@ export const api = {
     return get<ModelCardResponse>(`/models/${id}`)
   },
 
-  modelCurve(id: number): Promise<ModelCurveResponse> {
+  /** The Rayid curve; `subsetHash` makes that subset the population (re-ranked inside it). */
+  modelCurve(id: number, subsetHash?: string): Promise<ModelCurveResponse> {
     if (USE_FIXTURE) return fake(fixture.modelCurve(id))
-    return get<ModelCurveResponse>(`/models/${id}/curve`)
+    const q = subsetHash ? `?subset=${encodeURIComponent(subsetHash)}` : ''
+    return get<ModelCurveResponse>(`/models/${id}/curve${q}`)
   },
 
   modelHistogram(id: number, bins?: number): Promise<ModelHistogramResponse> {

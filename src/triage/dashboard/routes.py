@@ -730,18 +730,36 @@ def model_detail(model_id: int, pool: DictRowPool = Depends(_pool)) -> dict[str,
 def model_curve(
     model_id: int,
     as_of_date: Optional[str] = None,
+    subset: str = "",
     pool: DictRowPool = Depends(_pool),
 ) -> list[dict[str, Any]]:
     """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this).
 
-    One test date: ``as_of_date``, or the model's latest test date when omitted.
+    One test date: ``as_of_date``, or the model's latest test date when omitted. ``subset``
+    is a ``subset_hash`` (``/experiments/{hash}/subsets`` lists them); the subset is then the
+    population, re-ranked inside it. ``base_rate`` is that population's labeled positives over
+    its labeled rows — the reference line the panel draws.
     """
+    if subset and (
+        _one(
+            pool,
+            "select 1 from triage.subsets where subset_hash = %(subset)s",
+            {"subset": subset},
+        )
+        is None
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=f"subset {subset!r} not found — pass a subset_hash from"
+            " /experiments/{hash}/subsets",
+        )
     return _rows(
         pool,
-        "select k, pct, prec, rec, tp, fp, fn, tn"
-        " from triage.model_threshold_curve(%(model_id)s, %(as_of_date)s::date)"
+        "select k, pct, prec, rec, tp, fp, fn, tn, base_rate"
+        " from triage.model_threshold_curve(%(model_id)s, %(as_of_date)s::date,"
+        "                                   %(subset)s)"
         " order by k",
-        {"model_id": model_id, "as_of_date": as_of_date},
+        {"model_id": model_id, "as_of_date": as_of_date, "subset": subset},
     )
 
 

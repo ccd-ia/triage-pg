@@ -1018,6 +1018,178 @@ def model_show(
         )
 
 
+def _resolve_subset(conn, value: str) -> tuple[str, Optional[str]]:
+    """A subset by its name or by (a prefix of) its subset_hash → ``(subset_hash, name)``.
+
+    Fails loud, like the experiment-hash prefix: an unknown value or one that matches more
+    than one subset exits 1 with the query that lists them.
+    """
+    rows = conn.execute(
+        "select subset_hash, config->>'name' as name from triage.subsets"
+        " where config->>'name' = %(v)s"
+        "    or left(subset_hash, length(%(v)s)) = %(v)s"
+        " order by subset_hash limit 5",
+        {"v": value},
+    ).fetchall()
+    if not rows:
+        console.print(
+            f"[red]No subset matches {value!r} by name or subset_hash — list them with:"
+            " select subset_hash, config->>'name' as name from triage.subsets;[/red]"
+        )
+        raise typer.Exit(code=1)
+    if len(rows) > 1:
+        console.print(
+            f"[red]Ambiguous subset {value!r} — matches "
+            + ", ".join(f"{r['name']} ({r['subset_hash'][:12]}…)" for r in rows)
+            + ". Pass the full subset_hash.[/red]"
+        )
+        raise typer.Exit(code=1)
+    return rows[0]["subset_hash"], rows[0]["name"]
+
+
+@model_app.command("curve")
+def model_curve(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        help="Test as_of_date (YYYY-MM-DD). Default: the model's latest test date.",
+    ),
+    subset: Optional[str] = typer.Option(
+        None,
+        "--subset",
+        help="Subset name or subset_hash (a prefix is enough). The subset becomes the"
+        " population: its members are ranked among themselves, as subset metrics are.",
+    ),
+    points: int = typer.Option(
+        20,
+        "--points",
+        callback=natural_number,
+        help="Rows to print: the cuts at k = ceil(i·N/points), i = 1..points, so the row"
+        " at 10% is precision@10_pct's cut.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the points as JSON."),
+) -> None:
+    """The Rayid curve of one test date: precision and recall at each population cut, and
+    the population's base rate (labeled positives ÷ labeled rows).
+
+    Reads ``triage.model_threshold_curve`` — the ranks, label pin and horizon the stored
+    ``precision@``/``recall@`` come from (ADR-0033), so a row at k agrees with the stored
+    metric at k.
+    """
+    date_str = parse_date(as_of_date).date().isoformat() if as_of_date else None
+    engine = get_pool(ctx)
+    with engine.connection() as conn:
+        if (
+            conn.execute(
+                "select 1 from triage.models where model_id = %(m)s", {"m": model_id}
+            ).fetchone()
+            is None
+        ):
+            console.print(f"[red]No model with id {model_id}.[/red]")
+            raise typer.Exit(code=1)
+        subset_hash, subset_name = (
+            _resolve_subset(conn, subset) if subset else ("", None)
+        )
+        if date_str is None:
+            # the date the curve function defaults to, resolved here to print it
+            latest = returned_row(
+                conn.execute(
+                    "select max(as_of_date) as d from triage.predictions"
+                    " where model_id = %(m)s and split_kind = 'test'",
+                    {"m": model_id},
+                ).fetchone()  # an aggregate SELECT always yields one row
+            )["d"]
+            if latest is None:
+                console.print(
+                    f"[red]Model {model_id} has no test predictions — the curve is drawn"
+                    " over one scored test date.[/red]"
+                )
+                raise typer.Exit(code=1)
+            date_str = latest.isoformat()
+        rows = conn.execute(
+            "with c as ("
+            "    select * from triage.model_threshold_curve(%(m)s, %(d)s::date, %(s)s)"
+            "), n as (select max(k) as n from c)"
+            " select c.k, c.pct, c.prec, c.rec, c.base_rate, c.tp, c.fp, c.fn, c.tn,"
+            "        n.n as population"
+            " from c cross join n"
+            " where c.k in (select ceil(i * n.n::numeric / %(p)s::int)::int"
+            "               from generate_series(1, %(p)s::int) as i)"
+            " order by c.k",
+            {"m": model_id, "d": date_str, "s": subset_hash, "p": points},
+        ).fetchall()
+        if not rows:
+            test_dates = [
+                str(r["as_of_date"])
+                for r in conn.execute(
+                    "select distinct as_of_date from triage.predictions"
+                    " where model_id = %(m)s and split_kind = 'test'"
+                    " order by as_of_date",
+                    {"m": model_id},
+                ).fetchall()
+            ]
+            if subset_hash and date_str in test_dates:
+                console.print(
+                    f"[red]Subset {subset_name or subset_hash} has no members among"
+                    f" model {model_id}'s test predictions at {date_str}.[/red]"
+                )
+            else:
+                console.print(
+                    f"[red]Model {model_id} has no test predictions at {date_str} — its"
+                    f" test dates: {', '.join(test_dates) or 'none'}.[/red]"
+                )
+            raise typer.Exit(code=1)
+
+    population = rows[0]["population"]
+    base_rate = rows[0]["base_rate"]
+    if as_json:
+        console.print_json(
+            json.dumps(
+                {
+                    "model_id": model_id,
+                    "as_of_date": date_str,
+                    "subset_hash": subset_hash,
+                    "subset_name": subset_name,
+                    "population": population,
+                    "base_rate": base_rate,
+                    "points": [
+                        {key: r[key] for key in r if key != "population"} for r in rows
+                    ],
+                },
+                default=str,
+            )
+        )
+        return
+
+    heading = f"[bold]Threshold curve[/bold] — model {model_id} @ {date_str}"
+    if subset_hash:
+        heading += f" · subset {subset_name or subset_hash[:12]}"
+    console.print(heading)
+    console.print(
+        f"[dim]{population} scored row(s); base rate = labeled positives ÷ labeled"
+        " rows[/dim]"
+    )
+    table = Table(box=box.SIMPLE_HEAVY)
+    for col in ("k", "% pop", "Precision", "Recall", "Base rate"):
+        table.add_column(col, justify="right")
+    for r in rows:
+        table.add_row(
+            str(r["k"]),
+            f"{100 * r['pct']:.1f}%",
+            _fmt(r["prec"]),
+            _fmt(r["rec"]),
+            _fmt(r["base_rate"]),
+        )
+    console.print(table)
+    if base_rate is None:
+        console.print(
+            "[dim]no labeled rows in this population — precision, recall and the base"
+            " rate are undefined[/dim]"
+        )
+
+
 @app.command("audition")
 def audition_command(
     ctx: typer.Context,
