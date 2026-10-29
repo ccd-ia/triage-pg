@@ -42,7 +42,13 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["build_labels", "LABELS_KIND", "LABELS_OUTPUT_REF"]
+__all__ = [
+    "build_labels",
+    "label_value_columns",
+    "render_label_query",
+    "LABELS_KIND",
+    "LABELS_OUTPUT_REF",
+]
 
 LABELS_KIND = "labels"
 LABELS_OUTPUT_REF = "triage.labels"
@@ -71,27 +77,48 @@ def _validate_template(label_query_template: str) -> None:
         )
 
 
+def label_value_columns(problem_type: str) -> tuple[str, ...]:
+    """The value columns a label query must return besides ``entity_id`` (ADR-0010).
+
+    ``outcome`` for the outcome types, ``duration, event_observed`` for survival.
+    """
+    if problem_type in _OUTCOME_TYPES:
+        return ("outcome",)
+    if problem_type == _SURVIVAL_TYPE:
+        return ("duration", "event_observed")
+    raise ValueError(
+        f"unknown problem_type {problem_type!r}; expected one of"
+        + f" {sorted(_OUTCOME_TYPES) + [_SURVIVAL_TYPE]} (ADR-0010)"
+    )
+
+
 def _label_projection(problem_type: str) -> tuple[str, str]:
     """Return (target_columns, select_columns) for ``problem_type`` (ADR-0010).
 
     Both share the ``cohort_hash``/``as_of_date``/``label_timespan`` keys; they differ
     only in which value columns the wrapped subquery is expected to supply.
     """
-    if problem_type in _OUTCOME_TYPES:
-        return (
-            "label_hash, entity_id, as_of_date, label_timespan, outcome",
-            "%(label_hash)s, sub.entity_id, %(as_of_date)s,"
-            + " cast(%(label_timespan)s as interval), sub.outcome",
-        )
-    if problem_type == _SURVIVAL_TYPE:
-        return (
-            "label_hash, entity_id, as_of_date, label_timespan, duration, event_observed",
-            "%(label_hash)s, sub.entity_id, %(as_of_date)s,"
-            + " cast(%(label_timespan)s as interval), sub.duration, sub.event_observed",
-        )
-    raise ValueError(
-        f"unknown problem_type {problem_type!r}; expected one of"
-        + f" {sorted(_OUTCOME_TYPES) + [_SURVIVAL_TYPE]} (ADR-0010)"
+    values = label_value_columns(problem_type)
+    return (
+        "label_hash, entity_id, as_of_date, label_timespan, " + ", ".join(values),
+        "%(label_hash)s, sub.entity_id, %(as_of_date)s,"
+        + " cast(%(label_timespan)s as interval), "
+        + ", ".join(f"sub.{column}" for column in values),
+    )
+
+
+def render_label_query(template: str, as_of_date: date, label_timespan: str) -> str:
+    """Render the label template for one ``(as_of_date, label_timespan)``, as the builder does.
+
+    ``{as_of_date}`` becomes a quoted literal (``'2014-01-01'``) and ``{label_timespan}``
+    becomes ``interval '6 months'``. The result is plain SQL with no parameter markers: a
+    caller that wraps it in a parameterized statement must double any literal ``%`` itself
+    (see :func:`build_labels`), while a bare SELECT run without parameters needs no doubling.
+    The leakage check (:mod:`triage.diagnostics.leakage`) runs this same rendering.
+    """
+    return template.format(
+        as_of_date=f"'{as_of_date}'",
+        label_timespan=f"interval '{label_timespan}'",
     )
 
 
@@ -192,9 +219,8 @@ def build_labels(
         with db_engine.connection() as conn:
             for as_of_date in as_of_dates:
                 for label_timespan in label_timespans:
-                    rendered = label_query_template.format(
-                        as_of_date=f"'{as_of_date}'",
-                        label_timespan=f"interval '{label_timespan}'",
+                    rendered = render_label_query(
+                        label_query_template, as_of_date, label_timespan
                     )
                     # The rendered user SQL is embedded directly; psycopg3 reads ``%`` as
                     # the parameter marker, so literal ``%`` in the user's query (LIKE

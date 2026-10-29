@@ -18,6 +18,8 @@ import re
 from collections.abc import Iterable
 from typing import LiteralString, cast, Any
 
+from psycopg.rows import dict_row
+
 from triage.util.db import DictRowPool, returned_row
 
 from triage.logging import get_logger
@@ -130,18 +132,36 @@ def capture_fingerprint(pool: DictRowPool, source_name: str) -> dict[str, Any]:
             f"Source {source_name!r} is not registered; register it with"
             + " `triage source register` before fingerprinting"
         )
-    relation = _quote_relation(source["relation"])
-    kdc = source["knowledge_date_column"]
-    max_expr = f"max({_quote_column(kdc)})::text" if kdc else "null"
     with pool.connection() as conn:
-        # cast: the relation/column are registry-validated identifiers quoted above —
-        # this is deliberately dynamic SQL, so LiteralString cannot apply.
+        return fingerprint_relation(
+            conn, source["relation"], source["knowledge_date_column"]
+        )
+
+
+def fingerprint_relation(
+    conn: Any, relation: str, knowledge_date_column: str | None
+) -> dict[str, Any]:
+    """The fingerprint of one relation on an open connection: row count + max knowledge date.
+
+    :func:`capture_fingerprint` applies it to a registered Source. The leakage check
+    (:mod:`triage.diagnostics.leakage`) applies it to the Sources an experiment config
+    declares, which need not be registered, to prove its rollback left them unchanged.
+    """
+    quoted = _quote_relation(relation)
+    max_expr = (
+        f"max({_quote_column(knowledge_date_column)})::text"
+        if knowledge_date_column
+        else "null"
+    )
+    # cast: the relation/column are validated identifiers quoted above —
+    # this is deliberately dynamic SQL, so LiteralString cannot apply.
+    with conn.cursor(row_factory=dict_row) as cur:
         row = returned_row(
-            conn.execute(
+            cur.execute(
                 cast(
                     LiteralString,
                     f"select count(*) as row_count, {max_expr} as max_knowledge_date"
-                    f" from {relation}",
+                    f" from {quoted}",
                 )
             ).fetchone()
         )
