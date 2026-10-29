@@ -12,6 +12,10 @@ docs:
 docs-site:
     npm --prefix docs-site install && npm --prefix docs-site run dev
 
+# Regenerate the guides' figures (docs-site/src/assets/guides) — worked ones need the DirtyDuck DB (just tutorial-up) and a run of experiment-guides.yaml
+docs-figures *ARGS:
+    uv run python scripts/docs_figures.py {{ARGS}}
+
 # Serve the dashboard app — read views + write surface (set TRIAGE_REGISTRY_URL to enable POST routes)
 serve PORT="8000":
     TRIAGE_DASHBOARD_STATIC="${TRIAGE_DASHBOARD_STATIC:-{{justfile_directory()}}/frontend/dist}" \
