@@ -5,6 +5,11 @@ through the request pool (psycopg3, ``dict_row``). No selection/metric/business 
 here — it all lives in the views (ADR-0012). Parameters are ALWAYS bound with psycopg3
 ``%(name)s`` placeholders, never f-string-interpolated (SQL-injection + the global hard rule).
 
+The diagnostic reads — the threshold curve, crosstabs, error rules, rule recurrence, list
+overlap and a group's models — run through :mod:`triage.diagnostics.readers`, the query
+layer ``triage plot`` shares; those handlers only add the HTTP contract (404s, 422s and the
+empty-state envelope).
+
 The dashboard hierarchy is **Experiment ▸ Model Group ▸ Model** (migration 0005): analysis
 (audition / bias / leaderboard / model-groups / selected-model) is scoped to the
 **experiment**, not a single run — a re-run cache-shares models, so run-scoped audition goes
@@ -23,7 +28,7 @@ telemetry emitters own the NOTIFY).
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, LiteralString, Optional
+from typing import Annotated, Any, Literal, LiteralString, Optional
 from uuid import UUID
 
 import psycopg
@@ -31,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from triage.component.catwalk.in_pg_evaluation import AUDITION_RULES as _AUDITION_RULES
+from triage.diagnostics import readers
 from triage.logging import get_logger
 from triage.util.db import DictRowPool
 
@@ -611,20 +617,7 @@ def model_group_detail(
         "parameter": parameter,
         "exp": experiment_hash,
     }
-    models = _rows(
-        pool,
-        "select m.model_id, m.train_end_time, m.run_id,"
-        "       m.training_label_timespan, m.train_duration_ms,"
-        "       (select min(e.as_of_date) from triage.evaluations e"
-        "          where e.model_id = m.model_id and e.split_kind = 'test'"
-        "            and e.subset_hash = '') as test_as_of"
-        " from triage.models m"
-        " join triage.runs r on r.run_id = m.run_id"
-        " where m.model_group_id = %(g)s"
-        "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
-        " order by m.train_end_time, m.model_id",
-        params,
-    )
+    models = readers.group_models(pool, model_group_id, experiment_hash)
     metric_over_time = _rows(
         pool,
         "select e.model_id, m.model_group_id, e.as_of_date, e.metric, e.parameter,"
@@ -731,6 +724,7 @@ def model_curve(
     model_id: int,
     as_of_date: Optional[str] = None,
     subset: str = "",
+    points: Annotated[Optional[int], Query(ge=2)] = None,
     pool: DictRowPool = Depends(_pool),
 ) -> list[dict[str, Any]]:
     """The Rayid precision/recall + confusion curve over population cuts (client k-slider reads this).
@@ -738,29 +732,20 @@ def model_curve(
     One test date: ``as_of_date``, or the model's latest test date when omitted. ``subset``
     is a ``subset_hash`` (``/experiments/{hash}/subsets`` lists them); the subset is then the
     population, re-ranked inside it. ``base_rate`` is that population's labeled positives over
-    its labeled rows — the reference line the panel draws.
+    its labeled rows — the reference line the panel draws. ``points`` thins the curve to the
+    rows nearest that many evenly spaced shares of the population, keeping every configured
+    cut's exact row (``readers.curve``); omitted, every k is returned.
     """
-    if subset and (
-        _one(
-            pool,
-            "select 1 from triage.subsets where subset_hash = %(subset)s",
-            {"subset": subset},
+    try:
+        return readers.curve(
+            pool, model_id, as_of_date=as_of_date, subset=subset, points=points
         )
-        is None
-    ):
+    except readers.NotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"subset {subset!r} not found — pass a subset_hash from"
             " /experiments/{hash}/subsets",
-        )
-    return _rows(
-        pool,
-        "select k, pct, prec, rec, tp, fp, fn, tn, base_rate"
-        " from triage.model_threshold_curve(%(model_id)s, %(as_of_date)s::date,"
-        "                                   %(subset)s)"
-        " order by k",
-        {"model_id": model_id, "as_of_date": as_of_date, "subset": subset},
-    )
+        ) from exc
 
 
 @router.get("/models/{model_id}/histogram")
@@ -836,13 +821,8 @@ def model_overlap(
 ) -> list[dict[str, Any]]:
     """Top-k list overlap between two models (migration 0016): per shared prediction
     date — intersection, Jaccard over the union of the two lists, Spearman rank corr."""
-    return _rows(
-        pool,
-        "select as_of_date, k_a, k_b, n_intersection, jaccard, rank_corr"
-        " from triage.list_overlap(%(a)s, %(b)s, %(p)s,"
-        "        cast(%(split)s as triage.split_kind), null)"
-        " order by as_of_date",
-        {"a": model_id, "b": other_model_id, "p": parameter, "split": split_kind},
+    return readers.list_overlap(
+        pool, model_id, other_model_id, parameter=parameter, split_kind=split_kind
     )
 
 
@@ -877,22 +857,19 @@ def model_crosstabs(
     model_id: int,
     parameter: Optional[str] = None,
     limit: int = 20,
+    stat: Literal["mean", "nonzero_rate"] = "mean",
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
-    """Top distinguishing features (mean among selected vs rest, by |log ratio|) —
-    thin read over ``triage.crosstabs`` (persisted by ``triage postmodel crosstabs``).
+    """Top distinguishing features among the selected vs the rest — thin read over
+    ``triage.crosstabs`` (persisted by ``triage postmodel crosstabs``).
+
+    ``stat=mean`` (the default) ranks the ratio of means by |log ratio|; ``stat=nonzero_rate``
+    ranks the nonzero rates by |selected − rest|, where a ratio of two rates near zero would
+    mislead.
     """
-    sql = (
-        "select as_of_date, parameter, feature, selected_value, rest_value, ratio"
-        " from triage.crosstabs"
-        " where model_id = %(m)s and stat = 'mean' and ratio is not null and ratio > 0"
+    rows = readers.crosstabs(
+        pool, model_id, parameter=parameter, stat=stat, limit=limit
     )
-    params: dict[str, Any] = {"m": model_id, "limit": limit}
-    if parameter is not None:
-        sql += " and parameter = %(p)s"
-        params["p"] = parameter
-    sql += " order by abs(ln(ratio)) desc limit %(limit)s"
-    rows = _rows(pool, sql, params)
     if not rows:
         return _empty(
             "no crosstabs persisted for this model",
@@ -923,29 +900,20 @@ def model_error_rules(
     almost no error, each with its TP share and its lift over the model's precision@. That
     list is a plain array — empty when nothing qualifies — since "nothing suspicious" is an
     answer, not a missing diagnostic.
+
+    Every leaf carries ``reference_error_rate``: the population error rate of its kind at its
+    date and cut (``readers.error_reference_rates``), the mark its own rate is read against.
     """
-    params: dict[str, Any] = {"m": model_id, "k": error_kind, "limit": limit}
     if suspicious:
-        params.update(e=max_error_rate, s=min_support)
-        return _rows(
+        return readers.suspicious_leaves(
             pool,
-            "select split_kind, as_of_date, parameter, error_kind, rule_id, rule,"
-            "       n_matched, n_errors, error_rate, tp_share, class_counts, signature,"
-            "       precision_at_k, lift"
-            " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s)"
-            " where %(k)s::text is null or error_kind = %(k)s"
-            " limit %(limit)s",
-            params,
+            model_id,
+            error_kind=error_kind,
+            max_error_rate=max_error_rate,
+            min_support=min_support,
+            limit=limit,
         )
-    rows = _rows(
-        pool,
-        "select as_of_date, parameter, error_kind, rule, n_matched, n_errors,"
-        "       error_rate, depth, class_counts, signature"
-        " from triage.error_analysis"
-        " where model_id = %(m)s and (%(k)s::text is null or error_kind = %(k)s)"
-        " order by error_rate desc, n_matched desc limit %(limit)s",
-        params,
-    )
+    rows = readers.error_rules(pool, model_id, error_kind=error_kind, limit=limit)
     if not rows:
         return _empty(
             "no error analysis persisted for this model"
@@ -970,47 +938,60 @@ def model_group_error_recurrence(
     ``parameters`` lists the cuts the group's error trees were fitted at; without
     ``parameter`` the most recently analysed cut is read.
     """
-    if (
-        _one(
+    try:
+        recurrence = readers.error_recurrence(
             pool,
-            "select 1 as found from triage.model_groups where model_group_id = %(g)s",
-            {"g": model_group_id},
+            model_group_id,
+            parameter=parameter,
+            error_kind=error_kind,
+            limit=limit,
         )
-        is None
-    ):
-        raise HTTPException(status_code=404, detail="model group not found")
-    cuts = _rows(
-        pool,
-        "select ea.parameter"
-        " from triage.error_analysis ea"
-        " join triage.models m using (model_id)"
-        " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
-        " group by ea.parameter"
-        " order by max(ea.computed_at) desc, ea.parameter",
-        {"g": model_group_id},
-    )
-    if not cuts:
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="model group not found") from exc
+    if not recurrence["parameters"]:
         return _empty(
             "no error analysis persisted for this model group",
             "run `triage postmodel error-tree <model_id> --kind all` on the group's"
             " models — recurrence counts each rule across their test dates.",
         )
-    parameters = [c["parameter"] for c in cuts]
-    chosen = parameter if parameter is not None else parameters[0]
-    return {
-        "model_group_id": model_group_id,
-        "parameter": chosen,
-        "error_kind": error_kind,
-        "parameters": parameters,
-        "rules": _rows(
+    return recurrence
+
+
+@router.get("/model-groups/{model_group_id}/curves")
+def model_group_curves(
+    model_group_id: int,
+    subset: str = "",
+    points: Annotated[int, Query(ge=2)] = 101,
+    experiment_hash: Optional[str] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The curve across a model group's test dates: one thinned curve per (model, date).
+
+    Each series is ``{model_id, as_of_date, base_rate, population, points}``, in date order;
+    ``points`` holds the curve rows ``readers.curve`` returns, thinned to that many evenly
+    spaced shares of the population plus every configured cut. ``subset`` is a subset_hash
+    (each model's curve is then drawn over the subset's members); ``experiment_hash`` keeps
+    one experiment's models of a shared group.
+    """
+    try:
+        series = readers.group_curves(
             pool,
-            "select signature, n_dates, n_dates_total, mean_error_rate, mean_support,"
-            "       example_rule"
-            " from triage.error_rule_recurrence(%(g)s, %(p)s, %(k)s)"
-            " limit %(limit)s",
-            {"g": model_group_id, "p": chosen, "k": error_kind, "limit": limit},
-        ),
-    }
+            model_group_id,
+            subset=subset,
+            points=points,
+            experiment_hash=experiment_hash,
+        )
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not series:
+        return _empty(
+            "no test curves for this model group"
+            + (f" in subset {subset!r}" if subset else ""),
+            "a curve is drawn over a model's scored test date — score the group's"
+            " models (a run of the experiment does), or pick a subset with members"
+            " on those dates.",
+        )
+    return series
 
 
 @router.get("/models/{model_id}/predictions")

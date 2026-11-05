@@ -1018,35 +1018,6 @@ def model_show(
         )
 
 
-def _resolve_subset(conn, value: str) -> tuple[str, Optional[str]]:
-    """A subset by its name or by (a prefix of) its subset_hash → ``(subset_hash, name)``.
-
-    Fails loud, like the experiment-hash prefix: an unknown value or one that matches more
-    than one subset exits 1 with the query that lists them.
-    """
-    rows = conn.execute(
-        "select subset_hash, config->>'name' as name from triage.subsets"
-        " where config->>'name' = %(v)s"
-        "    or left(subset_hash, length(%(v)s)) = %(v)s"
-        " order by subset_hash limit 5",
-        {"v": value},
-    ).fetchall()
-    if not rows:
-        console.print(
-            f"[red]No subset matches {value!r} by name or subset_hash — list them with:"
-            " select subset_hash, config->>'name' as name from triage.subsets;[/red]"
-        )
-        raise typer.Exit(code=1)
-    if len(rows) > 1:
-        console.print(
-            f"[red]Ambiguous subset {value!r} — matches "
-            + ", ".join(f"{r['name']} ({r['subset_hash'][:12]}…)" for r in rows)
-            + ". Pass the full subset_hash.[/red]"
-        )
-        raise typer.Exit(code=1)
-    return rows[0]["subset_hash"], rows[0]["name"]
-
-
 @model_app.command("curve")
 def model_curve(
     ctx: typer.Context,
@@ -1078,6 +1049,8 @@ def model_curve(
     ``precision@``/``recall@`` come from (ADR-0033), so a row at k agrees with the stored
     metric at k.
     """
+    from triage.diagnostics.readers import resolve_subset
+
     date_str = parse_date(as_of_date).date().isoformat() if as_of_date else None
     engine = get_pool(ctx)
     with engine.connection() as conn:
@@ -1089,9 +1062,14 @@ def model_curve(
         ):
             console.print(f"[red]No model with id {model_id}.[/red]")
             raise typer.Exit(code=1)
-        subset_hash, subset_name = (
-            _resolve_subset(conn, subset) if subset else ("", None)
-        )
+        subset_hash, subset_name = "", None
+        if subset:
+            # an unknown subset is a NotFoundError, an ambiguous prefix a ValueError
+            try:
+                subset_hash, subset_name = resolve_subset(engine, subset)
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(code=1) from exc
         if date_str is None:
             # the date the curve function defaults to, resolved here to print it
             latest = returned_row(
