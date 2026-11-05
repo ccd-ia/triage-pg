@@ -81,3 +81,8 @@ Renumbered again on 2026-10-22: the milestone is now **v1.4.0**. v1.3.0 carries 
 (threshold metrics over the full population, ADR-0033), a minor release because it changes
 stored metric values. The scope above is unchanged. Where the body says "the v1.2.0 plan"
 or "v1.3.0", read v1.4.0.
+
+Renumbered a third time on 2026-11-05: the milestone is now **v1.6.0**. v1.4.0 shipped
+the leakage check and the error-tree and subset-curve diagnostics, and v1.5.0 carries
+`triage plot`, four dashboard additions and `triage reset`. The scope above is unchanged.
+Where the body names an earlier milestone, read v1.6.0.
