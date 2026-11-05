@@ -24,7 +24,7 @@ _SITES = [10, 20, 10]  # the relationship key every group carries next to the id
 
 
 def _group(features: dict[str, list[float]], *, carried: bool = True) -> pa.Table:
-    columns: dict[str, list] = {"as_of_date": _DATES, "person_id": _IDS}
+    columns: dict[str, list[Any]] = {"as_of_date": _DATES, "person_id": _IDS}
     if carried:
         columns["site_id"] = _SITES
     columns.update(features)
@@ -213,7 +213,8 @@ def test_a_wide_config_with_a_relationship_key_builds_its_features(db_pool):
         frame = builder.build(conn, _AS_OF, range(1, 7))
 
     assert [name for name in frame.columns if name.endswith("_right")] == []
-    assert frame.columns[:3] == ["as_of_date", "customer_id", "region_id"]
+    # The carried key merges once and then leaves: it is not a feature (#50).
+    assert frame.columns[:2] == ["as_of_date", "customer_id"]
+    assert "region_id" not in frame.columns
     assert frame.get_column("customer_id").to_list() == [1, 2, 3, 4, 5, 6]
-    assert frame.get_column("region_id").to_list() == [20, 10, 20, 10, 20, 10]
     assert len(frame.columns) > 3200

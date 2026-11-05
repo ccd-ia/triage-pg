@@ -14,7 +14,9 @@ the two ADR boundaries:
 * a rerun is a cache hit (same matrix_uuid, no duplicate artifacts).
 """
 
+import tempfile
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -689,6 +691,134 @@ def test_target_temporal_ix_dropped_from_feature_set(db_pool_greenfield, tmp_pat
         )
     # the leaked Date column is dropped from the Parquet entirely (not merely excluded)
     assert "signup_date" not in frame.columns
+
+
+def _keyed_featurizer_config(*, declare_region: bool = False) -> dict[str, Any]:
+    """``_featurizer_config`` plus two identifier columns on the target that are not features.
+
+    ``customers.region_id`` is the key of a second relationship (customers -> region_stats),
+    and ``customers.store_id`` is an ``index`` variable. featurizer carries both next to
+    ``customer_id`` and leaves both out of its feature manifest (#50). With
+    ``declare_region`` the user also declares ``region_id`` as a numeric variable, which
+    puts it in the manifest.
+    """
+    config = _featurizer_config()
+    customers = config["entities"][0]
+    customers["variables"] = {**customers["variables"], "store_id": {"type": "index"}}
+    if declare_region:
+        customers["variables"]["region_id"] = {"type": "numeric"}
+    config["entities"].append(
+        {
+            "alias": "region_stats",
+            "id": "stat_id",
+            "table": "region_stats",
+            "temporal_ix": "stat_date",
+            "variables": {"visits": {"type": "numeric"}},
+        }
+    )
+    config["relationships"].append(
+        {
+            "parent": {"entity": "customers", "key": "region_id"},
+            "child": {"entity": "region_stats", "key": "region_id"},
+        }
+    )
+    return config
+
+
+def _seed_keyed_source(engine) -> None:
+    """``_seed_source`` plus the target's two identifier columns and the region child."""
+    _seed_source(engine)
+    with engine.connection() as conn:
+        conn.execute(
+            "alter table customers add column region_id bigint,"
+            " add column store_id bigint"
+        )
+        conn.execute(
+            "update customers set region_id = 700 + customer_id % 2,"
+            " store_id = 9000 + customer_id"
+        )
+        conn.execute(
+            "create table region_stats (stat_id bigint primary key, region_id bigint,"
+            " stat_date date, visits double precision)"
+        )
+        conn.execute(
+            "insert into region_stats values"
+            " (1, 700, date '2013-01-01', 5.0), (2, 701, date '2013-02-01', 7.0)"
+        )
+
+
+def _carried_keys_of(config: dict[str, Any]) -> list[str]:
+    from featurizer import Featurizer
+
+    from triage.adapters.matrix import _carried_key_columns, _featurizer_config_yaml
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        handle.write(_featurizer_config_yaml(config))
+    try:
+        return _carried_key_columns(Featurizer(handle.name, validate=True))
+    finally:
+        Path(handle.name).unlink()
+
+
+def test_carried_key_columns_are_the_identifiers_the_manifest_leaves_out():
+    """The target's relationship key, its index variable and its clock are not features."""
+    assert sorted(_carried_keys_of(_keyed_featurizer_config())) == [
+        "region_id",
+        "signup_date",
+        "store_id",
+    ]
+    # A key the user also declares as a variable is in the manifest, so it stays a feature.
+    assert sorted(_carried_keys_of(_keyed_featurizer_config(declare_region=True))) == [
+        "signup_date",
+        "store_id",
+    ]
+
+
+def test_a_targets_relationship_keys_stay_out_of_the_matrix(
+    db_pool_greenfield, tmp_path
+):
+    """#50: the target's carried identifier columns reached the design matrix as features.
+
+    featurizer emits ``region_id`` (a relationship key) and ``store_id`` (an ``index``
+    variable) next to the target id. Neither is in its feature manifest, and before the fix
+    both landed in ``feature_names`` as numbers, a surrogate key read as an ordinal.
+    """
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_keyed_source(engine)
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF])
+
+    train = build_matrix(
+        engine,
+        run_id,
+        featurizer_config=_keyed_featurizer_config(),
+        cohort_artifact_id=cohort,
+        labels_artifact_id=labels,
+        temporal_config=_temporal_config(),
+        imputation_policy=policy,
+        matrix_kind="train",
+        as_of_dates=[TRAIN_AS_OF],
+        label_timespan=LABEL_TIMESPAN,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "matrices"),
+        source_pins={
+            "customers": "v1",
+            "orders": "v1",
+            "region_stats": "v1",
+            "label_src": "v1",
+        },
+    )
+
+    assert "region_id" not in train.feature_names
+    assert "store_id" not in train.feature_names
+    # The relationship still feeds features: only the key itself leaves.
+    assert any(
+        name.startswith("SUM(region_stats.visits") for name in train.feature_names
+    )
+    frame = pl.read_parquet(train.storage_uri)
+    assert "region_id" not in frame.columns
+    assert "store_id" not in frame.columns
 
 
 def test_cohort_row_the_target_clock_hides_is_dropped_loudly(

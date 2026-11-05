@@ -68,6 +68,7 @@ from triage.adapters.cohort import render_cohort_query
 from triage.adapters.labels import _validate_template as _validate_label_template
 from triage.adapters.labels import label_value_columns, render_label_query
 from triage.adapters.matrix import (
+    _drop_carried_keys,
     _featurizer_config_yaml,
     _materialize_pairs,
     _merge_arrow_groups,
@@ -1107,6 +1108,7 @@ class _FeatureBuilder:
             _require_open_transaction(conn, "featurizer.to_arrow")
             if not hasattr(table, "column_names"):  # an OrderedDict of column groups
                 table = _merge_arrow_groups(table, self.keys[1])
+            table = _drop_carried_keys(table, self.featurizer)
         except psycopg.Error as exc:
             message = (
                 f"featurizer failed on the {len(pairs)} cohort pairs of {as_of_date}"
