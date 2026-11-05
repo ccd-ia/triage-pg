@@ -12,8 +12,8 @@ gives every PostgreSQL-backed project the same six screens, keys and theme;
 triage-pg supplies three adapters and three screens of its own. Nothing on
 any tab is computed in the TUI: every number is a `SELECT` over the views the
 [dashboard](/triage-pg/reference/dashboard/) and the
-[CLI](/triage-pg/reference/cli/) already read (headless-complete core,
-ADR-0012), and the one thing it writes — refreshing the leaderboard
+[CLI](/triage-pg/reference/cli/) already read (headless-complete core),
+and the one thing it writes — refreshing the leaderboard
 matview — runs the CLI as a subprocess and shows its exit code.
 
 ```bash
@@ -53,7 +53,7 @@ the right: its stage table — cohort, labels, matrices, models, predictions,
 evaluations, each as *done / planned* from `run_progress`, `run_artifacts`
 and the run's plan, with notes such as `9 cached` when a re-run reused
 another run's artifacts — and its live log. A running run streams
-`LISTEN run_progress` notifications (ADR-0021); if LISTEN is unavailable the
+`LISTEN run_progress` notifications; if LISTEN is unavailable the
 adapter polls the `run_progress` view every five seconds and says so in the
 log. A finished run replays its counts. Keys: `l` focus the log, `k` kill
 (triage-pg has no cancel — the key explains what to do instead), `o` open the
@@ -110,7 +110,7 @@ triage -- --version`.
 
 ## Experiments (6)
 
-One row per **experiment** — a prediction problem, ADR-0022 — from
+One row per **experiment** — a prediction problem — from
 `experiment_summary`: problem type, framing, runs, models, base rate, last
 run. The detail panel adds the latest run's base rate and cohort size over
 its as-of dates as sparklines. `enter` opens the Runs tab filtered to this

@@ -107,7 +107,7 @@ reality hand you a label?* Its three values —
 `task_framing` is **identity-neutral**: adding or changing it never forks an
 Experiment's hash, because it changes how you should *read* the numbers — what a base
 rate means, whether missing labels are a bug or a fact of life — not how they are
-computed (migration 0019). The two axes compose freely, which is why there is no
+computed. The two axes compose freely, which is why there is no
 4×3 matrix to memorize. The [full problem space](/triage-pg/reference/problems/)
 page teaches each axis exactly once and shows all four problem types and all three
 regimes exercised on the real tutorial datasets.

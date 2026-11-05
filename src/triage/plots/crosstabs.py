@@ -4,6 +4,7 @@ model group's test dates."""
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from matplotlib.lines import Line2D
@@ -80,6 +81,7 @@ def crosstabs(
     compare: Optional[int] = None,
     top: int = 15,
     title: Optional[str] = None,
+    features: Sequence[str] = (),
 ) -> PlotResult:
     """The features that most distinguish a model's top-k list from the rest.
 
@@ -99,14 +101,16 @@ def crosstabs(
         compare: a second model, drawn for the first model's features.
         top: the features drawn, the most distinguishing first.
         title: replaces the default title.
+        features: draw only these features (exact names), in the ranking's order;
+            ``top`` does not apply. Empty draws the ``top`` features.
 
     Returns:
         ``data`` maps ``'model <id>'`` to the :func:`readers.crosstabs` rows drawn for
         that model, in the first model's order.
 
     Raises:
-        ValueError: ``stat`` is unknown, or several cuts are persisted and
-            ``parameter`` is ``None``.
+        ValueError: ``stat`` is unknown, several cuts are persisted and ``parameter``
+            is ``None``, or a feature in ``features`` has no crosstab.
         NothingToDraw: no crosstab is persisted for a model at the cut and date.
     """
     if compare == model_id:
@@ -115,7 +119,20 @@ def crosstabs(
         )
     _check_stat(stat)
     cut, day = _resolve(pool, model_id, parameter, as_of_date, stat)
-    rows_a = readers.crosstabs(pool, model_id, cut, stat, top, day)
+    if features:
+        ranking = readers.crosstabs(pool, model_id, cut, stat, _ALL, day)
+        wanted = set(features)
+        known = {r["feature"] for r in ranking}
+        unknown = [f for f in dict.fromkeys(features) if f not in known]
+        if unknown:
+            raise ValueError(
+                f"Not in model {model_id}'s crosstabs at {cut} on {day}:"
+                f" {', '.join(unknown)} — give the feature names exactly as"
+                " triage.crosstabs stores them"
+            )
+        rows_a = [r for r in ranking if r["feature"] in wanted]
+    else:
+        rows_a = readers.crosstabs(pool, model_id, cut, stat, top, day)
     data: dict[str, Any] = {f"model {model_id}": rows_a}
     missing: list[str] = []
     if compare is not None:

@@ -50,12 +50,17 @@ The score histogram counts every test date. The predicted list
 (`/api/models/{id}/predictions`) shows the test split unless `split_kind=` names
 another one, such as `production` for `triage score` output.
 
-When the experiment declares `evaluation.subsets`, a **population** selector sits
-above the curve: *full cohort*, or one *subset: name*. A subset becomes the
-population, ranked among its own members, so its curve at k equals
+When the experiment declares `evaluation.subsets`, a row of **population**
+buttons sits above the curve: *everyone*, and one button per Subset. A Subset
+becomes the population, ranked among its own members, so its curve at k equals
 the stored subset `precision@k_abs` (`?subset=<subset_hash>` on the curve route).
 A subset with no scored rows at that date says so instead of drawing an empty
-chart. The dashed horizontal line marked *base rate* is the population's labeled
+chart. With one population on, the panel draws its full curve and the k-slider.
+Turn on a second one, up to four Subsets and everyone, and the panel overlays
+them: one precision line per population, each with its own dashed base-rate
+line in the same colour. The overlay reads each curve at 101 evenly spaced
+shares of its population plus the exact row of every configured cut
+(`?points=101`). The dashed horizontal line marked *base rate* is the population's labeled
 positives over its labeled rows, which is the precision a random ranking
 expects; the readout under the k-slider repeats it next to precision and recall.
 A precision line that stays near it means the model barely ranks that
@@ -68,7 +73,19 @@ The error-rules panel has one tab per kind of leaf: **FP · wrong flags**,
 · N**, counts the leaves `triage.error_rules_suspicious` returns at its defaults
 (error rate at most 0.02, at least 30 rows). Clicking it lists them with their
 TP share and their lift over the model's `precision@`; at N = 0 the chip is
-disabled. See [Reading the error trees](/triage-pg/guides/reading-the-error-trees/)
+disabled. Each leaf's error-rate bar carries a tick at the population error rate
+of its kind at the same cut and date (`reference_error_rate` on the route): the
+wrong share of the whole list for fp, the missed share of everyone passed over
+for fn, and the wrong share of all labeled rows for confusion. A bar that ends
+past its tick marks a leaf worse than the list as a whole.
+
+The crosstabs panel has two views. *Mean ratio*, the default, ranks features by
+the ratio of the list's mean to the rest's. *Nonzero rate* draws two bars per
+feature, the share of the list and the share of the rest with a nonzero value,
+ranked by the gap between them (`?stat=nonzero_rate` on
+`/api/models/{id}/crosstabs`). A feature near 1 on the list and near 0 off it is
+the leakage shape, and a missing-value flag concentrated on the list is a data
+quality signal. See [Reading the crosstabs](/triage-pg/guides/reading-the-crosstabs/). See [Reading the error trees](/triage-pg/guides/reading-the-error-trees/)
 and [How to find leakage](/triage-pg/guides/finding-leakage/).
 
 ## Audition — model selection with discipline
@@ -98,7 +115,14 @@ family your intervention actually implicates.
 The hyperparameter-family rollup (avg ± σ, max regret, fit time) — and where
 feature-group ablation runs become comparable side by side.
 
-Opening a group shows its sheet, which ends with a **recurrence** table: each
+Opening a group shows its sheet. Its **curve across test dates** panel draws one
+precision line per test date, scored by the group's model for that date, with
+the legend in date order and a dashed base-rate line per date
+(`/api/model-groups/{id}/curves?points=101`). A selector switches between
+everyone and one of the experiment's Subsets. Two dates scored by the same model
+that differ point to a change in the data.
+
+The sheet ends with a **recurrence** table: each
 error-rule signature with the number of the group's test dates it appears on
 (`2/6`), its mean error rate, its mean number of rows and an example rule.
 Buttons switch between fp, fn and confusion leaves, and a cut selector appears

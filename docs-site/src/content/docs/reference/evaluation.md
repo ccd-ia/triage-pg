@@ -96,7 +96,7 @@ A threshold metric (`precision@`, `recall@`, the bias audit, the dashboard's
 threshold curve, the error tree) ranks **every scored row** at the
 `as_of_date`, cuts the list at k, and only then looks at labels. An entity with
 no label still takes a place in the top k. It is left out of the metric itself.
-This is how DSSG triage computed them (ADR-0033). Since migration 0024,
+This is how DSSG triage computed them. Since v1.3.0,
 triage-pg does the same.
 
 | Parameter | k | precision@k | recall@k |
@@ -124,7 +124,7 @@ The dashboard's threshold curve is one test date:
 or the model's latest test date when `as_of_date` is NULL. It reads the same
 population ranks, labels artifact and label horizon as `precision@`, so the
 curve at k is the stored
-`precision@k_abs` (migration 0025, v1.3.1). The label horizon is the scored test
+`precision@k_abs` (since v1.3.1). The label horizon is the scored test
 matrix's `label_timespan`, which need not equal the model's training horizon.
 
 The third argument selects a subset, and `base_rate` gives the reference line. With the
@@ -141,7 +141,7 @@ curve's own precision on its last row, where k is the whole population.
 explains how to read them.
 
 The predicted list and the score histogram read their labels the same way,
-through `triage.scored_labels(model_id, split_kind)` (migration 0026, v1.3.2):
+through `triage.scored_labels(model_id, split_kind)` (since v1.3.2):
 one row per latest score in that split, labeled from the scored matrix's labels
 artifact. A date whose predictions have no matrix lineage falls back to the
 training horizon and the run's labels artifact.

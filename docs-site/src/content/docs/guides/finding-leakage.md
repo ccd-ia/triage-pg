@@ -390,6 +390,10 @@ after the cut passes it.
 of the same Run and split, at 2016-10-01. The baseline's precision stays near the
 base rate of 0.26 (0.249 at 10% of the population, 0.261 at 50%).*
 
+Reproduce on your data: `uv run triage plot curve 285 --compare 286`, with your best
+model in place of 285 and the constant-prior model trained on the same window in
+place of 286.
+
 ## The privilege the check needs
 
 The check deletes rows inside one transaction, reads on the same connection, and
@@ -466,6 +470,9 @@ confusion leaf is 0.568. See
 
 *Every fp and confusion leaf of the best group (41 in our run) on its six test dates.
 The shaded suspicious zone is empty.*
+
+Reproduce on your data: `uv run triage plot leaves 41 -p 10_pct`, with your best
+model group in place of 41.
 
 **The crosstabs, near-total separation.** A feature whose nonzero rate is near 1 on
 the list and near 0 off it is the signature of a proxy for the outcome. In DirtyDuck,

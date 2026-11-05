@@ -87,7 +87,13 @@ Three readers query the stored leaves without fitting anything:
   which each rule appears (see [Stability over time](#stability-over-time)).
 - In the dashboard, the model card's error-rules panel has one tab per kind and a
   "suspiciously right" chip, and the model group sheet has a table of rule
-  recurrence across test dates.
+  recurrence across test dates. Each leaf's error-rate bar carries a tick at the
+  population error rate at the same cut: the wrong share of the whole list for an
+  fp leaf, the missed share of everyone passed over for an fn leaf, and the
+  wrong share of all labeled rows for a confusion leaf. A leaf reads as a failure
+  mode only when its bar ends well past its tick.
+- `triage plot error-rules`, `triage plot recurrence` and `triage plot leaves`
+  draw the figures below from your own project database.
 
 ### A diagnostic, not a booster
 
@@ -228,6 +234,9 @@ make, a leaf that is almost all TP (see [Leakage](#leakage)).
 errors. Each bar is a leaf's error rate; the dashed line is its tree's rate over all
 its rows (fp 0.61, fn 0.25).*
 
+Reproduce on your data: `uv run triage plot error-rules 285 -p 10_pct --top 6`, with
+your best model in place of 285.
+
 Errors that concentrate under a set of conditions form a failure mode. The fp leaf
 `STDDEV(inspections.n_serious|interval=P6M) <= 0.7719 AND SUM(inspections.n_serious)
 <= 3.5 AND STDDEV(inspections.n_serious) <= 0.612` puts 60 facilities on the list,
@@ -238,12 +247,19 @@ by chance (see [Caveats](#caveats)).
 
 ### A rule that recurs across test dates
 
-![Two bar charts of fn rule recurrence: for group 41, five signatures recur on 2 of 6 test dates, three of them inside zip 60622; for group 45, one signature with MEAN of n_serious recurs on 2 of 6 dates and the rest on 1](../../../assets/guides/worked-error-recurrence.svg)
+![fn rule recurrence for group 41: twelve signatures by test date; five recur on 2 of 6 dates, three of them inside zip 60622, and the rest appear on one date](../../../assets/guides/worked-error-recurrence.svg)
 
-*`triage.error_rule_recurrence` for the fn trees of two model groups. Top: group 41,
-the logistic regression on the violation counts. Bottom: group 45, the same
-estimator on `experiment.yaml`'s features. No signature recurs on more than 2 of 6
-test dates.*
+![fn rule recurrence for group 45: one signature with MEAN of n_serious recurs on 2 of 6 dates and the other eleven appear on one date](../../../assets/guides/worked-error-recurrence-before.svg)
+
+*`triage.error_rule_recurrence` for the fn trees of two model groups. Each row is a
+signature, each column a test date, and a dot marks a date with a leaf of that
+signature. First: group 41, the logistic regression on the violation counts.
+Second: group 45, the same estimator on `experiment.yaml`'s features. No signature
+recurs on more than 2 of 6 test dates.*
+
+Reproduce on your data: `uv run triage plot recurrence 41 -p 10_pct --kind fn`, with
+your best model group in place of 41, and the same command with 45 for the group
+it is compared with.
 
 `triage.error_rule_recurrence` matches rules across a model group's test dates by
 their signature, the sorted set of `feature op` pairs without thresholds. In group
@@ -263,6 +279,9 @@ come from chance or from a one-off event.
 *Every fp and confusion leaf of group 41 on its six test dates at `10_pct`, by the
 share of the leaf the model gets wrong and the number of rows in the leaf. The shaded
 suspicious zone (error at most 0.02, at least 30 rows) is empty.*
+
+Reproduce on your data: `uv run triage plot leaves 41 -p 10_pct`, with your best
+model group in place of 41. The command prints how many leaves fall in the zone.
 
 An fp leaf with many rows and an error rate near zero, or a confusion leaf that is
 nearly all TP, describes a set of rows on which the model is almost never wrong. In
@@ -488,7 +507,24 @@ the intervention. That leaf belongs under [Fairness](#fairness) and
 above has the same shape.
 
 A leaf of the other kind describes rows on which the intervention has no effect, such
-as entities that another program already handles. When one appears:
+as entities that another program already handles. The Chicago 311 tutorial has one.
+Its model 93 predicts which service requests will be slow to close. At 2019-12-01 and
+the 10% cut, its fn tree puts 972 of the 1,681 requests in one leaf,
+`requests.owner_department=Streets and Sanitation > 0.5`, with no missed slow request:
+
+![The fn leaves of Chicago 311 model 93 at 2019-12-01, cut 10_pct: four leaves outside Streets and Sanitation with error rates from 0.12 to 0.44, and the Streets and Sanitation leaf at 0 of 972, against 0.13 for everyone passed over](../../../assets/guides/worked-chicago311-error-rules-fn.svg)
+
+That department owns the graffiti (614 requests), rodent (289) and weed (69)
+requests, and none of the 972 was slow. An early warning has nothing to warn about in
+58% of the Cohort. On 2019-11-01 the trees hold the same leaf, 1,020 requests with
+no slow one. Whether the zero is real, or reflects how the department closes
+requests, is a question for the people who own the data; the tree cannot settle it.
+DonorsChoose's trees show no such leaf.
+
+Reproduce on your data: `uv run triage plot error-rules 93 --date 2019-12-01 -p 10_pct --kind fn`,
+here on the Chicago 311 tutorial database (`just chi311-up`).
+
+When such a leaf appears:
 
 - **To drop the group**, add its condition to `cohort_config.query`. The Cohort is
   part of the Experiment's identity, so this makes a new Experiment with its own
@@ -523,6 +559,12 @@ Over all 84 fp and confusion leaves of group 41 at `10_pct`, the lowest fp error
 is 0.233 and the lowest non-TP share of a confusion leaf is 0.568; the figure under
 [Patterns](#a-large-leaf-with-almost-no-errors) plots them all. `triage check
 leakage` on the same config exits 0. DirtyDuck shows no leak.
+
+DirtyDuck, DonorsChoose and Chicago 311 all lack this pattern; the planted test
+below shows its shape. The nearest leaves are Chicago 311's: `--max-error 0.1`
+finds six, and the top three hold 34 or 35 rows each at an error rate of 0.029.
+They sit inside a list whose own precision is 0.75 to 0.85, so their lift is only
+1.07 to 1.30.
 
 The test suite shows what a hit looks like
 (`test_planted_perfect_segment_is_suspiciously_right` in
@@ -605,6 +647,21 @@ their number matches the Source exactly. Here the data are what they claim to be
 only the rule reads wrong. In another project the same trace can end at a Source that
 stopped loading for some weeks, or at a join column whose format changed, and then the
 leaf points at a fault in the data.
+
+The DonorsChoose tutorial shows the same trap on another aggregation. Its model 59's
+confusion tree at 2013-11-01 and the 30% cut has a leaf of 32 projects, 19 of them
+misclassified (0.59, against 0.30 over all labeled rows). One of its conditions is
+`STDDEV(resources.item_unit_price|interval=P6M) <= 25.71`. A standard deviation is
+NULL when a project has fewer than two line items in six months, and the config's
+`all: zero` writes 0, so the condition also catches every such project. Read against
+the scored Matrix and its flags, 21 of the leaf's 32 rows (66%) hold a zero-filled
+value.
+
+![The confusion leaves of DonorsChoose model 59 at 2013-11-01, cut 30_pct: six leaves; the one with the standard deviation of item prices at most 25.71 is wrong on 19 of 32 projects, against 0.30 over all labeled rows](../../../assets/guides/worked-donorschoose-error-rules-confusion.svg)
+
+Reproduce on your data: `uv run triage plot error-rules 59 --date 2013-11-01 -p 30_pct --kind confusion`,
+here on the DonorsChoose tutorial database (`just donors-up`). The figure shows the
+leaf; the share of zero-filled rows comes from the Matrix's `__missing` flags.
 
 Next steps:
 

@@ -1,0 +1,288 @@
+# DonorsChoose — the experiment that searches this dataset for the reading guides'
+# patterns (docs-site guides/*).
+#
+# The guides teach how to read the threshold curve, the error trees and the crosstabs,
+# with worked examples from DirtyDuck. Seven of their patterns do not occur in
+# DirtyDuck. This file runs the DonorsChoose tutorial's problem with what is needed to
+# look for them here, so each pattern is either shown on real data or recorded as
+# absent. Nothing is planted.
+#
+# How it differs from experiment.yaml, and why:
+#
+#   * temporal_config: each split is tested on three consecutive monthly as_of_dates
+#     (test_durations '3month' x test_as_of_date_frequencies '1month'), so the same
+#     model scores three monthly Cohorts. A monthly Cohort is small (62-253 projects
+#     in the baked sample), and three dates per split give a pattern three chances
+#     to repeat. temporal_config is part of experiment identity, so this file gets its
+#     own experiment_hash and leaves experiment.yaml's alone.
+#   * evaluation: cuts at 10% and 30% of the Cohort. 30_pct is the primary cut of the
+#     error trees and crosstabs: at 10% a monthly list holds 7-26 projects, too few
+#     for a tree leaf of 30 rows.
+#   * evaluation.subsets: four groups, chosen to probe the guides' patterns:
+#     technology and large_ask have base rates above everyone's (a group the model
+#     could lift as a block); highest_poverty is the largest group, half the Cohort;
+#     metro_unknown is the projects whose school_metro is NULL, which the one-hot
+#     encoding turns into all zeros (a segment defined by missing data).
+#   * grid_config: a forest, a tree, a scaled logistic regression and the
+#     constant-prior floor: 4 model groups, 12 models.
+#   * sources: a distinct version_label, so no artifact derived from an earlier load
+#     is reused.
+#
+# The cohort, label and feature definitions are experiment.yaml's, unchanged (see that
+# file for the commentary).
+#
+# Reproduce (tutorial DB up with `just donors-up`; PG* pointing at it, credentials
+# in donorschoose/docker-compose.yml):
+#
+#   uv run triage db upgrade
+#   uv run triage run example/donorschoose/experiment-guides.yaml \
+#       --project-path "$HOME/.cache/triage-pg/donorschoose-guides"
+#   # The best group is the audition pick (rule best_average_value) at the primary cut:
+#   uv run triage audition <experiment_hash> -m precision@ -p 30_pct
+#   # For every model of the best group:
+#   uv run triage postmodel error-tree <model_id> -p 30_pct --kind all
+#   uv run triage postmodel crosstabs <model_id> -p 30_pct
+#   uv run triage postmodel error-rules <model_id> --suspicious
+#   uv run triage model curve <model_id> [--subset technology] [--date YYYY-MM-DD]
+#   uv run triage check leakage example/donorschoose/experiment-guides.yaml
+
+problem_type: classification
+
+task_framing: early_warning
+
+temporal_config:
+  feature_start_time: '2012-01-01'
+  feature_end_time: '2014-05-01'
+  label_start_time: '2012-02-01'
+  label_end_time: '2014-05-01'
+  model_update_frequency: '6month'
+  training_as_of_date_frequencies: '1month'
+  training_label_timespans: ['4month']
+  # Three test dates per split, one month apart (months 0, 1 and 2 of a half-open
+  # 3-month window).
+  test_as_of_date_frequencies: '1month'
+  test_durations: '3month'
+  test_label_timespans: ['4month']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: posted_projects
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.date_posted >= {as_of_date}::date - interval '1 month'
+      and e.date_posted <  {as_of_date}::date
+
+label_config:
+  name: unfunded_4mo
+  query: |
+    select
+      e.entity_id,
+      (coalesce(sum(d.donation_to_project) filter (
+         where d.donation_timestamp < {as_of_date}::date + {label_timespan}), 0)
+       < e.total_price)::int as outcome
+    from ontology.entities as e
+    left join clean.donations as d on d.projectid = e.projectid
+    where e.date_posted >= {as_of_date}::date - interval '1 month'
+      and e.date_posted <  {as_of_date}::date
+    group by e.entity_id, e.total_price
+
+feature_config:
+  target: projects
+  max_depth: 2
+  intervals:
+    - P1M
+    - P6M
+    - P12M
+  aggregations:
+    - count
+    - sum
+    - mean
+    - max
+    - stddev
+  transformations:
+    - identity
+
+  entities:
+    - alias: projects
+      id: entity_id
+      table: ontology.entities
+      variables:
+        poverty_level:
+          type: categorical
+          role: categorical
+          vocabulary: ["highest poverty", "high poverty", "moderate poverty", "low poverty"]
+        grade_level:
+          type: categorical
+          role: categorical
+          vocabulary: ["Grades PreK-2", "Grades 3-5", "Grades 6-8", "Grades 9-12"]
+        primary_focus_area:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Literacy & Language"
+            - "Math & Science"
+            - "Music & The Arts"
+            - "Applied Learning"
+            - "Special Needs"
+            - "History & Civics"
+            - "Health & Sports"
+        resource_type:
+          type: categorical
+          role: categorical
+          vocabulary: ["Technology", "Supplies", "Books", "Other"]
+        teacher_prefix:
+          type: categorical
+          role: categorical
+          vocabulary: ["Mrs.", "Ms.", "Mr."]
+        school_metro:
+          type: categorical
+          role: categorical
+          vocabulary: ["urban", "suburban", "rural"]
+        school_state:
+          type: categorical
+          role: categorical
+          vocabulary: ["CA", "NY", "TX", "FL", "IL", "NC", "GA", "PA", "SC", "MI", "OK", "IN"]
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+    - alias: resources
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables:
+        project_resource_type:
+          type: categorical
+        line_total:
+          type: numeric
+        item_unit_price:
+          type: numeric
+        item_quantity:
+          type: numeric
+
+    - alias: teacher_history
+      id: entity_id
+      table: ontology.entities
+      temporal_ix: date_posted
+      variables:
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+    - alias: school_history
+      id: entity_id
+      table: ontology.entities
+      temporal_ix: date_posted
+      variables:
+        total_price:
+          type: numeric
+        students_reached:
+          type: numeric
+
+  relationships:
+    - parent:
+        entity: projects
+        key: entity_id
+      child:
+        entity: resources
+        key: entity_id
+      temporal:
+        mode: as_of
+    - parent:
+        entity: projects
+        key: teacher_acctid
+      child:
+        entity: teacher_history
+        key: teacher_acctid
+      temporal:
+        mode: as_of
+    - parent:
+        entity: projects
+        key: schoolid
+      child:
+        entity: school_history
+        key: schoolid
+      temporal:
+        mode: as_of
+
+grid_config:
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [100]
+    max_depth: [5]
+    min_samples_leaf: [10]
+    max_features: ['sqrt']
+    n_jobs: [-1]
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [4]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+
+evaluation:
+  metrics: [precision@, recall@, auc_roc, average_precision]
+  thresholds: [10_pct, 30_pct]
+  subsets:
+    - name: technology
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.resource_type = 'Technology'
+          and e.date_posted >= {as_of_date}::date - interval '1 month'
+          and e.date_posted <  {as_of_date}::date
+    - name: large_ask
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.total_price >= 500
+          and e.date_posted >= {as_of_date}::date - interval '1 month'
+          and e.date_posted <  {as_of_date}::date
+    - name: highest_poverty
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.poverty_level = 'highest poverty'
+          and e.date_posted >= {as_of_date}::date - interval '1 month'
+          and e.date_posted <  {as_of_date}::date
+    - name: metro_unknown
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.school_metro is null
+          and e.date_posted >= {as_of_date}::date - interval '1 month'
+          and e.date_posted <  {as_of_date}::date
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: date_posted
+    version_label: 'donorschoose-guides-v1'
+    role: entity
+    type_column: primary_focus_area
+    description: Posted classroom projects — the target entity (DonorsChoose KDD Cup 2014)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'donorschoose-guides-v1'
+    role: event
+    type_column: project_resource_type
+    description: Requested resource line items, the project's child event stream (DonorsChoose)
+
+  - name: clean_donations
+    relation: clean.donations
+    knowledge_date_column: donation_timestamp
+    version_label: 'donorschoose-guides-v1'
+    description: Donations — the label source only (4-month funding outcome), never a feature
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

@@ -116,12 +116,17 @@ _Avoid_: contingency table (this is a stat comparison, not counts), feature drif
 The "predict on the errors" diagnostic: a shallow decision tree fitted on the model's mistakes at the top-k cut, whose leaf paths become human-readable rules with support and error rate (`triage.error_analysis`). Strictly diagnostic — never a score modifier.
 _Avoid_: error model (implies stacking), boosting, residual model
 
+**Leakage check**:
+The `triage check leakage` test that an Experiment's Cohort, labels and features stay the same when data known after each as_of_date is removed.
+_Avoid_: leak test, leakage audit
+
 ## Relationships
 
 - A **Registry** tracks many **Projects**; each **Project** is one database with many collaborating users.
 - An **Experiment** runs within one **Project**, under one **Profile**.
 - An **Experiment** builds **Matrices** keyed by (**Cohort** entity × **as_of_date**); the **Feature engine** generates the features and an **Adapter** assembles the **Matrix**.
 - A trained model produces append-only **Predictions**; evaluation, leaderboards, and bias metrics run in PostgreSQL over the **Predictions** table.
+- A **Leakage check** removes, per **as_of_date**, the rows of each declared **Source** known after it, and compares the **Experiment**'s Cohort, labels and features with and without them.
 - An **Experiment** freezes the current **Source version** of every declared **Source** at plan time; every artifact's **Derivation** embeds those pins plus its parents' Derivations (Merkle DAG).
 - A **Submission** records that a **Principal** asked a **Project** to run an **Experiment**; the resulting Run and **Predictions** live in the **Project** database — the **Registry** keeps only the audit row.
 - **Forward scores** append **Predictions** over time; monitoring compares each scoring window against the model group's **Reference window** (drift) and re-evaluates once labels arrive (realized outcomes). Survival experiments are evaluated by **C-index** on the same ranking spine.

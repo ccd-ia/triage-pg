@@ -74,17 +74,18 @@ Three properties of the input decide what a crosstab can tell you.
   list the flags.
   Models never train on them, and the crosstabs never compute them.
 
-The rows are read in four places:
+The rows are read in five places:
 
 | Surface | What it shows |
 |---|---|
 | `triage postmodel crosstabs` (after it writes) | the 15 mean rows with the largest \|log ratio\| at the cut, all test dates ranked together; `-n` changes the count |
 | `triage model show <id>` | the 5 mean rows with the largest \|log ratio\|, across every date and every cut computed for the model |
-| The model card's crosstabs panel (dashboard) | the 20 mean rows with the largest \|log ratio\|, across every date and every cut computed for the model |
+| The model card's crosstabs panel (dashboard) | a toggle between two views, across every date and every cut computed for the model: *mean ratio*, the 20 rows with the largest \|log ratio\|; and *nonzero rate*, the 20 rows with the widest gap between the list's nonzero share and the rest's, drawn as two bars per feature |
+| `triage plot crosstabs` | a figure of one model's list, or of two models' lists, at one cut and date: mean ratios (`--stat mean`) or nonzero rates (`--stat nonzero`), the top features or the ones named with `--feature` |
 | `triage.crosstabs` in SQL | every row, including `std` and `nonzero_rate` |
 
-The nonzero rates and standard deviations are only in the table, so several
-examples below query it directly.
+The standard deviations are only in the table, so several examples below query
+it directly.
 
 ## How to read it
 
@@ -133,6 +134,9 @@ At 2016-10-01 all 15 of the largest ratios are violation-count features, and
 the model uses every one of them. The one ratio below 1,
 `MIN(inspections.n_serious|interval=P1M)`, is 0.0043 on the list against
 0.022 off it.
+
+Reproduce on your data: `uv run triage plot crosstabs 285 -p 10_pct`, with your best
+model in place of 285.
 
 ### The nonzero rate
 
@@ -186,11 +190,29 @@ each, with made-up values.
 | re-inspection already scheduled | near 1 on the list, near 0 off it | a feature that may know the outcome | [Leakage](#leakage) |
 
 In DirtyDuck the first three shapes occur and the last two do not. The worked
-version for model 285 at 2016-10-01 shows nonzero rates as pairs of points.
-Rows marked "(not used)" are columns of the Matrix that the model does not
-train on.
+version for model 285 at 2016-10-01 shows nonzero rates as pairs of points. The
+two critical-violation features are features the model uses. The facility types
+and zip codes are columns of the Matrix that the model does not train on.
 
 ![Nonzero rates of model 285's list against the rest at 2016-10-01: critical-violation features 0.92 against 0.28; restaurant 0.72 against 0.61; zip code 60622 0.061 against 0.029, though the model never uses zip code](../../../assets/guides/worked-crosstabs-nonzero.svg)
+
+Reproduce on your data, with your best model in place of 285 and the features you
+want to read in place of these six:
+
+```console
+$ uv run triage plot crosstabs 285 -p 10_pct --stat nonzero \
+    --feature 'MAX(inspections.n_critical)' \
+    --feature 'STDDEV(inspections.n_critical)' \
+    --feature 'facilities.facility_type=restaurant' \
+    --feature 'facilities.facility_type=grocery store' \
+    --feature 'facilities.zip_code=60622' \
+    --feature 'facilities.zip_code=60614'
+```
+
+Without `--feature`, the command draws the 15 features with the widest gap. In
+the dashboard, the *nonzero rate* view of the crosstabs panel ranks the same way.
+That ranking is the one that finds the leakage shape: a feature near 1 on the
+list and near 0 off it rises to the top.
 
 ## Use it to improve the model
 
@@ -355,6 +377,11 @@ accumulate more recorded violations, and a count-based score lifts them. When
 one category or one group of facilities takes a large share of the list, ask
 whether the reason is part of what the program wants to rank.
 
+DirtyDuck, DonorsChoose and Chicago 311 all lack this pattern; the illustrative figure shows its shape. The
+nearest is Chicago 311, where pothole complaints are every request on the 10%
+list, but their own base rate (0.77, against 0.19 for everyone) explains it,
+which is a reason inside the problem.
+
 DirtyDuck shows no dominating segment. The largest over-representation by
 share is restaurants, 72.2% of the list against 61.1% of the rest (1.18×). The
 largest by ratio among categories is zip code 60622, at 2.13×, which is 6.1% of
@@ -422,8 +449,10 @@ list, any serious violation on record, is 0.999 on the list, but 0.416 of the
 rest have one too. That feature is the model's main signal. A leak would also
 be near 0 off the list.
 
-Query by gap, as above, rather than reading the CLI table. The CLI and the
-model card rank the mean ratio and skip two kinds of row. A ratio is NULL when
+Read by gap, as above: the model card's *nonzero rate* view and
+`triage plot crosstabs --stat nonzero` rank this way. `triage postmodel
+crosstabs`, `triage model show` and the model card's *mean ratio* view rank
+the mean ratio and skip two kinds of row. A ratio is NULL when
 the rest's value is 0, and 0 when the list's value is 0, and both are left
 out. A 0/1 feature that is 1 for some of the list and 0 for every row of the
 rest, which is the most extreme leak, therefore never appears in the CLI
@@ -436,6 +465,23 @@ check is clean, the leak is in the raw data itself, such as a column recorded
 after the outcome, which the check cannot see.
 [How to find leakage](/triage-pg/guides/finding-leakage/) covers the check and its
 limits.
+
+The Chicago 311 tutorial has the shape, and it is not a leak. For model 93 at
+2019-12-01 and the 10% cut, pothole complaints have a nonzero rate of 1.000 on the
+list against 0.017 off it, a gap of 0.983:
+
+![Nonzero rates of Chicago 311 model 93's list against the rest at 2019-12-01: pothole complaints 1.00 against 0.02, the transportation department 1.00 against 0.36, and every other request type 0 on the list](../../../assets/guides/worked-chicago311-crosstabs-nonzero.svg)
+
+Those are the numbers of the illustrative row. The follow-up clears it.
+`uv run triage check leakage example/chicago311/experiment-guides.yaml` exits 0
+with no differences on 18 dates. The request type is recorded when the request is
+filed, so it is known at the as_of_date. And the threshold-curve guide shows why the
+list is all potholes: their base rate is 0.77, the model lifts them as a block, and
+the list (169 requests) is smaller than the potholes (194). DonorsChoose's widest
+gap is 0.516.
+
+Reproduce on your data: `uv run triage plot crosstabs 93 -p 10_pct --date 2019-12-01 --stat nonzero --top 8`,
+here on the Chicago 311 tutorial database (`just chi311-up`).
 
 ### Data quality
 
@@ -542,6 +588,9 @@ Across dates, for the best group's four top features:
 
 ![The four largest mean ratios of group 41 on six test dates; STDDEV(n_critical, 3 months) drops from 10.18 to 6.74 where the model changes from 281 to 285](../../../assets/guides/worked-crosstabs-dates.svg)
 
+Reproduce on your data: `uv run triage plot crosstabs-dates 41 -p 10_pct`, with your
+best model group in place of 41.
+
 ```text
  as_of_date | model_id | ratio
 ------------+----------+-------
@@ -564,6 +613,9 @@ Between two model groups, read the lists of the best group (285, logistic
 regression) and the runner-up (283, random forest) on the same date:
 
 ![Mean ratios for the lists of model 285 and model 283 at 2016-10-01: the same features separate both lists, and the forest's list is more extreme on the 6-month critical-violation features](../../../assets/guides/worked-crosstabs-two-groups.svg)
+
+Reproduce on your data: `uv run triage plot crosstabs 285 -p 10_pct --compare 283 --top 12`, with your best model in place of 285 and the model it is compared with
+in place of 283.
 
 The same features separate both lists. The forest's list is more extreme on
 the 6-month critical-violation features (`STDDEV` 12.79 against 9.15, `SUM`

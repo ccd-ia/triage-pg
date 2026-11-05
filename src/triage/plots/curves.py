@@ -239,17 +239,22 @@ def curve_dates(
         base_ax.scatter(xs, rates, s=36, c=list(colours), zorder=3)
         for x, s in zip(xs, series, strict=True):
             base_ax.annotate(
-                f"{fmt_rate(s['base_rate'])}\n{s['population']:,} rows",
+                fmt_rate(s["base_rate"]),
                 (x, nan(s["base_rate"])),
                 xytext=(0, 6),
                 textcoords="offset points",
                 ha="center",
                 fontsize=7.5,
             )
-        base_ax.set_xticks(xs, [_short_date(s["as_of_date"]) for s in series])
+        # the scored rows go under each date: above the dot, six labels collide
+        base_ax.set_xticks(
+            xs,
+            [f"{_short_date(s['as_of_date'])}\n{s['population']:,}" for s in series],
+            fontsize=7.5,
+        )
         base_ax.set_xlim(-0.6, len(series) - 0.4)
         base_ax.set_ylim(0, 1)
-        base_ax.set_xlabel("test date")
+        base_ax.set_xlabel("test date, and the rows scored on it")
         base_ax.set_ylabel("base rate (labeled positives ÷ labeled)")
         base_ax.set_title("The base rate of each date")
         fig.suptitle(

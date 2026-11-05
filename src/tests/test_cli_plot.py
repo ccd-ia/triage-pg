@@ -68,6 +68,8 @@ def _commands(d: Diagnosed) -> list[tuple[list[str], str, str]]:
         (["crosstabs", str(a)], f"crosstabs-{a}.svg", "5 features by mean ratio"),
         (["crosstabs", str(a), "--date", str(D1), "--stat", "nonzero", "--compare",
           str(b), "--top", "3"], f"crosstabs-{a}.svg", "3 features by nonzero rate"),
+        (["crosstabs", str(a), "--stat", "nonzero", "--feature", "visits", "--feature",
+          "zip_60622"], f"crosstabs-{a}.svg", "2 features by nonzero rate"),
         (["crosstabs-dates", str(g), "-p", CUT], f"crosstabs-dates-{g}.svg",
          "4 feature(s) by mean ratio across 4 test date(s)"),
         (["crosstabs-dates", str(g), "--stat", "nonzero", "--top", "2"],
@@ -116,6 +118,7 @@ def test_unknown_ids_and_bad_options_exit_2(plot, diagnosed, tmp_path):  # noqa:
         (["crosstabs-dates", g, "--top", "9"], "the cap is 8 series"),
         (["curve", a, "--points", "1"], "points=1 cannot span the population"),
         (["crosstabs", a, "--stat", "median"], "'median' is not a crosstab statistic"),
+        (["crosstabs", a, "--feature", "nowhere"], "crosstabs at 10_pct on"),
         (["error-rules", a, "--kind", "tp"], "'tp' is not an error-rule kind"),
         (["curve", a, "--date", "2014-13-01"], "invalid date"),
     ):

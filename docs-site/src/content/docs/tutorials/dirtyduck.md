@@ -98,7 +98,7 @@ in the config), and it shows up everywhere downstream:
 - evaluation ranks **every** active facility and cuts the list at k, as the
   inspectors would, then measures precision over the inspected ones inside
   the cut. `num_labeled_above_threshold` says how many labels a precision@k
-  rests on (ADR-0033).
+  rests on.
 
 ### Formulation 2 — early warning (the EIS twin)
 
@@ -244,7 +244,7 @@ facilities nobody inspected, and its precision rests on 59 labels. Before
 v1.3.0, triage-pg ranked only the inspected facilities and this table read the
 other way round (heuristic 0.403, logistic regression 0.388). That ranking left
 out every uninspected facility the model would have sent an inspector to. See
-[evaluation](/triage-pg/reference/evaluation/) and ADR-0033.
+[evaluation](/triage-pg/reference/evaluation/).
 
 The **regression** variant (`experiment-regression.yaml`) tells the opposite,
 equally useful story. It ships **time-series** baselines that forecast each
