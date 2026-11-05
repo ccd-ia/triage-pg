@@ -541,8 +541,12 @@ def test_compare_cohort_and_labels():
 # --------------------------------------------------------------------------------------
 
 
-def _discover(db_url: str, config: dict[str, Any]):
-    plan = plan_cuts(config, [date(2014, 1, 1)])
+def _discover(
+    db_url: str,
+    config: dict[str, Any],
+    dates: tuple[date, ...] | None = (_DAY,),
+):
+    plan = plan_cuts(config, dates)
     experiment = leakage._Experiment.from_config(config)
     sources = leakage.declared_sources(config)
     conn = _connect(db_url)
@@ -740,3 +744,120 @@ def test_harness_delete_boundary_at_an_equal_timestamp(seeded, db_pool):
     assert surviving(Check("cohort", at.date()).cut) == (True, True)
     assert surviving(Check("features", at.date()).cut) == (True, False)
     assert surviving(CutKey(at, False, False)) == (False, False)
+
+
+# --------------------------------------------------------------------------------------
+# hardening — cases where the check could report clean when it should not
+# --------------------------------------------------------------------------------------
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """CLI output without ANSI codes (rich forces colour under GITHUB_ACTIONS), one line."""
+    return " ".join(_ANSI.sub("", output).split())
+
+
+# From 2014 on, only entities with an active flag. The planner folds the date test, so
+# `flags` is in the 2014 plans and pruned from the 2013 ones.
+LATE_BRANCH_COHORT = (
+    "select e.entity_id from entities as e"
+    " where e.start_time <= {as_of_date}::date"
+    " and ({as_of_date}::date < date '2014-01-01'"
+    " or exists (select 1 from flags as f where f.entity_id = e.entity_id and f.active))"
+)
+LATE_BRANCH_LABELS = (
+    "select entity_id, max(failed) as outcome from events"
+    " where occurred_at >= {as_of_date}::date"
+    " and occurred_at < {as_of_date}::date + {label_timespan}"
+    " and ({as_of_date}::date < date '2014-01-01'"
+    " or entity_id in (select entity_id from flags where active))"
+    " group by entity_id"
+)
+
+# Wrapped as `select sub.entity_id from (TEMPLATE) as sub`, this template closes the
+# wrapper, deletes every event and reopens it: three statements that each parse.
+SEMICOLON_COHORT = (
+    "select entity_id from entities where start_time <= {as_of_date}::date) as sub;"
+    " delete from events;"
+    " select sub.entity_id from (select entity_id from entities"
+    " where start_time <= {as_of_date}::date"
+)
+
+
+def test_discovery_explains_every_date_so_a_table_read_only_later_is_listed(seeded):
+    config = _config(cohort=LATE_BRANCH_COHORT, labels=LATE_BRANCH_LABELS)
+    assert plan_cuts(config).as_of_dates[0] < date(2014, 1, 1)  # flags pruned there
+    [flags] = _discover(seeded, config, dates=None)
+    assert flags.relation == "public.flags"
+    assert "cohort query" in flags.reason and "label query" in flags.reason
+
+
+def test_cli_null_knowledge_dates_are_counted_not_a_finding(
+    seeded, db_pool, tmp_path, monkeypatch
+):
+    """No cut matches a NULL knowledge date, so those rows are listed as not checked."""
+    with db_pool.connection() as conn:
+        conn.execute("alter table entities alter column start_time drop not null")
+        conn.execute(
+            "insert into entities values (9, null, 27, 'e9'), (10, null, 30, 'e10')"
+        )
+    result, report = _run_cli(tmp_path, monkeypatch, seeded, _config())
+    assert result.exit_code == 0, result.output
+    assert report["findings"] == []
+    reason = (
+        "2 rows of entities have no knowledge date (start_time is null)"
+        " and are never cut"
+    )
+    assert report["not_checked"] == [
+        {"relation": "entities", "source": "entities", "reason": reason}
+    ]
+    assert reason in _plain(result.output)
+
+
+def test_cli_a_trigger_that_cancels_the_cut_exits_2(
+    seeded, db_pool, tmp_path, monkeypatch
+):
+    """A BEFORE DELETE trigger returning NULL keeps every row: the check cannot cut, so
+    it must not report clean."""
+    with db_pool.connection() as conn:
+        conn.execute(
+            "create function keep_events() returns trigger language plpgsql as $$"
+            " begin return null; end $$"
+        )
+        conn.execute(
+            "create trigger events_keep before delete on events"
+            " for each row execute function keep_events()"
+        )
+    result, report = _run_cli(tmp_path, monkeypatch, seeded, _config())
+    assert result.exit_code == 2, result.output
+    assert report == {}
+    text = _plain(result.output)
+    assert "Source 'events' (events)" in text
+    assert "'rows known on or after 2015-01-01'" in text  # the first cut
+    assert "trigger" in text
+
+
+def test_cli_a_template_with_a_semicolon_exits_2_before_connecting(
+    seeded, tmp_path, monkeypatch
+):
+    """The builders refuse ';' (`triage run` does); the check refuses it before it opens
+    a connection, so no statement of the template runs and nothing is deleted."""
+    connections: list[Any] = []
+    connect = psycopg.connect
+
+    def _spy(*args: Any, **kwargs: Any) -> psycopg.Connection[Any]:
+        connections.append(args)
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(psycopg, "connect", _spy)
+    result, report = _run_cli(
+        tmp_path, monkeypatch, seeded, _config(cohort=SEMICOLON_COHORT)
+    )
+    assert result.exit_code == 2, result.output
+    assert report == {}
+    assert connections == []
+    assert "cohort_config.query" in _plain(result.output)
+    assert "no ';'" in _plain(result.output)
+    with pytest.raises(LeakageCheckError, match=r"label_config\.query: .* no ';'"):
+        leakage._Experiment.from_config(_config(labels=CLEAN_LABELS + ";"))
