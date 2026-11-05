@@ -35,7 +35,7 @@ Every artifact along the way (cohort, labels, matrices, models) is content-addre
 
 ## The database schema
 
-triage-pg is **two-tier** (ADR-0002): a small **registry** control-plane database (projects, users, submissions) routes to **one project database per Project**, each holding a `triage` schema. Only predictions and evaluation live in Postgres — matrices are Parquet on local FS / S3. Every built artifact (cohort, labels, matrices, models) is a **content-addressed node** in the derivation DAG, so caching, provenance, and garbage collection all fall out of the schema below (this is the per-project `triage` backbone; the derivation/GC and importance edges are elided — see the full ERD).
+triage-pg is **two-tier**: a small **registry** control-plane database (projects, users, submissions) routes to **one project database per Project**, each holding a `triage` schema. Only predictions and evaluation live in Postgres — matrices are Parquet on local FS / S3. Every built artifact (cohort, labels, matrices, models) is a **content-addressed node** in the derivation DAG, so caching, provenance, and garbage collection all fall out of the schema below (this is the per-project `triage` backbone; the derivation/GC and importance edges are elided — see the full ERD).
 
 ```mermaid
 erDiagram
@@ -59,7 +59,7 @@ erDiagram
 | Source registry & pinning | `sources`, `source_versions`, `run_source_pins` |
 | Cohorts & labels | `cohorts`, `labels`, `protected_groups` |
 | Matrices & models | `matrices`, `models` |
-| Predictions | `predictions` — append-only, range-partitioned on `scored_at` (ADR-0006) |
+| Predictions | `predictions` — append-only, range-partitioned on `scored_at` |
 | Evaluation & bias | `evaluations`, `bias_metrics`, `subsets` / `subset_members` |
 | Postmodeling & importances | `feature_importances`, `individual_importances`, crosstabs / error-tree tables |
 
@@ -70,8 +70,8 @@ erDiagram
 A handful of rules make triage-pg's numbers trustworthy — internalize them before your first run. The [Concepts](https://ccd-ia.github.io/triage-pg/concepts/) pages explain the *why*; the short version:
 
 - **Point-in-time correctness is the cardinal rule.** Features for an `as_of_date` may use only data knowable *strictly before* it — and a feature's knowledge date is when the data *became known*, not when the event occurred. Leakage silently inflates offline metrics and then fails in production.
-- **The imputation split is a leakage boundary (ADR-0009).** Fit-free imputation (zero/constant + an `*_imp` missing-flag) runs in featurizer; fit-based imputation (mean/median/mode) is fitted on the *training split only*, in the triage-pg adapter. Never fit a statistic over the full matrix.
-- **A score is not the latest score (ADR-0006).** Predictions are append-only — stamped with `scored_at`, never overwritten; a read that wants "current" must pick the latest `scored_at`.
+- **The imputation split is a leakage boundary.** Fit-free imputation (zero/constant + an `*_imp` missing-flag) runs in featurizer; fit-based imputation (mean/median/mode) is fitted on the *training split only*, in the triage-pg adapter. Never fit a statistic over the full matrix.
+- **A score is not the latest score.** Predictions are append-only — stamped with `scored_at`, never overwritten; a read that wants "current" must pick the latest `scored_at`.
 - **Matrices are Parquet, not Postgres.** Only predictions and evaluations live in the project database; matrices and serialized models live on local FS / S3.
 - **Label columns follow `problem_type`.** `outcome` for classification/regression; `duration, event_observed` for the survival path.
 
@@ -81,17 +81,17 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 
 | Capability | The triage-pg shape |
 |---|---|
-| **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch (ADR-0010/0026) |
-| **Features** | [`featurizer`](https://github.com/ccd-ia/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins (ADR-0008) |
-| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, Brier/log loss/ECE, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices (ADR-0007). A top-k cut ranks every scored row and the metric counts the labeled ones, as DSSG did — so selective-labels problems (inspections) read correctly (ADR-0033) |
+| **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch |
+| **Features** | [`featurizer`](https://github.com/ccd-ia/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins |
+| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, Brier/log loss/ECE, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices. A top-k cut ranks every scored row and the metric counts the labeled ones, as DSSG did — so selective-labels problems (inspections) read correctly |
 | **Fairness** | SQL group-bys over `protected_groups`: 8 per-group metrics with disparity + τ verdicts, config-driven ingestion, and the Aequitas **fairness tree** as a guidance wizard ([`docs/fairness.md`](docs/fairness.md)) |
 | **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
 | **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)) |
-| **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon (ADR-0027, [`docs/monitoring.md`](docs/monitoring.md)) |
+| **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon ([`docs/monitoring.md`](docs/monitoring.md)) |
 | **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates |
-| **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` (ADR-0002/0025) |
-| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents — all business-logic-free (ADR-0012/0024/0028) |
-| **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam (ADR-0003–0005) |
+| **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` |
+| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents — all business-logic-free |
+| **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam |
 
 | ![Experiment overview — model groups × splits heatmap](docs/images/experiment-overview.png) | ![Model card — curves, calibration, diagnostics](docs/images/model-sheet.png) | ![Production monitoring — drift, volume, outcomes](docs/images/monitoring-view.png) |
 |---|---|---|

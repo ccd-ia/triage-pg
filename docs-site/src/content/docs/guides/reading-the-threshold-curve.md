@@ -65,7 +65,7 @@ metrics. The row at k = 100 therefore equals the stored `precision@100_abs`,
 and the row at 10% is the cut of `precision@10_pct`
 (see [how top-k cuts count labels](/triage-pg/reference/evaluation/#top-k-cuts-the-whole-population-metrics-count-the-labeled-rows)).
 
-Three surfaces read the function:
+Four surfaces read the function:
 
 - `triage model curve MODEL_ID [--date D] [--subset NAME] [--points N] [--json]`
   prints the curve. Without `--date` it uses the model's latest test date.
@@ -75,10 +75,15 @@ Three surfaces read the function:
   reads precision, recall and the four counts at any share of the list.
 - `GET /api/models/{id}/curve?as_of_date=…&subset=<subset_hash>` returns the
   rows as JSON.
+- `triage plot curve` and `triage plot curve-dates` draw the figures on this page
+  from your own project database, as SVG, PNG or PDF.
 
 ## How to read it
 
-![Model 285's threshold curve at 2016-10-01: precision falls from 0.53 at k = 100 to 0.39 at 10% and toward the base rate of 0.26; recall rises from 0.02 to 1](../../../assets/guides/worked-curve.svg)
+![Model 285's threshold curve at 2016-10-01: on the left, precision falls from 0.53 near the top of the list to 0.39 at 10% and toward the base rate of 0.26; on the right, recall rises above the diagonal of a random ranking to 1](../../../assets/guides/worked-curve.svg)
+
+Reproduce on your data: `uv run triage plot curve 285`, with your best model in
+place of 285.
 
 ```text
 $ uv run triage model curve 285 --points 10
@@ -143,9 +148,13 @@ Threshold curve — model 285 @ 2016-10-01 · subset restaurant
   2624    30.0%      0.3495   0.4567      0.2617
 ```
 
-In the dashboard, the "population" selector above the curve switches between
-"full cohort" and each Subset of the Experiment. The dashboard draws the latest
-test date only. For an earlier date, use `--date` or the API's `as_of_date`.
+In the dashboard, the population buttons above the curve turn on "everyone" and
+up to four Subsets of the Experiment. With one population the panel draws its
+full curve and the k-slider. With two or more it overlays them: one precision
+line per population, each with its own dashed base-rate line, so a Subset that
+stays on its base rate stands out next to everyone. The dashboard draws the
+latest test date only. For an earlier date, use `--date` or the API's
+`as_of_date`.
 
 A Subset curve answers "how well does the score order the members of this
 group among themselves?" It does not show what happens to the group on the
@@ -168,7 +177,11 @@ precision 0.53 at k = 100, 0.39 at 10% and 0.31 at 50%, against a base rate of
 
 ### Flat at the base rate
 
-![Model 285 against the constant-prior floor at 2016-10-01: the floor's precision stays at the base rate of 0.26](../../../assets/guides/worked-curve-floor.svg)
+![Model 285 against the constant-prior floor at 2016-10-01: the floor's precision stays at the base rate of 0.26, and its recall stays near the diagonal](../../../assets/guides/worked-curve-floor.svg)
+
+Reproduce on your data: `uv run triage plot curve 285 --compare 286`, with your best
+model in place of 285 and the constant-prior model trained on the same window in
+place of 286.
 
 A model whose precision stays on the base-rate line does not rank. The
 Experiment includes such a model on purpose. The constant-prior floor (model
@@ -299,7 +312,9 @@ Next steps in triage-pg:
 
 ### Find missing features
 
-![Model 285's curve per facility type at 2016-10-01: restaurants and grocery stores rank, schools are nearly flat](../../../assets/guides/worked-curve-subsets.svg)
+![Model 285's curve for everyone and per facility type at 2016-10-01, each type re-ranked inside itself: restaurants and grocery stores rank, schools are nearly flat](../../../assets/guides/worked-curve-subsets.svg)
+
+Reproduce on your data: `uv run triage plot curve 285 --subset restaurant --subset grocery_store --subset school`, with your best model and your Experiment's Subsets.
 
 A Subset whose curve stays near its own base rate is a group the features do
 not order. The Experiment declares three facility types as Subsets. Model 285
@@ -422,6 +437,32 @@ Restaurants are the only facility type over-represented on the list, and the
 restaurant curve ranks within the group (lift 1.53 at 10%), so they are not a
 block either.
 
+The Chicago 311 tutorial has a block. Its best model group in the guides'
+Experiment is a random forest, and its latest model, 93, scores 1,681 requests
+at 2019-12-01 with a primary cut of 10%. The Experiment declares pothole and
+street-light complaints as Subsets:
+
+![Model 93 of the Chicago 311 tutorial at 2019-12-01, for everyone and for two Subsets: pothole complaints stay on or below their base rate of 0.77, far above everyone's 0.19; street-light complaints stay near their base rate of 0.34](../../../assets/guides/worked-chicago311-curve-subsets.svg)
+
+All three readings agree for potholes. Their curve stays at or below their own
+base rate, with precision 0.650 at 10% of the potholes against a base rate of
+0.768, so nothing the model knows orders them. That base rate is four times
+everyone's (0.193). And potholes are every request on the 10% list, against
+1.7% of the rest. The list holds 169 requests and there are 194 potholes, so
+score differences that carry no information decide which potholes make it. On
+2019-11-01 the shape holds again (base rate 0.842 against 0.215). Street-light
+complaints show the first two readings more weakly, but none of them reaches
+the list.
+
+DonorsChoose shows a smaller block on one date. At 2013-12-01, requests of at
+least $500 have a base rate of 0.391 against everyone's 0.280, their curve stays
+near it (lift 1.02 at 10%), and they are 86% of the 30% list against 34% of the
+rest. On the two earlier dates the shape does not hold.
+
+Reproduce on your data: `uv run triage plot curve 93 --date 2019-12-01 --subset pothole --subset street_light`,
+here on the Chicago 311 tutorial database (`just chi311-up`), with your model
+and your Subsets in their place.
+
 Next steps in triage-pg, when a block appears:
 
 - Add the group to `evaluation.subsets` if it is not there, and confirm the
@@ -477,6 +518,11 @@ $ uv run triage check leakage example/dirtyduck/experiment-guides.yaml
 Checked 7 as_of_date(s) in 10.9s: no differences (exit 0).
 ```
 
+DirtyDuck, DonorsChoose and Chicago 311 all lack this pattern; the illustrative figure shows its shape. The nearest is
+Chicago 311's model 93 at 2019-11-01: precision 0.93 at 2% of the population and
+0.85 at 10%, against a base rate of 0.21. It does not hold near 1, and the
+leakage check on that Experiment also exits 0.
+
 Next steps in triage-pg, when a plateau appears:
 
 1. Run `triage check leakage <config>`. For each as_of_date it builds the
@@ -498,7 +544,10 @@ shape.
 
 ### Data quality
 
-![Subset zip_60618 on six test dates: precision at 10% falls from 0.50 to 0.18 between two dates scored by model 277, as the base rate falls from 0.27 to 0.15](../../../assets/guides/worked-curve-dates-zip.svg)
+![Group 41's curve in Subset zip_60618 on six test dates: the 2015-07-01 curve sits far above the others, and the base rate falls from 0.27 to 0.15 between the two dates scored by model 277, then to 0.06](../../../assets/guides/worked-curve-dates-zip.svg)
+
+Reproduce on your data: `uv run triage plot curve-dates 41 --subset zip_60618`, with
+your best model group and a Subset of your Experiment.
 
 The Experiment tests each model on two as_of_dates three months apart. On two
 such dates the model is the same, so a jump in its curve between them is a
@@ -580,6 +629,9 @@ Next steps in triage-pg:
 
 ![Model 285's curve per zip at 2016-10-01, each zip re-ranked inside itself: 60647 with base rate 0.32 and 60618 with base rate 0.10](../../../assets/guides/worked-curve-fairness.svg)
 
+Reproduce on your data: `uv run triage plot curve 285 --subset zip_60647 --subset zip_60618`, with your best model and the Subsets that match your bias audit's
+groups.
+
 DirtyDuck has no demographic columns, so the Experiment's `bias_config` uses
 zip code as a geographic proxy, by assumption. Two zips are also declared as
 Subsets: 60647, the bias audit's reference group (the largest zip), and 60618.
@@ -637,7 +689,11 @@ Next steps in triage-pg:
 
 ### Stability over time
 
-![Group 41 on six test dates: the six curves overlap, and precision at 10% stays between 0.36 and 0.42 while the base rate moves between 0.24 and 0.28](../../../assets/guides/worked-curve-dates.svg)
+![Group 41 on six test dates: the six precision curves overlap, and the base rate of each date, on the right, moves between 0.24 and 0.28](../../../assets/guides/worked-curve-dates.svg)
+
+Reproduce on your data: `uv run triage plot curve-dates 41`, with your best model
+group in place of 41. In the dashboard, the model group sheet's "curve across test
+dates" panel draws the same lines, over everyone or one Subset.
 
 A model group is easier to trust when its curve holds its shape across test
 dates. The
@@ -679,8 +735,9 @@ Next steps in triage-pg:
   `triage audition <experiment_hash> -m precision@ -p 10_pct --rule best_avg_var_penalized`
   picks group 39 here.
 - To select on the recent regime only, add `--from <date>` to `triage audition`.
-- Read the curve of an earlier date with `triage model curve <id> --date <date>`;
-  the dashboard shows only the latest.
+- Read the curve of an earlier date with `triage model curve <id> --date <date>`.
+  The model card shows only the latest; the model group sheet overlays every
+  test date.
 
 ## Caveats
 
@@ -706,7 +763,7 @@ arbitrarily. The 10% cut lies above the block. The
 [model card guide](/triage-pg/guides/reading-the-model-card/) reads ties on the
 score histogram.
 
-**One curve is one date and one model.** The dashboard draws the latest test
+**One curve is one date and one model.** The model card draws the latest test
 date. Read several dates, and several model groups, before acting on a shape.
 
 **The curve says where, not who.** A flat stretch or a jump says that something

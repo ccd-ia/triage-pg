@@ -292,6 +292,9 @@ $ uv run triage postmodel compare 285 283 -p 10_pct
 
 ![Jaccard and rank correlation between the top-10% lists of group 41 and group 39 on six test dates: Jaccard between 0.47 and 0.65, rank correlation between 0.94 and 0.96](../../../assets/guides/worked-list-overlap.svg)
 
+Reproduce on your data: `uv run triage plot overlap 41 39 -p 10_pct`, with your best
+model group and the group it is compared with in place of 41 and 39.
+
 ### How to read Jaccard
 
 Jaccard measures what the people who act will notice: whether the other model

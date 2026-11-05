@@ -154,8 +154,8 @@ RMSE and MAE score a *point* forecast. A **quantile** forecaster
 pinball@τ = mean( τ·(y − ŷ)   when y ≥ ŷ,   (1 − τ)·(ŷ − y)   when y < ŷ )
 ```
 
-It is a **loss** (lower is better) and computed in-Postgres
-(migration 0020). The default regression metric set includes
+It is a **loss** (lower is better) and computed in-Postgres.
+The default regression metric set includes
 `pinball@0.5`, `pinball@0.8`, `pinball@0.95` (median + two upper tails for
 resource-prioritization); `pinball@0.5` is exactly half the MAE. Because
 `triage.higher_is_better` knows `pinball@%` is a loss, audition ranks quantile
@@ -200,7 +200,7 @@ by their prior inspection count, **beats the tree and the forest on
 precision@100** (0.376 vs 0.369 and 0.352). Only the logistic regression clears
 it on both metrics (0.405 vs 0.376, AUC 0.584 vs 0.546). That is exactly the
 humility these heuristic floors are for. (Precision@k ranks every facility and
-counts the inspected ones in the cut, ADR-0033; before v1.3.0 this table ranked
+counts the inspected ones in the cut; before v1.3.0 this table ranked
 only inspected facilities and put the heuristic first.) Regression's Ridge barely beats the constant floor (4.325 vs
 4.462) and the time-series baselines are *worse* — the target's own history isn't
 predictive here, so the ML earns very little. Note the quantile nuance: at the

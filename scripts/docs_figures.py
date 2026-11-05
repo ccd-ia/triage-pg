@@ -12,16 +12,20 @@ crosstab bars, and a good and a bad calibration plot.
 
 Worked figures read the DirtyDuck tutorial database (``just tutorial-up``; PG* or
 DATABASE_URL in the environment) after a run of
-``example/dirtyduck/experiment-guides.yaml`` and its diagnostics. They call the
-dashboard's own read routes (``triage.dashboard.routes``), which are thin selects over
-the SQL the model card uses: ``model_threshold_curve``, ``error_analysis``,
-``error_rules_suspicious``, ``error_rule_recurrence``, ``crosstabs``, ``list_overlap``,
-``monitoring_calibration``, ``model_score_histogram``, ``evaluations``, ``audition``
-and ``bias_metrics``. Two reads have no route and go to the same tables directly: the
-crosstabs' ``nonzero_rate`` rows and the feature-group label of each run. The
-experiment and every model are resolved by query (the audition pick at the
-experiment's primary cut); no id is written in this file. The script never runs an
-experiment; when something is missing it prints the command to run.
+``example/dirtyduck/experiment-guides.yaml`` and its diagnostics. Fourteen of them
+(the curves, error rules, leaves, rule recurrence, crosstabs and list overlap) are
+drawn by :mod:`triage.plots`, exactly as ``triage plot`` draws them, with a provenance
+line added under each; the guides print the command beside each figure. The other
+five (calibration, score histogram, Subset metrics, feature ablation, bias) read the
+dashboard's routes (``triage.dashboard.routes``) and are drawn here. The experiment
+and every model are resolved by query (the audition pick at the experiment's primary
+cut); no id is written in this file, except the crosstabs features and Subsets the
+guides name. The script never runs an experiment; when something is missing it prints
+the command to run.
+
+The ``worked-chicago311-*`` and ``worked-donorschoose-*`` figures are not drawn here:
+each is the output of the ``triage plot`` command printed under it in the guide, run
+against that tutorial's database.
 
 Output: ``docs-site/src/assets/guides/*.svg``, on a transparent background, in mid-tone
 colours that read on the site's light and dark themes. Text is laid out with the
@@ -758,97 +762,6 @@ def _group_name(ctx: Ctx, gid: int) -> str:
     return f"group {gid}: {_short_type(str(g['model_type']))}, {features}"
 
 
-def _curve_rows(
-    ctx: Ctx, model_id: int, as_of: date, subset: str = ""
-) -> list[dict[str, Any]]:
-    return ctx.routes.model_curve(
-        model_id, as_of_date=str(as_of), subset=subset, pool=ctx.pool
-    )
-
-
-def _thin(
-    rows: Sequence[Mapping[str, Any]], points: int = 300
-) -> list[Mapping[str, Any]]:
-    if len(rows) <= points:
-        return list(rows)
-    idx = np.unique(np.linspace(0, len(rows) - 1, points).round().astype(int))
-    return [rows[int(i)] for i in idx]
-
-
-def _at_pct(rows: Sequence[Mapping[str, Any]], pct: float) -> Mapping[str, Any]:
-    n = len(rows)
-    k = max(1, math.ceil(pct * n))
-    return rows[k - 1]
-
-
-def _plot_curve(
-    ax: Axes, rows: Sequence[Mapping[str, Any]], colour: str, **kw: Any
-) -> None:
-    thin = _thin(rows)
-    skip = max(1, len(rows) // 200)  # the first few cuts are a handful of rows
-    pts = [r for r in thin if int(r["k"]) >= skip]
-    ax.plot([r["pct"] for r in pts], [r["prec"] for r in pts], color=colour, **kw)
-
-
-def fig_worked_curve(ctx: Ctx, out: Path, w: Written) -> None:
-    m = ctx.latest(ctx.best_group)
-    d = m.dates[-1]
-    rows = _curve_rows(ctx, m.model_id, d)
-    cut_pct = ctx.cut_pct()
-    fig, ax = plt.subplots(figsize=(7.2, 3.4))
-    thin = _thin(rows)
-    ax.plot(
-        [r["pct"] for r in thin],
-        [r["prec"] for r in thin],
-        color=BLUE,
-        label="precision",
-    )
-    ax.plot(
-        [r["pct"] for r in thin], [r["rec"] for r in thin], color=ORANGE, label="recall"
-    )
-    base = float(rows[-1]["base_rate"])
-    _base_rate(ax, base, legend=True)
-    marks: dict[str, Any] = {}
-    for label, row, height in (
-        ("k = 100", rows[99], 0.98),
-        (ctx.cut, _at_pct(rows, cut_pct) if cut_pct else rows[99], 0.76),
-    ):
-        ax.axvline(float(row["pct"]), color=INK, linewidth=0.8, alpha=0.7)
-        ax.annotate(
-            f"{label}\nprecision {row['prec']:.2f}\nrecall {row['rec']:.2f}",
-            xy=(float(row["pct"]), height),
-            xycoords=("data", "axes fraction"),
-            xytext=(4, 0),
-            textcoords="offset points",
-            va="top",
-            fontsize=8,
-        )
-        marks[label] = {
-            k: row[k] for k in ("k", "pct", "prec", "rec", "tp", "fp", "fn", "tn")
-        }
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    _pct_axis(ax)
-    ax.set_xlabel("population selected (ranked by score)")
-    ax.set_ylabel("precision, recall")
-    ax.set_title(f"Model {m.model_id} at {d}: the threshold curve")
-    ax.legend(loc="center right")
-    _save(
-        fig,
-        "worked-curve.svg",
-        out,
-        w,
-        f"DirtyDuck, {_group_name(ctx, ctx.best_group)}; {len(rows):,} scored facilities.",
-    )
-    w.data["worked-curve"] = {
-        "model_id": m.model_id,
-        "as_of_date": str(d),
-        "n_scored": len(rows),
-        "base_rate": base,
-        "marks": marks,
-    }
-
-
 def _subset_hashes(ctx: Ctx) -> dict[str, str]:
     return {
         str(s["name"]): str(s["subset_hash"])
@@ -856,50 +769,69 @@ def _subset_hashes(ctx: Ctx) -> dict[str, str]:
     }
 
 
-def _subset_panels(
-    ctx: Ctx, names: Sequence[str], name: str, title: str, out: Path, w: Written
+def _save_plot(result: Any, name: str, out_dir: Path, w: Written, note: str) -> None:
+    """Write a :mod:`triage.plots` figure as ``name``, with ``note`` wrapped under it.
+
+    The figure is exactly what ``triage plot`` writes; the note is the guides' provenance
+    line and the only thing added.
+    """
+    from triage.plots.style import INK as PLOT_INK
+    from triage.plots.style import style as plot_style
+
+    fig = result.figure
+    with plot_style():
+        fig.text(
+            0.005,
+            0.0,
+            textwrap.fill(note, int(fig.get_figwidth() * 15.5)),
+            ha="left",
+            va="top",
+            fontsize=8,
+            color=PLOT_INK,
+        )
+    path = result.save(out_dir / name)
+    w.files.append(path)
+    w.data[name.removesuffix(".svg")] = {"summary": result.summary}
+    typer.echo(f"  wrote {path.relative_to(REPO)} — {result.summary}")
+
+
+def fig_worked_curve(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import curve
+
+    m = ctx.latest(ctx.best_group)
+    d = m.dates[-1]
+    result = curve(ctx.pool, m.model_id, as_of_date=d)
+    rows = result.data["everyone"]
+    _save_plot(
+        result,
+        "worked-curve.svg",
+        out,
+        w,
+        f"DirtyDuck, {_group_name(ctx, ctx.best_group)}; {rows[-1]['k']:,} scored"
+        " facilities.",
+    )
+
+
+def fig_worked_curve_subsets(
+    ctx: Ctx, out: Path, w: Written, names: Sequence[str], name: str
 ) -> None:
+    """The best model's curve for everyone and for each Subset, each re-ranked inside."""
+    from triage.plots import curve
+
     m = ctx.latest(ctx.best_group)
     d = m.dates[-1]
     hashes = _subset_hashes(ctx)
-    panels = [("everyone", "")] + [(n, hashes[n]) for n in names if n in hashes]
-    fig, axes = plt.subplots(
-        1, len(panels), figsize=(2.6 * len(panels), 2.8), sharey=True
+    result = curve(
+        ctx.pool, m.model_id, as_of_date=d, subsets=[n for n in names if n in hashes]
     )
-    data: dict[str, Any] = {}
-    for ax, (label, h) in zip(np.atleast_1d(axes), panels, strict=True):
-        rows = _curve_rows(ctx, m.model_id, d, h)
-        _plot_curve(ax, rows, BLUE)
-        base = float(rows[-1]["base_rate"])
-        _base_rate(ax, base)
-        ax.set_title(label.replace("_", " "))
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 0.8)
-        _pct_axis(ax)
-        ax.set_xlabel("share drawn")
-        data[label] = {
-            "n_scored": len(rows),
-            "base_rate": base,
-            **{
-                f"prec@{p:.0%}": float(_at_pct(rows, p)["prec"])
-                for p in (0.05, 0.1, 0.2, 0.3, 0.5)
-            },
-        }
-    np.atleast_1d(axes)[0].set_ylabel("precision")
-    fig.suptitle(title, x=0.01, ha="left", fontsize=10.5, fontweight="bold", color=INK)
-    _save(
-        fig,
+    _save_plot(
+        result,
         name,
         out,
         w,
-        f"DirtyDuck, model {m.model_id} at {d}. Each panel is re-ranked inside its subset"
+        f"DirtyDuck, model {m.model_id} at {d}. Each Subset is re-ranked inside itself"
         " (triage.model_threshold_curve with p_subset_hash).",
     )
-    w.data[name.removesuffix(".svg")] = {
-        "model_id": m.model_id,
-        "as_of_date": str(d),
-        **data,
-    }
 
 
 def fig_worked_curve_dates(
@@ -909,69 +841,12 @@ def fig_worked_curve_dates(
     subset: str = "",
     name: str = "worked-curve-dates.svg",
 ) -> None:
-    """The best group's curve on every test date, for everyone or for one subset."""
-    subset_hash = _subset_hashes(ctx)[subset] if subset else ""
-    pairs = [(m, d) for m in ctx.models[ctx.best_group] for d in m.dates]
-    fig, (ax, ax2) = plt.subplots(
-        1, 2, figsize=(10.0, 3.3), gridspec_kw={"width_ratios": [1.4, 1]}
-    )
-    cut_pct = ctx.cut_pct() or 0.1
-    series: list[dict[str, Any]] = []
-    for (m, d), colour in zip(pairs, DATE_RAMP[-len(pairs) :], strict=False):
-        rows = _curve_rows(ctx, m.model_id, d, subset_hash)
-        _plot_curve(ax, rows, colour, label=f"{d} (model {m.model_id})", linewidth=1.3)
-        at = _at_pct(rows, cut_pct)
-        series.append(
-            {
-                "model_id": m.model_id,
-                "as_of_date": str(d),
-                "prec_at_cut": float(at["prec"]),
-                "rec_at_cut": float(at["rec"]),
-                "base_rate": float(rows[-1]["base_rate"]),
-                "n_scored": len(rows),
-            }
-        )
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 0.8)
-    _pct_axis(ax)
-    ax.set_xlabel("population selected")
-    ax.set_ylabel("precision")
-    ax.set_title("One curve per test date" + (f", subset {subset}" if subset else ""))
-    ax.legend(loc="upper right", fontsize=7.5)
-    xs = np.arange(len(series))
-    ax2.plot(
-        xs,
-        [s["prec_at_cut"] for s in series],
-        color=BLUE,
-        marker="o",
-        markersize=5,
-        label=f"precision at {ctx.cut}",
-    )
-    ax2.plot(
-        xs,
-        [s["base_rate"] for s in series],
-        color=INK,
-        marker="o",
-        markersize=4,
-        linestyle=BASE_DASH,
-        label="base rate",
-    )
-    for x, s in zip(xs, series, strict=True):
-        ax2.annotate(
-            f"{s['prec_at_cut']:.2f}",
-            (x, s["prec_at_cut"]),
-            xytext=(0, 5),
-            textcoords="offset points",
-            ha="center",
-            fontsize=7.5,
-        )
-    ax2.set_xticks(xs, [s["as_of_date"][2:7] for s in series])
-    ax2.set_ylim(0, 0.6)
-    ax2.set_title(f"At the primary cut ({ctx.cut})")
-    ax2.set_xlabel("test date (yy-mm)")
-    ax2.legend(loc="upper right")
-    _save(
-        fig,
+    """The best group's curve on every test date, for everyone or for one Subset."""
+    from triage.plots import curve_dates
+
+    result = curve_dates(ctx.pool, ctx.best_group, subset=subset)
+    _save_plot(
+        result,
         name,
         out,
         w,
@@ -979,10 +854,11 @@ def fig_worked_curve_dates(
         " dates three months apart. Adjacent dates of one model share the model; a jump"
         " between them is a change in the data.",
     )
-    w.data[name.removesuffix(".svg")] = series
 
 
 def fig_worked_curve_floor(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import curve
+
     best = ctx.groups[ctx.best_group]
     floor = next(
         gid
@@ -993,548 +869,170 @@ def fig_worked_curve_floor(ctx: Ctx, out: Path, w: Written) -> None:
     m = ctx.latest(ctx.best_group)
     d = m.dates[-1]
     fm = ctx.peer(floor, m)
-    fig, ax = plt.subplots(figsize=(7.2, 3.0))
-    data: dict[str, Any] = {}
-    for gid, model, colour in ((ctx.best_group, m, BLUE), (floor, fm, ORANGE)):
-        rows = _curve_rows(ctx, model.model_id, d)
-        _plot_curve(
-            ax, rows, colour, label=f"model {model.model_id} ({_group_name(ctx, gid)})"
-        )
-        data[str(model.model_id)] = {
-            "group": gid,
-            "prec@10%": float(_at_pct(rows, 0.1)["prec"]),
-            "prec@50%": float(_at_pct(rows, 0.5)["prec"]),
-            "base_rate": float(rows[-1]["base_rate"]),
-        }
-    _base_rate(ax, float(next(iter(data.values()))["base_rate"]))
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 0.6)
-    _pct_axis(ax)
-    ax.set_xlabel("population selected")
-    ax.set_ylabel("precision")
-    ax.set_title(f"A model against the constant-prior floor, {d}")
-    ax.legend(loc="upper right", fontsize=8)
-    _save(
-        fig,
+    result = curve(ctx.pool, m.model_id, as_of_date=d, compare=fm.model_id)
+    _save_plot(
+        result,
         "worked-curve-floor.svg",
         out,
         w,
-        "DirtyDuck. The floor scores every facility the same, so its list is the"
-        " tie order: precision stays at the base rate.",
-    )
-    w.data["worked-curve-floor"] = {"as_of_date": str(d), **data}
-
-
-def _error_rules(
-    ctx: Ctx, model_id: int, kind: str | None, *, suspicious: bool = False
-) -> list[dict[str, Any]]:
-    """Error-tree leaves of a model, at the suspicious-leaf thresholds (0.02, n 30)."""
-    return ctx.routes.model_error_rules(
-        model_id,
-        error_kind=kind,
-        suspicious=suspicious,
-        max_error_rate=0.02,
-        min_support=30,
-        limit=10_000,
-        pool=ctx.pool,
+        f"DirtyDuck, {_group_name(ctx, ctx.best_group)} against"
+        f" {_group_name(ctx, floor)}. The floor scores every facility the same, so its"
+        " list is the tie order: precision stays at the base rate.",
     )
 
 
 def fig_worked_error_rules(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import error_rules
+
     m = ctx.latest(ctx.best_group)
     d = m.dates[-1]
-    curve = _curve_rows(ctx, m.model_id, d)
-    cut_pct = float(ctx.cut.split("_")[0]) / 100
-    at = _at_pct(curve, cut_pct)
-    population_rate = {
-        "fp": at["fp"] / max(at["tp"] + at["fp"], 1),
-        "fn": at["fn"] / max(at["fn"] + at["tn"], 1),
-    }
-    fig, axes = plt.subplots(2, 1, figsize=(8.0, 8.4))
-    data: dict[str, Any] = {"model_id": m.model_id, "as_of_date": str(d)}
-    for ax, kind, colour, title in (
-        (
-            axes[0],
-            "fp",
-            BLUE,
-            "fp leaves: among the selected, where are the wrong flags?",
-        ),
-        (
-            axes[1],
-            "fn",
-            ORANGE,
-            "fn leaves: among the passed-over, where are the misses?",
-        ),
-    ):
-        rows = _error_rules(ctx, m.model_id, kind)
-        rows = [r for r in rows if r["parameter"] == ctx.cut and r["as_of_date"] == d]
-        rows = sorted(rows, key=lambda r: (-int(r["n_errors"]), str(r["rule"])))[:6][
-            ::-1
-        ]
-        ypos = np.arange(len(rows))
-        ax.barh(ypos, [r["error_rate"] for r in rows], height=0.55, color=colour)
-        for yv, r in zip(ypos, rows, strict=True):
-            ax.annotate(
-                f"{r['error_rate']:.2f}  ({r['n_errors']} of {r['n_matched']})",
-                (r["error_rate"], yv),
-                xytext=(4, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=8,
-            )
-        ax.axvline(population_rate[kind], color=INK, linewidth=1.0, linestyle=BASE_DASH)
-        ax.annotate(
-            f"all {kind} rows {population_rate[kind]:.2f}",
-            (population_rate[kind], 1.0),
-            xycoords=("data", "axes fraction"),
-            xytext=(3, -2),
-            textcoords="offset points",
-            va="top",
-            fontsize=8,
-        )
-        ax.set_yticks(
-            ypos, [str(r["rule"]).replace(" AND ", "\n") for r in rows], fontsize=7.5
-        )
-        ax.set_xlim(0, 1.15)
-        ax.set_xlabel("error rate in the leaf (bar) — errors of rows matched (label)")
-        ax.set_title(title)
-        ax.grid(axis="y", visible=False)
-        data[kind] = {
-            "population_error_rate": float(population_rate[kind]),
-            "leaves": [
-                {
-                    k: r[k]
-                    for k in (
-                        "rule",
-                        "n_matched",
-                        "n_errors",
-                        "error_rate",
-                        "signature",
-                    )
-                }
-                for r in rows[::-1]
-            ],
-        }
-    fig.tight_layout()
-    _save(
-        fig,
+    result = error_rules(ctx.pool, m.model_id, as_of_date=d, parameter=ctx.cut, top=6)
+    _save_plot(
+        result,
         "worked-error-rules.svg",
         out,
         w,
         f"DirtyDuck, model {m.model_id} at {d}, cut {ctx.cut}: the six leaves with the"
         " most errors of each tree (depth 3, at least 30 rows per leaf).",
     )
-    w.data["worked-error-rules"] = data
 
 
 def fig_worked_error_recurrence(ctx: Ctx, out: Path, w: Written) -> None:
-    panels = [(ctx.best_group, "fn"), (ctx.before_group, "fn")]
-    fig, axes = plt.subplots(2, 1, figsize=(8.0, 7.6))
-    data: dict[str, Any] = {}
-    for ax, (gid, kind) in zip(axes, panels, strict=True):
-        rec = ctx.routes.model_group_error_recurrence(
-            gid, parameter=ctx.cut, error_kind=kind, limit=8, pool=ctx.pool
+    """fn rule recurrence for the best group and for its peer on fewer features."""
+    from triage.plots import recurrence
+
+    for gid, name in (
+        (ctx.best_group, "worked-error-recurrence.svg"),
+        (ctx.before_group, "worked-error-recurrence-before.svg"),
+    ):
+        result = recurrence(ctx.pool, gid, ctx.cut, kind="fn")
+        _save_plot(
+            result,
+            name,
+            out,
+            w,
+            f"DirtyDuck, {_group_name(ctx, gid)}. Rules are matched by signature"
+            " (features and split directions, without thresholds) across the group's"
+            " test dates.",
         )
-        rows = [] if rec.get("empty") else rec["rules"][:6]
-        rows = rows[::-1]
-        ypos = np.arange(len(rows))
-        total = int(rows[0]["n_dates_total"]) if rows else 0
-        ax.barh(ypos, [r["n_dates"] for r in rows], height=0.55, color=BLUE)
-        for yv, r in zip(ypos, rows, strict=True):
-            ax.annotate(
-                f"{r['n_dates']} of {r['n_dates_total']} dates,"
-                f" mean error {r['mean_error_rate']:.2f}, mean n {r['mean_support']:.0f}",
-                (r["n_dates"], yv),
-                xytext=(4, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=7.5,
-            )
-        ax.set_yticks(
-            ypos, [str(r["signature"]).replace("|", "\n") for r in rows], fontsize=7.5
-        )
-        ax.set_xlim(0, max(total, 1) * 2.1)
-        ax.set_xticks(range(0, total + 1))
-        ax.set_xlabel("test dates on which the rule recurs")
-        ax.set_title(f"{kind} rules that recur — {_group_name(ctx, gid)}")
-        ax.grid(axis="y", visible=False)
-        data[str(gid)] = {
-            "kind": kind,
-            "n_dates_total": total,
-            "rules": [dict(r) for r in rows[::-1]],
-        }
-    fig.tight_layout()
-    _save(
-        fig,
-        "worked-error-recurrence.svg",
-        out,
-        w,
-        "DirtyDuck, triage.error_rule_recurrence: rules matched by signature (features and"
-        " split directions, without thresholds) across a group's test dates.",
-    )
-    w.data["worked-error-recurrence"] = data
 
 
 def fig_worked_suspicious(ctx: Ctx, out: Path, w: Written) -> None:
-    fig, ax = plt.subplots(figsize=(7.2, 3.6))
-    pts: list[tuple[float, int, str]] = []
-    n_suspicious = 0
-    for m in ctx.models[ctx.best_group]:
-        for kind in ("fp", "confusion"):
-            for r in _error_rules(ctx, m.model_id, kind):
-                if r["parameter"] != ctx.cut:
-                    continue
-                cc = r["class_counts"] or {}
-                if kind == "fp":
-                    err = float(r["error_rate"])
-                else:  # a confusion leaf is "right" when it is almost all TP
-                    err = 1.0 - cc.get("tp", 0) / max(int(r["n_matched"]), 1)
-                pts.append((err, int(r["n_matched"]), kind))
-        n_suspicious += len(_error_rules(ctx, m.model_id, None, suspicious=True))
-    ax.add_patch(Rectangle((0, 30), 0.02, 1e5, color=ORANGE, alpha=0.18, linewidth=0))
-    ax.annotate(
-        "suspicious zone\nerror ≤ 0.02, n ≥ 30", (0.025, 2000), fontsize=8, va="top"
-    )
-    for kind, colour, label in (
-        ("fp", BLUE, "fp leaves (error rate)"),
-        ("confusion", AQUA, "confusion leaves (1 − TP share)"),
-    ):
-        sel = [p for p in pts if p[2] == kind]
-        ax.scatter(
-            [p[0] for p in sel],
-            [p[1] for p in sel],
-            s=18,
-            color=colour,
-            edgecolors="none",
-            alpha=0.85,
-            label=label,
-        )
-    ax.set_yscale("log")
-    ax.set_ylim(20, 5000)
-    ax.set_xlim(0, 1)
-    ax.set_xlabel("share of the leaf the model gets wrong")
-    ax.set_ylabel("rows in the leaf (log)")
-    ax.set_title(f"Suspiciously right leaves: {n_suspicious} found")
-    ax.legend(loc="upper right")
-    _save(
-        fig,
+    from triage.plots import leaves
+
+    result = leaves(ctx.pool, ctx.best_group, ctx.cut)
+    _save_plot(
+        result,
         "worked-suspicious-leaves.svg",
         out,
         w,
         f"DirtyDuck, every leaf of {_group_name(ctx, ctx.best_group)} across its"
-        f" six test dates at {ctx.cut}; triage.error_rules_suspicious returns none.",
+        f" six test dates at {ctx.cut}.",
     )
-    w.data["worked-suspicious-leaves"] = {
-        "n_leaves": len(pts),
-        "n_suspicious": n_suspicious,
-        "min_fp_error": min((p[0] for p in pts if p[2] == "fp"), default=None),
-        "min_confusion_non_tp": min(
-            (p[0] for p in pts if p[2] == "confusion"), default=None
-        ),
-    }
-
-
-def _model_features(ctx: Ctx, gid: int) -> set[str]:
-    return set(ctx.groups[gid]["feature_list"] or [])
-
-
-def _crosstab_mean(ctx: Ctx, model_id: int, d: date) -> list[dict[str, Any]]:
-    rows = ctx.routes.model_crosstabs(
-        model_id, parameter=ctx.cut, limit=100_000, pool=ctx.pool
-    )
-    if isinstance(rows, dict):  # the empty-state envelope
-        return []
-    return [r for r in rows if r["as_of_date"] == d]
-
-
-def _crosstab_stat(
-    ctx: Ctx, model_id: int, d: date, stat: str
-) -> dict[str, dict[str, Any]]:
-    rows = _query(
-        ctx.pool,
-        "select feature, selected_value, rest_value, ratio from triage.crosstabs"
-        " where model_id = %(m)s and parameter = %(p)s and as_of_date = %(d)s"
-        "   and split_kind = 'test' and stat = %(s)s",
-        {"m": model_id, "p": ctx.cut, "d": d, "s": stat},
-    )
-    return {str(r["feature"]): dict(r) for r in rows}
 
 
 def fig_worked_crosstabs_ratio(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import crosstabs
+
     m = ctx.latest(ctx.best_group)
     d = m.dates[-1]
-    used = _model_features(ctx, ctx.best_group)
-    rows = _crosstab_mean(ctx, m.model_id, d)[:15][::-1]
-    fig, ax = plt.subplots(figsize=(8.0, 5.0))
-    ypos = np.arange(len(rows))
-    colours = [BLUE if r["feature"] in used else ORANGE for r in rows]
-    ax.barh(ypos, [math.log10(r["ratio"]) for r in rows], height=0.6, color=colours)
-    for yv, r in zip(ypos, rows, strict=True):
-        x = math.log10(r["ratio"])
-        ax.annotate(
-            f"{r['selected_value']:.3g} vs {r['rest_value']:.3g}",
-            (x, float(yv)),
-            xytext=(4 if x >= 0 else -4, 0),
-            textcoords="offset points",
-            ha="left" if x >= 0 else "right",
-            va="center",
-            fontsize=7.5,
-        )
-    ax.set_yticks(ypos, [str(r["feature"]) for r in rows], fontsize=7.5)
-    _log_ratio_axis(ax)
-    lo = min([math.log10(r["ratio"]) for r in rows] + [-0.3])
-    hi = max([math.log10(r["ratio"]) for r in rows] + [0.3])
-    ax.set_xlim(lo - 0.9, hi + 0.55)
-    ax.set_xlabel("mean on the list ÷ mean on the rest (log scale)")
-    ax.set_title(f"Who is on the list: model {m.model_id} at {d}, top {ctx.cut}")
-    ax.grid(axis="y", visible=False)
-    kinds = [
-        (BLUE, "a feature the model uses"),
-        (ORANGE, "in the matrix, not used by the model"),
-    ]
-    present = [(c, t) for c, t in kinds if c in colours]
-    ax.legend(
-        handles=[Patch(color=c) for c, _ in present],
-        labels=[t for _, t in present],
-        loc="upper left",
-        bbox_to_anchor=(0.0, -0.12),
-        ncols=2,
-    )
-    _save(
-        fig,
+    result = crosstabs(ctx.pool, m.model_id, parameter=ctx.cut, as_of_date=d, top=15)
+    _save_plot(
+        result,
         "worked-crosstabs-ratio.svg",
         out,
         w,
-        "DirtyDuck, the 15 features with the largest |log ratio| of means (the"
-        " route the model card reads). Labels: mean on the list vs mean on the rest.",
+        "DirtyDuck, the 15 features with the largest |log ratio| of means. Labels: mean"
+        " on the list vs mean on the rest.",
     )
-    w.data["worked-crosstabs-ratio"] = {
-        "model_id": m.model_id,
-        "as_of_date": str(d),
-        "rows": [dict(r, used=r["feature"] in used) for r in rows[::-1]],
-    }
+
+
+# The rows the crosstabs guide reads, one per shape it names: the model's own signal,
+# an over-represented category, and a group attribute the model never uses.
+NONZERO_FEATURES = (
+    "MAX(inspections.n_critical)",
+    "STDDEV(inspections.n_critical)",
+    "facilities.facility_type=restaurant",
+    "facilities.facility_type=grocery store",
+    "facilities.zip_code=60622",
+    "facilities.zip_code=60614",
+)
 
 
 def fig_worked_crosstabs_nonzero(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import crosstabs
+
     m = ctx.latest(ctx.best_group)
     d = m.dates[-1]
-    nz = _crosstab_stat(ctx, m.model_id, d, "nonzero_rate")
-    used = _model_features(ctx, ctx.best_group)
-
-    def spread(r: Mapping[str, Any]) -> float:
-        s, o = float(r["selected_value"] or 0), float(r["rest_value"] or 0)
-        return abs(s - o)
-
-    picks = sorted(nz.values(), key=lambda r: (-spread(r), str(r["feature"])))[:4]
-    onehots = sorted(
-        (r for r in nz.values() if str(r["feature"]).startswith("facilities.")),
-        key=lambda r: (-spread(r), str(r["feature"])),
-    )[:6]
-    rows = (picks + [r for r in onehots if r not in picks])[::-1]
-    fig, ax = plt.subplots(figsize=(8.0, 5.4))
-    ypos = np.arange(len(rows))
-    for yv, r in zip(ypos, rows, strict=True):
-        s, o = float(r["selected_value"] or 0), float(r["rest_value"] or 0)
-        ax.plot([o, s], [yv, yv], color=INK, linewidth=1.0, alpha=0.6)
-    ax.scatter(
-        [float(r["selected_value"] or 0) for r in rows],
-        ypos,
-        s=36,
-        color=BLUE,
-        edgecolors="none",
-        label="on the list",
-        zorder=3,
+    result = crosstabs(
+        ctx.pool,
+        m.model_id,
+        parameter=ctx.cut,
+        as_of_date=d,
+        stat="nonzero_rate",
+        features=NONZERO_FEATURES,
     )
-    ax.scatter(
-        [float(r["rest_value"] or 0) for r in rows],
-        ypos,
-        s=36,
-        color=ORANGE,
-        edgecolors="none",
-        label="the rest",
-        zorder=3,
-    )
-    ax.set_yticks(
-        ypos,
-        [
-            f"{r['feature']}{'' if r['feature'] in used else '  (not used)'}"
-            for r in rows
-        ],
-        fontsize=7.5,
-    )
-    ax.set_xlim(0, 1)
-    _pct_axis(ax)
-    ax.set_xlabel("share of facilities with a nonzero value")
-    ax.set_title(f"Nonzero rates, list against the rest: model {m.model_id} at {d}")
-    ax.legend(loc="lower right")
-    _save(
-        fig,
+    _save_plot(
+        result,
         "worked-crosstabs-nonzero.svg",
         out,
         w,
-        "DirtyDuck, triage.crosstabs stat nonzero_rate: the four features with the"
-        " widest gap, then the six facility-type and zip one-hots with the widest gap.",
+        "DirtyDuck, triage.crosstabs stat nonzero_rate: two critical-violation features"
+        " the model uses, then two facility types and two zip codes it does not use.",
     )
-    w.data["worked-crosstabs-nonzero"] = {
-        "model_id": m.model_id,
-        "as_of_date": str(d),
-        "rows": [dict(r, used=r["feature"] in used) for r in rows[::-1]],
-    }
 
 
 def fig_worked_crosstabs_two_groups(ctx: Ctx, out: Path, w: Written) -> None:
+    from triage.plots import crosstabs
+
     a = ctx.latest(ctx.best_group)
     b = ctx.peer(ctx.second_group, a)
     d = a.dates[-1]
-    ra = {r["feature"]: r for r in _crosstab_mean(ctx, a.model_id, d)}
-    rb = {r["feature"]: r for r in _crosstab_mean(ctx, b.model_id, d)}
-    feats = [f for f in list(ra)[:12] if f in rb][::-1]
-    fig, ax = plt.subplots(figsize=(8.0, 4.8))
-    ypos = np.arange(len(feats))
-    h = 0.36
-    ax.barh(
-        ypos + h / 2,
-        [math.log10(ra[f]["ratio"]) for f in feats],
-        height=h,
-        color=BLUE,
-        label=f"model {a.model_id} ({_group_name(ctx, ctx.best_group)})",
+    result = crosstabs(
+        ctx.pool,
+        a.model_id,
+        parameter=ctx.cut,
+        as_of_date=d,
+        compare=b.model_id,
+        top=12,
     )
-    ax.barh(
-        ypos - h / 2,
-        [math.log10(rb[f]["ratio"]) for f in feats],
-        height=h,
-        color=ORANGE,
-        label=f"model {b.model_id} ({_group_name(ctx, ctx.second_group)})",
-    )
-    ax.set_yticks(ypos, feats, fontsize=7.5)
-    _log_ratio_axis(ax)
-    ax.set_xlabel("mean on the list ÷ mean on the rest (log scale)")
-    ax.set_title(f"Two groups' lists at {d}, top {ctx.cut}")
-    ax.legend(loc="lower right", fontsize=7.5)
-    ax.grid(axis="y", visible=False)
-    _save(
-        fig,
+    _save_plot(
+        result,
         "worked-crosstabs-two-groups.svg",
         out,
         w,
-        "DirtyDuck, the twelve features the first list separates most, read for"
-        " both lists from triage.crosstabs.",
+        f"DirtyDuck, model {a.model_id} ({_group_name(ctx, ctx.best_group)}) and model"
+        f" {b.model_id} ({_group_name(ctx, ctx.second_group)}): the twelve features the"
+        " first list separates most, read for both lists.",
     )
-    w.data["worked-crosstabs-two-groups"] = {
-        "as_of_date": str(d),
-        "a": a.model_id,
-        "b": b.model_id,
-        "ratios": {f: [ra[f]["ratio"], rb[f]["ratio"]] for f in feats[::-1]},
-    }
 
 
 def fig_worked_crosstabs_dates(ctx: Ctx, out: Path, w: Written) -> None:
-    latest = ctx.latest(ctx.best_group)
-    top = [
-        r["feature"] for r in _crosstab_mean(ctx, latest.model_id, latest.dates[-1])[:4]
-    ]
-    pairs = [(m, d) for m in ctx.models[ctx.best_group] for d in m.dates]
-    fig, ax = plt.subplots(figsize=(8.0, 3.4))
-    xs = np.arange(len(pairs))
-    data: dict[str, list[float | None]] = {}
-    for feature, colour in zip(top, SERIES, strict=False):
-        vals: list[float | None] = []
-        for m, d in pairs:
-            row = next(
-                (
-                    r
-                    for r in _crosstab_mean(ctx, m.model_id, d)
-                    if r["feature"] == feature
-                ),
-                None,
-            )
-            vals.append(float(row["ratio"]) if row else None)
-        data[feature] = vals
-        ax.plot(
-            xs,
-            [v if v is not None else np.nan for v in vals],
-            color=colour,
-            marker="o",
-            markersize=4,
-            label=feature,
-        )
-    ax.set_xticks(
-        xs, [f"{str(d)[2:7]}\nmodel {m.model_id}" for m, d in pairs], fontsize=7.5
-    )
-    ax.set_ylim(bottom=0)
-    ax.set_ylabel("mean ratio, list ÷ rest")
-    ax.set_title(f"The same crosstab across test dates, top {ctx.cut}")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=7.5)
-    _save(
-        fig,
+    from triage.plots import crosstabs_dates
+
+    result = crosstabs_dates(ctx.pool, ctx.best_group, parameter=ctx.cut, top=4)
+    _save_plot(
+        result,
         "worked-crosstabs-dates.svg",
         out,
         w,
-        f"DirtyDuck, {_group_name(ctx, ctx.best_group)}: the four features its"
-        " latest list separates most, on every test date.",
+        f"DirtyDuck, {_group_name(ctx, ctx.best_group)}: the four features its latest"
+        " list separates most, on every test date.",
     )
-    w.data["worked-crosstabs-dates"] = {
-        "dates": [str(d) for _, d in pairs],
-        "models": [m.model_id for m, _ in pairs],
-        "ratios": data,
-    }
 
 
 def fig_worked_overlap(ctx: Ctx, out: Path, w: Written) -> None:
-    rows: list[dict[str, Any]] = []
-    for a in ctx.models[ctx.best_group]:
-        b = ctx.peer(ctx.second_group, a)
-        for r in ctx.routes.model_overlap(
-            a.model_id, b.model_id, parameter=ctx.cut, split_kind="test", pool=ctx.pool
-        ):
-            rows.append(dict(r, model_a=a.model_id, model_b=b.model_id))
-    fig, ax = plt.subplots(figsize=(7.2, 3.0))
-    xs = np.arange(len(rows))
-    h = 0.36
-    ax.bar(
-        xs - h / 2,
-        [r["jaccard"] for r in rows],
-        width=h,
-        color=BLUE,
-        label="Jaccard of the two lists",
-    )
-    ax.bar(
-        xs + h / 2,
-        [r["rank_corr"] for r in rows],
-        width=h,
-        color=ORANGE,
-        label="rank correlation (Spearman)",
-    )
-    for x, r in zip(xs, rows, strict=True):
-        ax.annotate(
-            f"{r['jaccard']:.2f}",
-            (x - h / 2, r["jaccard"]),
-            xytext=(0, 2),
-            textcoords="offset points",
-            ha="center",
-            fontsize=7.5,
-        )
-    ax.set_xticks(
-        xs,
-        [
-            f"{str(r['as_of_date'])[2:7]}\n{r['model_a']} vs {r['model_b']}"
-            for r in rows
-        ],
-        fontsize=7.5,
-    )
-    ax.set_ylim(0, 1.1)
-    ax.set_title(f"Do the two best groups flag the same facilities? (top {ctx.cut})")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.grid(axis="x", visible=False)
-    _save(
-        fig,
+    from triage.plots import overlap
+
+    result = overlap(ctx.pool, ctx.best_group, ctx.second_group, ctx.cut)
+    _save_plot(
+        result,
         "worked-list-overlap.svg",
         out,
         w,
         f"DirtyDuck, triage.list_overlap: {_group_name(ctx, ctx.best_group)} against"
         f" {_group_name(ctx, ctx.second_group)}.",
     )
-    w.data["worked-list-overlap"] = rows
 
 
 def fig_worked_calibration(ctx: Ctx, out: Path, w: Written) -> None:
@@ -1872,22 +1370,16 @@ def worked(config: Path, out: Path, w: Written) -> None:
     ]
     for step in steps:
         step(ctx, out, w)
-    _subset_panels(
+    fig_worked_curve_subsets(
         ctx,
+        out,
+        w,
         ["restaurant", "grocery_store", "school"],
         "worked-curve-subsets.svg",
-        "The curve per facility type",
-        out,
-        w,
     )
     fig_worked_curve_dates(ctx, out, w, "zip_60618", "worked-curve-dates-zip.svg")
-    _subset_panels(
-        ctx,
-        ["zip_60647", "zip_60618"],
-        "worked-curve-fairness.svg",
-        "The curve per zip code (the bias_config attribute)",
-        out,
-        w,
+    fig_worked_curve_subsets(
+        ctx, out, w, ["zip_60647", "zip_60618"], "worked-curve-fairness.svg"
     )
     ctx.pool.close()
 

@@ -35,8 +35,8 @@ See [identity and caching](/triage-pg/concepts/identity-and-caching/) and
 
 ## My precision@k does not match DSSG triage's, or changed after upgrading to v1.3.0.
 
-Check how many of your test rows have a label. Since v1.3.0 (migration 0024,
-ADR-0033) triage-pg computes threshold metrics the way DSSG triage did: rank
+Check how many of your test rows have a label. Since v1.3.0 triage-pg computes
+threshold metrics the way DSSG triage did: rank
 every scored row, cut at k, then count only the labeled rows inside the cut.
 Before v1.3.0 it dropped the unlabeled rows first, so `precision@100_abs` meant
 "the top 100 among labeled entities". When every test row is labeled the two
@@ -102,7 +102,7 @@ from triage.predictions
 order by model_id, entity_id, as_of_date, split_kind, scored_at desc
 ```
 
-`triage.latest_predictions` is this query (since migration 0025, v1.3.1).
+`triage.latest_predictions` is this query (since v1.3.1).
 
 This is a concept to teach, not a bug: "a score is not the latest score." The
 payoff is that prediction history, drift, and trajectories are already recorded

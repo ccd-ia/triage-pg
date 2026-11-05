@@ -1,0 +1,242 @@
+# Chicago 311 — the experiment that searches this dataset for the reading guides'
+# patterns (docs-site guides/*).
+#
+# The guides teach how to read the threshold curve, the error trees and the crosstabs,
+# with worked examples from DirtyDuck. Seven of their patterns do not occur in
+# DirtyDuck. This file runs the Chicago 311 tutorial's problem with what is needed to
+# look for them here, so each pattern is either shown on real data or recorded as
+# absent. Nothing is planted.
+#
+# How it differs from experiment.yaml, and why:
+#
+#   * temporal_config: each split is tested on two consecutive monthly as_of_dates
+#     (test_durations '2month' x test_as_of_date_frequencies '1month'): 3 splits, 6
+#     test dates. Two adjacent dates scored by the same model separate a change in
+#     the data from a change in the model. temporal_config is part of experiment
+#     identity, so this file gets its own experiment_hash; with experiment.yaml's
+#     temporal_config its Runs would join the tutorial's Experiment and its audition.
+#   * evaluation: cuts at 300 requests (the tutorial's bias_config cut) and at 10% of
+#     the Cohort. 10_pct is the primary cut of the error trees and crosstabs; a
+#     monthly Cohort holds 1,681-4,433 requests on the test dates.
+#   * evaluation.subsets: three groups, chosen to probe the guides' patterns:
+#     pothole and street_light are the two request types whose base rates sit above
+#     everyone's (a group the model could lift as a block, or rank near-perfectly);
+#     austin is the community area with the highest base rate, the tutorial's own
+#     Subset example.
+#   * grid_config: a forest, a tree, a scaled logistic regression, the constant-prior
+#     floor and the tutorial's neighbourhood-load ranker: 5 model groups, 15 models.
+#   * sources: a distinct version_label, so no artifact derived from an earlier load
+#     is reused.
+#
+# The cohort, label and feature definitions are experiment.yaml's, unchanged (see that
+# file for the commentary).
+#
+# Reproduce (tutorial DB up with `just chi311-up`; PG* pointing at it, credentials in
+# chicago311/docker-compose.yml):
+#
+#   uv run triage db upgrade
+#   uv run triage run example/chicago311/experiment-guides.yaml \
+#       --project-path "$HOME/.cache/triage-pg/chicago311-guides"
+#   # The best group is the audition pick (rule best_average_value) at the primary cut:
+#   uv run triage audition <experiment_hash> -m precision@ -p 10_pct
+#   # For every model of the best group:
+#   uv run triage postmodel error-tree <model_id> -p 10_pct --kind all
+#   uv run triage postmodel crosstabs <model_id> -p 10_pct
+#   uv run triage postmodel error-rules <model_id> --suspicious
+#   uv run triage model curve <model_id> [--subset pothole] [--date YYYY-MM-DD]
+#   uv run triage check leakage example/chicago311/experiment-guides.yaml
+
+problem_type: classification
+
+task_framing: early_warning
+
+temporal_config:
+  feature_start_time: '2019-01-01'
+  feature_end_time: '2020-01-15'
+  label_start_time: '2019-02-01'
+  label_end_time: '2020-01-15'
+  model_update_frequency: '3month'
+  training_as_of_date_frequencies: '1month'
+  training_label_timespans: ['14day']
+  # Two test dates per split, one month apart (months 0 and 1 of a half-open 2-month
+  # window).
+  test_as_of_date_frequencies: '1month'
+  test_durations: '2month'
+  test_label_timespans: ['14day']
+  max_training_histories: '5year'
+
+cohort_config:
+  name: filed_requests
+  query: |
+    select e.entity_id
+    from ontology.entities as e
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+label_config:
+  name: slow_resolution
+  query: |
+    select
+      e.entity_id,
+      (o.closed_date is null
+       or o.closed_date >= e.created_date + {label_timespan})::int as outcome
+    from ontology.entities as e
+    join ontology.request_outcome as o using (entity_id)
+    where e.created_date >= {as_of_date}::date - interval '1 month'
+      and e.created_date <  {as_of_date}::date
+
+feature_config:
+  target: requests
+  max_depth: 2
+  intervals:
+    - P7D
+    - P30D
+    - P90D
+  aggregations:
+    - count
+    - sum
+    - mean
+    - max
+    - stddev
+  transformations:
+    - identity
+
+  entities:
+    - alias: requests
+      id: entity_id
+      table: ontology.entities
+      variables:
+        sr_type:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Weed Removal Request"
+            - "Street Light Out Complaint"
+            - "Pothole in Street Complaint"
+            - "Graffiti Removal Request"
+            - "Rodent Baiting/Rat Complaint"
+        owner_department:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Streets and Sanitation"
+            - "CDOT - Department of Transportation"
+        origin:
+          type: categorical
+          role: categorical
+          vocabulary:
+            - "Phone Call"
+            - "Mass Entry"
+            - "Internet"
+            - "Mobile Device"
+            - "Alderman's Office"
+        ward:
+          type: numeric
+        created_day_of_week:
+          type: numeric
+        created_hour:
+          type: numeric
+        created_month:
+          type: numeric
+
+    - alias: area_backlog
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables:
+        sr_type:
+          type: categorical
+
+    - alias: type_demand
+      id: ~
+      table: ontology.events
+      temporal_ix: date
+      variables: {}
+
+  relationships:
+    - parent:
+        entity: requests
+        key: community_area
+      child:
+        entity: area_backlog
+        key: community_area
+      temporal:
+        mode: as_of
+    - parent:
+        entity: requests
+        key: sr_short_code
+      child:
+        entity: type_demand
+        key: sr_short_code
+      temporal:
+        mode: as_of
+
+grid_config:
+  'sklearn.ensemble.RandomForestClassifier':
+    n_estimators: [100]
+    max_depth: [8]
+    min_samples_leaf: [20]
+    max_features: ['sqrt']
+    n_jobs: [-1]
+  'sklearn.tree.DecisionTreeClassifier':
+    max_depth: [5]
+    min_samples_split: [50]
+  'triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression':
+    C: [1.0]
+    penalty: ['l2']
+    max_iter: [1000]
+  'sklearn.dummy.DummyClassifier':
+    strategy: ['prior']
+  'triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature':
+    rules:
+      - - feature: 'COUNT(area_backlog.date)'
+          low_value_high_score: false
+
+evaluation:
+  metrics: [precision@, recall@, auc_roc, average_precision]
+  thresholds: [300_abs, 10_pct]
+  subsets:
+    - name: pothole
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.sr_type = 'Pothole in Street Complaint'
+          and e.created_date >= {as_of_date}::date - interval '1 month'
+          and e.created_date <  {as_of_date}::date
+    - name: street_light
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.sr_type = 'Street Light Out Complaint'
+          and e.created_date >= {as_of_date}::date - interval '1 month'
+          and e.created_date <  {as_of_date}::date
+    - name: austin
+      query: |
+        select e.entity_id
+        from ontology.entities as e
+        where e.community_area = 25
+          and e.created_date >= {as_of_date}::date - interval '1 month'
+          and e.created_date <  {as_of_date}::date
+
+sources:
+  - name: ontology_entities
+    relation: ontology.entities
+    knowledge_date_column: created_date
+    version_label: 'chicago311-guides-v1'
+    role: entity
+    type_column: sr_type
+    description: Filed 311 service requests — the target entity (Chicago 311, 2019 subset)
+
+  - name: ontology_events
+    relation: ontology.events
+    knowledge_date_column: date
+    version_label: 'chicago311-guides-v1'
+    role: event
+    type_column: sr_type
+    description: Filing events (location/type/date) — the backlog child stream (Chicago 311)
+
+imputation_config:
+  count:
+    type: zero_noflag
+  all:
+    type: zero

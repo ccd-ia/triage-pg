@@ -371,6 +371,19 @@ def test_crosstabs_draws_the_readers_ranking(db_pool_greenfield, diagnosed, tmp_
     plots.crosstabs(pool, a, CUT, D1, "nonzero_rate", compare=b)
 
 
+def test_crosstabs_draws_only_the_named_features(db_pool_greenfield, diagnosed):
+    """features= picks rows out of the whole ranking, in its order, and ignores top."""
+    pool = db_pool_greenfield
+    a = diagnosed.group.model_a
+    ranking = readers.crosstabs(pool, a, CUT, "nonzero_rate", ALL, D1)
+    named = [ranking[-1]["feature"], ranking[0]["feature"]]  # given out of order
+    result = plots.crosstabs(pool, a, CUT, D1, "nonzero_rate", top=1, features=named)
+    assert result.data == {f"model {a}": [ranking[0], ranking[-1]]}
+    assert "2 features by nonzero rate" in result.summary
+    with pytest.raises(ValueError, match="Not in model .*'s crosstabs .*: nowhere"):
+        plots.crosstabs(pool, a, CUT, D1, features=[ranking[0]["feature"], "nowhere"])
+
+
 def test_crosstabs_dates_reads_each_model_and_date(
     db_pool_greenfield, diagnosed, tmp_path
 ):

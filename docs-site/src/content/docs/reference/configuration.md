@@ -119,7 +119,7 @@ problem_type: classification   # | regression_ranking | regression | survival
 
 **Shape.** A mapping with a `query`, an optional cosmetic `name` and
 `description`, and an optional `forward_query` (the production cohort that
-`triage score` visits, ADR-0032). No other key is accepted:
+`triage score` visits). No other key is accepted:
 
 ```yaml
 cohort_config:
@@ -481,10 +481,10 @@ bias_config:
 `metrics: [precision@, recall@, auc_roc, average_precision]`,
 `thresholds: [100_abs, 10_pct]`; the regression family →
 `[rmse, mae, r2, pinball@0.5, pinball@0.8, pinball@0.95]` (pinball@τ is the
-quantile-loss metric a τ-quantile forecaster minimizes, migration 0020);
+quantile-loss metric a τ-quantile forecaster minimizes);
 survival → `[c_index]`.
 
-**Probability metrics (classification, opt-in, migration 0023).** `brier`,
+**Probability metrics (classification, opt-in).** `brier`,
 `log_loss` and `ece@<bins>` (expected calibration error, e.g. `ece@10`) score the
 probability a model emits, not only its ranking. List them under `metrics`; they
 are not in the default set. They match scikit-learn to 1e-9: `brier_score_loss`,
@@ -620,7 +620,7 @@ you *read* the numbers, not how they're computed; the dashboard turns it into a
 pill and adjusts the %-labeled expectation. See
 [the full problem space](/triage-pg/reference/problems/).
 
-**Optional.** Identity-neutral by construction (migration 0019) — adding or
+**Optional.** Identity-neutral by construction — adding or
 changing it never forks an experiment's hash.
 
 **Shape.**

@@ -378,7 +378,7 @@ returns no row for keeps a NULL label, and nothing turns it into a 0:
 - *Evaluation* ranks every entity in the cohort, because that is the list you
   act on, cuts it at k, and computes precision over the inspected entities
   inside the cut. `num_labeled_above_threshold` says how many there were
-  ([evaluation](/triage-pg/reference/evaluation/), ADR-0033).
+  ([evaluation](/triage-pg/reference/evaluation/)).
 - Do **not** write `coalesce(…, 0)` into this regime's label query to "fill" the
   gaps. That is the early-warning query above, and it turns every uninspected
   entity into a pass in the test labels too.

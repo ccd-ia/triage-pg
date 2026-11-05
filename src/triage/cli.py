@@ -3347,6 +3347,12 @@ def plot_crosstabs(
     top: int = typer.Option(
         15, "--top", callback=natural_number, help="Features drawn."
     ),
+    feature: Optional[list[str]] = typer.Option(
+        None,
+        "--feature",
+        help="Draw only this feature (its exact name); repeat for several. Replaces"
+        " --top.",
+    ),
     output: Optional[pathlib.Path] = typer.Option(
         None, "--output", "-o", help=_OUTPUT_HELP.format("crosstabs-MODEL.svg")
     ),
@@ -3355,14 +3361,21 @@ def plot_crosstabs(
 
     --stat mean draws the ratio of means on a log axis; --stat nonzero the share of
     entities with a nonzero value, on the list and off it. --compare reads a second
-    model for the same features.
+    model for the same features. --feature draws the named features only.
     """
 
     def draw(pool: DictRowPool) -> PlotResult:
         from triage import plots
 
         return plots.crosstabs(
-            pool, model_id, parameter, as_of_date, stat, compare, top
+            pool,
+            model_id,
+            parameter,
+            as_of_date,
+            stat,
+            compare,
+            top,
+            features=feature or (),
         )
 
     _write_plot(ctx, output, f"crosstabs-{model_id}.svg", draw, [model_id, compare])
