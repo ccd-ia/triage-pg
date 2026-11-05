@@ -298,9 +298,38 @@ def _run_featurizer(
             table = featurizer.to_arrow(connection=conn, impute=True)
             if not hasattr(table, "column_names"):  # an OrderedDict of column groups
                 table = _merge_arrow_groups(table, target_id_col)
+        table = _drop_carried_keys(table, featurizer)
     finally:
         Path(config_path).unlink(missing_ok=True)
     return table, target_id_col
+
+
+def _carried_key_columns(featurizer) -> list[str]:
+    """The target's identifier columns, other than its id, that are not features.
+
+    featurizer projects every identifier column of the target next to its id: the temporal
+    and spatial indexes, the keys of the relationships the target is a parent of, and its
+    ``index``-typed variables (``Entity.identifier_columns``). Its feature manifest leaves
+    them out, but the output table carries them, and triage-pg used to read every non-key
+    column as a feature (#50): a surrogate key went into the design matrix as a number. A
+    column the user also declares as a variable is in the manifest, so it stays a feature.
+    """
+    target = featurizer.target
+    features = {entry.column for entry in featurizer.feature_manifest}
+    return [
+        name
+        for name in target.identifier_columns()
+        if name != target.id.name and name not in features
+    ]
+
+
+def _drop_carried_keys(table, featurizer):
+    """``table`` without :func:`_carried_key_columns`, so it holds the keys and the features."""
+    carried = [c for c in _carried_key_columns(featurizer) if c in table.column_names]
+    if not carried:
+        return table
+    logger.info(f"Dropping the target's identifier columns {carried}: not features")
+    return table.drop_columns(carried)
 
 
 def _materialize_as_of_dates_psycopg(
