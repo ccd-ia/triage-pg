@@ -24,7 +24,8 @@ affect it. All of it runs on **one connection, inside one transaction that alway
 ROLLBACK**:
 
 1. The cuts are sorted in descending order, so the deletes are cumulative and each row is
-   deleted at most once.
+   deleted at most once. Each delete must remove exactly the rows a ``count(*)`` of its
+   predicate matched just before; a trigger or rule that cancels it stops the check.
 2. Other sessions never see the deletes (MVCC). A deferred constraint on a temporary table
    makes any ``COMMIT`` on the connection fail, so even a library that committed by mistake
    could not make the deletes permanent. This module has no commit call; a test enforces it.
@@ -40,7 +41,9 @@ and for features the columns, whose names encode the relationship and aggregatio
 read the data.
 
 Relations the queries read but the config does not declare as Sources are found through
-``explain (format json)`` (no SQL parsing, ADR-0014) and reported as not checked.
+``explain (format json)`` on every planned date (no SQL parsing, ADR-0014) and reported as
+not checked. So are the rows of a cuttable Source whose knowledge date is NULL, which no
+cut deletes.
 """
 
 from __future__ import annotations
@@ -60,7 +63,9 @@ import psycopg
 from psycopg import pq
 from pydantic import ValidationError
 
+from triage.adapters.cohort import _validate_template as _validate_cohort_template
 from triage.adapters.cohort import render_cohort_query
+from triage.adapters.labels import _validate_template as _validate_label_template
 from triage.adapters.labels import label_value_columns, render_label_query
 from triage.adapters.matrix import (
     _featurizer_config_yaml,
@@ -99,6 +104,7 @@ __all__ = [
     "delete_after",
     "discover_relations",
     "fingerprints",
+    "null_knowledge_dates",
     "plan_cuts",
     "preflight_privileges",
 ]
@@ -753,6 +759,45 @@ def preflight_privileges(
         )
 
 
+def null_knowledge_dates(
+    conn: psycopg.Connection[Any], sources: Sequence[SourceSpec]
+) -> list[NotChecked]:
+    """The rows of each cuttable Source whose knowledge date is NULL, as not checked.
+
+    No cut matches a NULL knowledge date, so those rows stay in every rebuild and leakage
+    through them is not tested. A count is not a finding and does not change the exit code.
+    """
+    out: list[NotChecked] = []
+    for source in sources:
+        column = source.knowledge_date_column
+        if column is None:
+            continue
+        rows = _fetch(
+            conn,
+            f"select count(*) from {_quote_relation(source.relation)}"
+            + f" where {_quote_column(column)} is null",
+            f"counting the rows of Source {source.name!r} ({source.relation})"
+            + f" with a NULL {column}",
+        )
+        n = int(rows[0][0])
+        if n:
+            rows_have = (
+                f"1 row of {source.name} has"
+                if n == 1
+                else f"{n} rows of {source.name} have"
+            )
+            are = "is" if n == 1 else "are"
+            out.append(
+                NotChecked(
+                    relation=source.relation,
+                    source=source.name,
+                    reason=f"{rows_have} no knowledge date ({column} is null)"
+                    + f" and {are} never cut",
+                )
+            )
+    return out
+
+
 def delete_after(
     conn: psycopg.Connection[Any], sources: Sequence[SourceSpec], cut: CutKey
 ) -> dict[str, int]:
@@ -762,26 +807,56 @@ def delete_after(
     holds. Each delete runs under a savepoint: a failure (a foreign key broken because a
     referencing row is known before the row it references, a lock held past
     ``lock_timeout``) is rolled back to it and raised as :class:`LeakageCheckError`.
+
+    Each delete is verified against a ``count(*)`` of its predicate taken just before. A
+    BEFORE DELETE trigger that returns NULL, or a DO INSTEAD rule, cancels a delete without
+    an error; the artifact rebuilt after it would equal the baseline and read as clean. A
+    mismatch is therefore raised as :class:`LeakageCheckError`, naming the Source and cut.
     """
     deleted: dict[str, int] = {}
     for source in sorted(sources, key=lambda s: s.is_entity):
         if source.knowledge_date_column is None:
             continue
         op = ">" if cut.keeps_equal(source) else ">="
-        statement = (
-            f"delete from {_quote_relation(source.relation)}"
-            + f" where {_quote_column(source.knowledge_date_column)} {op} %s"
-        )
+        relation = _quote_relation(source.relation)
+        predicate = f"{_quote_column(source.knowledge_date_column)} {op} %s"
         with conn.cursor() as cur:
             cur.execute(_sql(f"savepoint {_DELETE_SAVEPOINT}"))
             try:
-                cur.execute(_sql(statement), (cut.at,))
+                cur.execute(
+                    _sql(f"select count(*) from {relation} where {predicate}"),
+                    (cut.at,),
+                )
+                row = cur.fetchone()
+                assert row is not None  # count(*) returns one row
+                matched = int(row[0])
+                cur.execute(
+                    _sql(f"delete from {relation} where {predicate}"), (cut.at,)
+                )
             except psycopg.Error as exc:
                 cur.execute(_sql(f"rollback to savepoint {_DELETE_SAVEPOINT}"))
                 raise LeakageCheckError(_delete_failure(source, cut, exc)) from exc
+            if cur.rowcount != matched:
+                cur.execute(_sql(f"rollback to savepoint {_DELETE_SAVEPOINT}"))
+                raise LeakageCheckError(
+                    _cut_not_applied(source, cut, matched, cur.rowcount)
+                )
             deleted[source.name] = cur.rowcount
             cur.execute(_sql(f"release savepoint {_DELETE_SAVEPOINT}"))
     return deleted
+
+
+def _cut_not_applied(
+    source: SourceSpec, cut: CutKey, matched: int, deleted: int
+) -> str:
+    return (
+        f"the cut '{cut.describe()}' matched {matched} rows of Source {source.name!r}"
+        + f" ({source.relation}) but deleted {deleted}. A BEFORE DELETE trigger that"
+        + " returns NULL, or a DO INSTEAD rule, on that table cancels deletes (another"
+        + " session deleting rows at the same moment would too). A check that cannot"
+        + " cut cannot report clean: disable the trigger or rule for the check, or run"
+        + f" it on a copy of {source.relation} without them."
+    )
 
 
 def _delete_failure(source: SourceSpec, cut: CutKey, exc: psycopg.Error) -> str:
@@ -838,28 +913,36 @@ def discover_relations(
 ) -> list[NotChecked]:
     """Relations the cohort, labels or features read that no Source declares.
 
-    Reads the planner's JSON plan for one rendered cohort query, one rendered label query,
-    and a ``select *`` over each table featurizer reads (entity tables and
-    ``graph_relationships`` edge tables), so views resolve to their base
-    tables and no SQL is parsed (ADR-0014). Relations in the ``triage`` and system schemas
-    are ignored. A declared Source counts through the base tables it reads, so a declared
-    view covers the tables beneath it.
+    Reads the planner's JSON plan for the rendered cohort query at every planned
+    as_of_date, the rendered label query at every (as_of_date, label timespan), and a
+    ``select *`` over each table featurizer reads (entity tables and
+    ``graph_relationships`` edge tables), so views resolve to their base tables and no SQL
+    is parsed (ADR-0014). The relation sets are merged across dates: a table the planner
+    prunes on one date (a partition, or a branch on ``{as_of_date}``) is still found on the
+    dates that read it. Relations in the ``triage`` and system schemas are ignored. A
+    declared Source counts through the base tables it reads, so a declared view covers the
+    tables beneath it.
     """
-    as_of_date = plan.as_of_dates[0]
     reads: dict[tuple[str, str], set[str]] = defaultdict(set)
 
-    cohort_sql = render_cohort_query(experiment.cohort_query, as_of_date)
-    for rel in _explain_relations(
-        conn, f"select sub.entity_id from ({cohort_sql}) as sub", "the cohort query"
-    ):
-        reads[rel].add("cohort query")
-    label_sql = render_label_query(
-        experiment.label_query, as_of_date, plan.label_timespans[as_of_date][0]
-    )
-    for rel in _explain_relations(
-        conn, f"select * from ({label_sql}) as sub", "the label query"
-    ):
-        reads[rel].add("label query")
+    for as_of_date in plan.as_of_dates:
+        cohort_sql = render_cohort_query(experiment.cohort_query, as_of_date)
+        for rel in _explain_relations(
+            conn,
+            f"select sub.entity_id from ({cohort_sql}) as sub",
+            f"the cohort query at {as_of_date}",
+        ):
+            reads[rel].add("cohort query")
+        for label_timespan in plan.label_timespans[as_of_date]:
+            label_sql = render_label_query(
+                experiment.label_query, as_of_date, label_timespan
+            )
+            for rel in _explain_relations(
+                conn,
+                f"select * from ({label_sql}) as sub",
+                f"the label query at {as_of_date} ({label_timespan})",
+            ):
+                reads[rel].add("label query")
     for table in experiment.featurizer_tables:
         for rel in _explain_relations(
             conn, f"select * from {table}", f"featurizer table {table}"
@@ -892,6 +975,33 @@ def discover_relations(
 # --------------------------------------------------------------------------------------
 
 
+def _template_errors(
+    config: Mapping[str, Any], config_errors: Sequence[tuple[str, str]]
+) -> list[str]:
+    """The cohort and label builders' template rule, as ``triage run`` applies it.
+
+    The builders wrap each template as a subquery and refuse a ``;`` in it. A template
+    that closes the wrapper could otherwise run statements of its own, a DELETE among
+    them, inside the check's transaction. A query the config checks already rejected is
+    skipped, so a missing placeholder is reported once.
+    """
+    errors: list[str] = []
+    for block, validate in (
+        ("cohort_config", _validate_cohort_template),
+        ("label_config", _validate_label_template),
+    ):
+        path = f"{block}.query"
+        raw = config.get(block)
+        query = raw.get("query") if isinstance(raw, Mapping) else None
+        if not isinstance(query, str) or any(p == path for p, _ in config_errors):
+            continue
+        try:
+            validate(query)
+        except ValueError as exc:
+            errors.append(f"{path}: {exc}")
+    return errors
+
+
 @dataclass(frozen=True)
 class _Experiment:
     """The parts of the experiment config the check runs."""
@@ -905,12 +1015,15 @@ class _Experiment:
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> _Experiment:
-        """Validate the cohort, label and feature blocks; collect every error at once."""
+        """Validate the cohort, label and feature blocks; collect every error at once.
+
+        Runs before the check connects, so a refused template never reaches the database.
+        """
         problem_type = config.get("problem_type")
-        errors = [m for _, m in cohort_config_errors(config.get("cohort_config"))]
-        errors += [
-            m for _, m in label_config_errors(config.get("label_config"), problem_type)
-        ]
+        config_errors = cohort_config_errors(config.get("cohort_config"))
+        config_errors += label_config_errors(config.get("label_config"), problem_type)
+        errors = [m for _, m in config_errors]
+        errors += _template_errors(config, config_errors)
         label_columns: tuple[str, ...] = ()
         try:
             label_columns = label_value_columns(str(problem_type))
@@ -1136,9 +1249,10 @@ def check_leakage(
         and the elapsed time.
 
     Raises:
-        LeakageCheckError: when the check cannot run (bad config, no cuttable Source,
-            missing privilege, a broken foreign key, a held lock), or when the Source
-            fingerprints differ after the rollback.
+        LeakageCheckError: when the check cannot run (bad config, a template with a
+            ``;``, no cuttable Source, missing privilege, a broken foreign key, a held
+            lock, a delete a trigger or rule cancelled), or when the Source fingerprints
+            differ after the rollback.
     """
     started = time.monotonic()
     experiment = _Experiment.from_config(config)
@@ -1183,6 +1297,7 @@ def check_leakage(
         conn.execute(_sql(f"set local lock_timeout = '{LOCK_TIMEOUT}'"))
         _arm_commit_guard(conn)
         preflight_privileges(conn, cuttable)
+        report.not_checked.extend(null_knowledge_dates(conn, cuttable))
         report.not_checked.extend(discover_relations(conn, plan, experiment, sources))
         with tempfile.TemporaryDirectory(prefix="triage-leakage-") as workdir:
             baseline = _build_baseline(conn, plan, experiment, features, Path(workdir))
