@@ -61,6 +61,29 @@ other unknown key in `label_config` or `cohort_config` is an error. See
 
 ---
 
+## My feature values changed after upgrading to v1.5.0.
+
+triage-pg v1.5.0 runs on featurizer v1.5.0, which changes the values of some
+columns and keeps every column name. Three groups of columns move:
+
+- **The sequence primitives** (`sequence_entropy`, `markov_conditional_entropy`,
+  `max_transition_prob`, `state_volatility`, `transition_matrix_summary`,
+  `rework_count`, `ngram_2_freq`, `ngram_3_freq`, `time_in_current_state`). A
+  NULL category now counts as a state, so a step into or out of a NULL is a
+  transition. `ngram_3_freq` on a series of two rows is now NULL.
+- **The interval columns of `skewness`, `kurtosis`, `harmonic_mean` and
+  `geometric_mean`.** Before, each `|interval=…` column repeated the
+  whole-history value. Now each one reads only its window.
+- **Interval columns with a `timestamp` as-of date, or an interval with a time
+  part** such as `PT12H`. A window now ends at the as-of instant. With a `date`
+  as-of date and intervals of whole days, weeks, months or years, nothing moves.
+
+The engine version is part of every artifact's identity, so the first run after
+upgrading rebuilds features, matrices and models on its own. Compare the new
+models with the old ones before you replace a model in production.
+
+---
+
 ## My feature count dropped after upgrading to v1.3.1.
 
 featurizer v1.3.1 stops emitting window features on an entity without a
