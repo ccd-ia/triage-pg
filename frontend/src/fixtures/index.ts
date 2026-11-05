@@ -45,7 +45,9 @@ import type {
   HistogramBin,
   MetricsResponse,
   ModelCardResponse,
+  CrosstabStat,
   ModelCurveResponse,
+  ModelGroupCurvesResponse,
   ModelGroupDetailResponse,
   ModelGroupSummaryRow,
   ModelGroupsResponse,
@@ -818,8 +820,11 @@ export function modelCalibration(id: number): CalibrationResponse {
   }
 }
 
-/** A handful of list-characterizing features (fixture: inspection-history flavored). */
-export function modelCrosstabs(id: number): CrosstabsResponse {
+/** A handful of list-characterizing features (fixture: inspection-history flavored). With
+ *  `nonzero_rate`, the shares of the list and of the rest with a nonzero value, ranked by
+ *  their difference as the route ranks them: one near-total separation (the leakage
+ *  signature), one feature missing mostly on the list. */
+export function modelCrosstabs(id: number, stat?: CrosstabStat): CrosstabsResponse {
   void id
   const mk = (feature: string, sel: number, rest: number): CrosstabRow => ({
     as_of_date: SPLITS[SPLITS.length - 1],
@@ -829,6 +834,14 @@ export function modelCrosstabs(id: number): CrosstabsResponse {
     rest_value: rest,
     ratio: rest === 0 ? null : sel / rest,
   })
+  if (stat === 'nonzero_rate') {
+    return [
+      mk('inspections__reinspection__max_none__all', 0.98, 0.03),
+      mk('inspections__failed__sum_none__1y', 0.91, 0.26),
+      mk('facility__license_missing__identity_none__all', 0.41, 0.06),
+      mk('inspections__entity_id__count_none__all', 1.0, 0.88),
+    ]
+  }
   return [
     mk('inspections__entity_id__count_none__all', 6.1, 2.2),
     mk('inspections__failed__sum_none__1y', 1.9, 0.4),
@@ -850,6 +863,7 @@ const ERROR_RULES: ErrorRuleRow[] = [
     depth: 2,
     class_counts: { tp: 13, fp: 51 },
     signature: 'facility__age__identity_none__all<=|inspections__entity_id__count_none__all<=',
+    reference_error_rate: 0.69,
   },
   {
     as_of_date: SPLITS[SPLITS.length - 1],
@@ -862,6 +876,7 @@ const ERROR_RULES: ErrorRuleRow[] = [
     depth: 1,
     class_counts: { tp: 41, fp: 0 },
     signature: 'inspections__failed__sum_none__1y>',
+    reference_error_rate: 0.69,
   },
   {
     as_of_date: SPLITS[SPLITS.length - 1],
@@ -874,6 +889,7 @@ const ERROR_RULES: ErrorRuleRow[] = [
     depth: 1,
     class_counts: { fn: 22, tn: 16 },
     signature: 'inspections__failed__sum_none__1y>',
+    reference_error_rate: 0.18,
   },
   {
     as_of_date: SPLITS[SPLITS.length - 1],
@@ -886,6 +902,7 @@ const ERROR_RULES: ErrorRuleRow[] = [
     depth: 2,
     class_counts: { tp: 4, fp: 9, fn: 22, tn: 177 },
     signature: 'facility__age__identity_none__all>|inspections__failed__sum_none__1y<=',
+    reference_error_rate: 0.214,
   },
 ]
 
@@ -940,9 +957,69 @@ export function modelOverlap(a: number, b: number): ListOverlapRow[] {
   }))
 }
 
-/** A monotone Rayid threshold curve (cumulative TP/FP by rank) over 20 points. */
-export function modelCurve(id: number): ModelCurveResponse {
+/** The experiment's subsets (fixture): each its own population, with its own size, base
+ *  rate and top-of-list precision, so the curve overlays differ visibly in dev mode. */
+const FX_SUBSETS: { subset_hash: string; name: string; n: number; pos: number; top: number }[] = [
+  { subset_hash: 'fx0a1b2c3d4e5f60718293a4b5c6d7e8f9', name: 'restaurant', n: 1300, pos: 350, top: 0.58 },
+  { subset_hash: 'fx1b2c3d4e5f60718293a4b5c6d7e8f9a0', name: 'grocery_store', n: 420, pos: 80, top: 0.33 },
+  { subset_hash: 'fx2c3d4e5f60718293a4b5c6d7e8f9a0b1', name: 'school', n: 180, pos: 40, top: 0.47 },
+]
+
+export const subsets: { subset_hash: string; name: string }[] = FX_SUBSETS.map(
+  ({ subset_hash, name }) => ({ subset_hash, name }),
+)
+
+/** A threshold curve over `n` rows with `pos` positives: precision starts near `top` and
+ *  falls to the base rate at the whole population (20 points). */
+function fxCurve(n: number, pos: number, top: number): ThresholdCurvePoint[] {
+  const base = pos / n
+  const points: ThresholdCurvePoint[] = []
+  for (let i = 1; i <= 20; i++) {
+    const pct = i / 20
+    const k = Math.round(pct * n)
+    const tp = Math.min(pos, Math.round((base + (top - base) * (1 - pct) ** 1.5) * k))
+    const fp = k - tp
+    const fn = pos - tp
+    points.push({
+      k,
+      pct: Number(pct.toFixed(3)),
+      prec: Number((tp / k).toFixed(3)),
+      rec: Number((tp / pos).toFixed(3)),
+      tp,
+      fp,
+      fn,
+      tn: n - k - fn,
+      base_rate: base,
+    })
+  }
+  return points
+}
+
+/** One curve per (model, test date) of a group (fixture): the top of the list erodes a
+ *  little on each later date. A subset narrows every curve to its members. */
+export function modelGroupCurves(id: number, subsetHash?: string): ModelGroupCurvesResponse {
+  const sub = FX_SUBSETS.find((s) => s.subset_hash === subsetHash)
+  const { models } = modelGroupDetail(id)
+  return models.slice(0, -1).map((m, i) => {
+    const n = (sub?.n ?? 2000) + i * 40
+    const pos = (sub?.pos ?? 480) + i * 6
+    const points = fxCurve(n, pos, (sub?.top ?? 0.62) - i * 0.04)
+    return {
+      model_id: m.model_id,
+      as_of_date: m.test_as_of ?? SPLITS[i + 1],
+      base_rate: points[points.length - 1].base_rate,
+      population: points[points.length - 1].k,
+      points,
+    }
+  })
+}
+
+/** A monotone Rayid threshold curve (cumulative TP/FP by rank) over 20 points; a subset
+ *  hash from `subsets` gives that subset's own curve. */
+export function modelCurve(id: number, subsetHash?: string): ModelCurveResponse {
   void id
+  const sub = FX_SUBSETS.find((s) => s.subset_hash === subsetHash)
+  if (sub) return fxCurve(sub.n, sub.pos, sub.top)
   const N = 2000
   const POS = 480
   const points: ThresholdCurvePoint[] = []

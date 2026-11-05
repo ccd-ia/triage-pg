@@ -11,6 +11,10 @@
  * route (?suspicious=true): high-support leaves with almost no error, each with its
  * lift over the model's precision@. Which leaves qualify is decided in SQL; the panel
  * only shows the count and the rows. Diagnostic only, never a score modifier.
+ *
+ * Each leaf's bar carries a tick at its reference_error_rate: the population error rate of
+ * the same kind at the same cut and date, as the route reads it from the threshold curve.
+ * A leaf at 65% wrong flags is unremarkable when the whole top-k is 61% wrong.
  */
 import { useState } from 'react'
 import { api } from '../api/client'
@@ -27,6 +31,14 @@ const KINDS: { kind: ErrorKind; label: string; title: string }[] = [
     title: 'every labeled row, TP/FP/FN/TN: the first splits mostly redraw the cut itself',
   },
 ]
+
+/** What each kind's reference_error_rate is the share of — the route computes it at the
+ *  leaf's cut; the confusion tab reads the confusion rate. */
+const REFERENCE: Record<ErrorKind, string> = {
+  fp: 'the wrong share of the top-k (1 − precision@k)',
+  fn: 'the missed share of the labeled rest',
+  confusion: 'the confusion rate, (FP + FN) over every labeled row',
+}
 
 /** " · tp 39 · fp 1" — the leaf's class counts, in the route's key order ('' when none). */
 function countsSuffix(counts: Record<string, number> | null): string {
@@ -106,21 +118,45 @@ export function ErrorRulesPanel({ modelId }: { modelId: number }) {
           {rules.data.reason} — {rules.data.hint}
         </div>
       ) : (
-        <div className="featlist">
-          {rules.data.map((r, i) => (
-            <div className="featrow" key={`${r.as_of_date}-${r.error_kind}-${i}`}>
-              <div>
-                <div className="pretty mono" style={{ fontSize: 11 }}>{r.rule}</div>
-                <div className="rawsub">
-                  {r.as_of_date} · matches {r.n_matched} · {r.n_errors} error(s)
-                  {countsSuffix(r.class_counts)}
+        <>
+          <div className="muted" style={{ fontSize: 10, margin: '0 0 4px' }}>
+            <span className="refkey" />
+            population error rate at this cut: {REFERENCE[kind]}. A bar past the mark fails
+            more often than the model does overall.
+          </div>
+          <div className="featlist">
+            {rules.data.map((r, i) => {
+              const ref = r.reference_error_rate
+              const refText =
+                ref == null
+                  ? undefined
+                  : `population error rate at this cut: ${(ref * 100).toFixed(1)}% — ${REFERENCE[r.error_kind]}, @${r.parameter} on ${r.as_of_date} · this leaf: ${(r.error_rate * 100).toFixed(1)}%`
+              return (
+                <div className="featrow" key={`${r.as_of_date}-${r.error_kind}-${i}`}>
+                  <div>
+                    <div className="pretty mono" style={{ fontSize: 11 }}>{r.rule}</div>
+                    <div className="rawsub">
+                      {r.as_of_date} · matches {r.n_matched} · {r.n_errors} error(s)
+                      {countsSuffix(r.class_counts)}
+                    </div>
+                  </div>
+                  <div className="imp">{(r.error_rate * 100).toFixed(0)}%</div>
+                  <div className="ratetrack" title={refText}>
+                    <div className="bar" style={{ width: `${r.error_rate * 100}%` }} />
+                    {ref != null ? (
+                      <span
+                        className="reftick"
+                        style={{ left: `${ref * 100}%` }}
+                        title={refText}
+                        aria-label={refText}
+                      />
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <div className="imp">{(r.error_rate * 100).toFixed(0)}%</div>
-              <div className="bar" style={{ width: `${r.error_rate * 100}%` }} />
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
     </>
   )

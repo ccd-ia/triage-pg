@@ -10,6 +10,7 @@
  */
 import type {
   CalibrationResponse,
+  CrosstabStat,
   CrosstabsResponse,
   DerivationResponse,
   EntityProfileResponse,
@@ -32,6 +33,7 @@ import type {
   MonitoringVolumeRow,
   ModelCardResponse,
   ModelCurveResponse,
+  ModelGroupCurvesResponse,
   ModelGroupDetailResponse,
   ModelGroupsResponse,
   ModelHistogramResponse,
@@ -277,7 +279,7 @@ export const api = {
 
   /** The subsets this experiment has evaluations for (migration 0015); [] = full-cohort only. */
   expSubsets(hash: string): Promise<{ subset_hash: string; name: string }[]> {
-    if (USE_FIXTURE) return fake([])
+    if (USE_FIXTURE) return fake([...fixture.subsets])
     return get<{ subset_hash: string; name: string }[]>(`/experiments/${hash}/subsets`)
   },
 
@@ -325,11 +327,30 @@ export const api = {
     return get<ModelCardResponse>(`/models/${id}`)
   },
 
-  /** The Rayid curve; `subsetHash` makes that subset the population (re-ranked inside it). */
-  modelCurve(id: number, subsetHash?: string): Promise<ModelCurveResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelCurve(id))
-    const q = subsetHash ? `?subset=${encodeURIComponent(subsetHash)}` : ''
-    return get<ModelCurveResponse>(`/models/${id}/curve${q}`)
+  /** The Rayid curve; `subsetHash` makes that subset the population (re-ranked inside it).
+   *  `points` thins it to that many evenly spaced shares plus every configured cut;
+   *  omitted, every k comes back (what the k-slider reads). */
+  modelCurve(id: number, subsetHash?: string, points?: number): Promise<ModelCurveResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCurve(id, subsetHash))
+    const q = new URLSearchParams()
+    if (subsetHash) q.set('subset', subsetHash)
+    if (points !== undefined) q.set('points', String(points))
+    const qs = q.toString()
+    return get<ModelCurveResponse>(`/models/${id}/curve${qs ? `?${qs}` : ''}`)
+  },
+
+  /** The curve across a model group's test dates: one thinned curve per (model, date). */
+  modelGroupCurves(
+    id: number,
+    opts?: { subset?: string; points?: number; experimentHash?: string },
+  ): Promise<ModelGroupCurvesResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelGroupCurves(id, opts?.subset))
+    const q = new URLSearchParams()
+    if (opts?.subset) q.set('subset', opts.subset)
+    if (opts?.points !== undefined) q.set('points', String(opts.points))
+    if (opts?.experimentHash) q.set('experiment_hash', opts.experimentHash)
+    const qs = q.toString()
+    return get<ModelGroupCurvesResponse>(`/model-groups/${id}/curves${qs ? `?${qs}` : ''}`)
   },
 
   modelHistogram(id: number, bins?: number): Promise<ModelHistogramResponse> {
@@ -344,10 +365,12 @@ export const api = {
     return get<CalibrationResponse>(`/models/${id}/calibration`)
   },
 
-  /** Top distinguishing features (persisted by `triage postmodel crosstabs`). */
-  modelCrosstabs(id: number): Promise<CrosstabsResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelCrosstabs(id))
-    return get<CrosstabsResponse>(`/models/${id}/crosstabs`)
+  /** Top distinguishing features (persisted by `triage postmodel crosstabs`): the ratio of
+   *  means (`mean`, the default) or the nonzero rates of the list and the rest. */
+  modelCrosstabs(id: number, stat?: CrosstabStat): Promise<CrosstabsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCrosstabs(id, stat))
+    const q = stat && stat !== 'mean' ? `?stat=${stat}` : ''
+    return get<CrosstabsResponse>(`/models/${id}/crosstabs${q}`)
   },
 
   /** Error-tree rules of one kind (persisted by `triage postmodel error-tree`). */

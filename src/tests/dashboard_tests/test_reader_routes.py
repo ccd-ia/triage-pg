@@ -111,6 +111,41 @@ def test_group_curves_empty_missing_and_bad_input(client, seeded):
     assert too_few.status_code == 422
 
 
+def test_the_overlay_calls_draw_the_subsets_own_curve(
+    client, seeded, db_pool_greenfield
+):
+    """The panels' two subset calls: ``/curve?subset=&points=`` (one line per population on
+    the model sheet) and ``/curves?subset=`` (the group sheet's Subset selector). Both draw
+    the subset as its own population, as the full single-model curve does."""
+    model_id = seeded.all_models["mg1"][0]
+    gid = seeded.group_ids["mg1"]
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "insert into triage.subsets (subset_hash, config)"
+            " values ('sub-overlay', '{\"name\": \"first three\"}'::jsonb)"
+        )
+        # scores 0.9 / 0.7 / 0.4, outcomes 1 / 0 / 1
+        for entity_id in (1, 2, 3):
+            conn.execute(
+                "insert into triage.subset_members (subset_hash, entity_id, as_of_date)"
+                " values ('sub-overlay', %(e)s, %(d)s)",
+                {"e": entity_id, "d": SPLITS[-1]},
+            )
+    curve = f"/api/models/{model_id}/curve"
+    full = client.get(curve, params={"subset": "sub-overlay"}).json()
+    assert [r["k"] for r in full] == [1, 2, 3]
+
+    thin = client.get(curve, params={"subset": "sub-overlay", "points": 2}).json()
+    assert thin == [full[0], full[-1]]  # shares 0 and 1 of the subset's three rows
+
+    series = client.get(
+        f"/api/model-groups/{gid}/curves", params={"subset": "sub-overlay"}
+    ).json()
+    assert [(s["model_id"], s["population"]) for s in series] == [(model_id, 3)]
+    assert series[0]["base_rate"] == pytest.approx(2 / 3)
+    assert series[0]["points"] == full
+
+
 # ------------------------------------------------------------------------ crosstabs
 
 
