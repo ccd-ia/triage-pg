@@ -2,8 +2,10 @@
  * ModelGroupSheet — a side-sheet for ONE model group (/model-groups/{id}), surfaced
  * from the Model Groups table (the "open group" affordance) and reused by the audition
  * compare view. Shows the group's identity (algorithm + hyperparameters + features),
- * its per-split models (each opens the model sheet), its metric-over-time line, and
- * the error rules that recur across its test dates (ErrorRecurrencePanel).
+ * its per-split models (each opens the model sheet), its metric-over-time line, its
+ * threshold curve on every test date (/model-groups/{id}/curves → CurveOverlayChart, one
+ * line per (model, date), legend in date order, over everyone or one Subset), and the
+ * error rules that recur across its test dates (ErrorRecurrencePanel).
  */
 import { useMemo, useState } from 'react'
 import {
@@ -22,9 +24,21 @@ import { useAsync } from '../hooks/useAsync'
 import { tooltipFormatter } from '../api/format'
 import { abbrevAlgo } from '../api/transforms'
 import type { ExpEvaluationRow, MetricCatalogRow } from '../api/types'
+import { isEmpty } from '../api/types'
+import { CurveOverlayChart } from './CurveOverlayChart'
 import { ErrorRecurrencePanel } from './ErrorRecurrencePanel'
 
 const shortType = abbrevAlgo
+
+/** The group's curves are thinned to 101 evenly spaced shares plus every configured cut. */
+const CURVE_POINTS = 101
+
+/** Step i of n on the date ramp (--date-old → --date-new, mixed in oklch): older dates
+ *  recede, the newest is the strongest. The ends are set per theme in index.css. */
+function dateColor(i: number, n: number): string {
+  const toNew = n <= 1 ? 100 : Math.round((i / (n - 1)) * 100)
+  return `color-mix(in oklch, var(--date-new) ${toNew}%, var(--date-old))`
+}
 
 function hyperText(h: Record<string, unknown> | null): string {
   if (!h) return '—'
@@ -79,6 +93,28 @@ export function ModelGroupSheet({
       .map((r) => ({ as_of_date: r.as_of_date.slice(0, 7), value: r.value as number }))
       .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date))
   }, [group.data])
+
+  // The curve across test dates (/model-groups/{id}/curves, thinned to 101 shares), over
+  // everyone or one of the experiment's Subsets.
+  const [curveSubset, setCurveSubset] = useState('')
+  const subsets = useAsync(
+    () => (experimentHash ? api.expSubsets(experimentHash) : Promise.resolve([])),
+    [experimentHash],
+  )
+  const curveKey = `${groupId}#${experimentHash ?? ''}#${curveSubset}`
+  const curves = useAsync(
+    async () => ({
+      key: curveKey,
+      body: await api.modelGroupCurves(groupId, {
+        subset: curveSubset || undefined,
+        points: CURVE_POINTS,
+        experimentHash,
+      }),
+    }),
+    [curveKey],
+  )
+  // a stale response (another group or population) is never drawn
+  const curvesNow = curves.data?.key === curveKey ? curves.data.body : undefined
 
   const heading = label ?? (s ? `${shortType(s.model_type)} · g${groupId}` : `group ${groupId}`)
 
@@ -227,6 +263,55 @@ export function ModelGroupSheet({
                 </div>
               ) : (
                 <div className="muted" style={{ fontSize: 11 }}>no evaluations yet for this metric.</div>
+              )}
+            </section>
+
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <h4 style={{ margin: 0 }}>curve across test dates</h4>
+                {(subsets.data?.length ?? 0) > 0 ? (
+                  <select
+                    className="splitsel"
+                    style={{ width: 'auto' }}
+                    aria-label="curve population"
+                    value={curveSubset}
+                    onChange={(e) => setCurveSubset(e.target.value)}
+                  >
+                    <option value="">everyone</option>
+                    {subsets.data?.map((x) => (
+                      <option key={x.subset_hash} value={x.subset_hash}>
+                        subset: {x.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+              {curves.error ? (
+                <div className="muted" style={{ fontSize: 11 }}>curves unavailable: {curves.error.message}</div>
+              ) : !curvesNow ? (
+                <div className="muted" style={{ fontSize: 11 }}>loading curves…</div>
+              ) : isEmpty(curvesNow) ? (
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {curvesNow.reason} — {curvesNow.hint}
+                </div>
+              ) : (
+                <>
+                  <CurveOverlayChart
+                    series={curvesNow.map((c, i) => ({
+                      key: `${c.model_id}-${c.as_of_date}`,
+                      label: `${c.as_of_date} · m${c.model_id}`,
+                      color: dateColor(i, curvesNow.length),
+                      points: c.points,
+                      baseRate: c.base_rate,
+                      note: `n=${c.population.toLocaleString('en-US')}`,
+                    }))}
+                  />
+                  <div className="muted" style={{ fontSize: 10.5 }}>
+                    one line per (model, test date), the newest in the strongest colour. Curves
+                    that lie together rank alike on every date; a gap between two dates of one
+                    model is a change in the data.
+                  </div>
+                </>
               )}
             </section>
 

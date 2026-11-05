@@ -750,7 +750,13 @@ export type CalibrationResponse =
   | { as_of_date: string; deciles: CalibrationDecile[] }
   | EmptyState
 
-/** GET /api/models/{id}/crosstabs — top distinguishing features (triage postmodel). */
+/** The two crosstab rankings the route serves (`?stat=`): the ratio of means, ranked by
+ *  |log ratio|, or the nonzero rates, ranked by |selected − rest|. */
+export type CrosstabStat = 'mean' | 'nonzero_rate'
+
+/** GET /api/models/{id}/crosstabs — top distinguishing features (triage postmodel).
+ *  With `?stat=nonzero_rate`, `selected_value`/`rest_value` are the shares of the list
+ *  and of the rest with a nonzero value (0..1). */
 export interface CrosstabRow {
   as_of_date: string
   parameter: string
@@ -778,6 +784,10 @@ export interface ErrorRuleRow {
   class_counts: Record<string, number> | null
   /** Sorted feature+op pairs without thresholds, e.g. "age>|visits<="; null before 0027. */
   signature: string | null
+  /** The population error rate of this leaf's kind at its date and cut: fp = fp/(tp+fp)
+   *  (1 − precision@k), fn = fn/(fn+tn), confusion = (fp+fn)/labeled. Null on a train
+   *  leaf, or when the model has no test predictions at the date. */
+  reference_error_rate: number | null
 }
 export type ErrorRulesResponse = ErrorRuleRow[] | EmptyState
 
@@ -798,6 +808,8 @@ export interface SuspiciousRuleRow {
   precision_at_k: number | null
   /** (1 − error_rate) / precision@ at the same date and cut; null when that cut was not evaluated. */
   lift: number | null
+  /** The population error rate of the leaf's kind at its date and cut (see ErrorRuleRow). */
+  reference_error_rate: number | null
 }
 
 /** GET /api/model-groups/{id}/error-recurrence — triage.error_rule_recurrence. */
@@ -850,6 +862,20 @@ export interface ThresholdCurvePoint {
 }
 
 export type ModelCurveResponse = ThresholdCurvePoint[]
+
+/** GET /api/model-groups/{id}/curves — one thinned curve per (model, test date). */
+export interface GroupCurveSeries {
+  model_id: number
+  as_of_date: string
+  /** The population's base rate (the subset's, when one is given). */
+  base_rate: number | null
+  /** The population's scored rows: the curve's last k. */
+  population: number
+  /** The curve rows, thinned (`?points=`) and ordered by k. */
+  points: ThresholdCurvePoint[]
+}
+/** Series in date order, then model; the envelope when the group has no test curve. */
+export type ModelGroupCurvesResponse = GroupCurveSeries[] | EmptyState
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/models/{id}/histogram — score histogram                             */

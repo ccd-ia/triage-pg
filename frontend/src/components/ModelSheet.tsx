@@ -5,7 +5,9 @@
  *     answers "which model opens"; surfaces /model-groups/{id}, follow-up #2)
  *   - ScoreDistributionChart (/models/{id}/histogram)
  *   - RayidCurveChart + client k-slider (/models/{id}/curve), with a population selector
- *     over the experiment's subsets (/experiments/{hash}/subsets → ?subset=)
+ *     over the experiment's subsets (/experiments/{hash}/subsets → ?subset=). Picking
+ *     several populations (everyone + up to 4 Subsets) swaps in CurveOverlayChart over
+ *     their thinned curves (?points=101); one population keeps the full curve and slider.
  *   - feature importance (top 20 + "View all" modal), PRETTY + RAW names
  *   - PredictedList (top 20 + "View all" modal); each entity opens the EntityDrawer
  */
@@ -21,12 +23,18 @@ import { ErrorRulesPanel } from './ErrorRulesPanel'
 import { ModelCompareModal } from './ModelCompareModal'
 import { ScoreDistributionChart } from './ScoreDistributionChart'
 import { RayidCurveChart } from './RayidCurveChart'
+import { CurveOverlayChart, type OverlaySeries } from './CurveOverlayChart'
 import { PredictedList } from './PredictedList'
 import { predictionHead, predictionRow } from './predictionRows'
 import { FullListModal } from './FullListModal'
 import { EntityDrawer } from './EntityDrawer'
 
 const INLINE = 20
+/** The most Subsets overlaid on the curve at once, besides everyone. */
+const MAX_SUBSETS = 4
+const NO_PICKS: (string | null)[] = Array(MAX_SUBSETS).fill(null)
+/** An overlay draws thinned curves: 101 evenly spaced shares plus every configured cut. */
+const OVERLAY_POINTS = 101
 
 interface Props {
   modelId: number
@@ -44,12 +52,16 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   // pattern, so there's no setState-in-effect cascade).
   const [activeId, setActiveId] = useState(modelId)
   const [openedId, setOpenedId] = useState(modelId)
-  // The Rayid curve's population: '' = the whole scored population, else a subset_hash.
-  const [curveSubset, setCurveSubset] = useState('')
+  // The Rayid curve's populations: everyone (the whole scored population) and up to
+  // MAX_SUBSETS Subsets. A picked Subset holds its slot (and so its colour) until it is
+  // unpicked, so toggling one never repaints the others.
+  const [everyone, setEveryone] = useState(true)
+  const [picked, setPicked] = useState<(string | null)[]>(NO_PICKS)
   if (modelId !== openedId) {
     setOpenedId(modelId)
     setActiveId(modelId)
-    setCurveSubset('')
+    setEveryone(true)
+    setPicked(NO_PICKS)
   }
 
   // Sub-sheets/modals
@@ -67,18 +79,66 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
   )
   const card = useAsync(() => api.model(activeId), [activeId])
   const histo = useAsync(() => api.modelHistogram(activeId), [activeId])
-  const curve = useAsync(
-    () => api.modelCurve(activeId, curveSubset || undefined),
-    [activeId, curveSubset],
-  )
   // the experiment's subsets (migration 0015) feed the curve's population selector
   const subsets = useAsync(
     () => (experimentHash ? api.expSubsets(experimentHash) : Promise.resolve([])),
     [experimentHash],
   )
+  const nameOf = (hash: string) =>
+    subsets.data?.find((s) => s.subset_hash === hash)?.name ?? hash.slice(0, 10)
+  // The populations drawn, each with its colour slot: everyone is slot 1, picked Subsets
+  // slots 2–5. One population keeps the full curve and its k-slider; several overlay
+  // their thinned curves (?points=101).
+  const populations = [
+    ...(everyone ? [{ subset: '', label: 'everyone', slot: 1 }] : []),
+    ...picked.flatMap((h, i) => (h == null ? [] : [{ subset: h, label: nameOf(h), slot: i + 2 }])),
+  ]
+  const overlay = populations.length > 1
+  // the model and populations a response answers; a stale response is never drawn
+  const curveKey = `${activeId}#${populations.map((p) => `${p.slot}:${p.subset}`).join('|')}`
+  const curve = useAsync(
+    async () =>
+      overlay
+        ? undefined
+        : { key: curveKey, rows: await api.modelCurve(activeId, populations[0]?.subset || undefined) },
+    [curveKey],
+  )
+  const curves = useAsync(
+    async () =>
+      overlay
+        ? {
+            key: curveKey,
+            rows: await Promise.all(
+              populations.map((p) => api.modelCurve(activeId, p.subset || undefined, OVERLAY_POINTS)),
+            ),
+          }
+        : undefined,
+    [curveKey],
+  )
+  const singleCurve = curve.data?.key === curveKey ? curve.data.rows : undefined
+  const overlaySeries: OverlaySeries[] | undefined =
+    curves.data?.key === curveKey
+      ? populations.map((p, i) => ({
+          key: `${p.slot}:${p.subset}`,
+          label: p.label,
+          color: `var(--series-${p.slot})`,
+          points: curves.data!.rows[i],
+          baseRate: curves.data!.rows[i][0]?.base_rate ?? null,
+        }))
+      : undefined
   const calibration = useAsync(() => api.modelCalibration(activeId), [activeId])
-  const crosstabs = useAsync(() => api.modelCrosstabs(activeId), [activeId])
   const preds = useAsync(() => api.modelPredictions(activeId, { limit: INLINE }), [activeId])
+
+  const nPicked = picked.filter((h) => h != null).length
+  const togglePick = (hash: string) => {
+    const at = picked.indexOf(hash)
+    if (at >= 0) {
+      if (populations.length > 1) setPicked(picked.map((h, i) => (i === at ? null : h)))
+      return
+    }
+    const free = picked.indexOf(null)
+    if (free >= 0) setPicked(picked.map((h, i) => (i === free ? hash : h)))
+  }
 
   const features = useMemo(() => card.data?.feature_importances ?? [], [card.data])
   const maxImp = features.reduce((m, f) => Math.max(m, f.feature_importance), 0) || 1
@@ -219,28 +279,72 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
         </section>
 
         <section>
-          <h4>Rayid curve · k-slider</h4>
+          <h4>{overlay ? 'Rayid curve · populations overlaid' : 'Rayid curve · k-slider'}</h4>
           {(subsets.data?.length ?? 0) > 0 ? (
-            <label className="field" style={{ margin: '0 0 6px' }}>
-              <span>population</span>
-              <select value={curveSubset} onChange={(e) => setCurveSubset(e.target.value)}>
-                <option value="">full cohort</option>
-                {subsets.data?.map((s) => (
-                  <option key={s.subset_hash} value={s.subset_hash}>
-                    subset: {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <>
+              <div className="popchips" role="group" aria-label="curve populations">
+                <span className="muted" style={{ fontSize: 11, marginRight: 2 }}>population</span>
+                <button
+                  type="button"
+                  className={`seg${everyone ? ' active' : ''}`}
+                  aria-pressed={everyone}
+                  disabled={everyone && populations.length === 1}
+                  title="every scored row at the model's latest test date"
+                  onClick={() => setEveryone((v) => !v)}
+                >
+                  <span className="dot" style={{ background: 'var(--series-1)' }} />
+                  everyone
+                </button>
+                {subsets.data?.map((s) => {
+                  const slot = picked.indexOf(s.subset_hash)
+                  const on = slot >= 0
+                  const full = !on && nPicked >= MAX_SUBSETS
+                  return (
+                    <button
+                      key={s.subset_hash}
+                      type="button"
+                      className={`seg${on ? ' active' : ''}`}
+                      aria-pressed={on}
+                      disabled={full || (on && populations.length === 1)}
+                      title={
+                        full
+                          ? `up to ${MAX_SUBSETS} subsets at once — unpick one first`
+                          : `subset ${s.name}: its members ranked among themselves`
+                      }
+                      onClick={() => togglePick(s.subset_hash)}
+                    >
+                      {on ? <span className="dot" style={{ background: `var(--series-${slot + 2})` }} /> : null}
+                      {s.name}
+                    </button>
+                  )
+                })}
+              </div>
+              {!overlay ? (
+                <div className="muted" style={{ fontSize: 10, margin: '-2px 0 6px' }}>
+                  pick a second population to overlay their precision curves (up to {MAX_SUBSETS}{' '}
+                  subsets and everyone)
+                </div>
+              ) : null}
+            </>
           ) : null}
-          {curve.error ? (
+          {overlay ? (
+            curves.error ? (
+              <div className="muted" style={{ fontSize: 11 }}>curves unavailable: {curves.error.message}</div>
+            ) : overlaySeries ? (
+              <CurveOverlayChart series={overlaySeries} />
+            ) : (
+              <div className="muted" style={{ fontSize: 11 }}>loading curves…</div>
+            )
+          ) : curve.error ? (
             <div className="muted" style={{ fontSize: 11 }}>curve unavailable: {curve.error.message}</div>
-          ) : curve.data ? (
+          ) : singleCurve ? (
             <RayidCurveChart
-              curve={curve.data}
+              curve={singleCurve}
               initialPct={k}
               emptyText={
-                curveSubset ? 'no curve: the subset has no scored rows at this date' : undefined
+                populations[0]?.subset
+                  ? 'no curve: the subset has no scored rows at this date'
+                  : undefined
               }
             />
           ) : (
@@ -319,11 +423,8 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
 
         <section>
           <h4>crosstabs · what characterizes the list</h4>
-          {crosstabs.data ? (
-            <CrosstabsPanel data={crosstabs.data} />
-          ) : (
-            <div className="muted" style={{ fontSize: 11 }}>loading crosstabs…</div>
-          )}
+          {/* the panel fetches the ranking its toggle picks (mean ratio | nonzero rate) */}
+          <CrosstabsPanel modelId={activeId} />
         </section>
 
         <section>
