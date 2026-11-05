@@ -31,7 +31,7 @@ ROLLBACK**:
    could not make the deletes permanent. This module has no commit call; a test enforces it.
 3. featurizer reads on the same connection. ``Featurizer.to_arrow(connection=conn)`` runs its
    statements under savepoints and commits only connections it opened itself (pinned
-   featurizer 1.3.1; a tripwire test in ``test_leakage_check.py`` guards the bump). Each
+   featurizer 1.5.0; a tripwire test in ``test_leakage_check.py`` guards the bump). Each
    feature build runs inside a savepoint that is rolled back, which drops its temp tables.
 4. Afterwards every cut Source's fingerprint (row count + max knowledge date) is read again
    on a fresh connection and compared with the one taken before the run.
