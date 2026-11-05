@@ -152,6 +152,13 @@ reversible root-removal gesture; `triage gc` is a **dry run by default**
 scheduled auto-GC — silently deleting expensive-but-rebuildable artifacts is
 the wrong default.
 
+GC never deletes history, and that is wrong when the history itself is wrong.
+If a source is reloaded because the earlier load was broken, every run, model
+and evaluation built on it describes data that no longer exists. In that case,
+`triage reset` deletes the results and their files in one pass and keeps the
+source registry. With `--bump-sources`, it also records the new data version,
+so the next runs pin it. See the [CLI tour](/triage-pg/reference/cli/).
+
 ## See also
 
 - [Technical architecture](/triage-pg/reference/architecture/) — the results

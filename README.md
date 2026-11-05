@@ -89,7 +89,7 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 | **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)) |
 | **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon ([`docs/monitoring.md`](docs/monitoring.md)) |
 | **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates |
-| **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop` |
+| **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop`; `triage reset` clears a project's results after a data reload and keeps its source registry, also when the `triage` schema lives inside a host database |
 | **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents — all business-logic-free |
 | **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam |
 

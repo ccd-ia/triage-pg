@@ -562,13 +562,14 @@ class TriageRuns:
 
 #: The verbs this project knows to be destructive. ``gc`` and ``archive`` delete
 #: artifacts and rows without a destructive word in their names, so no word rule
-#: finds them; the other two also match lynkeus's ``DESTRUCTIVE_WORDS`` and are
+#: finds them; the others also match lynkeus's ``DESTRUCTIVE_WORDS`` and are
 #: named anyway, so this set reads as the full list a maintainer must confirm.
 _DESTRUCTIVE = {
     "triage gc",
     "triage archive",
     "triage db downgrade",
     "triage project drop",
+    "triage reset",
 }
 
 

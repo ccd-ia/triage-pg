@@ -218,6 +218,7 @@ def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs(
         "triage archive",
         "triage db downgrade",
         "triage project drop",
+        "triage reset",
     }
     assert verbs["triage analyze-config"].description
 

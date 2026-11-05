@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import textwrap
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -2873,6 +2874,137 @@ def gc_command(
     if do_purge:
         purged = purge(engine, min_age_days=min_age)
         console.print(f"[green]Purged {len(purged)} dead artifact row(s).[/green]")
+
+
+def _print_reset(result, bumped: Mapping[str, str]) -> None:
+    verb = "Would delete" if result.dry_run else "Deleted"
+    table = Table(title=f"{verb} in database {result.database!r}", box=box.SIMPLE_HEAVY)
+    table.add_column("Table")
+    table.add_column("Rows", justify="right")
+    for name, count in result.tables.items():
+        table.add_row(f"triage.{name}", f"{count:,}")
+    table.add_row("[bold]total[/bold]", f"[bold]{result.total_rows:,}[/bold]")
+    console.print(table)
+    console.print(f"Kept: {', '.join('triage.' + t for t in result.kept)}")
+
+    shown = 20
+    if result.dry_run:
+        console.print(f"{len(result.external)} file-backed output(s) would be deleted.")
+        for ref in result.external[:shown]:
+            console.print(f"  {ref}")
+        if len(result.external) > shown:
+            console.print(
+                f"  … and {len(result.external) - shown} more (--json lists all)"
+            )
+        console.print(
+            "[yellow]Dry run — nothing deleted. Add --yes --confirm"
+            f" {result.database} to delete.[/yellow]"
+        )
+        return
+    console.print(
+        f"[green]Deleted {len(result.deleted)} file-backed output(s);"
+        f" {len(result.absent)} already absent.[/green]"
+    )
+    for item in result.failed:
+        console.print(f"[red]  could not delete {item['ref']}: {item['error']}[/red]")
+    for source_name, label in bumped.items():
+        console.print(f"[green]Source '{source_name}' pinned at '{label}'.[/green]")
+
+
+@app.command("reset")
+def reset_command(
+    ctx: typer.Context,
+    all_results: bool = typer.Option(
+        False, "--all", help="Every result, plus protected groups and Subsets."
+    ),
+    before: Optional[datetime] = typer.Option(
+        None,
+        "--before",
+        help="Runs started, and experiments created, before this timestamp"
+        " (a naive one is read in the database session's time zone).",
+        formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"],
+    ),
+    experiments: Optional[List[str]] = typer.Option(
+        None,
+        "--experiment",
+        "-e",
+        help="An experiment hash or unique prefix; repeat for several.",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Delete. Without it the command is a dry run."
+    ),
+    confirm: Optional[str] = typer.Option(
+        None,
+        "--confirm",
+        help="The database name, required with --yes when stdin is not a terminal.",
+    ),
+    bump_sources: Optional[str] = typer.Option(
+        None,
+        "--bump-sources",
+        help="After the reset, pin every registered source at this version label.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the summary as JSON."),
+) -> None:
+    """Delete triage results: experiments, runs, models, matrices, predictions, evaluations.
+
+    Keeps the schema, the source registry, the metric directions and the Alembic
+    stamp. A dry run by default; deleting needs --yes and the database name, either
+    from --confirm or typed at the prompt. Matrix and model files are deleted after
+    the commit through the storage layer that `triage gc --delete` uses.
+    """
+    from triage.reset import ResetError, ResetScope, delete_external, reset_results
+
+    engine = get_pool(ctx)
+    try:
+        hashes: tuple[str, ...] = ()
+        if experiments:
+            with engine.connection() as conn:
+                hashes = tuple(_resolve_experiment_hash(conn, e) for e in experiments)
+        scope = ResetScope(all=all_results, before=before, experiments=hashes)
+        result = reset_results(engine, scope, dry_run=True)
+    except ResetError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2)
+
+    def emit(bumped: Mapping[str, str]) -> None:
+        if as_json:
+            payload = {**result.as_dict(), "bumped": dict(bumped)}
+            typer.echo(json.dumps(payload, default=str, indent=2))
+        else:
+            _print_reset(result, bumped)
+
+    if not yes:
+        emit({})
+        return
+
+    if confirm is None:
+        if not sys.stdin.isatty():
+            console.print(
+                "[red]Refusing to delete: stdin is not a terminal. Pass --confirm"
+                f" {result.database} together with --yes.[/red]"
+            )
+            raise typer.Exit(code=2)
+        if not as_json:
+            _print_reset(result, {})
+        confirm = typer.prompt(f"Type the database name ({result.database}) to delete")
+    if confirm != result.database:
+        console.print(
+            f"[red]Refusing to delete: --confirm {confirm!r} does not match the"
+            f" connected database {result.database!r}.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    result = reset_results(engine, scope, dry_run=False)
+    delete_external(result)
+    bumped: dict[str, str] = {}
+    if bump_sources is not None:
+        for source in list_sources(engine):
+            name = source["source_name"]
+            bumped[name] = bump_source(engine, name, bump_sources)
+
+    emit(bumped)
+    if result.failed:
+        raise typer.Exit(code=1)
 
 
 # ------------------------------------------------------------------ TUI (lynkeus)
