@@ -471,6 +471,39 @@ views (drift, volume, realized outcomes) accumulate. Bookkeeping surfaces:
 experiment), `triage gc` (collect artifacts unreachable from any root),
 `triage runs status` (AWS Batch backfill in the cloud profile).
 
+### `triage reset` — start over after the data changes
+
+When a source is reloaded and the old data was wrong, every result built on it
+is wrong too. `triage reset` deletes those results and keeps the
+configuration. It works in a database of its own and in a host database that
+carries the `triage` schema beside its own tables.
+
+```console
+$ triage reset --all                       # dry run: rows per table, files to delete
+$ triage reset --all --yes --confirm food --bump-sources reload-2026-11
+```
+
+It deletes experiments, runs, models, model groups, matrices, predictions,
+evaluations, bias metrics, crosstabs, error rules, feature importances,
+cohorts, labels and the artifact records. It keeps `sources`,
+`source_versions`, `metric_directions` and the schema version, so the schema
+and the source registry survive. The matrix and model files are deleted after
+the database commit, through the same storage layer as `triage gc --delete`.
+A file that cannot be deleted is listed and the command exits 1. The database
+change is not undone.
+
+| Option | What it does |
+|---|---|
+| `--all` | Every result. It also clears `protected_groups` and the Subsets, which the next run rebuilds from the new data. |
+| `--before <timestamp>` | Runs started before the timestamp, and experiments created before it that keep no later run. A cohort, matrix or model that a later run still uses is kept. |
+| `--experiment <hash>` | One experiment and its runs; repeat for several. A unique prefix is enough. |
+| `--yes --confirm <database>` | Delete. Without `--yes` the command is a dry run. Without `--confirm` it asks for the database name, and it refuses when stdin is not a terminal. |
+| `--bump-sources <label>` | After the reset, pin every registered source at this label, so the next runs record the new data version. |
+| `--json` | The counts, the kept tables and the file paths as JSON, for scripts and agents. |
+
+`triage gc` is the opposite case: it deletes only outputs that nothing uses and
+keeps every row of history. Use `reset` when the history itself is wrong.
+
 ## Where next
 
 - [Architecture](/triage-pg/reference/architecture/) — the tables these
