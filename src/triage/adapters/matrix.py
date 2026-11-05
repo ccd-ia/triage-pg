@@ -359,7 +359,16 @@ def _materialize_pairs(cur, pairs: Sequence[tuple[date, int]]) -> None:
 
 
 def _merge_arrow_groups(groups, target_id_col: str):
-    """Re-join column-group Tables (wide-config sharding) on the (as_of_date, id) keys."""
+    """Re-join column-group Tables (wide-config sharding) on the (as_of_date, id) keys.
+
+    Every group carries the target's full identifier columns, not only its id: the keys of
+    the relationships the target is a parent of travel with it (featurizer's
+    ``Entity.identifier_columns``). The groups still re-join on ``(as_of_date, id)`` alone,
+    so a later group's copy of a column the merged frame already holds is dropped before
+    the join. Left in, polars names it ``<column>_right`` on the second group and refuses
+    the same name on the third. The merged frame is the table a single query would return:
+    each carried column once, from the first group.
+    """
     import polars as pl
 
     keys = [_AS_OF_COL, target_id_col]
@@ -367,7 +376,12 @@ def _merge_arrow_groups(groups, target_id_col: str):
     for table in groups.values():
         frame = pl.from_arrow(table)
         assert isinstance(frame, pl.DataFrame)  # from_arrow(Table) is a frame
-        merged = frame if merged is None else merged.join(frame, on=keys, how="left")
+        if merged is None:
+            merged = frame
+            continue
+        held = set(merged.columns) - set(keys)
+        carried = [column for column in frame.columns if column in held]
+        merged = merged.join(frame.drop(carried), on=keys, how="left")
     assert merged is not None, "sharding always yields at least one column group"
     return merged.to_arrow()
 
