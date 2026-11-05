@@ -7,10 +7,10 @@ import pathlib
 import subprocess
 import textwrap
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from datetime import date, datetime
+from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 from urllib.parse import quote as _urlquote
 
 import typer
@@ -48,10 +48,11 @@ from triage.sources import (
     list_sources,
     register_source,
 )
-from triage.util.db import connection_pool, returned_row
+from triage.util.db import DictRowPool, connection_pool, returned_row
 
 if TYPE_CHECKING:
     from triage.diagnostics.leakage import Finding, LeakageReport
+    from triage.plots import PlotResult
 
 logger = get_logger(__name__)
 console = Console()
@@ -91,6 +92,11 @@ check_app = typer.Typer(
     " nothing: every check ends in ROLLBACK and never commits (ADR-0034)."
 )
 app.add_typer(check_app, name="check")
+plot_app = typer.Typer(
+    help="Draw the diagnostics as figures for reports and slides — SVG, PNG or PDF, by"
+    " the output's extension — from the rows the dashboard reads."
+)
+app.add_typer(plot_app, name="plot")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -3014,6 +3020,412 @@ def actions_run_command(
     code = lk.actions_run(TriageActions(cli_app=app), name, ctx.args, console=console)
     if code != 0:
         raise typer.Exit(code)
+
+
+# ---------------------------------------------------------------------------- triage plot
+# The figures come from triage.plots, which imports matplotlib: it is imported inside the
+# commands, never at module level, so `triage --help` and every other command stay as
+# fast as they were.
+
+#: ``--stat`` of the crosstab plots → the statistic the readers rank by.
+_PLOT_STATS = {"mean": "mean", "nonzero": "nonzero_rate"}
+
+_OUTPUT_HELP = "The file to write: .svg, .png or .pdf, by extension. Default: {}."
+
+
+def _plot_stat(value: str) -> str:
+    if value not in _PLOT_STATS:
+        raise typer.BadParameter(
+            f"{value!r} is not a crosstab statistic — expected {' | '.join(_PLOT_STATS)}"
+        )
+    return _PLOT_STATS[value]
+
+
+def _plot_date(value: Optional[str]) -> Optional[str]:
+    return parse_date(value).date().isoformat() if value else None
+
+
+def _plot_fail(message: str, code: int) -> NoReturn:
+    # markup off: a reader's message may hold brackets rich would read as styles
+    console.print(message, style="red", markup=False, highlight=False, soft_wrap=True)
+    raise typer.Exit(code=code)
+
+
+def _latest_test_date(pool: DictRowPool, model_id: int) -> Optional[date]:
+    """The test date a model's curve defaults to, resolved here so the figure names it."""
+    with pool.connection() as conn:
+        return returned_row(
+            conn.execute(
+                "select max(as_of_date) as d from triage.predictions"
+                " where model_id = %(m)s and split_kind = 'test'",
+                {"m": model_id},
+            ).fetchone()  # an aggregate select always yields one row
+        )["d"]
+
+
+def _write_plot(
+    ctx: typer.Context,
+    output: Optional[pathlib.Path],
+    default_name: str,
+    draw: Callable[[DictRowPool], PlotResult],
+    models: Sequence[Optional[int]] = (),
+) -> None:
+    """Draw, write and report one figure, with the plot commands' exit codes.
+
+    0: written. 1: the database holds nothing to draw (the message names the command
+    that creates it). 2: bad input — an unknown model, model group or Subset, an
+    unsupported extension, more series than the cap — or the figure could not be
+    drawn or written (the database unreachable, the file not writable, a crash).
+    """
+    import psycopg
+
+    from triage.plots import NothingToDraw, output_format
+
+    path = output if output is not None else pathlib.Path(default_name)
+    try:
+        output_format(path)
+    except ValueError as exc:
+        _plot_fail(str(exc), 2)
+    pool = get_pool(ctx)
+    try:
+        ids = [m for m in models if m is not None]
+        if ids:
+            with pool.connection() as conn:
+                known = {
+                    r["model_id"]
+                    for r in conn.execute(
+                        "select model_id from triage.models"
+                        " where model_id = any(%(ids)s)",
+                        {"ids": ids},
+                    ).fetchall()
+                }
+            unknown = [m for m in ids if m not in known]
+            if unknown:
+                _plot_fail(
+                    f"No model with id {', '.join(map(str, unknown))} — list a model"
+                    " group's models with: triage models <experiment> --group <id>",
+                    2,
+                )
+        try:
+            result = draw(pool)
+            written = result.save(path)
+        except NothingToDraw as exc:
+            _plot_fail(str(exc), 1)
+        except ValueError as exc:  # NotFoundError, an ambiguous prefix, the series cap
+            _plot_fail(str(exc), 2)
+    except typer.Exit:
+        raise
+    except (psycopg.Error, OSError) as exc:
+        _plot_fail(f"The figure could not be drawn or written: {exc}", 2)
+    except Exception as exc:
+        # Exit 1 means "nothing to draw, run this command first", so a crash must not
+        # fall through to Typer's default exit code. Log the traceback, then exit 2.
+        logger.exception(f"triage plot failed writing {path}")
+        _plot_fail(f"The figure could not be drawn or written: {exc}", 2)
+    finally:
+        pool.close()
+    typer.echo(f"wrote {written}")
+    typer.echo(result.summary)
+
+
+@plot_app.command("curve")
+def plot_curve(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="Test as_of_date (YYYY-MM-DD). Default: the model's latest test date.",
+    ),
+    subset: Optional[List[str]] = typer.Option(
+        None,
+        "--subset",
+        help="A Subset by name or subset_hash (a prefix is enough), drawn next to"
+        " everyone and ranked among its own members. Repeat for several.",
+    ),
+    compare: Optional[int] = typer.Option(
+        None,
+        "--compare",
+        help="A second model drawn at the same test date: the constant-prior floor, or"
+        " another model group's model.",
+    ),
+    points: int = typer.Option(
+        101,
+        "--points",
+        help="Points per curve: evenly spaced shares of the population, plus the exact"
+        " row of each configured cut.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("curve-MODEL.svg")
+    ),
+) -> None:
+    """Precision and recall over the population selected, per Subset or model.
+
+    One series per population — everyone and each --subset, each ranked among its own
+    members — and per model when --compare is given, each with its base rate.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        day = as_of_date
+        if day is None:
+            latest = _latest_test_date(pool, model_id)
+            if latest is None:
+                raise plots.NothingToDraw(
+                    f"Model {model_id} has no test predictions — the curve is drawn over"
+                    " one scored test date. Score it first: triage run <config>."
+                )
+            day = latest.isoformat()
+        return plots.curve(pool, model_id, day, subset or (), compare, points)
+
+    _write_plot(ctx, output, f"curve-{model_id}.svg", draw, [model_id, compare])
+
+
+@plot_app.command("curve-dates")
+def plot_curve_dates(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    subset: Optional[str] = typer.Option(
+        None,
+        "--subset",
+        help="Draw one Subset (name or subset_hash prefix) instead of everyone.",
+    ),
+    points: int = typer.Option(101, "--points", help="Points per curve."),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("curve-dates-GROUP.svg")
+    ),
+) -> None:
+    """A model group's curve on each test date: is the ranking stable over time?
+
+    One precision curve per test date, and each date's base rate beside them.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.curve_dates(pool, model_group_id, subset or "", points)
+
+    _write_plot(ctx, output, f"curve-dates-{model_group_id}.svg", draw)
+
+
+@plot_app.command("error-rules")
+def plot_error_rules(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="Test as_of_date (YYYY-MM-DD). Default: the latest date with leaves.",
+    ),
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="The cut the trees were fitted at. Default: the only one persisted.",
+    ),
+    kind: Optional[str] = typer.Option(
+        None,
+        "--kind",
+        callback=_leaf_kind,
+        help="fp | fn | confusion. Default: the fp and fn trees.",
+    ),
+    top: int = typer.Option(
+        12, "--top", callback=natural_number, help="Leaves drawn per kind."
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("error-rules-MODEL.svg")
+    ),
+) -> None:
+    """A model's error-tree leaves with the most errors, against the population rate.
+
+    One panel per kind of leaf. The dashed line is the kind's error rate over the whole
+    population at the cut — for fp leaves, 1 − precision@k.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.error_rules(pool, model_id, as_of_date, parameter, kind, top)
+
+    _write_plot(ctx, output, f"error-rules-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("leaves")
+def plot_leaves(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(
+        ..., "--parameter", "-p", help="The cut the trees were fitted at."
+    ),
+    max_error: float = typer.Option(
+        0.02,
+        "--max-error",
+        min=0.0,
+        max=1.0,
+        help="The suspicious zone's largest wrong share.",
+    ),
+    min_support: int = typer.Option(
+        30, "--min-support", min=1, help="The suspicious zone's fewest rows."
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("leaves-GROUP.svg")
+    ),
+) -> None:
+    """Every fp and confusion leaf of a model group: are any suspiciously right?
+
+    Leaves by the share the model gets wrong and by size, with the suspicious zone
+    (--max-error, --min-support) shaded and the count inside it stated.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.leaves(pool, model_group_id, parameter, max_error, min_support)
+
+    _write_plot(ctx, output, f"leaves-{model_group_id}.svg", draw)
+
+
+@plot_app.command("recurrence")
+def plot_recurrence(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(
+        ..., "--parameter", "-p", help="The cut the trees were fitted at."
+    ),
+    kind: str = typer.Option(
+        "fp", "--kind", callback=_leaf_kind, help="fp | fn | confusion."
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("recurrence-GROUP.svg")
+    ),
+) -> None:
+    """Which error rules recur across a model group's test dates?
+
+    One row per rule signature (features and split directions, without thresholds), one
+    column per test date.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.recurrence(pool, model_group_id, parameter, kind)
+
+    _write_plot(ctx, output, f"recurrence-{model_group_id}.svg", draw)
+
+
+@plot_app.command("crosstabs")
+def plot_crosstabs(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="The top-k cut. Default: the only one persisted.",
+    ),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="Prediction as_of_date (YYYY-MM-DD). Default: the latest persisted.",
+    ),
+    stat: str = typer.Option(
+        "mean",
+        "--stat",
+        callback=_plot_stat,
+        help="mean (the ratio of means, log axis) | nonzero (the share nonzero, list"
+        " against rest).",
+    ),
+    compare: Optional[int] = typer.Option(
+        None,
+        "--compare",
+        help="A second model, read for the same features, cut and date.",
+    ),
+    top: int = typer.Option(
+        15, "--top", callback=natural_number, help="Features drawn."
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("crosstabs-MODEL.svg")
+    ),
+) -> None:
+    """The features that most distinguish a model's list from the rest.
+
+    --stat mean draws the ratio of means on a log axis; --stat nonzero the share of
+    entities with a nonzero value, on the list and off it. --compare reads a second
+    model for the same features.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.crosstabs(
+            pool, model_id, parameter, as_of_date, stat, compare, top
+        )
+
+    _write_plot(ctx, output, f"crosstabs-{model_id}.svg", draw, [model_id, compare])
+
+
+@plot_app.command("crosstabs-dates")
+def plot_crosstabs_dates(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="The top-k cut. Default: the only one persisted.",
+    ),
+    stat: str = typer.Option(
+        "mean",
+        "--stat",
+        callback=_plot_stat,
+        help="mean (the ratio of means) | nonzero (nonzero rate, list minus rest).",
+    ),
+    top: int = typer.Option(
+        4,
+        "--top",
+        callback=natural_number,
+        help="Features drawn: those the latest list separates most (at most 8).",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("crosstabs-dates-GROUP.svg")
+    ),
+) -> None:
+    """The same crosstab on each of a model group's test dates."""
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.crosstabs_dates(pool, model_group_id, parameter, stat, top)
+
+    _write_plot(ctx, output, f"crosstabs-dates-{model_group_id}.svg", draw)
+
+
+@plot_app.command("overlap")
+def plot_overlap(
+    ctx: typer.Context,
+    group_a: int = typer.Argument(..., callback=natural_number),
+    group_b: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(..., "--parameter", "-p", help="The top-k cut."),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("overlap-GROUP_A-GROUP_B.svg")
+    ),
+) -> None:
+    """Do two model groups flag the same entities?
+
+    The Jaccard index of their top-k lists and the rank correlation of their scores, on
+    each test date both scored. Models are paired by training window.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.overlap(pool, group_a, group_b, parameter)
+
+    _write_plot(ctx, output, f"overlap-{group_a}-{group_b}.svg", draw)
 
 
 def execute() -> None:
