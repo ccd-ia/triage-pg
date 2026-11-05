@@ -61,7 +61,7 @@ other unknown key in `label_config` or `cohort_config` is an error. See
 
 ---
 
-## My feature values changed after upgrading to v1.5.0.
+## My features changed after upgrading to v1.5.0.
 
 triage-pg v1.5.0 runs on featurizer v1.5.0, which changes the values of some
 columns and keeps every column name. Three groups of columns move:
@@ -77,6 +77,14 @@ columns and keeps every column name. Three groups of columns move:
 - **Interval columns with a `timestamp` as-of date, or an interval with a time
   part** such as `PT12H`. A window now ends at the as-of instant. With a `date`
   as-of date and intervals of whole days, weeks, months or years, nothing moves.
+
+One change is triage-pg's own. The target's identifier columns other than its
+id are no longer features: the key of a relationship the target is a parent of
+(a `site_id` on a `person` target), an `index` variable, and its spatial index.
+They were reaching the matrix as numbers, so a model could read a surrogate key
+as an ordinal. A matrix of such a target now has those columns fewer, and its
+width equals the feature count that `triage analyze-config` prints. To
+keep one as a feature, declare it under the target's `variables:`.
 
 The engine version is part of every artifact's identity, so the first run after
 upgrading rebuilds features, matrices and models on its own. Compare the new
