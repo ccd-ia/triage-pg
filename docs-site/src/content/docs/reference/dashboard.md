@@ -162,3 +162,5 @@ deployment, not an error.
   appear in the tutorials' guided tours.
 - [Architecture](/triage-pg/reference/architecture/) explains the tables all
   of this reads.
+- [Emacs](/triage-pg/reference/emacs/) reads the same Project from a status
+  buffer, and its serve menu starts this dashboard.
