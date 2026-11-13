@@ -501,6 +501,9 @@ STDERR).  Commands are recorded in `triage-test--calls'."
         (should (string-match-p "source: +inspections.yaml" text))
         (should (string-match-p "Validation: valid" text))
         (should (string-match-p "models to train: +32" text))
+        ;; The longest labels still leave a space before their value.
+        (should (string-match-p "matrices to build: +8" text))
+        (should (string-match-p "feature-group runs: +1" text))
         (should (string-match-p "label timespans: +6 months" text))
         (should (string-match-p "Subsets (1)" text))
         (should (string-match-p "History\n +not run yet" text)))

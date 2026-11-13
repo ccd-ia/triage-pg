@@ -561,7 +561,7 @@ group of REGEXP, when the output first matches.  Return the buffer."
 
 (defun triage--key-line (label value &optional face)
   "Insert a line with LABEL and VALUE, VALUE in FACE."
-  (insert (propertize (format "%-18s" (concat label ":")) 'font-lock-face 'triage-key)
+  (insert (propertize (format "%-20s" (concat label ":")) 'font-lock-face 'triage-key)
           (if face (propertize (triage--str value) 'font-lock-face face) (triage--str value))
           "\n"))
 
