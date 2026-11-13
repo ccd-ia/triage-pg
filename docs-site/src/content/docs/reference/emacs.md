@@ -90,19 +90,7 @@ roots and executables.
 
 ## The status buffer
 
-```
-Project:  food        DB: connected · pg 16 · 0028_subset_threshold_curve · 1418 MB
-triage:   .venv/bin/triage (1.6.0)
-
-Pending (1)
-Experiments (13)
-  Slate-Planck-96     classification   6 runs   completed  example/dirtyduck/experiment-guides.yaml
-  Pyrite-Pasteur-25   classification   19 runs  completed  4 config files
-  fc565f0dd83d        classification   —        not run    example/chicago311/experiment.yaml
-Recent runs (5)
-Sources (2)
-Tables (43)
-```
+![The status buffer on the DirtyDuck project: the database header, thirteen Experiments matched to their config files, the five most recent runs, and the folded Sources and Tables sections](../../../assets/reference/emacs-status.svg)
 
 One refresh is one call to `triage status --json --full`. The CLI takes about
 a second to start, so the call runs in the background: the command returns at
@@ -144,6 +132,8 @@ files.
 TARGET is the config file when there is one, and the hash otherwise. The view
 has four sections:
 
+![The Experiment view of the DirtyDuck guides config: identity, a clean validation, the plan (3 splits, 12 model groups, 36 models to train, three subsets) and the history in the database (9 runs)](../../../assets/reference/emacs-experiment.svg)
+
 - **Identity**: hash, name, problem type, task framing, and the source (a file
   or the stored config).
 - **Validation**: errors and warnings. Folded when there are none.
@@ -176,6 +166,8 @@ comes from the CLI's own listing, `triage.el` quotes it, and the CLI runs every
 query in a read-only transaction. `triage-table-limit` sets how many rows it reads.
 
 ## The menus
+
+![The dispatch menu under the status buffer. It greys out Forward score and Plot, since no model is at point](../../../assets/reference/emacs-dispatch.svg)
 
 Each menu entry builds the arguments of one CLI verb. The Experiment, Run,
 model or model group at point fills the target; otherwise the entry asks for

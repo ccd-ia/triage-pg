@@ -90,7 +90,7 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 | **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon ([`docs/monitoring.md`](docs/monitoring.md)) |
 | **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates; `triage check leakage` tests whether the cohort, label and feature queries read data from after the as-of date |
 | **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop`; `triage reset` clears a project's results after a data reload and keeps its source registry, also when the `triage` schema lives inside a host database |
-| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents — all business-logic-free |
+| **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents, and `triage.el`, an Emacs front end that draws the CLI's JSON — all business-logic-free |
 | **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam |
 
 | ![Experiment overview — model groups × splits heatmap](docs/images/experiment-overview.png) | ![Model card — curves, calibration, diagnostics](docs/images/model-sheet.png) | ![Production monitoring — drift, volume, outcomes](docs/images/monitoring-view.png) |
@@ -104,6 +104,16 @@ forward. Eight tabs, every number a `SELECT` over the views above; the
 | ![Status tab — database facts, row gauges, the last runs, pending work](docs/images/tui-status.png) | ![Runs tab — the run list, its artifact stages and its live log](docs/images/tui-runs.png) | ![Leaderboard tab — one row per model group, sparkline over the test as-of dates](docs/images/tui-leaderboard.png) |
 |---|---|---|
 | status and pending work | a run, stage by stage | the leaderboard matview |
+
+The same project from Emacs — `M-x triage-status` opens a Magit-style buffer
+with the Experiments matched to their config files; `RET` shows an
+Experiment's plan and history, and `?` opens a menu for every CLI action. The
+[Emacs page](https://ccd-ia.github.io/triage-pg/reference/emacs/) covers
+installation and keys:
+
+| ![Status buffer — the database header, Experiments matched to their config files, recent runs](docs/images/emacs-status.png) | ![Experiment view — identity, validation, the plan the config implies, the history in the database](docs/images/emacs-experiment.png) | ![Dispatch menu — run, check, analyze, results, score, plot, maintain, serve](docs/images/emacs-dispatch.png) |
+|---|---|---|
+| the status buffer | one Experiment: plan and history | a menu for every CLI action |
 
 ## Five minutes to a running experiment
 
