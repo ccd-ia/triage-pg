@@ -50,6 +50,14 @@ jobs:
       # `check` does not imply formatting: a ruff 0.15.0 format sweep of 10 files
       # rode into 092e2f43 unnoticed because this gate was missing.
       - run: uv run ruff format --check src/
+      # The Emacs package: byte-compile (warnings as errors), checkdoc and ERT over
+      # emacs/test/fixtures. ubuntu-24.04 ships Emacs 29.3; ci.el installs
+      # magit-section and a current transient from GNU/NonGNU ELPA.
+      - name: Emacs package checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y emacs-nox
+          emacs --batch -l emacs/test/ci.el
 
   frontend:
     runs-on: ubuntu-latest

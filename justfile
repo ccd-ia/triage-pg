@@ -43,6 +43,10 @@ test *ARGS:
 emacs-fixtures:
     TRIAGE_REGEN_EMACS_FIXTURES=1 uv run pytest src/tests/overview_tests/test_emacs_fixtures.py -q
 
+# Byte-compile, checkdoc and the ERT suite of emacs/triage*.el (what the CI lint job runs)
+emacs-test:
+    emacs --batch -l emacs/test/ci.el
+
 # Run tests with coverage
 test-cov:
     uv run pytest --cov=triage

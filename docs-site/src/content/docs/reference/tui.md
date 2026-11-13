@@ -144,3 +144,6 @@ sparkline of the distance over time — flat and low means steady. Best first.
 Anything richer than a sparkline: the model-group × split heatmap, the
 threshold curves, feature importances, crosstabs, the derivation graph. The
 `o` key on a run or an experiment takes you there.
+
+If you work in Emacs, [triage.el](/triage-pg/reference/emacs/) shows the same
+Project in a status buffer and opens this cockpit with `T`.
