@@ -1,0 +1,350 @@
+{
+  "contract": 1,
+  "triage_version": "1.5.0",
+  "project_root": "/project",
+  "project": "tests",
+  "database": {
+    "connected": true,
+    "detail": "pg 18"
+  },
+  "last_runs": [
+    {
+      "run_id": "00000000-0000-4000-8000-000000000001",
+      "name": "Churn baseline",
+      "state": "succeeded",
+      "started_at": "2026-01-01T00:00:00+00:00",
+      "finished_at": null,
+      "detail": "9 models"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000002",
+      "name": "Churn baseline",
+      "state": "succeeded",
+      "started_at": "2026-01-01T00:00:00+00:00",
+      "finished_at": null,
+      "detail": "9 models"
+    }
+  ],
+  "pending": [
+    {
+      "name": "runs",
+      "detail": "nothing pending",
+      "due": "",
+      "level": "ok"
+    }
+  ],
+  "extra": {
+    "size": "9574 kB \u00b7 26 tables \u00b7 18 views",
+    "schema": "0028_subset_threshold_curve",
+    "artifacts": "11 built"
+  },
+  "gauges": [
+    {
+      "name": "predictions",
+      "value": 0,
+      "total": null,
+      "note": "~"
+    },
+    {
+      "name": "evaluations",
+      "value": 0,
+      "total": null,
+      "note": "~"
+    },
+    {
+      "name": "models",
+      "value": 9,
+      "total": null,
+      "note": ""
+    },
+    {
+      "name": "model groups",
+      "value": 3,
+      "total": null,
+      "note": ""
+    },
+    {
+      "name": "runs",
+      "value": 2,
+      "total": null,
+      "note": ""
+    },
+    {
+      "name": "experiments",
+      "value": 1,
+      "total": null,
+      "note": ""
+    }
+  ],
+  "series": [
+    {
+      "name": "runs per day",
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.0
+      ],
+      "empty_note": "none in 14 d"
+    }
+  ],
+  "experiments": [
+    {
+      "experiment_hash": "exp-dash",
+      "name": "Churn baseline",
+      "problem_type": "classification",
+      "task_framing": null,
+      "n_runs": 2,
+      "last_status": "completed",
+      "last_started_at": "2026-01-01T00:00:00+00:00",
+      "archived_at": null
+    }
+  ],
+  "configs": [
+    {
+      "path": "inspections.yaml",
+      "experiment_hash": "b9e38fd8f3669d9451f4deaa3a13f33130c5e4fd1f95dbc1c1ae3420816c7725",
+      "name": null,
+      "problem_type": "classification",
+      "error": null
+    }
+  ],
+  "sources": [
+    {
+      "source_name": "customers",
+      "relation": "customers",
+      "knowledge_date_column": "signup_date",
+      "description": "customer master",
+      "version_label": "v1",
+      "registered_at": "2026-01-01T00:00:00+00:00"
+    }
+  ],
+  "relations": [
+    {
+      "name": "artifact_inputs",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "artifact_sharing",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "artifacts",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "audition",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "audition_distances",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "bias_metrics",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "cohort_profile",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "cohorts",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "crosstabs",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "current_source_pins",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "error_analysis",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "evaluations",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "evaluations_windowed",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "experiment_actuals",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "experiment_summary",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "experiments",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "feature_importances",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "individual_importances",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "label_base_rate",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "labels",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "latest_predictions",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "leaderboard",
+      "kind": "matview",
+      "est_rows": 0
+    },
+    {
+      "name": "matrices",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "metric_catalog",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "metric_directions",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "model_group_summary",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "model_groups",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "models",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "monitoring_outcome_tracking",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "monitoring_volume",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "prediction_ranks",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "predictions",
+      "kind": "partitioned",
+      "est_rows": 0
+    },
+    {
+      "name": "protected_groups",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "results_schema_versions",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "run_artifacts",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "run_progress",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "run_source_pins",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "run_summary",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "runs",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "source_versions",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "sources",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "subset_members",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "subsets",
+      "kind": "table",
+      "est_rows": 0
+    }
+  ],
+  "warnings": []
+}

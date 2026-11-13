@@ -98,6 +98,10 @@ plot_app = typer.Typer(
     " the output's extension — from the rows the dashboard reads."
 )
 app.add_typer(plot_app, name="plot")
+experiment_app = typer.Typer(
+    help="Inspect one Experiment: identity, validation, plan, history."
+)
+app.add_typer(experiment_app, name="experiment")
 
 DEFAULT_DATABASE_FILE = pathlib.Path("database.yaml")
 DEFAULT_SETUP_FILE = pathlib.Path("experiment.py")
@@ -117,6 +121,7 @@ class CLIState:
     db_url: Optional[str]
     setup_path: Optional[pathlib.Path]
     db_error: Optional[str] = None
+    dbfile: Optional[pathlib.Path] = None
 
 
 def natural_number(value: int) -> int:
@@ -453,7 +458,9 @@ def triage_callback(
     setup_path = resolve_setup_path(setup)
     if setup_path:
         load_setup_module(setup_path)
-    ctx.obj = CLIState(db_url=db_url, setup_path=setup_path, db_error=db_error)
+    ctx.obj = CLIState(
+        db_url=db_url, setup_path=setup_path, db_error=db_error, dbfile=dbfile
+    )
     if db_url is not None:
         # Never log credentials: strip the password from the URL before printing
         # (tutorials quote CLI output verbatim; real deployments carry real secrets).
@@ -564,11 +571,9 @@ def _resolve_experiment_hash(conn, prefix: str) -> str:
     The run summary prints a 12-char prefix; every inspection command accepts it
     (like git). Ambiguity and unknown prefixes error with next steps.
     """
-    rows = conn.execute(
-        "select experiment_hash from triage.experiments"
-        " where experiment_hash like %(p)s || '%%' order by experiment_hash limit 3",
-        {"p": prefix},
-    ).fetchall()
+    from triage.overview import match_experiment_hashes
+
+    rows = match_experiment_hashes(conn, prefix)
     if not rows:
         console.print(
             f"[red]No experiment matches {prefix!r} — list them with:"
@@ -578,10 +583,10 @@ def _resolve_experiment_hash(conn, prefix: str) -> str:
     if len(rows) > 1:
         console.print(
             f"[red]Ambiguous experiment prefix {prefix!r} — matches"
-            f" {', '.join(r['experiment_hash'][:16] + '…' for r in rows)}.[/red]"
+            f" {', '.join(h[:16] + '…' for h in rows)}.[/red]"
         )
         raise typer.Exit(code=1)
-    return rows[0]["experiment_hash"]
+    return rows[0]
 
 
 @app.command("leaderboard")
@@ -626,60 +631,46 @@ def leaderboard_command(
     """
     from psycopg import errors as pg_errors
 
+    from triage.diagnostics import readers
+
     engine = get_pool(ctx)
-    if windowed:
-        # A plain view over per-date rows — no matview, so no refresh dance. Full
-        # cohort only (subset_hash = ''): a window pooled across subsets would answer
-        # no question anyone asks (same read audition uses).
-        sql = (
-            "select mg.model_group_id, mg.model_type, w.split_kind, w.metric,"
-            "       w.parameter, w.n_as_of_dates, w.value_mean, w.value_stddev,"
-            "       w.value_min, w.model_id, m.train_end_time"
-            " from triage.evaluations_windowed w"
-            " join triage.models m on m.model_id = w.model_id"
-            " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
-            " join triage.runs r on r.run_id = m.run_id"
-            " where r.experiment_hash = %(hash)s and w.subset_hash = ''"
-        )
-    else:
-        sql = (
-            "select model_group_id, model_type, split_kind, metric, parameter, as_of_date,"
-            "       value, value_expected, value_std, model_id, train_end_time"
-            " from triage.leaderboard where experiment_hash = %(hash)s"
-        )
-    params: Dict[str, Any] = {"hash": experiment_hash, "limit": limit}
-    if metric:
-        sql += " and metric = %(metric)s"
-        params["metric"] = metric
-    if parameter is not None:
-        sql += " and parameter = %(parameter)s"
-        params["parameter"] = parameter
-    if windowed:
-        sql += " order by metric, parameter, value_mean desc nulls last"
-    else:
-        sql += " order by metric, parameter, as_of_date desc, value desc nulls last"
-    sql += " limit %(limit)s"
-    with engine.connection() as conn:
-        params["hash"] = _resolve_experiment_hash(conn, experiment_hash)
-        if refresh:
+
+    def _refresh() -> None:
+        with engine.connection() as conn:
             conn.execute("refresh materialized view triage.leaderboard")
-            logger.info("Refreshed triage.leaderboard on request")
-        if windowed:
-            rows = conn.execute(sql, params).fetchall()
+
+    with engine.connection() as conn:
+        full_hash = _resolve_experiment_hash(conn, experiment_hash)
+    if refresh:
+        _refresh()
+        logger.info("Refreshed triage.leaderboard on request")
+
+    def _read() -> List[Dict[str, Any]]:
+        return readers.leaderboard(
+            engine,
+            full_hash,
+            metric=metric,
+            parameter=parameter,
+            limit=limit,
+            windowed=windowed,
+        )
+
+    if windowed:
+        # A plain view over per-date rows — no matview, so no refresh dance.
+        rows = _read()
+    else:
+        try:
+            rows = _read()
+        except pg_errors.ObjectNotInPrerequisiteState:
+            _refresh()
+            rows = _read()
         else:
-            try:
-                rows = conn.execute(sql, params).fetchall()
-            except pg_errors.ObjectNotInPrerequisiteState:
-                conn.rollback()
-                conn.execute("refresh materialized view triage.leaderboard")
-                rows = conn.execute(sql, params).fetchall()
-            else:
-                if not rows:
-                    # Populated but possibly STALE (e.g. a migration refreshed it before
-                    # this experiment evaluated) — refresh once and retry before
-                    # reporting empty.
-                    conn.execute("refresh materialized view triage.leaderboard")
-                    rows = conn.execute(sql, params).fetchall()
+            if not rows:
+                # Populated but possibly STALE (e.g. a migration refreshed it before
+                # this experiment evaluated) — refresh once and retry before
+                # reporting empty.
+                _refresh()
+                rows = _read()
     if as_json:
         console.print_json(json.dumps(rows, default=str))
         return
@@ -767,46 +758,25 @@ def models_command(
     Headless twin of the dashboard's Model Groups tab / group sheet (ADR-0012): the
     numbers come from the same ``triage.audition`` / ``evaluations_windowed`` objects.
     """
+    from triage.diagnostics import readers
+
     engine = get_pool(ctx)
     with engine.connection() as conn:
         experiment_hash = _resolve_experiment_hash(conn, experiment_hash)
-        if metric is None or parameter is None:
-            sql = (
-                "select metric, parameter, sum(n_splits_evaluated) as n"
-                " from triage.audition where experiment_hash = %(h)s"
+    if metric is None or parameter is None:
+        chosen = readers.default_metric(engine, experiment_hash, metric)
+        if chosen is None:
+            console.print(
+                "[yellow]No evaluated test splits for this experiment yet.[/yellow]"
             )
-            if metric is not None:
-                sql += " and metric = %(m)s"
-            sql += (
-                " group by metric, parameter order by n desc, metric, parameter limit 1"
-            )
-            row = conn.execute(sql, {"h": experiment_hash, "m": metric}).fetchone()
-            if row is None:
-                console.print(
-                    "[yellow]No evaluated test splits for this experiment yet.[/yellow]"
-                )
-                raise typer.Exit(code=1)
-            metric = metric or row["metric"]
-            parameter = parameter if parameter is not None else row["parameter"]
-        params = {"h": experiment_hash, "m": metric, "p": parameter, "g": group}
+            raise typer.Exit(code=1)
+        metric = metric or chosen[0]
+        parameter = parameter if parameter is not None else chosen[1]
+    params = {"h": experiment_hash, "m": metric, "p": parameter, "g": group}
 
+    with engine.connection() as conn:
         if group is None:
-            rows = conn.execute(
-                "select mgs.model_group_id, mgs.model_type, mgs.n_models,"
-                "       a.avg_value, a.stddev_value, a.max_regret,"
-                "       (select avg(mm.train_duration_ms)::bigint from triage.models mm"
-                "          join triage.runs rr on rr.run_id = mm.run_id"
-                "         where mm.model_group_id = mgs.model_group_id"
-                "           and rr.experiment_hash = %(h)s) as avg_duration_ms"
-                " from triage.model_group_summary mgs"
-                " left join triage.audition a"
-                "        on a.experiment_hash = mgs.experiment_hash"
-                "       and a.model_group_id = mgs.model_group_id"
-                "       and a.metric = %(m)s and a.parameter = %(p)s"
-                " where mgs.experiment_hash = %(h)s"
-                " order by a.avg_distance_from_best asc nulls last, mgs.model_group_id",
-                params,
-            ).fetchall()
+            rows = readers.model_groups(engine, experiment_hash, metric, parameter)
             if as_json:
                 console.print_json(json.dumps(rows, default=str))
                 return
@@ -3043,13 +3013,39 @@ def tui_command(
 def status_command(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="Print the status as JSON."),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="With --json: also the Experiments, the config files under the current"
+        " directory with each one's experiment hash, the declared Sources and the"
+        " triage schema's tables and views — everything an editor front end draws, in"
+        " one call.",
+    ),
+    configs: Optional[List[str]] = typer.Option(
+        None,
+        "--configs",
+        metavar="GLOB",
+        help="With --full: where to look for config files, relative to the current"
+        " directory (repeatable). Default: every .yaml/.yml file.",
+    ),
 ) -> None:
     """Project status — health, sizes, last runs, pending work — derived from queries."""
     from lynkeus import commands as lk
 
     from triage.tui.adapters import TriageStatus, project_name
 
+    if full and not as_json:
+        console.print("[red]--full is JSON-only; add --json[/red]")
+        raise typer.Exit(code=2)
     db_url = require_db_url(ctx)
+    if full:
+        from triage.overview import DEFAULT_CONFIG_GLOBS, full_status
+
+        payload = full_status(
+            db_url, pathlib.Path.cwd(), tuple(configs or DEFAULT_CONFIG_GLOBS)
+        )
+        console.print_json(json.dumps(payload, default=str))
+        return
     lk.status(
         TriageStatus(_tui_source(ctx), project_name(db_url) or "triage-pg"),
         json_out=as_json,
@@ -3123,6 +3119,191 @@ def query_command(
     from lynkeus import commands as lk
 
     lk.query(_tui_source(ctx), sql_text, json_out=as_json, console=console)
+
+
+@experiment_app.command("show")
+def experiment_show_command(
+    ctx: typer.Context,
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help="An experiment config file, or a prefix of an experiment hash.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the object as JSON."),
+    runs: int = typer.Option(20, "--runs", help="How many of the newest runs to show."),
+    top: int = typer.Option(10, "--top", help="How many leaderboard rows to show."),
+) -> None:
+    """One Experiment: the plan its config implies, its validation, and its history.
+
+    The plan and the validation need no database (they are what ``analyze-config``
+    prints). The history — runs, model groups and the top of the leaderboard — is what
+    the database holds for the Experiment, empty when it has not run yet.
+    """
+    from triage.overview import TargetError, experiment_object
+
+    state = get_state(ctx)
+    try:
+        payload = experiment_object(
+            target, state.db_url, db_error=state.db_error, n_runs=runs, n_top=top
+        )
+    except TargetError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    if as_json:
+        console.print_json(json.dumps(payload, default=str))
+        return
+    _print_experiment_object(payload)
+
+
+def _print_experiment_object(obj: Mapping[str, Any]) -> None:
+    """The ``experiment show`` panels: every number the JSON carries, readable."""
+    where = obj["path"] or "stored config (no file)"
+    console.print(
+        Panel.fit(
+            f"[cyan]hash:[/cyan] {obj['experiment_hash']}\n"
+            f"[cyan]name:[/cyan] {obj['name'] or '—'}\n"
+            f"[cyan]problem_type:[/cyan] {obj['problem_type'] or '—'}"
+            f"   [cyan]task_framing:[/cyan] {obj['task_framing'] or '—'}\n"
+            f"[cyan]config:[/cyan] {where}",
+            title="Experiment",
+        )
+    )
+    validation = obj["validation"]
+    lines = [
+        f"[red]{e['path']}[/red]: {e['message']}" for e in validation["errors"]
+    ] + [f"[yellow]note:[/yellow] {w}" for w in validation["warnings"]]
+    console.print(
+        Panel.fit(
+            "\n".join(lines) or "[green]valid[/green]",
+            title="Validation"
+            + ("" if validation["valid"] else " — [red]invalid[/red]"),
+        )
+    )
+    plan = obj["plan"]
+    if plan is None:
+        console.print(f"[red]Cannot plan this config:[/red] {obj['plan_error']}")
+    else:
+        table = Table(title="Plan", box=box.SIMPLE_HEAVY)
+        table.add_column("Statistic")
+        table.add_column("Value", justify="right")
+        for label, value in (
+            ("Temporal splits", plan["n_splits"]),
+            ("Distinct as_of dates", plan["n_as_of_dates"]),
+            ("Label timespans", ", ".join(plan["label_timespans"]) or "—"),
+            ("Matrices to build", plan["n_matrices"]),
+            ("Model grid size", plan["grid_size"]),
+            ("Model groups", plan["n_model_groups"]),
+            ("Feature-group runs", plan["n_runs"]),
+            (
+                "Feature columns",
+                "unknown"
+                if plan["n_feature_columns"] is None
+                else plan["n_feature_columns"],
+            ),
+            ("[bold]Models to be trained[/bold]", f"[bold]{plan['n_models']}[/bold]"),
+        ):
+            table.add_row(label, str(value))
+        console.print(table)
+        for note in plan["baseline_issues"]:
+            console.print(f"[red]baseline:[/red] {note}")
+        for note in plan["warnings"]:
+            console.print(f"[yellow]note:[/yellow] {note}")
+        if plan["feature_error"]:
+            console.print(
+                f"[yellow]Feature manifest could not be built:[/yellow]"
+                f" {plan['feature_error']}"
+            )
+    database, history = obj["database"], obj["history"]
+    if history is None:
+        console.print(
+            "[dim]History: "
+            + (
+                "not run yet — no row in triage.experiments."
+                if database["connected"]
+                else f"database not reachable ({database['detail']})."
+            )
+            + "[/dim]"
+        )
+        return
+    summary = history["summary"]
+    console.print(
+        f"[cyan]runs:[/cyan] {summary.get('n_runs')}"
+        f"   [cyan]last:[/cyan] {summary.get('last_status') or '—'}"
+        f" {summary.get('last_started_at') or ''}"
+    )
+    runs_table = Table(title="Runs", box=box.SIMPLE_HEAVY)
+    for col in ("Run", "State", "Started", "Detail"):
+        runs_table.add_column(col)
+    for run in history["runs"]:
+        runs_table.add_row(
+            str(run["run_id"])[:8],
+            str(run["state"]),
+            str(run["started_at"] or "—"),
+            str(run["detail"] or ""),
+        )
+    console.print(runs_table)
+    chosen = history["model_group_metric"]
+    if chosen:
+        groups = Table(
+            title=f"Model groups ({' '.join(filter(None, chosen.values()))})",
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in ("Group", "Algorithm", "Models", "Avg ± σ", "Max regret"):
+            groups.add_column(col)
+        for r in history["model_groups"]:
+            groups.add_row(
+                str(r["model_group_id"]),
+                str(r["model_type"]).rsplit(".", 1)[-1],
+                str(r["n_models"]),
+                f"{_fmt(r['avg_value'])} ± {_fmt(r['stddev_value'])}",
+                _fmt(r["max_regret"]),
+            )
+        console.print(groups)
+    board = Table(title="Leaderboard (top)", box=box.SIMPLE_HEAVY)
+    for col in ("Group", "Model", "Metric", "Param", "As-of", "Value"):
+        board.add_column(col)
+    for r in history["leaderboard"]:
+        board.add_row(
+            str(r["model_group_id"]),
+            str(r["model_id"]),
+            r["metric"],
+            r["parameter"],
+            str(r["as_of_date"]),
+            _fmt(r["value"]),
+        )
+    console.print(board)
+
+
+@app.command("serve")
+def serve_command(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    port: int = typer.Option(8000, "--port", help="Port to listen on."),
+    reload: bool = typer.Option(
+        False, "--reload", help="Restart when the source changes (development)."
+    ),
+) -> None:
+    """Start the dashboard for this project (needs the dashboard extra).
+
+    The dashboard finds its database the way every verb does — database.yaml,
+    DATABASE_URL, then PG* — and serves the built web app packaged with triage-pg
+    (TRIAGE_DASHBOARD_STATIC overrides it).
+    """
+    if get_state(ctx).dbfile is not None:
+        console.print(
+            "[red]serve reads database.yaml / DATABASE_URL / PG*; --dbfile is not passed"
+            " to the dashboard[/red]"
+        )
+        raise typer.Exit(code=2)
+    try:
+        import uvicorn
+    except ImportError as exc:
+        console.print(
+            "[red]the dashboard needs the dashboard extra:"
+            " uv add 'triage-pg\\[dashboard]'[/red]"
+        )
+        raise typer.Exit(code=1) from exc
+    uvicorn.run("triage.dashboard.app:app", host=host, port=port, reload=reload)
 
 
 @actions_app.command("list")

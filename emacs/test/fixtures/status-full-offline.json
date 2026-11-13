@@ -1,0 +1,28 @@
+{
+  "contract": 1,
+  "triage_version": "1.5.0",
+  "project_root": "/project",
+  "project": "nowhere",
+  "database": {
+    "connected": false,
+    "detail": "connection failed: connection to server at \"127.0.0.1\", port 1 failed: could not receive data from server: Connection refused"
+  },
+  "last_runs": [],
+  "pending": [],
+  "extra": {},
+  "gauges": [],
+  "series": [],
+  "experiments": [],
+  "configs": [
+    {
+      "path": "inspections.yaml",
+      "experiment_hash": "b9e38fd8f3669d9451f4deaa3a13f33130c5e4fd1f95dbc1c1ae3420816c7725",
+      "name": null,
+      "problem_type": "classification",
+      "error": null
+    }
+  ],
+  "sources": [],
+  "relations": [],
+  "warnings": []
+}

@@ -9,8 +9,8 @@ sidebar:
 The dashboard is a deliberately thin window: every number you'll see is a
 `SELECT` over the views and functions in the `triage` schema (no
 business logic in the UI), so anything shown here is equally scriptable from
-[the CLI](/triage-pg/reference/cli/) or `psql`. Start it with `just serve`
-against any project database.
+[the CLI](/triage-pg/reference/cli/) or `psql`. Start it with `triage serve`
+from any project directory (`just serve` in a checkout of this repository).
 
 ## Experiments — the front page
 

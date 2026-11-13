@@ -1,0 +1,56 @@
+{
+  "run": {
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "name": "Churn baseline",
+    "state": "succeeded",
+    "started_at": "2026-01-01T00:00:00+00:00",
+    "finished_at": null,
+    "detail": "9 models"
+  },
+  "stages": [
+    {
+      "name": "cohort",
+      "done": 1,
+      "total": 1,
+      "note": ""
+    },
+    {
+      "name": "labels",
+      "done": 1,
+      "total": 1,
+      "note": ""
+    },
+    {
+      "name": "matrices",
+      "done": 0,
+      "total": 0,
+      "note": ""
+    },
+    {
+      "name": "models",
+      "done": 9,
+      "total": 9,
+      "note": ""
+    },
+    {
+      "name": "predictions",
+      "done": 1,
+      "total": 9,
+      "note": ""
+    },
+    {
+      "name": "evaluations",
+      "done": 9,
+      "total": 9,
+      "note": ""
+    }
+  ],
+  "meta": {
+    "profile": "local",
+    "git": "abc1234",
+    "splits": "3 \u00b7 1 feature group(s)",
+    "features": "12",
+    "batch": "batch-1",
+    "experiment": "exp-dash"
+  }
+}

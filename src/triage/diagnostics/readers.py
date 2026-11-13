@@ -723,3 +723,128 @@ def list_overlap(
         " order by as_of_date",
         {"a": model_id, "b": other_model_id, "p": parameter, "split": split_kind},
     )
+
+
+# ------------------------------------------------------------- leaderboard, model groups
+
+
+def leaderboard(
+    pool: DictRowPool,
+    experiment_hash: str,
+    *,
+    metric: Optional[str] = None,
+    parameter: Optional[str] = None,
+    limit: int = 20,
+    windowed: bool = False,
+) -> list[dict[str, Any]]:
+    """An experiment's leaderboard rows, best first within each metric and parameter.
+
+    Args:
+        pool: the project database.
+        experiment_hash: the full experiment hash.
+        metric: keep one metric; ``None`` keeps all.
+        parameter: keep one metric parameter; ``None`` keeps all.
+        limit: the most rows to return.
+        windowed: read ``triage.evaluations_windowed`` (one row per model across its whole
+            test window, full cohort only) instead of the per-date ``triage.leaderboard``.
+
+    Returns:
+        Per date: ``model_group_id, model_type, split_kind, metric, parameter, as_of_date,
+        value, value_expected, value_std, model_id, train_end_time``. Windowed:
+        ``model_group_id, model_type, split_kind, metric, parameter, n_as_of_dates,
+        value_mean, value_stddev, value_min, model_id, train_end_time``.
+
+    Raises:
+        psycopg.errors.ObjectNotInPrerequisiteState: the per-date matview was never
+            refreshed. The caller decides whether to refresh it.
+    """
+    if windowed:
+        # A plain view over per-date rows, so no matview. Full cohort only (subset_hash =
+        # ''): a window pooled across subsets answers no question anyone asks.
+        sql: LiteralString = (
+            "select mg.model_group_id, mg.model_type, w.split_kind, w.metric,"
+            "       w.parameter, w.n_as_of_dates, w.value_mean, w.value_stddev,"
+            "       w.value_min, w.model_id, m.train_end_time"
+            " from triage.evaluations_windowed w"
+            " join triage.models m on m.model_id = w.model_id"
+            " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
+            " join triage.runs r on r.run_id = m.run_id"
+            " where r.experiment_hash = %(hash)s and w.subset_hash = ''"
+        )
+    else:
+        sql = (
+            "select model_group_id, model_type, split_kind, metric, parameter, as_of_date,"
+            "       value, value_expected, value_std, model_id, train_end_time"
+            " from triage.leaderboard where experiment_hash = %(hash)s"
+        )
+    params: dict[str, Any] = {"hash": experiment_hash, "limit": limit}
+    if metric:
+        sql += " and metric = %(metric)s"
+        params["metric"] = metric
+    if parameter is not None:
+        sql += " and parameter = %(parameter)s"
+        params["parameter"] = parameter
+    if windowed:
+        sql += " order by metric, parameter, value_mean desc nulls last"
+    else:
+        sql += " order by metric, parameter, as_of_date desc, value desc nulls last"
+    sql += " limit %(limit)s"
+    return _rows(pool, sql, params)
+
+
+def default_metric(
+    pool: DictRowPool, experiment_hash: str, metric: Optional[str] = None
+) -> Optional[tuple[str, str]]:
+    """The experiment's most-evaluated ``(metric, parameter)`` in ``triage.audition``.
+
+    Args:
+        pool: the project database.
+        experiment_hash: the full experiment hash.
+        metric: restrict the choice to this metric's parameters.
+
+    Returns:
+        ``(metric, parameter)``, or ``None`` when no test split has been evaluated.
+    """
+    row = _one(
+        pool,
+        "select metric, parameter, sum(n_splits_evaluated) as n"
+        " from triage.audition where experiment_hash = %(h)s"
+        "   and (%(m)s::text is null or metric = %(m)s)"
+        " group by metric, parameter order by n desc, metric, parameter limit 1",
+        {"h": experiment_hash, "m": metric},
+    )
+    return None if row is None else (row["metric"], row["parameter"])
+
+
+def model_groups(
+    pool: DictRowPool, experiment_hash: str, metric: str, parameter: str
+) -> list[dict[str, Any]]:
+    """An experiment's model groups ranked by average distance from the best, on one metric.
+
+    Args:
+        pool: the project database.
+        experiment_hash: the full experiment hash.
+        metric: the audition metric.
+        parameter: the metric parameter.
+
+    Returns:
+        Rows ``model_group_id, model_type, n_models, avg_value, stddev_value, max_regret,
+        avg_duration_ms``. A group with no evaluation on the metric has ``None`` values.
+    """
+    return _rows(
+        pool,
+        "select mgs.model_group_id, mgs.model_type, mgs.n_models,"
+        "       a.avg_value, a.stddev_value, a.max_regret,"
+        "       (select avg(mm.train_duration_ms)::bigint from triage.models mm"
+        "          join triage.runs rr on rr.run_id = mm.run_id"
+        "         where mm.model_group_id = mgs.model_group_id"
+        "           and rr.experiment_hash = %(h)s) as avg_duration_ms"
+        " from triage.model_group_summary mgs"
+        " left join triage.audition a"
+        "        on a.experiment_hash = mgs.experiment_hash"
+        "       and a.model_group_id = mgs.model_group_id"
+        "       and a.metric = %(m)s and a.parameter = %(p)s"
+        " where mgs.experiment_hash = %(h)s"
+        " order by a.avg_distance_from_best asc nulls last, mgs.model_group_id",
+        {"h": experiment_hash, "m": metric, "p": parameter},
+    )

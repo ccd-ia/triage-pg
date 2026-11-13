@@ -1,0 +1,48 @@
+{
+  "contract": 1,
+  "source": "file",
+  "path": "inspections.yaml",
+  "experiment_hash": "b9e38fd8f3669d9451f4deaa3a13f33130c5e4fd1f95dbc1c1ae3420816c7725",
+  "name": null,
+  "problem_type": "classification",
+  "task_framing": "resource_prioritization",
+  "validation": {
+    "valid": true,
+    "errors": [],
+    "warnings": []
+  },
+  "plan": {
+    "n_splits": 4,
+    "n_test_matrices": 4,
+    "n_as_of_dates": 5,
+    "label_timespans": [
+      "6 months"
+    ],
+    "n_matrices": 8,
+    "grid_size": 8,
+    "n_model_groups": 8,
+    "n_runs": 1,
+    "n_models": 32,
+    "n_feature_columns": 107,
+    "n_truncated_columns": 0,
+    "subsets": [
+      {
+        "label": "all-features",
+        "group_names": [
+          "all"
+        ],
+        "n_columns": 107
+      }
+    ],
+    "baseline_issues": [],
+    "warnings": [],
+    "feature_error": null
+  },
+  "plan_error": null,
+  "config_yaml": null,
+  "database": {
+    "connected": true,
+    "detail": "pg 18"
+  },
+  "history": null
+}

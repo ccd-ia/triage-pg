@@ -1,0 +1,14 @@
+[
+  {
+    "model_group_id": 1,
+    "model_type": "sklearn.tree.DecisionTreeClassifier"
+  },
+  {
+    "model_group_id": 2,
+    "model_type": "sklearn.tree.DecisionTreeClassifier"
+  },
+  {
+    "model_group_id": 3,
+    "model_type": "sklearn.tree.DecisionTreeClassifier"
+  }
+]

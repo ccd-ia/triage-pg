@@ -1,0 +1,29 @@
+[
+  {
+    "model_group_id": 2,
+    "model_type": "sklearn.tree.DecisionTreeClassifier",
+    "n_models": 3,
+    "avg_value": 0.8099999999999999,
+    "stddev_value": 0.009999999999999898,
+    "max_regret": 0.08999999999999997,
+    "avg_duration_ms": null
+  },
+  {
+    "model_group_id": 3,
+    "model_type": "sklearn.tree.DecisionTreeClassifier",
+    "n_models": 3,
+    "avg_value": 0.6999999999999998,
+    "stddev_value": 6.409875621278546e-17,
+    "max_regret": 0.20000000000000007,
+    "avg_duration_ms": null
+  },
+  {
+    "model_group_id": 1,
+    "model_type": "sklearn.tree.DecisionTreeClassifier",
+    "n_models": 3,
+    "avg_value": 0.6666666666666666,
+    "stddev_value": 0.20816659994661327,
+    "max_regret": 0.30000000000000004,
+    "avg_duration_ms": null
+  }
+]

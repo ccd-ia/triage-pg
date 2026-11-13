@@ -1,0 +1,359 @@
+[
+  {
+    "name": "triage run",
+    "description": "Run a greenfield experiment end-to-end (cohort\u2192labels\u2192matrix\u2192model\u2192eval, ADR-00\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "CONFIG"
+  },
+  {
+    "name": "triage leaderboard",
+    "description": "The experiment leaderboard, headless (ADR-0012) \u2014 the same ``triage.leaderboard\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
+    "name": "triage models",
+    "description": "Model groups at a glance (avg \u00b1 \u03c3, max regret, avg fit time) \u2014 or, with",
+    "source": "cli",
+    "destructive": false,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
+    "name": "triage audition",
+    "description": "Model selection over the in-PG audition views (ADR-0007), headless (ADR-0012).",
+    "source": "cli",
+    "destructive": false,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
+    "name": "triage retrainpredict",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID PREDICTION_DATE"
+  },
+  {
+    "name": "triage predictlist",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID AS_OF_DATE"
+  },
+  {
+    "name": "triage score",
+    "description": "Forward-score a model (the ADR-0027 monitoring entrypoint; alias of predictlist\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage analyze-config",
+    "description": "Inspect an experiment config: the plan it implies, and optionally the data behi\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "CONFIG"
+  },
+  {
+    "name": "triage archive",
+    "description": "Soft-archive an experiment (ADR-0017). Reversible until a gc sweep.",
+    "source": "cli",
+    "destructive": true,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
+    "name": "triage gc",
+    "description": "Garbage-collect artifacts unreachable from any root (ADR-0017).",
+    "source": "cli",
+    "destructive": true,
+    "args": ""
+  },
+  {
+    "name": "triage reset",
+    "description": "Delete triage results: experiments, runs, models, matrices, predictions, evalua\u2026",
+    "source": "cli",
+    "destructive": true,
+    "args": ""
+  },
+  {
+    "name": "triage tui",
+    "description": "Open the terminal cockpit: Status \u00b7 Runs \u00b7 Data \u00b7 Query \u00b7 Actions + the project\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage status",
+    "description": "Project status \u2014 health, sizes, last runs, pending work \u2014 derived from queries.",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage query",
+    "description": "Run one statement inside a read-only transaction and print the rows.",
+    "source": "cli",
+    "destructive": false,
+    "args": "SQL"
+  },
+  {
+    "name": "triage serve",
+    "description": "Start the dashboard for this project (needs the dashboard extra).",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage db upgrade",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage db downgrade",
+    "description": "",
+    "source": "cli",
+    "destructive": true,
+    "args": ""
+  },
+  {
+    "name": "triage db stamp",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": "REVISION"
+  },
+  {
+    "name": "triage db history",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage db up",
+    "description": "",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage source register",
+    "description": "Declare a source table (idempotent).",
+    "source": "cli",
+    "destructive": false,
+    "args": "NAME"
+  },
+  {
+    "name": "triage source bump",
+    "description": "Record a new version pin after a data load.",
+    "source": "cli",
+    "destructive": false,
+    "args": "NAME"
+  },
+  {
+    "name": "triage source list",
+    "description": "List sources with their current pins (unpinned sources are volatile).",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage source show",
+    "description": "Show a source's registration, current pin, and drift status.",
+    "source": "cli",
+    "destructive": false,
+    "args": "NAME"
+  },
+  {
+    "name": "triage project create",
+    "description": "Create a project end-to-end: registry row \u2192 CREATE DATABASE \u2192 triage schema (he\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "SLUG"
+  },
+  {
+    "name": "triage project grant",
+    "description": "Re-apply the per-project role grants + matview ownership (cloud-runbook \u00a74.4).",
+    "source": "cli",
+    "destructive": false,
+    "args": "SLUG"
+  },
+  {
+    "name": "triage project drop",
+    "description": "DROP the project's database (WITH FORCE) and tombstone its registry row (ADR-00\u2026",
+    "source": "cli",
+    "destructive": true,
+    "args": "SLUG"
+  },
+  {
+    "name": "triage project list",
+    "description": "List registry projects (active only by default).",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage runs status",
+    "description": "Poll AWS Batch for cloud runs and backfill terminal state onto triage.runs.",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage runs list",
+    "description": "The most recent runs, newest first.",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage runs show",
+    "description": "One run: its row, per-stage progress and metadata.",
+    "source": "cli",
+    "destructive": false,
+    "args": "RUN_ID"
+  },
+  {
+    "name": "triage runs tail",
+    "description": "Follow a run's progress (LISTEN run_progress; a finished run replays its counts\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "RUN_ID"
+  },
+  {
+    "name": "triage postmodel crosstabs",
+    "description": "Feature means among the top-k vs the rest \u2014 what characterizes the list?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel error-tree",
+    "description": "Characterize WHERE the model fails: a shallow tree on the errors \u2192 rules.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel error-rules",
+    "description": "Read the persisted error-tree leaves \u2014 no tree is fitted here.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel error-recurrence",
+    "description": "On how many of a model group's test dates does each error rule recur?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage postmodel compare",
+    "description": "Do two models flag the same entities? Top-k overlap + Spearman (migration 0016).",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_A MODEL_B"
+  },
+  {
+    "name": "triage model show",
+    "description": "One model's card, headless: identity, windowed evaluations, top importances,",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage model curve",
+    "description": "The Rayid curve of one test date: precision and recall at each population cut, \u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage actions list",
+    "description": "Every action the palette offers: just recipes (cwd) + triage verbs.",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
+    "name": "triage actions run",
+    "description": "Run one action as a subprocess, stream its output, exit with its code.",
+    "source": "cli",
+    "destructive": false,
+    "args": "NAME"
+  },
+  {
+    "name": "triage check leakage",
+    "description": "Does the cohort, label or feature definition read data it should not know yet?",
+    "source": "cli",
+    "destructive": false,
+    "args": "CONFIG"
+  },
+  {
+    "name": "triage plot curve",
+    "description": "Precision and recall over the population selected, per Subset or model.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot curve-dates",
+    "description": "A model group's curve on each test date: is the ranking stable over time?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot error-rules",
+    "description": "A model's error-tree leaves with the most errors, against the population rate.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot leaves",
+    "description": "Every fp and confusion leaf of a model group: are any suspiciously right?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot recurrence",
+    "description": "Which error rules recur across a model group's test dates?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot crosstabs",
+    "description": "The features that most distinguish a model's list from the rest.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot crosstabs-dates",
+    "description": "The same crosstab on each of a model group's test dates.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot overlap",
+    "description": "Do two model groups flag the same entities?",
+    "source": "cli",
+    "destructive": false,
+    "args": "GROUP_A GROUP_B"
+  },
+  {
+    "name": "triage experiment show",
+    "description": "One Experiment: the plan its config implies, its validation, and its history.",
+    "source": "cli",
+    "destructive": false,
+    "args": "TARGET"
+  }
+]

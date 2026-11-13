@@ -1,0 +1,33 @@
+{
+  "card": {
+    "model_id": 3,
+    "model_group_id": 1,
+    "model_type": "sklearn.tree.DecisionTreeClassifier",
+    "hyperparameters": {},
+    "train_end_time": "2015-01-01",
+    "label_timespan": "6 mons",
+    "train_duration_ms": null,
+    "model_size_bytes": null
+  },
+  "windowed": [
+    {
+      "metric": "auc_roc",
+      "parameter": "",
+      "n_as_of_dates": 1,
+      "value_mean": 0.9,
+      "value_min": 0.9,
+      "value_max": 0.9
+    },
+    {
+      "metric": "average_precision",
+      "parameter": "",
+      "n_as_of_dates": 1,
+      "value_mean": 0.9,
+      "value_min": 0.9,
+      "value_max": 0.9
+    }
+  ],
+  "importances": [],
+  "calibration": [],
+  "crosstabs": []
+}
