@@ -1,0 +1,64 @@
+{
+  "leakage_found": true,
+  "dates_checked": [
+    "2013-01-01",
+    "2013-07-01",
+    "2014-01-01",
+    "2014-07-01"
+  ],
+  "label_checks": [
+    {
+      "as_of_date": "2013-01-01",
+      "label_timespan": "6 months"
+    },
+    {
+      "as_of_date": "2013-07-01",
+      "label_timespan": "6 months"
+    },
+    {
+      "as_of_date": "2014-01-01",
+      "label_timespan": "6 months"
+    },
+    {
+      "as_of_date": "2014-07-01",
+      "label_timespan": "6 months"
+    }
+  ],
+  "sources_cut": [
+    "entities",
+    "events"
+  ],
+  "elapsed_s": 1.0,
+  "findings": [
+    {
+      "component": "labels",
+      "as_of_date": "2013-07-01",
+      "label_timespan": "6 months",
+      "cut": "rows known on or after 2014-01-01",
+      "added": 0,
+      "removed": 1,
+      "changed": 0,
+      "n_entities": 1,
+      "examples": [
+        8
+      ],
+      "columns": {}
+    },
+    {
+      "component": "labels",
+      "as_of_date": "2013-01-01",
+      "label_timespan": "6 months",
+      "cut": "rows known on or after 2013-07-01",
+      "added": 0,
+      "removed": 2,
+      "changed": 0,
+      "n_entities": 2,
+      "examples": [
+        7,
+        8
+      ],
+      "columns": {}
+    }
+  ],
+  "not_checked": []
+}

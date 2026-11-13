@@ -17,7 +17,7 @@ import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString
 
 import psycopg
 import typer
@@ -107,6 +107,17 @@ _RUN_COLUMNS = (
     " r.plan, r.experiment_hash,"
     " coalesce(nullif(e.name, ''), triage.auto_experiment_name(e.experiment_hash),"
     "          left(r.experiment_hash, 8), 'run') as name"
+)
+
+
+#: Planner row estimate of the ``pg_class`` row aliased ``c``, never a full count. A
+#: partitioned table (``predictions``, ADR-0006) has no tuples of its own, so its estimate is
+#: the sum over its partitions. Shared by the Status gauges and ``status --full``.
+EST_ROWS_SQL: LiteralString = (
+    "case when c.relkind = 'p' then"
+    " (select coalesce(sum(greatest(p.reltuples, 0)), 0) from pg_inherits i"
+    "  join pg_class p on p.oid = i.inhrelid where i.inhparent = c.oid)"
+    " else greatest(c.reltuples, 0) end"
 )
 
 
@@ -225,11 +236,7 @@ class TriageStatus:
         estimates = {
             r["relname"]: int(r["est"])
             for r in self.source.rows(
-                "select c.relname,"
-                " case when c.relkind = 'p' then"
-                "   (select coalesce(sum(greatest(p.reltuples, 0)), 0) from pg_inherits i"
-                "    join pg_class p on p.oid = i.inhrelid where i.inhparent = c.oid)"
-                " else greatest(c.reltuples, 0) end as est"
+                f"select c.relname, {EST_ROWS_SQL} as est"
                 " from pg_class c join pg_namespace n on n.oid = c.relnamespace"
                 " where n.nspname = 'triage'"
                 "   and c.relname in ('predictions', 'evaluations')"
@@ -354,13 +361,14 @@ class TriageRuns:
         self.dashboard_url = (dashboard_url or "").rstrip("/")
 
     # -- list / show ---------------------------------------------------------------
-    def list(self, limit: int = 50) -> list[Run]:
-        """Newest first."""
+    def list(self, limit: int = 50, experiment_hash: str | None = None) -> list[Run]:
+        """Newest first; only one Experiment's runs when ``experiment_hash`` is given."""
         rows = self.source.rows(
             f"select {_RUN_COLUMNS} from triage.runs r"
             " left join triage.experiments e using (experiment_hash)"
+            " where %(h)s::text is null or r.experiment_hash = %(h)s"
             " order by r.started_at desc limit %(n)s",
-            {"n": limit},
+            {"n": limit, "h": experiment_hash},
         )
         return [_run_from_row(r) for r in rows]
 

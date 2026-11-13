@@ -1,0 +1,262 @@
+{
+  "contract": 1,
+  "source": "database",
+  "path": null,
+  "experiment_hash": "exp-dash",
+  "name": "Churn baseline",
+  "problem_type": "classification",
+  "task_framing": "resource_prioritization",
+  "validation": {
+    "valid": true,
+    "errors": [],
+    "warnings": []
+  },
+  "plan": {
+    "n_splits": 4,
+    "n_test_matrices": 4,
+    "n_as_of_dates": 5,
+    "label_timespans": [
+      "6 months"
+    ],
+    "n_matrices": 8,
+    "grid_size": 8,
+    "n_model_groups": 8,
+    "n_runs": 1,
+    "n_models": 32,
+    "n_feature_columns": 107,
+    "n_truncated_columns": 0,
+    "subsets": [
+      {
+        "label": "all-features",
+        "group_names": [
+          "all"
+        ],
+        "n_columns": 107
+      }
+    ],
+    "baseline_issues": [],
+    "warnings": [],
+    "feature_error": null
+  },
+  "plan_error": null,
+  "config_yaml": "sources:\n- name: ontology_entities\n  role: entity\n  relation: ontology.entities\n  description: Active food-service facilities (DirtyDuck tutorial)\n  type_column: facility_type\n  version_label: dirtyduck-v1\n  knowledge_date_column: start_time\n- name: ontology_events\n  role: event\n  relation: ontology.events\n  description: Food inspection events with result and violations (DirtyDuck tutorial)\n  type_column: type\n  version_label: dirtyduck-v1\n  knowledge_date_column: date\ngrid_config:\n  sklearn.dummy.DummyClassifier:\n    strategy:\n    - prior\n  sklearn.tree.DecisionTreeClassifier:\n    max_depth:\n    - 3\n    - 5\n    min_samples_split:\n    - 50\n  sklearn.ensemble.RandomForestClassifier:\n    max_depth:\n    - 3\n    n_estimators:\n    - 10\n    min_samples_split:\n    - 50\n  triage.component.catwalk.baselines.thresholders.SimpleThresholder:\n    rules:\n    - - COUNT(inspections.result) > 5\n  triage.component.catwalk.baselines.rankers.BaselineRankMultiFeature:\n    rules:\n    - - feature: COUNT(inspections.result)\n        low_value_high_score: false\n  triage.component.catwalk.estimators.classifiers.ScaledLogisticRegression:\n    C:\n    - 0.01\n    - 1.0\n    penalty:\n    - l2\n    max_iter:\n    - 1000\nlabel_config:\n  name: failed_inspections\n  query: \"select\\n  entity_id,\\n  bool_or(result = 'fail')::integer as outcome\\nfrom\\\n    \\ ontology.events\\nwhere {as_of_date}::date <= date\\n  and date < {as_of_date}::date\\\n    \\ + {label_timespan}\\ngroup by entity_id\\n\"\nproblem_type: classification\ntask_framing: resource_prioritization\ncohort_config:\n  name: active_facilities\n  query: 'select e.entity_id\n\n    from ontology.entities as e\n\n    where e.activity_period @> {as_of_date}::date\n\n    '\nfeature_config:\n  target: facilities\n  entities:\n  - id: entity_id\n    alias: facilities\n    table: ontology.entities\n    variables:\n      facility:\n        role: identifier\n        type: text\n      zip_code:\n        role: categorical\n        type: categorical\n        vocabulary:\n        - '60647'\n        - '60657'\n        - '60614'\n        - '60611'\n        - '60608'\n        - '60618'\n        - '60622'\n        - '60607'\n        - '60639'\n        - '60625'\n        - '60623'\n        - '60640'\n      facility_type:\n        role: categorical\n        type: categorical\n        vocabulary:\n        - restaurant\n        - grocery store\n        - school\n        - unknown\n        - children's services facility\n        - bakery\n        - daycare (2 - 6 years)\n        - daycare above and under 2 years\n        - liquor\n        - long term care\n        - catering\n        - mobile food preparer\n        - mobile food dispenser\n        - daycare combo 1586\n        - hospital\n  - id: null\n    alias: inspections\n    table: ontology.events\n    variables:\n      risk:\n        type: categorical\n      type:\n        type: categorical\n      result:\n        type: categorical\n    temporal_ix: date\n  intervals:\n  - P1M\n  - P3M\n  - P6M\n  max_depth: 2\n  relationships:\n  - child:\n      key: entity_id\n      entity: inspections\n    parent:\n      key: entity_id\n      entity: facilities\n    temporal:\n      mode: as_of\ntemporal_config:\n  label_end_time: '2017-07-01'\n  test_durations: 0day\n  feature_end_time: '2017-07-01'\n  label_start_time: '2015-01-01'\n  feature_start_time: '2014-01-01'\n  test_label_timespans:\n  - 6month\n  max_training_histories: 5year\n  model_update_frequency: 6month\n  training_label_timespans:\n  - 6month\n  test_as_of_date_frequencies: 6month\n  training_as_of_date_frequencies: 6month\nimputation_config:\n  all:\n    type: zero\n  count:\n    type: zero_noflag\n",
+  "database": {
+    "connected": true,
+    "detail": "pg 18"
+  },
+  "history": {
+    "summary": {
+      "experiment_hash": "exp-dash",
+      "name": "Churn baseline",
+      "description": "first churn experiment",
+      "author": "tester",
+      "problem_type": "classification",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "n_runs": 2,
+      "last_started_at": "2026-01-01T00:00:00+00:00",
+      "last_status": "completed",
+      "last_plan": {
+        "n_models": 9,
+        "n_splits": 3,
+        "n_features": 12,
+        "engine_versions": {
+          "featurizer": "0.4.1"
+        },
+        "estimator_types": [
+          "sklearn.tree.DecisionTreeClassifier"
+        ]
+      },
+      "n_model_groups": 3,
+      "n_models": 9,
+      "n_splits": 3,
+      "n_features": null,
+      "base_rate": 0.5,
+      "cohort_size": 4,
+      "archived_at": null,
+      "task_framing": null
+    },
+    "runs": [
+      {
+        "run_id": "00000000-0000-4000-8000-000000000001",
+        "name": "Churn baseline",
+        "state": "succeeded",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "finished_at": null,
+        "detail": "9 models"
+      },
+      {
+        "run_id": "00000000-0000-4000-8000-000000000002",
+        "name": "Churn baseline",
+        "state": "succeeded",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "finished_at": null,
+        "detail": "9 models"
+      }
+    ],
+    "model_group_metric": {
+      "metric": "auc_roc",
+      "parameter": ""
+    },
+    "model_groups": [
+      {
+        "model_group_id": 2,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "n_models": 3,
+        "avg_value": 0.8099999999999999,
+        "stddev_value": 0.009999999999999898,
+        "max_regret": 0.08999999999999997,
+        "avg_duration_ms": null
+      },
+      {
+        "model_group_id": 3,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "n_models": 3,
+        "avg_value": 0.6999999999999998,
+        "stddev_value": 6.409875621278546e-17,
+        "max_regret": 0.20000000000000007,
+        "avg_duration_ms": null
+      },
+      {
+        "model_group_id": 1,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "n_models": 3,
+        "avg_value": 0.6666666666666666,
+        "stddev_value": 0.20816659994661327,
+        "max_regret": 0.30000000000000004,
+        "avg_duration_ms": null
+      }
+    ],
+    "leaderboard": [
+      {
+        "model_group_id": 1,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2015-01-01",
+        "value": 0.9,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 3,
+        "train_end_time": "2015-01-01"
+      },
+      {
+        "model_group_id": 2,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2015-01-01",
+        "value": 0.81,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 6,
+        "train_end_time": "2015-01-01"
+      },
+      {
+        "model_group_id": 3,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2015-01-01",
+        "value": 0.7,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 9,
+        "train_end_time": "2015-01-01"
+      },
+      {
+        "model_group_id": 2,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-07-01",
+        "value": 0.82,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 5,
+        "train_end_time": "2014-07-01"
+      },
+      {
+        "model_group_id": 3,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-07-01",
+        "value": 0.7,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 8,
+        "train_end_time": "2014-07-01"
+      },
+      {
+        "model_group_id": 1,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-07-01",
+        "value": 0.6,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 2,
+        "train_end_time": "2014-07-01"
+      },
+      {
+        "model_group_id": 2,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-01-01",
+        "value": 0.8,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 4,
+        "train_end_time": "2014-01-01"
+      },
+      {
+        "model_group_id": 3,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-01-01",
+        "value": 0.7,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 7,
+        "train_end_time": "2014-01-01"
+      },
+      {
+        "model_group_id": 1,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "auc_roc",
+        "parameter": "",
+        "as_of_date": "2014-01-01",
+        "value": 0.5,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 1,
+        "train_end_time": "2014-01-01"
+      },
+      {
+        "model_group_id": 1,
+        "model_type": "sklearn.tree.DecisionTreeClassifier",
+        "split_kind": "test",
+        "metric": "average_precision",
+        "parameter": "",
+        "as_of_date": "2015-01-01",
+        "value": 0.9,
+        "value_expected": null,
+        "value_std": null,
+        "model_id": 3,
+        "train_end_time": "2015-01-01"
+      }
+    ]
+  }
+}

@@ -19,7 +19,7 @@ docs-figures *ARGS:
 # Serve the dashboard app — read views + write surface (set TRIAGE_REGISTRY_URL to enable POST routes)
 serve PORT="8000":
     TRIAGE_DASHBOARD_STATIC="${TRIAGE_DASHBOARD_STATIC:-{{justfile_directory()}}/frontend/dist}" \
-        uv run uvicorn triage.dashboard.app:app --host 127.0.0.1 --port {{PORT}}
+        uv run triage serve --port {{PORT}}
 
 # Run alembic commands (e.g., just alembic upgrade head)
 alembic *ARGS:
@@ -38,6 +38,10 @@ alembic-registry *ARGS:
 # Run tests
 test *ARGS:
     uv run pytest {{ARGS}}
+
+# Regenerate emacs/test/fixtures from the live CLI JSON (after an intended change to it)
+emacs-fixtures:
+    TRIAGE_REGEN_EMACS_FIXTURES=1 uv run pytest src/tests/overview_tests/test_emacs_fixtures.py -q
 
 # Run tests with coverage
 test-cov:

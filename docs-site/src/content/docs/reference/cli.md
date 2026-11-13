@@ -319,6 +319,96 @@ prints the points instead of the table. A precision column that stays close to
 the base rate means the model barely ranks that population; see
 [Reading the threshold curve](/triage-pg/guides/reading-the-threshold-curve/).
 
+### `triage experiment show` — one Experiment in one view
+
+`experiment show` takes a config file or a hash prefix. It prints what the config
+implies and what the database holds for that Experiment:
+
+```console
+$ triage experiment show experiment-guides.yaml --runs 3 --top 3
+╭────────────────────────────── Experiment ──────────────────────────────╮
+│ hash: 0494a5078c4a1ebc8ba1e5c9f5bec37a2086a221a3186fe2f4ef2aa9bbdb215d │
+│ name: Slate-Planck-96                                                  │
+│ problem_type: classification   task_framing: resource_prioritization   │
+│ config: experiment-guides.yaml                                         │
+╰────────────────────────────────────────────────────────────────────────╯
+╭─ Validation ─╮
+│ valid        │
+╰──────────────╯
+               Plan
+  Statistic                 Value
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Temporal splits               3
+  …
+  Models to be trained         36
+
+runs: 6   last: completed 2026-10-29T00:51:06.379233+00:00
+  Run        State       Started                            Detail
+  a3aec777   succeeded   2026-10-29T00:51:06.379233+00:00   12 models
+  …
+                          Model groups (auc_roc)
+  Group   Algorithm                  Models   Avg ± σ           Max regret
+  35      RandomForestClassifier     3        0.5928 ± 0.0151   0.0194
+  …
+                    Leaderboard (top)
+  Group   Model   Metric    Param   As-of        Value
+  37      273     auc_roc           2016-10-01   0.6142
+  …
+```
+
+The plan and the validation need no database: they are the numbers
+`analyze-config` prints. The history is the runs, the model groups (on the
+Experiment's most-evaluated metric) and the top of the leaderboard. A config
+that has not run yet shows "not run yet" instead of a history. With a hash
+prefix instead of a file, the command reads the config stored in
+`triage.experiments`, so an Experiment whose file is gone still shows its plan.
+`--runs N` and `--top N` set how many runs and leaderboard rows to show. `--json`
+prints the same content as one JSON object. The command exits with code 2 when
+the target is neither a file nor exactly one known hash prefix.
+
+### `triage status --json --full` — the whole Project in one call
+
+`status --json` prints the Project's health, sizes, last runs and pending work.
+`--full` adds five keys: `experiments` (each with its run count and last
+status), `configs` (every experiment config under the current directory, with
+the experiment hash it belongs to), `sources`, `relations` (the `triage`
+schema's tables and views, each with a row estimate) and `warnings`:
+
+```console
+$ triage status --json --full
+{
+  "contract": 1,
+  "triage_version": "1.5.0",
+  "project_root": "/…/example/dirtyduck",
+  "project": "food",
+  "database": { "connected": true, "detail": "pg 16" },
+  …
+  "configs": [
+    {
+      "path": "experiment-guides.yaml",
+      "experiment_hash": "0494a5078c4a1ebc8ba1e5c9f5bec37a2086a221a3186fe2f4ef2aa9bbdb215d",
+      "name": null,
+      "problem_type": "classification",
+      "error": null
+    },
+    …
+```
+
+A config joins its Experiment through `experiment_hash`. Several files can
+share one hash, because the hash covers only the cohort, the label, the temporal
+config and `problem_type`. A YAML file counts as a config when it has both a
+`temporal_config` and a `label_config` key. A config that cannot be parsed is
+listed with its parse error in `error`. The search skips `.venv`, `node_modules`,
+`dbt_packages`, `target`, `docs-site` and every directory whose name starts with
+a dot. It stops after 500 YAML files and says so in `warnings`. `--configs GLOB`
+(repeatable) narrows it.
+
+When the database is down, `database.connected` is `false`, `experiments`,
+`sources` and `relations` are empty, `configs` is still filled, and the exit
+code is 0. `--full` without `--json` exits with code 2. This is the call an
+editor front end makes on each refresh. `contract` is a version number. A
+release that renames or removes a key raises it.
+
 ## Select a model
 
 ```console
@@ -470,6 +560,13 @@ views (drift, volume, realized outcomes) accumulate. Bookkeeping surfaces:
 `triage source list` (version pins), `triage archive <hash>` (soft-archive an
 experiment), `triage gc` (collect artifacts unreachable from any root),
 `triage runs status` (AWS Batch backfill in the cloud profile).
+
+`triage serve` starts the dashboard from any project that has the `dashboard`
+extra (`uv add 'triage-pg[dashboard]'`). It finds the database the same way
+every command does: `database.yaml`, then `DATABASE_URL`, then `PG*`. It
+refuses the global `--dbfile` (exit code 2), because the dashboard would not
+read that file. It passes `--host` (default `127.0.0.1`), `--port` (default
+8000) and `--reload` to uvicorn.
 
 ### `triage reset` — start over after the data changes
 
