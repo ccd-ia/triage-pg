@@ -1,0 +1,110 @@
+{
+  "card": {
+    "model_id": 4,
+    "model_group_id": 4,
+    "model_type": "sklearn.linear_model.Ridge",
+    "hyperparameters": {},
+    "train_end_time": "2014-12-01",
+    "label_timespan": "1 mon",
+    "train_duration_ms": null,
+    "model_size_bytes": null,
+    "problem_type": "regression"
+  },
+  "windowed": [
+    {
+      "metric": "auc_roc",
+      "parameter": "",
+      "n_as_of_dates": 6,
+      "value_mean": 1.0,
+      "value_min": 1.0,
+      "value_max": 1.0
+    },
+    {
+      "metric": "average_precision",
+      "parameter": "",
+      "n_as_of_dates": 6,
+      "value_mean": 1.0,
+      "value_min": 1.0,
+      "value_max": 1.0
+    },
+    {
+      "metric": "precision@",
+      "parameter": "10_pct",
+      "n_as_of_dates": 6,
+      "value_mean": 1.0,
+      "value_min": 1.0,
+      "value_max": 1.0
+    },
+    {
+      "metric": "precision@",
+      "parameter": "100_abs",
+      "n_as_of_dates": 6,
+      "value_mean": 1.0,
+      "value_min": 1.0,
+      "value_max": 1.0
+    },
+    {
+      "metric": "recall@",
+      "parameter": "10_pct",
+      "n_as_of_dates": 6,
+      "value_mean": 0.13333333333333333,
+      "value_min": 0.13333333333333333,
+      "value_max": 0.13333333333333333
+    },
+    {
+      "metric": "recall@",
+      "parameter": "100_abs",
+      "n_as_of_dates": 6,
+      "value_mean": 0.6666666666666666,
+      "value_min": 0.6666666666666666,
+      "value_max": 0.6666666666666666
+    }
+  ],
+  "importances": [],
+  "calibration": [
+    {
+      "decile": 3,
+      "n": 50,
+      "avg_score": 501.0,
+      "mean_outcome": 500.0,
+      "lift": 3.6036036036036037,
+      "realized_rate": null,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 5,
+      "n": 50,
+      "avg_score": 51.0,
+      "mean_outcome": 50.0,
+      "lift": 0.36036036036036034,
+      "realized_rate": null,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 8,
+      "n": 50,
+      "avg_score": 6.0,
+      "mean_outcome": 5.0,
+      "lift": 0.036036036036036036,
+      "realized_rate": null,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 10,
+      "n": 50,
+      "avg_score": 1.0,
+      "mean_outcome": 0.0,
+      "lift": 0.0,
+      "realized_rate": null,
+      "n_distinct_scores": 1
+    }
+  ],
+  "calibration_ties": {
+    "n": 200,
+    "n_distinct": 4,
+    "largest_tie_n": 50,
+    "largest_tie_score": 501.0,
+    "largest_tie_share": 0.25
+  },
+  "crosstabs": []
+}

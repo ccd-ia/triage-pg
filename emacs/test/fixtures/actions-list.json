@@ -266,6 +266,69 @@
     "args": "MODEL_A MODEL_B"
   },
   {
+    "name": "triage postmodel near-miss",
+    "description": "Do the rows just below the cut differ from the rows inside it?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel prototypes",
+    "description": "The most typical entities of each class at the cut: compute, persist, print.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel residuals",
+    "description": "Where a regression model's errors are: by date, history segment and entity.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel baseline",
+    "description": "Where a regression model group beats its baseline, on the rows both scored.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage postmodel structure",
+    "description": "Checks on the fitted model: its forecast's shape, its leaves or its coefficient\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel importance",
+    "description": "Each feature family's share of a model group's importance, and its stability.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage postmodel sensitivity",
+    "description": "The metric for each value of one hyperparameter, other hyperparameters fixed.",
+    "source": "cli",
+    "destructive": false,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
+    "name": "triage postmodel survival",
+    "description": "A survival model's censoring-aware diagnostics: compute, persist and print them.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage postmodel kinds",
+    "description": "Which postmodel and plot commands read which problem types, for a front end.",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
     "name": "triage model show",
     "description": "One model's card, headless: identity, windowed evaluations, top importances,",
     "source": "cli",
@@ -380,6 +443,83 @@
   {
     "name": "triage plot scores",
     "description": "How the model's test scores spread.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot gains",
+    "description": "How much of the outcome the model's top k hold: the cumulative-gains curve.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot forecast-actual",
+    "description": "Forecast against outcome, as a hexbin on log1p axes with the diagonal.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot residuals",
+    "description": "Residual (forecast \u2212 outcome) against the forecast, as a hexbin.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot bias",
+    "description": "Mean forecast \u2212 outcome per test date, or per segment pooled over the dates.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot forecast-time",
+    "description": "\u03a3 forecast and \u03a3 outcome per test date, one panel per segment.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot segments",
+    "description": "MAE per segment for a regression model group and its baseline, as paired dots.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot win-consistency",
+    "description": "Entities by the test dates the model won, against the count expected by chance.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot importance",
+    "description": "Each feature family's share of the importance, across a model group's train end\u2026",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_GROUP_ID"
+  },
+  {
+    "name": "triage plot km",
+    "description": "Do the model's risk groups separate? Kaplan-Meier curves by risk tertile.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot brier",
+    "description": "How far is the model's predicted survival from the outcome? Brier(t) over time.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot survival-calibration",
+    "description": "Does the model's S(horizon) match what was observed? Predicted against KM.",
     "source": "cli",
     "destructive": false,
     "args": "MODEL_ID"

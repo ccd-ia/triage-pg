@@ -1,0 +1,22 @@
+{
+  "model_id": 8,
+  "estimator": "DecisionTreeRegressor",
+  "forecast_structure": null,
+  "leaf_support": {
+    "estimator": "DecisionTreeRegressor",
+    "min_rows": 2,
+    "n_trees": 1,
+    "leaves": 8,
+    "leaves_per_tree": {
+      "min": 8,
+      "mean": 8.0,
+      "max": 8
+    },
+    "small_leaves": 0,
+    "trees_with_small_leaf": 0,
+    "small": []
+  },
+  "unavailable": [
+    "DecisionTreeRegressor has no coef_ and intercept_: not linear"
+  ]
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "as_of_date": "2016-01-01",
+    "band": "selected",
+    "first_rank": 1,
+    "last_rank": 100,
+    "n": 100,
+    "n_labeled": 90,
+    "n_positive": 27,
+    "base_rate": 0.3,
+    "mean_outcome": 0.3,
+    "mean_score": 0.9496000000000006
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "band": "near_miss",
+    "first_rank": 101,
+    "last_rank": 200,
+    "n": 100,
+    "n_labeled": 90,
+    "n_positive": 27,
+    "base_rate": 0.3,
+    "mean_outcome": 0.3,
+    "mean_score": 0.8498500000000001
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "band": "rest",
+    "first_rank": 201,
+    "last_rank": 500,
+    "n": 300,
+    "n_labeled": 270,
+    "n_positive": 14,
+    "base_rate": 0.05185185185185185,
+    "mean_outcome": 0.05185185185185185,
+    "mean_score": 0.6495000000000001
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "band": "selected",
+    "first_rank": 1,
+    "last_rank": 100,
+    "n": 100,
+    "n_labeled": 100,
+    "n_positive": 10,
+    "base_rate": 0.1,
+    "mean_outcome": 0.1,
+    "mean_score": 0.9079420646322609
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "band": "near_miss",
+    "first_rank": 101,
+    "last_rank": 200,
+    "n": 100,
+    "n_labeled": 100,
+    "n_positive": 20,
+    "base_rate": 0.2,
+    "mean_outcome": 0.2,
+    "mean_score": 0.7224494772103531
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "band": "rest",
+    "first_rank": 201,
+    "last_rank": 500,
+    "n": 300,
+    "n_labeled": 300,
+    "n_positive": 67,
+    "base_rate": 0.22333333333333333,
+    "mean_outcome": 0.22333333333333333,
+    "mean_score": 0.29138769372653583
+  }
+]

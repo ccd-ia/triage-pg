@@ -1,0 +1,1314 @@
+[
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "tp",
+    "class_size": 27,
+    "rank": 1,
+    "entity_id": 87,
+    "distance": 1.9115300382435692,
+    "deviations": [
+      {
+        "z": 1.059151462638354,
+        "value": 5.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 1.1192368070149459,
+        "centroid_z": -0.06008534437659179
+      },
+      {
+        "z": -1.006549280737635,
+        "value": -1.018,
+        "feature": "license_age_years",
+        "deviation": -0.8979674602279464,
+        "centroid_z": -0.10858182050968869
+      },
+      {
+        "z": 0.5307944668404979,
+        "value": 0.53,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": 0.6924832028049297,
+        "centroid_z": -0.16168873596443178
+      },
+      {
+        "z": 0.46580420189000465,
+        "value": 0.392,
+        "feature": "facility_type_school",
+        "deviation": 0.5996847702284297,
+        "centroid_z": -0.13388056833842507
+      },
+      {
+        "z": 0.48518985423517935,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 0.5958471894116237,
+        "centroid_z": -0.11065733517644434
+      },
+      {
+        "z": -0.1295458124771374,
+        "value": -0.083,
+        "feature": "zip_code_60622",
+        "deviation": -0.36260491068095035,
+        "centroid_z": 0.23305909820381293
+      },
+      {
+        "z": 0.4529443094590025,
+        "value": 0.481,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.29220561536277123,
+        "centroid_z": 0.16073869409623123
+      },
+      {
+        "z": -0.47150894332297383,
+        "value": -0.495,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.2577089285614119,
+        "centroid_z": -0.21380001476156194
+      },
+      {
+        "z": -0.05516906103884699,
+        "value": 3.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.22476284126937646,
+        "centroid_z": -0.27993190230822346
+      },
+      {
+        "z": 0.1047317037557168,
+        "value": 0.129,
+        "feature": "risk_high_flag",
+        "deviation": 0.20612520676550256,
+        "centroid_z": -0.10139350300978577
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "tp",
+    "class_size": 27,
+    "rank": 2,
+    "entity_id": 97,
+    "distance": 2.1480267688756074,
+    "deviations": [
+      {
+        "z": -1.2385109437055892,
+        "value": 1.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -1.1278536085291448,
+        "centroid_z": -0.11065733517644434
+      },
+      {
+        "z": -1.1585502818157858,
+        "value": 1.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -0.8786183795075624,
+        "centroid_z": -0.27993190230822346
+      },
+      {
+        "z": -0.8979752450645184,
+        "value": -0.854,
+        "feature": "risk_high_flag",
+        "deviation": -0.7965817420547326,
+        "centroid_z": -0.10139350300978577
+      },
+      {
+        "z": -0.6337607754144986,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": -0.7592623806939025,
+        "centroid_z": 0.12550160527940388
+      },
+      {
+        "z": -0.5769675186063528,
+        "value": -0.532,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": -0.737706212702584,
+        "centroid_z": 0.16073869409623123
+      },
+      {
+        "z": -0.5467806435536546,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.5656351485037806,
+        "centroid_z": 0.01885450495012598
+      },
+      {
+        "z": 0.6791424651159532,
+        "value": 0.725,
+        "feature": "zip_code_60622",
+        "deviation": 0.4460833669121403,
+        "centroid_z": 0.23305909820381293
+      },
+      {
+        "z": -0.5021087343647814,
+        "value": -0.539,
+        "feature": "facility_type_school",
+        "deviation": -0.36822816602635633,
+        "centroid_z": -0.13388056833842507
+      },
+      {
+        "z": 0.14739049129169104,
+        "value": 0.127,
+        "feature": "facility_type_restaurant",
+        "deviation": 0.361190506053253,
+        "centroid_z": -0.21380001476156194
+      },
+      {
+        "z": -0.2618153505634559,
+        "value": -0.233,
+        "feature": "license_age_years",
+        "deviation": -0.15323353005376722,
+        "centroid_z": -0.10858182050968869
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "fp",
+    "class_size": 63,
+    "rank": 1,
+    "entity_id": 251,
+    "distance": 1.656792786272781,
+    "deviations": [
+      {
+        "z": 0.9738123959173041,
+        "value": 0.981,
+        "feature": "risk_high_flag",
+        "deviation": 0.9575172138954458,
+        "centroid_z": 0.0162951820218583
+      },
+      {
+        "z": 0.9501080645665628,
+        "value": 0.97,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.7720748002679879,
+        "centroid_z": 0.1780332642985749
+      },
+      {
+        "z": -0.5313429473302532,
+        "value": 2.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.6648098327382009,
+        "centroid_z": 0.1334668854079477
+      },
+      {
+        "z": -0.6639440110586663,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -0.6384077029410253,
+        "centroid_z": -0.025536308117640943
+      },
+      {
+        "z": -0.5467806435536546,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.36811176331198425,
+        "centroid_z": -0.1786688802416704
+      },
+      {
+        "z": 0.33743838841612994,
+        "value": 0.318,
+        "feature": "facility_type_restaurant",
+        "deviation": 0.32394850975811235,
+        "centroid_z": 0.013489878658017611
+      },
+      {
+        "z": -0.28066356205299897,
+        "value": -0.326,
+        "feature": "facility_type_school",
+        "deviation": -0.26714020786818204,
+        "centroid_z": -0.013523354184816955
+      },
+      {
+        "z": 0.4965215493496224,
+        "value": 4.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.21016785157655948,
+        "centroid_z": 0.2863536977730629
+      },
+      {
+        "z": 0.15561513259149806,
+        "value": 0.207,
+        "feature": "license_age_years",
+        "deviation": 0.14692890418985877,
+        "centroid_z": 0.008686228401639302
+      },
+      {
+        "z": 0.294934856545757,
+        "value": 0.302,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": 0.05873501991257926,
+        "centroid_z": 0.23619983663317776
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "fp",
+    "class_size": 63,
+    "rank": 2,
+    "entity_id": 214,
+    "distance": 1.7378216542287415,
+    "deviations": [
+      {
+        "z": -1.042647649864481,
+        "value": -1.069,
+        "feature": "facility_type_restaurant",
+        "deviation": -1.0561375285224985,
+        "centroid_z": 0.013489878658017611
+      },
+      {
+        "z": 0.9174257643492891,
+        "value": 1.01,
+        "feature": "license_age_years",
+        "deviation": 0.9087395359476498,
+        "centroid_z": 0.008686228401639302
+      },
+      {
+        "z": -0.6639440110586663,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -0.6384077029410253,
+        "centroid_z": -0.025536308117640943
+      },
+      {
+        "z": -0.6337607754144986,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": -0.5646615184152131,
+        "centroid_z": -0.06909925699928549
+      },
+      {
+        "z": -0.05516906103884699,
+        "value": 3.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -0.3415227588119099,
+        "centroid_z": 0.2863536977730629
+      },
+      {
+        "z": 0.48751193251351593,
+        "value": 0.515,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.309478668214941,
+        "centroid_z": 0.1780332642985749
+      },
+      {
+        "z": -0.15656881185215402,
+        "value": -0.11,
+        "feature": "zip_code_60622",
+        "deviation": -0.27583794129830325,
+        "centroid_z": 0.11926912944614923
+      },
+      {
+        "z": 0.01885450495012595,
+        "value": 3.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": 0.19752338519179635,
+        "centroid_z": -0.1786688802416704
+      },
+      {
+        "z": -0.0011781440073841023,
+        "value": 3.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.13464502941533182,
+        "centroid_z": 0.1334668854079477
+      },
+      {
+        "z": -0.05235565140025087,
+        "value": -0.025,
+        "feature": "risk_high_flag",
+        "deviation": -0.06865083342210918,
+        "centroid_z": 0.0162951820218583
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "fn",
+    "class_size": 41,
+    "rank": 1,
+    "entity_id": 229,
+    "distance": 2.411604650460125,
+    "deviations": [
+      {
+        "z": 1.634323719529025,
+        "value": 6.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 1.6256040045620255,
+        "centroid_z": 0.008719714966999477
+      },
+      {
+        "z": -1.3292120183034257,
+        "value": -1.357,
+        "feature": "facility_type_restaurant",
+        "deviation": -1.1069665089435616,
+        "centroid_z": -0.2222455093598641
+      },
+      {
+        "z": 0.8348794890763087,
+        "value": 0.747,
+        "feature": "facility_type_school",
+        "deviation": 0.8564169528979891,
+        "centroid_z": -0.02153746382168043
+      },
+      {
+        "z": 0.7300209810973284,
+        "value": 0.742,
+        "feature": "risk_high_flag",
+        "deviation": 0.6807201654137521,
+        "centroid_z": 0.04930081568357621
+      },
+      {
+        "z": -0.33271873370411437,
+        "value": -0.286,
+        "feature": "zip_code_60622",
+        "deviation": -0.5618196301860958,
+        "centroid_z": 0.2291008964819814
+      },
+      {
+        "z": 0.310451936170411,
+        "value": 0.317,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": 0.5143091887299955,
+        "centroid_z": -0.2038572525595846
+      },
+      {
+        "z": -0.5467806435536546,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.3448994807949881,
+        "centroid_z": -0.2018811627586665
+      },
+      {
+        "z": -0.0011781440073841023,
+        "value": 3.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 0.14223933747686737,
+        "centroid_z": -0.14341748148425149
+      },
+      {
+        "z": -0.05516906103884699,
+        "value": 3.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.12110281691454212,
+        "centroid_z": -0.1762718779533891
+      },
+      {
+        "z": -0.13374008868636775,
+        "value": -0.098,
+        "feature": "license_age_years",
+        "deviation": -0.10183545212666031,
+        "centroid_z": -0.03190463655970743
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "fn",
+    "class_size": 41,
+    "rank": 2,
+    "entity_id": 195,
+    "distance": 2.5405118591110774,
+    "deviations": [
+      {
+        "z": 1.2510497240999736,
+        "value": 1.266,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 1.2499642577538428,
+        "centroid_z": 0.0010854663461307241
+      },
+      {
+        "z": 1.0597567868821023,
+        "value": 5.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 1.0510370719151028,
+        "centroid_z": 0.008719714966999477
+      },
+      {
+        "z": 0.947161548276649,
+        "value": 0.855,
+        "feature": "facility_type_school",
+        "deviation": 0.9686990120983294,
+        "centroid_z": -0.02153746382168043
+      },
+      {
+        "z": 0.7244992888423432,
+        "value": 0.707,
+        "feature": "facility_type_restaurant",
+        "deviation": 0.9467447982022072,
+        "centroid_z": -0.2222455093598641
+      },
+      {
+        "z": 0.5844896534539066,
+        "value": 4.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": 0.7863708162125731,
+        "centroid_z": -0.2018811627586665
+      },
+      {
+        "z": 0.7922438945032636,
+        "value": 0.803,
+        "feature": "risk_high_flag",
+        "deviation": 0.7429430788196874,
+        "centroid_z": 0.04930081568357621
+      },
+      {
+        "z": 0.5289866593154849,
+        "value": 4.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 0.6724041407997364,
+        "centroid_z": -0.14341748148425149
+      },
+      {
+        "z": -0.6068596714273163,
+        "value": 2.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -0.4305877934739272,
+        "centroid_z": -0.1762718779533891
+      },
+      {
+        "z": 0.22297323328241112,
+        "value": 0.278,
+        "feature": "license_age_years",
+        "deviation": 0.2548778698421186,
+        "centroid_z": -0.03190463655970743
+      },
+      {
+        "z": -0.4519539093875891,
+        "value": -0.42,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.24809665682800452,
+        "centroid_z": -0.2038572525595846
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "tn",
+    "class_size": 319,
+    "rank": 1,
+    "entity_id": 376,
+    "distance": 1.5578378616984867,
+    "deviations": [
+      {
+        "z": -0.7459881287123159,
+        "value": -0.705,
+        "feature": "risk_high_flag",
+        "deviation": -0.7450153847338222,
+        "centroid_z": -0.0009727439784936821
+      },
+      {
+        "z": 0.6100836889353551,
+        "value": 0.656,
+        "feature": "zip_code_60622",
+        "deviation": 0.6828099822343257,
+        "centroid_z": -0.07272629329897054
+      },
+      {
+        "z": 0.5721265350993465,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 0.5594712287023482,
+        "centroid_z": 0.012655306396998332
+      },
+      {
+        "z": 0.5844896534539066,
+        "value": 4.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": 0.5248526769815643,
+        "centroid_z": 0.05963697647234219
+      },
+      {
+        "z": 0.4965215493496224,
+        "value": 4.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.5067252314853338,
+        "centroid_z": -0.010203682135711392
+      },
+      {
+        "z": 0.48518985423517935,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 0.4719013678792909,
+        "centroid_z": 0.013288486355888486
+      },
+      {
+        "z": -0.47678123678703554,
+        "value": -0.444,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.4700199625490807,
+        "centroid_z": -0.006761274237954856
+      },
+      {
+        "z": 0.2272380648089444,
+        "value": 0.259,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.2761425930584736,
+        "centroid_z": -0.04890452824952922
+      },
+      {
+        "z": 0.13569231407728435,
+        "value": 0.186,
+        "feature": "license_age_years",
+        "deviation": 0.12411686936441184,
+        "centroid_z": 0.011575444712872513
+      },
+      {
+        "z": -0.07250786087847122,
+        "value": -0.094,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.11650411143289593,
+        "centroid_z": 0.04399625055442472
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-01-01",
+    "parameter": "100_abs",
+    "class": "tn",
+    "class_size": 319,
+    "rank": 2,
+    "entity_id": 498,
+    "distance": 1.6727210383419477,
+    "deviations": [
+      {
+        "z": 1.059151462638354,
+        "value": 5.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 1.061991565276844,
+        "centroid_z": -0.0028401026384899503
+      },
+      {
+        "z": -0.7902262452050465,
+        "value": -0.747,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.7834649709670917,
+        "centroid_z": -0.006761274237954856
+      },
+      {
+        "z": 0.5844896534539066,
+        "value": 4.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": 0.5248526769815643,
+        "centroid_z": 0.05963697647234219
+      },
+      {
+        "z": 0.5073901497419826,
+        "value": 0.432,
+        "feature": "facility_type_school",
+        "deviation": 0.4906196711354941,
+        "centroid_z": 0.016770478606488528
+      },
+      {
+        "z": 0.48518985423517935,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 0.4719013678792909,
+        "centroid_z": 0.013288486355888486
+      },
+      {
+        "z": 0.29446058725578167,
+        "value": 0.315,
+        "feature": "risk_high_flag",
+        "deviation": 0.29543333123427534,
+        "centroid_z": -0.0009727439784936821
+      },
+      {
+        "z": -0.24862554564823922,
+        "value": -0.271,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.29262179620266393,
+        "centroid_z": 0.04399625055442472
+      },
+      {
+        "z": 0.19272847636565366,
+        "value": 0.239,
+        "feature": "zip_code_60622",
+        "deviation": 0.2654547696646242,
+        "centroid_z": -0.07272629329897054
+      },
+      {
+        "z": 0.21300433766885063,
+        "value": 0.245,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.26190886591837986,
+        "centroid_z": -0.04890452824952922
+      },
+      {
+        "z": -0.05516906103884699,
+        "value": 3.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -0.044965378903135594,
+        "centroid_z": -0.010203682135711392
+      }
+    ],
+    "computed_at": "2026-01-01T00:00:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "tp",
+    "class_size": 10,
+    "rank": 1,
+    "entity_id": 323,
+    "distance": 1.92060557566221,
+    "deviations": [
+      {
+        "z": 0.5178586483467978,
+        "value": 0.543,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.9341976914091829,
+        "centroid_z": -0.416339043062385
+      },
+      {
+        "z": -0.20146413731174742,
+        "value": -0.172,
+        "feature": "zip_code_60622",
+        "deviation": -0.7735451186430409,
+        "centroid_z": 0.5720809813312935
+      },
+      {
+        "z": 0.5852057359806528,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 0.7022468831767834,
+        "centroid_z": -0.11704114719613057
+      },
+      {
+        "z": -0.2754053216161777,
+        "value": -0.277,
+        "feature": "license_age_years",
+        "deviation": -0.6703500516569678,
+        "centroid_z": 0.3949447300407901
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.6349452003232459,
+        "centroid_z": 0.042714495294473034
+      },
+      {
+        "z": -0.5978026589461151,
+        "value": -0.554,
+        "feature": "risk_high_flag",
+        "deviation": -0.4841358869762571,
+        "centroid_z": -0.11366677196985794
+      },
+      {
+        "z": 0.45086759811332705,
+        "value": 0.486,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": 0.46434816234847126,
+        "centroid_z": -0.013480564235144233
+      },
+      {
+        "z": 0.5429412576377058,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 0.4450338177358245,
+        "centroid_z": 0.09790743990188136
+      },
+      {
+        "z": 0.5097148109001807,
+        "value": 4.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.34832447214135354,
+        "centroid_z": 0.1613903387588271
+      },
+      {
+        "z": 0.08955651149786036,
+        "value": 0.1,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.2979556747735057,
+        "centroid_z": 0.3875121862713661
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "tp",
+    "class_size": 10,
+    "rank": 2,
+    "entity_id": 449,
+    "distance": 2.3735992395747885,
+    "deviations": [
+      {
+        "z": -1.1704114719613057,
+        "value": 1.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -1.0533703247651751,
+        "centroid_z": -0.11704114719613057
+      },
+      {
+        "z": 0.9869588397490995,
+        "value": 1.027,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": 1.0004394039842437,
+        "centroid_z": -0.013480564235144233
+      },
+      {
+        "z": 1.382869745272852,
+        "value": 1.41,
+        "feature": "facility_type_restaurant",
+        "deviation": 0.9953575590014859,
+        "centroid_z": 0.3875121862713661
+      },
+      {
+        "z": 1.0902555978024364,
+        "value": 5.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.9288652590436093,
+        "centroid_z": 0.1613903387588271
+      },
+      {
+        "z": -0.10656863142029054,
+        "value": -0.075,
+        "feature": "zip_code_60622",
+        "deviation": -0.678649612751584,
+        "centroid_z": 0.5720809813312935
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.6349452003232459,
+        "centroid_z": 0.042714495294473034
+      },
+      {
+        "z": 0.13318901070772252,
+        "value": 0.172,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.5495280537701075,
+        "centroid_z": -0.416339043062385
+      },
+      {
+        "z": -0.5782402123293114,
+        "value": 2.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.45352173516024424,
+        "centroid_z": -0.12471847716906719
+      },
+      {
+        "z": -0.02332790822527585,
+        "value": -0.019,
+        "feature": "license_age_years",
+        "deviation": -0.418272638266066,
+        "centroid_z": 0.3949447300407901
+      },
+      {
+        "z": 0.18356023469294405,
+        "value": 0.166,
+        "feature": "facility_type_school",
+        "deviation": 0.32425836304372224,
+        "centroid_z": -0.14069812835077822
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "fp",
+    "class_size": 90,
+    "rank": 1,
+    "entity_id": 286,
+    "distance": 2.1616645317329706,
+    "deviations": [
+      {
+        "z": 1.7556172079419585,
+        "value": 6.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 1.5540463433264005,
+        "centroid_z": 0.2015708646155581
+      },
+      {
+        "z": -0.8621640666388511,
+        "value": -0.864,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.8874278820963788,
+        "centroid_z": 0.025263815457527646
+      },
+      {
+        "z": -0.5696432867018554,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": -0.5995594488940968,
+        "centroid_z": 0.0299161621922415
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.583636497266822,
+        "centroid_z": -0.008594207761950877
+      },
+      {
+        "z": -0.5469953969462348,
+        "value": -0.521,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.5271618927557847,
+        "centroid_z": -0.019833504190450085
+      },
+      {
+        "z": 0.5097148109001807,
+        "value": 4.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 0.45798217633400184,
+        "centroid_z": 0.05173263456617885
+      },
+      {
+        "z": -0.24422270924004946,
+        "value": -0.192,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": -0.3404654627477565,
+        "centroid_z": 0.09624275350770707
+      },
+      {
+        "z": 0.5625914307421478,
+        "value": 0.609,
+        "feature": "zip_code_60622",
+        "deviation": 0.31450305520704736,
+        "centroid_z": 0.24808837553510044
+      },
+      {
+        "z": -0.011338043379006117,
+        "value": 3.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 0.17636956367342824,
+        "centroid_z": -0.18770760705243436
+      },
+      {
+        "z": 0.18550286667320462,
+        "value": 0.243,
+        "feature": "risk_high_flag",
+        "deviation": 0.15355976998827364,
+        "centroid_z": 0.03194309668493098
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "fp",
+    "class_size": 90,
+    "rank": 2,
+    "entity_id": 247,
+    "distance": 2.3004468911110125,
+    "deviations": [
+      {
+        "z": -1.0391305959869046,
+        "value": -1.13,
+        "feature": "facility_type_school",
+        "deviation": -1.1187243727007443,
+        "centroid_z": 0.07959377671383966
+      },
+      {
+        "z": 1.0992335298074865,
+        "value": 5.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 1.069317367615245,
+        "centroid_z": 0.0299161621922415
+      },
+      {
+        "z": 1.0902555978024364,
+        "value": 5.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 1.0385229632362576,
+        "centroid_z": 0.05173263456617885
+      },
+      {
+        "z": -0.8621805590610421,
+        "value": -0.823,
+        "feature": "risk_high_flag",
+        "deviation": -0.8941236557459731,
+        "centroid_z": 0.03194309668493098
+      },
+      {
+        "z": 0.5555641255712993,
+        "value": 4.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 0.7432717326237337,
+        "centroid_z": -0.18770760705243436
+      },
+      {
+        "z": 0.5622151137407652,
+        "value": 4.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": 0.570809321502716,
+        "centroid_z": -0.008594207761950877
+      },
+      {
+        "z": -0.21971380005307145,
+        "value": -0.22,
+        "feature": "license_age_years",
+        "deviation": -0.24457588485286938,
+        "centroid_z": 0.02486208479979792
+      },
+      {
+        "z": 0.0,
+        "value": 3.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -0.2015708646155581,
+        "centroid_z": 0.2015708646155581
+      },
+      {
+        "z": -0.18530722098124955,
+        "value": -0.156,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.16547371679079947,
+        "centroid_z": -0.019833504190450085
+      },
+      {
+        "z": 0.191252352238149,
+        "value": 0.228,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.09500959873044192,
+        "centroid_z": 0.09624275350770707
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "fn",
+    "class_size": 87,
+    "rank": 1,
+    "entity_id": 489,
+    "distance": 2.168268730990752,
+    "deviations": [
+      {
+        "z": 1.0902555978024364,
+        "value": 5.0,
+        "feature": "days_since_last_inspection",
+        "deviation": 1.12104427815608,
+        "centroid_z": -0.030788680353643728
+      },
+      {
+        "z": -1.0969596097149108,
+        "value": -1.076,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -1.0876500487875411,
+        "centroid_z": -0.009309560927369781
+      },
+      {
+        "z": 0.6379208529446446,
+        "value": 0.686,
+        "feature": "zip_code_60622",
+        "deviation": 0.7250246045571248,
+        "centroid_z": -0.08710375161248018
+      },
+      {
+        "z": 0.5429412576377058,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 0.7161463733679935,
+        "centroid_z": -0.17320511573028763
+      },
+      {
+        "z": -0.5782402123293114,
+        "value": 2.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.6516116884486268,
+        "centroid_z": 0.07337147611931542
+      },
+      {
+        "z": 0.5562167764510769,
+        "value": 0.561,
+        "feature": "facility_type_school",
+        "deviation": 0.4728449249766222,
+        "centroid_z": 0.08337185147445467
+      },
+      {
+        "z": -0.5852057359806528,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -0.4574021844446482,
+        "centroid_z": -0.12780355153600462
+      },
+      {
+        "z": -0.33101710498164083,
+        "value": -0.326,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.3394819575468339,
+        "centroid_z": 0.008464852565193068
+      },
+      {
+        "z": -0.36290928300757364,
+        "value": -0.315,
+        "feature": "risk_high_flag",
+        "deviation": -0.308503015606484,
+        "centroid_z": -0.05440626740108963
+      },
+      {
+        "z": 0.2088787237741713,
+        "value": 0.245,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.2755386814826477,
+        "centroid_z": -0.06665995770847644
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "fn",
+    "class_size": 87,
+    "rank": 2,
+    "entity_id": 162,
+    "distance": 2.191130288113763,
+    "deviations": [
+      {
+        "z": -1.2319075498065868,
+        "value": 1.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -1.201118869452943,
+        "centroid_z": -0.030788680353643728
+      },
+      {
+        "z": -1.1849987440773415,
+        "value": -1.191,
+        "feature": "facility_type_restaurant",
+        "deviation": -1.1934635966425347,
+        "centroid_z": 0.008464852565193068
+      },
+      {
+        "z": 0.5429412576377058,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 0.7161463733679935,
+        "centroid_z": -0.17320511573028763
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.6900135928277699,
+        "centroid_z": 0.09778288779899698
+      },
+      {
+        "z": -0.5782402123293114,
+        "value": 2.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.6516116884486268,
+        "centroid_z": 0.07337147611931542
+      },
+      {
+        "z": -0.5852057359806528,
+        "value": 2.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": -0.4574021844446482,
+        "centroid_z": -0.12780355153600462
+      },
+      {
+        "z": -0.4619602399791487,
+        "value": -0.402,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": -0.39530028227067227,
+        "centroid_z": -0.06665995770847644
+      },
+      {
+        "z": 0.3788511312598643,
+        "value": 0.373,
+        "feature": "facility_type_school",
+        "deviation": 0.29547927978540967,
+        "centroid_z": 0.08337185147445467
+      },
+      {
+        "z": 0.29323442487027523,
+        "value": 0.305,
+        "feature": "license_age_years",
+        "deviation": 0.25570483050420756,
+        "centroid_z": 0.03752959436606767
+      },
+      {
+        "z": -0.0515321421996797,
+        "value": -0.021,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.04222258127230992,
+        "centroid_z": -0.009309560927369781
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "tn",
+    "class_size": 313,
+    "rank": 1,
+    "entity_id": 287,
+    "distance": 1.6570989403958556,
+    "deviations": [
+      {
+        "z": 0.7835844386376847,
+        "value": 0.802,
+        "feature": "facility_type_school",
+        "deviation": 0.8251493258549861,
+        "centroid_z": -0.04156488721730141
+      },
+      {
+        "z": -0.6513667629043309,
+        "value": 2.0,
+        "feature": "days_since_last_inspection",
+        "deviation": -0.6398931996206972,
+        "centroid_z": -0.011473563283633647
+      },
+      {
+        "z": -0.5782402123293114,
+        "value": 2.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": -0.6158042729811624,
+        "centroid_z": 0.037564060651850924
+      },
+      {
+        "z": -0.5707776331740694,
+        "value": -0.545,
+        "feature": "violations_entity_id_3y_severity_max",
+        "deviation": -0.5794988881905969,
+        "centroid_z": 0.008721255016527558
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.5661579334860194,
+        "centroid_z": -0.02607277154275344
+      },
+      {
+        "z": -0.541797334583485,
+        "value": -0.479,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": -0.5459537529079823,
+        "centroid_z": 0.004156418324497323
+      },
+      {
+        "z": -0.37050758540225126,
+        "value": -0.366,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.34850979809534094,
+        "centroid_z": -0.021997787306910342
+      },
+      {
+        "z": -0.3235965841057258,
+        "value": -0.275,
+        "feature": "risk_high_flag",
+        "deviation": -0.3331657032173858,
+        "centroid_z": 0.00956911911166001
+      },
+      {
+        "z": 0.18887923228300826,
+        "value": 0.227,
+        "feature": "zip_code_60622",
+        "deviation": 0.2542809486446256,
+        "centroid_z": -0.06540171636161732
+      },
+      {
+        "z": 0.11834350627736277,
+        "value": 0.126,
+        "feature": "license_age_years",
+        "deviation": 0.14854193963914428,
+        "centroid_z": -0.030198433361781515
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  },
+  {
+    "as_of_date": "2016-04-01",
+    "parameter": "100_abs",
+    "class": "tn",
+    "class_size": 313,
+    "rank": 2,
+    "entity_id": 472,
+    "distance": 1.7520616273166523,
+    "deviations": [
+      {
+        "z": 1.1224662945216046,
+        "value": 5.0,
+        "feature": "inspections_entity_id_3y_total_count",
+        "deviation": 1.0849022338697536,
+        "centroid_z": 0.037564060651850924
+      },
+      {
+        "z": 0.6993065906293804,
+        "value": 0.718,
+        "feature": "violations_entity_id_1y_severity_avg",
+        "deviation": 0.6951501723048831,
+        "centroid_z": 0.004156418324497323
+      },
+      {
+        "z": 0.5852057359806528,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_pass_count",
+        "deviation": 0.6039024048618238,
+        "centroid_z": -0.018696668881170993
+      },
+      {
+        "z": -0.5922307050287728,
+        "value": 2.0,
+        "feature": "inspections_entity_id_1y_total_count",
+        "deviation": -0.5661579334860194,
+        "centroid_z": -0.02607277154275344
+      },
+      {
+        "z": -0.5294567690952082,
+        "value": -0.527,
+        "feature": "facility_type_restaurant",
+        "deviation": -0.5074589817882978,
+        "centroid_z": -0.021997787306910342
+      },
+      {
+        "z": 0.5429412576377058,
+        "value": 4.0,
+        "feature": "results_entity_id_1y_fail_count",
+        "deviation": 0.5065281072472443,
+        "centroid_z": 0.036413150390461516
+      },
+      {
+        "z": -0.3815828149859514,
+        "value": -0.334,
+        "feature": "risk_high_flag",
+        "deviation": -0.39115193409761145,
+        "centroid_z": 0.00956911911166001
+      },
+      {
+        "z": 0.17403502784046898,
+        "value": 0.183,
+        "feature": "license_age_years",
+        "deviation": 0.2042334612022505,
+        "centroid_z": -0.030198433361781515
+      },
+      {
+        "z": -0.14667910298265893,
+        "value": -0.116,
+        "feature": "zip_code_60622",
+        "deviation": -0.08127738662104161,
+        "centroid_z": -0.06540171636161732
+      },
+      {
+        "z": -0.10890439301597041,
+        "value": -0.144,
+        "feature": "facility_type_school",
+        "deviation": -0.067339505798669,
+        "centroid_z": -0.04156488721730141
+      }
+    ],
+    "computed_at": "2026-01-01T00:01:00+00:00"
+  }
+]

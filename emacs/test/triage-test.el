@@ -11,6 +11,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'json)
 (require 'triage)
 
 (defconst triage-test--fixtures
@@ -470,7 +471,15 @@ STDERR).  Commands are recorded in `triage-test--calls'."
                                       "experiment-show-file" "experiment-show-hash")))
             (`("runs" "show" . ,_) (triage-test-fixture "runs-show"))
             (`("runs" "list" . ,_) (triage-test-fixture "runs-list"))
+            (`("model" "show" "4" . ,_) (triage-test-fixture "model-show-regression"))
             (`("model" "show" . ,_) (triage-test-fixture "model-show"))
+            (`("postmodel" "kinds" . ,_) (triage-test-fixture "postmodel-kinds"))
+            (`("postmodel" "structure" "8" . ,_) (triage-test-fixture "structure-tree"))
+            (`("postmodel" ,(and sub (or "residuals" "baseline" "structure" "importance"
+                                        "sensitivity" "compare-rows" "survival" "near-miss"
+                                        "prototypes"))
+               . ,_)
+             (triage-test-fixture sub))
             ((and `("models" . ,_) (guard (member "--group" args))) triage-test--group-json)
             (`("models" . ,_) (triage-test-fixture "models"))
             (`("leaderboard" . ,_) (triage-test-fixture "leaderboard"))
@@ -852,6 +861,19 @@ Exit 1 writes the leakage-report fixture where --json points."
         (triage-audition "exp-dash" nil)
         (triage-model-groups "exp-dash" nil)
         (triage-score-model 3 "" nil)
+        (triage-postmodel-residuals 4 nil)
+        (triage-postmodel-structure 7 nil)
+        (triage-postmodel-survival 9 '("--horizon=30"))
+        (triage-postmodel-near-miss 1 nil)
+        (triage-postmodel-prototypes 1 nil)
+        (triage-postmodel-error-tree 1 '("--kind=fp"))
+        (triage-postmodel-crosstabs-abs-error 4 nil)
+        (triage-postmodel-crosstabs-near-miss 1 nil)
+        (triage-postmodel-compare '(1 2) nil)
+        (triage-postmodel-baseline 4 nil)
+        (triage-postmodel-importance 13 nil)
+        (triage-postmodel-compare-rows "exp-common" nil)
+        (triage-postmodel-sensitivity "exp-sens" '("--param=alpha"))
         (dolist (sub triage-plot-subcommands)
           (funcall (intern (format "triage-plot-%s" (car sub)))
                    (if (eq (cadr sub) :groups) '(1 2) '(1)) nil))
@@ -867,6 +889,12 @@ Exit 1 writes the leakage-report fixture where --json points."
     (triage-test-with-stub (triage-test-leakage-responder 0)
       (let ((inhibit-message t)) (triage-check-leakage "a.yaml" nil))
       (push (car triage-test--calls) triage-test--started))
+    (triage-test-with-stub (triage-test-check-responder 1 "history-report")
+      (let ((inhibit-message t)) (triage-check-history "a.yaml" nil))
+      (setq triage-test--started (append triage-test--calls triage-test--started)))
+    (triage-test-with-stub (triage-test-check-responder 0 "metrics-report")
+      (let ((inhibit-message t)) (triage-check-metrics-group 1 nil))
+      (setq triage-test--started (append triage-test--calls triage-test--started)))
     (let* ((names (mapcar (lambda (a) (alist-get 'name a)) (triage-test-payload "actions-list")))
            (commands (append (mapcar #'cdr triage-test--calls)
                              (mapcar (lambda (s) (cdr (if (plist-member s :command)
@@ -876,6 +904,513 @@ Exit 1 writes the leakage-report fixture where --json points."
       (dolist (command commands)
         (should (or (member (format "triage %s %s" (car command) (cadr command)) names)
                     (member (format "triage %s" (car command)) names)))))))
+
+;;;; Type-aware menus and the postmodel views
+
+(defun triage-test-cli (group)
+  "Return the subcommands of GROUP in the cli-commands fixture.
+The fixture is the CLI's own command tree, pinned by value on the
+pytest side, so a new plot kind fails there first and here next."
+  (alist-get group (triage-test-payload "cli-commands")))
+
+(defun triage-test-cli-command (group sub)
+  "Return the arguments and options of triage GROUP SUB, from the fixture."
+  (alist-get (intern sub) (triage-test-cli group)))
+
+(defun triage-test-flags-missing (group sub flags)
+  "Return the FLAGS that triage GROUP SUB does not take, as (SUB FLAG)."
+  (let ((options (alist-get 'options (triage-test-cli-command group sub))))
+    (delq nil (mapcar (lambda (f) (unless (member f options) (list sub f))) flags))))
+
+(ert-deftest triage-test-plot-kinds-are-the-cli-plot-subcommands ()
+  (should (equal (sort (mapcar #'car triage-plot-subcommands) #'string<)
+                 (sort (mapcar (lambda (c) (symbol-name (car c))) (triage-test-cli 'plot))
+                       #'string<)))
+  (let (missing wrong-target)
+    (dolist (sub triage-plot-subcommands)
+      (setq missing (append missing (triage-test-flags-missing
+                                     'plot (car sub)
+                                     (append (nth 2 sub) (ensure-list (nth 3 sub))))))
+      (unless (= (length (alist-get 'arguments (triage-test-cli-command 'plot (car sub))))
+                 (if (eq (nth 1 sub) :groups) 2 1))
+        (push (car sub) wrong-target)))
+    (should (equal missing nil))
+    (should (equal wrong-target nil))))
+
+(ert-deftest triage-test-postmodel-entries-are-cli-subcommands ()
+  (let (missing)
+    (dolist (sub triage-postmodel-commands)
+      (if (triage-test-cli-command 'postmodel (car sub))
+          (setq missing (append missing (triage-test-flags-missing 'postmodel (car sub)
+                                                                   (nth 2 sub))))
+        (push (list (car sub) 'no-such-subcommand) missing)))
+    (should (equal missing nil))))
+
+(ert-deftest triage-test-every-gated-command-has-a-menu-entry ()
+  ;; A command the CLI gates by problem type, with no entry here, fails.
+  (let ((gated (mapcar (lambda (c) (symbol-name (car c)))
+                       (alist-get 'commands (triage-test-payload "postmodel-kinds"))))
+        (entries nil))
+    (mapatoms (lambda (s) (when-let* ((c (get s 'triage-command))) (push c entries))))
+    (should (> (length gated) 10))
+    (should (equal (seq-difference gated entries) nil))))
+
+(defmacro triage-test-at-type (type &rest body)
+  "Run BODY in a project buffer whose context is model 4 of an Experiment of TYPE."
+  (declare (indent 1))
+  `(triage-test-with-views
+     (let ((r root))
+       (with-temp-buffer
+         (setq-local triage--root r)
+         (setq default-directory r)
+         (setq-local triage--context
+                     (list :model 4 :group 4 :hash "exp-baseline" :type ,type))
+         ,@body))))
+
+(defconst triage-test--regression-only
+  '(triage-plot-forecast-actual--inapt-p triage-plot-residuals--inapt-p
+    triage-plot-bias--inapt-p triage-plot-forecast-time--inapt-p
+    triage-plot-segments--inapt-p triage-plot-win-consistency--inapt-p
+    triage-postmodel-residuals--inapt-p triage-postmodel-baseline--inapt-p
+    triage-postmodel-crosstabs-abs-error--inapt-p)
+  "The entries of regression and regression_ranking models only.")
+
+(defconst triage-test--survival-only
+  '(triage-plot-km--inapt-p triage-plot-brier--inapt-p
+    triage-plot-survival-calibration--inapt-p triage-postmodel-survival--inapt-p)
+  "The entries of survival models only.")
+
+(defconst triage-test--cut-class-only
+  '(triage-postmodel-near-miss--inapt-p triage-postmodel-prototypes--inapt-p)
+  "The entries of classification and regression_ranking models only.")
+
+(defconst triage-test--not-survival
+  '(triage-plot-gains--inapt-p)
+  "The entries of every type but survival.")
+
+(defconst triage-test--every-type
+  '(triage-plot-curve--inapt-p triage-plot-error-rules--inapt-p
+    triage-plot-calibration--inapt-p triage-plot-scores--inapt-p
+    triage-plot-curve-dates--inapt-p triage-plot-importance--inapt-p
+    triage-plot-overlap--inapt-p triage-postmodel-structure--inapt-p
+    triage-postmodel-error-tree--inapt-p triage-postmodel-compare--inapt-p
+    triage-postmodel-importance--inapt-p triage-postmodel-compare-rows--inapt-p
+    triage-postmodel-sensitivity--inapt-p triage-postmodel-crosstabs-near-miss--inapt-p)
+  "The entries the table gates for no type.")
+
+(defun triage-test-inapt-here (&rest refused)
+  "Check that exactly the predicates in the lists REFUSED grey out here."
+  (let* ((all (append triage-test--regression-only triage-test--survival-only
+                      triage-test--cut-class-only triage-test--not-survival
+                      triage-test--every-type))
+         (refused (apply #'append refused)))
+    (should (equal (seq-filter #'funcall all)
+                   (seq-filter (lambda (p) (memq p refused)) all)))))
+
+(ert-deftest triage-test-type-gates-for-regression ()
+  (triage-test-at-type "regression"
+    (triage-test-inapt-here triage-test--survival-only triage-test--cut-class-only)
+    ;; the table was read once, however many entries asked
+    (should (= 1 (seq-count (lambda (c) (equal (seq-take (cdr c) 2) '("postmodel" "kinds")))
+                            triage-test--calls)))))
+
+(ert-deftest triage-test-type-gates-for-classification ()
+  (triage-test-at-type "classification"
+    (triage-test-inapt-here triage-test--regression-only triage-test--survival-only)))
+
+(ert-deftest triage-test-type-gates-for-survival ()
+  (triage-test-at-type "survival"
+    (triage-test-inapt-here triage-test--regression-only triage-test--cut-class-only
+                            triage-test--not-survival)))
+
+(ert-deftest triage-test-type-gates-for-regression-ranking ()
+  (triage-test-at-type "regression_ranking"
+    (triage-test-inapt-here triage-test--survival-only)))
+
+(ert-deftest triage-test-type-gates-without-a-type-leave-it-to-the-cli ()
+  (triage-test-at-type nil
+    (triage-test-inapt-here)
+    ;; nothing to gate, so the table is not even read
+    (should-not (seq-some (lambda (c) (member "kinds" c)) triage-test--calls))))
+
+(ert-deftest triage-test-type-gates-without-a-table ()
+  (when (get-buffer triage-errors-buffer) (kill-buffer triage-errors-buffer))
+  (triage-test-in-project
+    (triage-test-with-stub (lambda (command)
+                             (if (member "kinds" command)
+                                 (list 2 "" "Error: No such command 'kinds'.\n")
+                               (triage-test-router command)))
+      (setq-local triage--context (list :model 4 :group 4 :hash "exp-baseline"
+                                        :type "classification"))
+      (let ((inhibit-message t))
+        (triage-test-inapt-here)
+        (should-not (triage-plot-km--inapt-p)))
+      (should (= 1 (length triage-test--calls)))
+      (should (eq (gethash root triage--kinds-cache) 'failed)))))
+
+(ert-deftest triage-test-type-at-point-from-the-status-buffer ()
+  (triage-test-with-status (triage-test-join-payload)
+    (goto-char (oref (triage-test-section 'triage-experiment "h-db") start))
+    (should (equal (triage--at-point :type) "regression"))
+    (goto-char (oref (triage-test-section 'triage-experiment "exp-dash") start))
+    (should (equal (triage--at-point :type) "classification"))
+    ;; a table view opened from here finds an Experiment's type by its hash
+    (let ((status (current-buffer)))
+      (with-temp-buffer
+        (setq-local triage--status-buffer status)
+        (setq-local triage--context (list :hash "h-db"))
+        (should (equal (triage--at-point :type) "regression"))))))
+
+(ert-deftest triage-test-type-at-point-in-the-object-views ()
+  (triage-test-with-views
+    (with-current-buffer (triage-experiment-show "exp-dash")
+      (goto-char (oref (triage-test-section 'triage-model 3) start))
+      (should (equal (triage--at-point :type) "classification")))
+    (with-current-buffer (triage-model-show 4)
+      (should (equal (triage--at-point :type) "regression")))
+    (with-current-buffer (triage-leaderboard "exp-dash" nil)
+      (goto-char (point-min))
+      (while (and (not (tabulated-list-get-id)) (not (eobp))) (forward-line))
+      ;; the leaderboard rows carry the Experiment's type, read from the view it came from
+      (should (eq (triage--at-point :model) 3)))))
+
+;;;; Errors, accepted exit codes
+
+(ert-deftest triage-test-call-json-accepts-listed-exit-codes ()
+  (triage-test-in-project
+    (triage-test-with-stub (lambda (_c) (list 1 "{\"chance\": null}" "INFO log\n"))
+      (let (got err)
+        (triage--call-json '("postmodel" "baseline" "4" "--json") (lambda (p) (setq got p))
+                           :errback (lambda (m) (setq err m)) :accept '(1))
+        (should (equal got '((chance))))
+        (should-not err)))
+    (triage-test-with-stub (lambda (_c) (list 2 "triage postmodel residuals reads regression models; model 1 is classification.\n"
+                                              "INFO Using database\n"))
+      (let (called err)
+        (triage--call-json '("postmodel" "residuals" "1" "--json") (lambda (_p) (setq called t))
+                           :errback (lambda (m) (setq err m)) :accept '(1))
+        (should-not called)
+        ;; the CLI's refusal, printed after the log lines, is the message
+        (should (string-prefix-p "triage postmodel residuals reads regression" err))))))
+
+;;;; The model view, type-aware
+
+(ert-deftest triage-test-model-view-calibration-by-type ()
+  (triage-test-with-views
+    (with-current-buffer (triage-model-show 4)
+      (let ((text (buffer-string)))
+        (should (string-match-p "problem_type: +regression" text))
+        (should (string-match-p "Calibration (4)" text))
+        (should (string-match-p "decile +n +avg_score +mean_outcome +lift +n_distinct_sc" text))
+        (should-not (string-match-p "realized_rate" text))
+        (should (string-match-p "ties: 4 distinct scores over 200 rows; the largest block holds 50 rows (25%) at 501.0000" text))))
+    (with-current-buffer (triage-model-show 3)
+      (let ((text (buffer-string)))
+        (should (string-match-p "decile .*mean_outcome .*lift .*realized_rate" text))
+        (should (string-match-p "ties: 4 distinct scores over 4 rows" text))))))
+
+;;;; The postmodel menu
+
+(ert-deftest triage-test-postmodel-residuals-view ()
+  (triage-test-with-views
+    (with-current-buffer (triage-postmodel-residuals 4 '("--top=5" "--date=2015-01-01"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "residuals" "4" "--json" "--top=5")))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Residuals of model 4" text))
+        (should (string-match-p "forecast structure: +on 2015-06-01, 4 distinct values; 25.0% of rows at 1; minimum 1, maximum 501; 0.0% negative" text))
+        (should (string-match-p "Errors per test date (6)" text))
+        (should (string-match-p "as_of_date +n +Σy +MAE +RMSE +WAPE +bias +top 100 |e|" text))
+        (should (string-match-p "Errors by band, pooled over the dates (4)" text))
+        (should (string-match-p "Errors by cold-start, pooled over the dates (1)" text))
+        (should (string-match-p "Largest errors (20)" text)))
+      (should (equal (triage--at-point :model) "4")))))
+
+(ert-deftest triage-test-postmodel-baseline-view ()
+  (triage-test-at-type "regression"
+    (with-current-buffer (triage-postmodel-baseline 4 '("--cut=band"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "baseline" "4" "--json" "--cut=band"
+                       "--experiment=exp-baseline")))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Group 4 against baseline group 2" text))
+        (should (string-match-p "chosen: the lowest MAE on the shared rows" text))
+        (should (string-match-p "Model against baseline, per segment (9)" text))
+        (should (string-match-p "won by the model: +100.0%" text))
+        (should (string-match-p "Dates won per entity (1)" text))
+        (should (string-match-p "Out of time, on 2015-06-01" text)))
+      (should (equal (triage--at-point :group) "4")))))
+
+(ert-deftest triage-test-postmodel-baseline-on-one-date ()
+  ;; exit 1 with JSON: the groups share one test date, so no chance tables
+  (triage-test-in-project
+    (triage-test-with-stub
+        (lambda (_c)
+          (let ((p (copy-tree (triage-test-payload "baseline"))))
+            (setf (alist-get 'chance p) nil (alist-get 'out_of_time p) nil)
+            (list 1 (let ((json-false :false)) (json-encode p)) "")))
+      (with-current-buffer (triage-postmodel-baseline 4 nil)
+        (unwind-protect
+            (let ((text (buffer-string)))
+              (should (string-match-p "skipped: the groups share fewer than two test dates" text))
+              (should-not (string-match-p "Out of time" text)))
+          (kill-buffer))))))
+
+(ert-deftest triage-test-postmodel-structure-views ()
+  (triage-test-with-views
+    (with-current-buffer (triage-postmodel-structure 7 '("--min-rows=3"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "structure" "7" "--json" "--min-rows=3")))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Structure of model 7 (Ridge)" text))
+        (should (string-match-p "leaf support not available for Ridge" text))
+        (should (string-match-p "Mean shift by feature family (3)" text))
+        (should (string-match-p "Feature contributions (3)" text))))
+    (with-current-buffer (triage-postmodel-structure 8 nil)
+      (let ((text (buffer-string)))
+        (should (string-match-p "Structure of model 8 (DecisionTreeRegressor)" text))
+        (should (string-match-p "leaves per tree: +8 to 8, mean 8.0000" text))
+        (should (string-match-p "Leaves on few training rows (0)" text))))))
+
+(ert-deftest triage-test-postmodel-survival-asks-for-the-horizon ()
+  (triage-test-at-type "survival"
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "30")))
+      (with-current-buffer (triage-postmodel-survival 9 '("--times=10,20"))
+        (should (equal (car triage-test--calls)
+                       '("triage" "postmodel" "survival" "9" "--json" "--times=10,20"
+                         "--horizon=30")))
+        (let ((text (buffer-string)))
+          (should (string-match-p "Survival diagnostics of model 9" text))
+          (should (string-match-p "Model 9 (CoxPHSurvivalAnalysis) on 2015-01-01, horizon 30" text))
+          (should (string-match-p "Uno's C: +0\\.[0-9]+" text))
+          (should (string-match-p "Risk deciles at horizon 30 (10)" text))
+          (should (string-match-p "Over time (10)" text))
+          (should (string-match-p "Calibration at horizon 30, per decile of predicted S (10)" text))
+          (should (string-match-p "KM steps: +[0-9]+ rows" text)))))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+      (should-error (triage-postmodel-survival 9 nil) :type 'user-error))))
+
+(ert-deftest triage-test-postmodel-prototypes-and-near-miss ()
+  (triage-test-at-type "classification"
+    (with-current-buffer (triage-postmodel-prototypes 1 '("--n=2" "--width=50_abs"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "prototypes" "1" "--json" "--n=2")))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Prototypes at 2016-01-01, top 100_abs (8)" text))
+        (should (string-match-p "TP +27 +1 +87 +1.9115 +inspections_entity_id_3y_total_count \\+1.12σ, " text))))
+    (with-current-buffer (triage-postmodel-near-miss 1 '("--width=50_abs" "--n=2"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "near-miss" "1" "--json" "--width=50_abs")))
+      (should (= (length tabulated-list-entries) 6))
+      (goto-char (point-min))
+      (while (and (not (tabulated-list-get-id)) (not (eobp))) (forward-line))
+      (should (equal (triage--at-point :model) "1"))
+      (should (equal (triage--at-point :type) "classification")))))
+
+(ert-deftest triage-test-postmodel-group-and-experiment-views ()
+  (triage-test-with-views
+    (with-current-buffer (triage-postmodel-importance 13 '("--top=3"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "importance" "13" "--json" "--top=3")))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Importance by family of group 13" text))
+        (should (string-match-p "Share of Σ|importance| by family, per model (2)" text))
+        (should (string-match-p "inspections.date" text))
+        (should (string-match-p "75.0%" text))
+        (should (string-match-p "Stability between train ends (1)" text))))
+    (with-current-buffer (triage-postmodel-compare-rows "exp-common" '("--groups=10,11"))
+      (should (equal (car triage-test--calls)
+                     '("triage" "postmodel" "compare-rows" "exp-common" "--json" "--groups=10,11")))
+      (should (= (length tabulated-list-entries) 6))
+      (goto-char (point-min))
+      (while (and (not (tabulated-list-get-id)) (not (eobp))) (forward-line))
+      (triage-table-visit)
+      (should (equal (car triage-test--calls) '("triage" "model" "show" "10" "--json"))))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "alpha")))
+      (with-current-buffer (triage-postmodel-sensitivity "exp-sens" '("--metric=mae"))
+        (should (equal (car triage-test--calls)
+                       '("triage" "postmodel" "sensitivity" "exp-sens" "--json" "--metric=mae"
+                         "--param=alpha")))
+        (let ((text (buffer-string)))
+          (should (string-match-p "sklearn.linear_model.Ridge: mae by alpha" text))
+          (should (string-match-p "Groups (3)" text)))
+        (goto-char (point-min))
+        (re-search-forward "^  0.1000 ")
+        (triage-visit)
+        (should (equal (car triage-test--calls)
+                       '("triage" "models" "exp-sens" "--group" "13" "--json")))))))
+
+(ert-deftest triage-test-postmodel-error-tree-by-type ()
+  (triage-test-at-type "regression"
+    (let* ((triage-test--started nil)
+           (triage--process-starter (lambda (&rest args) (push args triage-test--started) nil))
+           offered)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _) (setq offered collection) "abs-error")))
+        (triage-postmodel-error-tree 4 '("--horizon=30" "--depth=2" "--top=4")))
+      (should (equal offered '("abs-error" "beats-baseline")))
+      ;; a regression model refuses --horizon, so it is left out
+      (should (equal (triage-test-started)
+                     '("postmodel" "error-tree" "4" "--kind=abs-error" "--depth=2")))
+      (should-error (triage-postmodel-error-tree 4 '("--kind=fp")) :type 'user-error)))
+  (triage-test-at-type "survival"
+    (let* ((triage-test--started nil)
+           (triage--process-starter (lambda (&rest args) (push args triage-test--started) nil)))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "30")))
+        (triage-postmodel-error-tree 9 '("--kind=confusion")))
+      (should (equal (triage-test-started)
+                     '("postmodel" "error-tree" "9" "--kind=confusion" "--horizon=30")))
+      (should (equal (triage-postmodel--kinds-at-point)
+                     '("fp" "fn" "confusion" "both" "all"))))))
+
+(ert-deftest triage-test-postmodel-process-commands ()
+  (triage-test-with-menus
+    (triage-postmodel-crosstabs-abs-error 4 '("--parameter=5_pct" "--by=band"))
+    (should (equal (triage-test-started) '("postmodel" "crosstabs" "4" "--by=abs-error:5_pct")))
+    (triage-postmodel-crosstabs-abs-error 4 nil)
+    (should (equal (triage-test-started) '("postmodel" "crosstabs" "4" "--by=abs-error")))
+    (triage-postmodel-crosstabs-near-miss 3 '("--parameter=100_abs" "--by=band"))
+    (should (equal (triage-test-started)
+                   '("postmodel" "crosstabs" "3" "--against=near-miss" "--parameter=100_abs")))
+    (triage-postmodel-compare '(3 "4") '("--parameter=100_abs" "--sweep=50_abs,100_abs"))
+    (should (equal (triage-test-started)
+                   '("postmodel" "compare" "3" "4" "--sweep=50_abs,100_abs")))
+    (triage-postmodel-compare '(3 "4") '("--parameter=10_pct"))
+    (should (equal (triage-test-started) '("postmodel" "compare" "3" "4" "--parameter=10_pct")))))
+
+;;;; The check and results menus
+
+(defun triage-test-check-responder (code fixture)
+  "Return a responder for triage check that exits with CODE.
+Exit 0 and 1 write FIXTURE where --json points."
+  (lambda (command)
+    (if (not (equal (cadr command) "check"))
+        (triage-test-router command)
+      (when (<= code 1)
+        (with-temp-file (cadr (member "--json" command))
+          (insert (triage-test-fixture fixture))))
+      (list code "" (if (= code 2) "ERROR could not reach the database\n" "")))))
+
+(ert-deftest triage-test-check-history-exit-1-opens-the-report ()
+  (triage-test-in-project
+    (triage-test-with-stub (triage-test-check-responder 1 "history-report")
+      (triage-check-history "a.yaml" '("--as-of=2015-01-01" "--dates=2014-01-01"))
+      (let ((command (cdar triage-test--calls)))
+        (should (equal (seq-take command 4) '("check" "history" "a.yaml" "--json")))
+        (should (equal (nthcdr 5 command) '("--as-of=2015-01-01")))
+        (should-not (file-exists-p (nth 4 command))))
+      (with-current-buffer "*triage: history a.yaml*"
+        (unwind-protect
+            (let ((text (buffer-string)))
+              (should (string-match-p "History of a.yaml on the calendar" text))
+              (should (string-match-p "history_period: +1 month" text))
+              (should (string-match-p "with gaps: +1" text))
+              (should (string-match-p "fill missing: +unset (strict)" text))
+              (should (string-match-p "Entities with the most missing periods (1)" text)))
+          (kill-buffer))))))
+
+(ert-deftest triage-test-check-history-exit-0-says-it-is-complete ()
+  (triage-test-in-project
+    (triage-test-with-stub (triage-test-check-responder 0 "history-report")
+      (let (said)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+          (triage-check-history "a.yaml" nil))
+        (should (member "triage: history of a.yaml is complete on the calendar" said))
+        (should-not (get-buffer "*triage: history a.yaml*"))))))
+
+(ert-deftest triage-test-check-metrics-opens-the-report ()
+  (triage-test-in-project
+    (triage-test-with-stub (triage-test-check-responder 0 "metrics-report")
+      (let ((inhibit-message t))
+        (triage-check-metrics-model 3 '("--tolerance=1e-6" "--as-of=2015-01-01")))
+      (should (equal (seq-take (cdar triage-test--calls) 4)
+                     '("check" "metrics" "--model=3" "--json")))
+      (should (equal (nthcdr 5 (cdar triage-test--calls)) '("--tolerance=1e-6")))
+      (with-current-buffer "*triage: metrics model 3*"
+        (unwind-protect
+            (let ((text (buffer-string)))
+              (should (string-match-p "Metric audit of 1 model(s): passed" text))
+              (should (string-match-p "Metrics (4)" text))
+              (should (string-match-p "auc_roc .*model 1 · test · 2016-04-01 · stored" text)))
+          (kill-buffer))))
+    (when (get-buffer triage-errors-buffer) (kill-buffer triage-errors-buffer))
+    (triage-test-with-stub (triage-test-check-responder 2 "metrics-report")
+      (let ((inhibit-message t))
+        (triage-check-metrics-experiment "exp-dash" nil))
+      (with-current-buffer triage-errors-buffer
+        (should (string-match-p "check metrics --experiment.*exp-dash --json .* (exit 2)"
+                                (buffer-string)))))))
+
+(ert-deftest triage-test-results-audition-on-common-rows ()
+  (triage-test-with-menus
+    (triage-audition "exp-dash" '("--metric=mae" "--common-rows" "--groups=1,2" "--windowed"))
+    (should (equal (car triage-test--calls)
+                   '("triage" "audition" "exp-dash" "--json" "--metric=mae" "--common-rows"
+                     "--groups=1,2")))))
+
+(ert-deftest triage-test-plot-new-kinds-and-overlap-sweep ()
+  (triage-test-with-menus
+    (let ((inhibit-message t))
+      (triage-plot-km '(9) '("--horizon=30" "--date=2015-01-01" "--bins=5"))
+      (should (equal (seq-take (cdar triage-test--calls) 5)
+                     '("plot" "km" "9" "--horizon=30" "--date=2015-01-01")))
+      (triage-plot-bias '(4) '("--by=band" "--cut=sbc"))
+      (should (equal (seq-take (cdar triage-test--calls) 4) '("plot" "bias" "4" "--by=band")))
+      (triage-plot-overlap '(2 "3") '("--sweep=50_abs,100_abs"))
+      (should (equal (seq-take (cdar triage-test--calls) 5)
+                     '("plot" "overlap" "2" "3" "--sweep=50_abs,100_abs")))
+      ;; an empty answer to a required cut leaves it out (abs-error leaves have none)
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+        (triage-plot-leaves '(4) nil))
+      (should (equal (seq-take (cdar triage-test--calls) 4) '("plot" "leaves" "4" "-o"))))))
+
+(ert-deftest triage-test-new-suffixes-pass-only-cli-options ()
+  ;; Run every new suffix with every flag the menus offer, then check that each
+  ;; flag it passed is an option of its CLI subcommand.
+  (let ((every '("--parameter=1" "--date=2015-01-01" "--width=1" "--n=1" "--kind=abs-error"
+                 "--depth=1" "--min-leaf=1" "--horizon=1" "--times=1" "--by=band" "--top=1"
+                 "--quantiles" "--min-rows=1" "--baseline=1" "--cut=band" "--experiment=x"
+                 "--groups=1" "--sweep=1" "--param=a" "--metric=m" "--model-type=x"
+                 "--common-rows" "--bins=1" "--as-of=2015-01-01" "--tolerance=1"
+                 "--windowed" "--stat=mean" "--compare=1" "--subset=s" "--points=1")))
+    (triage-test-at-type "regression_ranking"
+      (let* ((triage-test--started nil)
+             (triage--process-starter (lambda (&rest args) (push args triage-test--started) nil)))
+        (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "1"))
+                  ((symbol-function 'completing-read) (lambda (&rest _) "abs-error")))
+          (let ((inhibit-message t))
+            (dolist (sub triage-plot-subcommands)
+              (funcall (intern (format "triage-plot-%s" (car sub)))
+                       (if (eq (cadr sub) :groups) '(1 2) '(1)) every))
+            (dolist (fn '(triage-postmodel-residuals triage-postmodel-structure
+                          triage-postmodel-survival triage-postmodel-near-miss
+                          triage-postmodel-prototypes triage-postmodel-error-tree
+                          triage-postmodel-crosstabs-abs-error triage-postmodel-crosstabs-near-miss
+                          triage-postmodel-baseline triage-postmodel-importance))
+              (funcall fn 4 every))
+            (triage-postmodel-compare '(3 4) every)
+            (triage-postmodel-compare-rows "exp-common" every)
+            (triage-postmodel-sensitivity "exp-sens" every)
+            (triage-audition "exp-dash" every)))
+        (let ((commands (append (mapcar #'cdr triage-test--calls)
+                                (mapcar (lambda (s) (cdr (plist-get s :command)))
+                                        triage-test--started)))
+              missing)
+          (dolist (command commands)
+            (when (member (car command) '("plot" "postmodel" "audition"))
+              (let* ((audition (equal (car command) "audition"))
+                     (spec (if audition
+                               (alist-get 'audition (triage-test-payload "cli-commands"))
+                             (triage-test-cli-command (intern (car command)) (cadr command))))
+                     (options (alist-get 'options spec)))
+                (dolist (arg command)
+                  (when (string-prefix-p "--" arg)
+                    (let ((flag (car (split-string arg "="))))
+                      (unless (member flag options)
+                        (push (list (car command) (cadr command) flag) missing))))))))
+          (should (> (length commands) 30))
+          (should (equal missing nil)))))))
 
 (provide 'triage-test)
 

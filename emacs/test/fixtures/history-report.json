@@ -1,0 +1,22 @@
+{
+  "as_of_dates": [
+    "2015-01-01"
+  ],
+  "history_period": "1 month",
+  "history_series_width": 6,
+  "fill_missing_periods": null,
+  "n_series": 2,
+  "n_series_with_gaps": 1,
+  "n_gaps": 2,
+  "n_misaligned": 0,
+  "n_leaked": 0,
+  "worst_entities": [
+    {
+      "entity_id": 1,
+      "n_gaps": 2,
+      "n_present": 4
+    }
+  ],
+  "misaligned_examples": [],
+  "clean": false
+}

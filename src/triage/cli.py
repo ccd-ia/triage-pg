@@ -4469,6 +4469,43 @@ def postmodel_survival(
             _print_survival(model_id, computed.estimator, result)
 
 
+@postmodel_app.command("kinds", hidden=True)
+def postmodel_kinds(
+    as_json: bool = typer.Option(False, "--json", help="Print the table as JSON."),
+) -> None:
+    """Which postmodel and plot commands read which problem types, for a front end.
+
+    The table the commands' own gates read (triage.problem_types): each gated command
+    with the problem types it reads and what to run instead for the others, then the
+    error-tree kinds and the --horizon rule of each type. A command not listed reads
+    every type. triage.el reads it once a session to grey out what would exit 2. Needs
+    no database.
+    """
+    from triage import problem_types
+    from triage.overview import CONTRACT
+
+    table = problem_types.kinds_table()
+    if as_json:
+        console.print_json(json.dumps({"contract": CONTRACT, **table}))
+        return
+    commands = Table(title="Commands gated by problem type", box=box.SIMPLE_HEAVY)
+    for col in ("Command", "Reads", "Instead"):
+        commands.add_column(col)
+    for name, entry in table["commands"].items():
+        commands.add_row(
+            f"triage {name}",
+            ", ".join(entry["accepts"]),
+            "; ".join(f"{t}: {cmd}" for t, cmd in entry["instead"].items()),
+        )
+    console.print(commands)
+    trees = Table(title="triage postmodel error-tree", box=box.SIMPLE_HEAVY)
+    for col in ("Problem type", "--kind", "--horizon"):
+        trees.add_column(col)
+    for problem_type, rule in table["error_tree"].items():
+        trees.add_row(problem_type, ", ".join(rule["kinds"]), rule["horizon"])
+    console.print(trees)
+
+
 @app.command("archive")
 def archive_command(
     ctx: typer.Context,

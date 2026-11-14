@@ -1,0 +1,505 @@
+{
+  "plot": {
+    "curve": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--date",
+        "--subset",
+        "--compare",
+        "--points",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "curve-dates": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--subset",
+        "--points",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "error-rules": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--date",
+        "--parameter",
+        "-p",
+        "--kind",
+        "--top",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "leaves": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--max-error",
+        "--min-support",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "recurrence": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--kind",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "crosstabs": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--date",
+        "--stat",
+        "--compare",
+        "--top",
+        "--feature",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "crosstabs-dates": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--stat",
+        "--top",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "overlap": {
+      "arguments": [
+        "group_a",
+        "group_b"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--sweep",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "calibration": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--bins",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "scores": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "gains": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--date",
+        "--points",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "forecast-actual": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "residuals": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "bias": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--by",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "forecast-time": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--cut",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "segments": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--baseline",
+        "--cut",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "win-consistency": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--baseline",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "importance": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "km": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--horizon",
+        "--date",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "brier": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--horizon",
+        "--date",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    },
+    "survival-calibration": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--horizon",
+        "--date",
+        "--output",
+        "-o"
+      ],
+      "required": []
+    }
+  },
+  "postmodel": {
+    "crosstabs": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--split",
+        "--top",
+        "-n",
+        "--by",
+        "--against"
+      ],
+      "required": []
+    },
+    "error-tree": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--kind",
+        "--depth",
+        "--min-leaf",
+        "--baseline",
+        "--horizon"
+      ],
+      "required": []
+    },
+    "error-rules": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--suspicious",
+        "--max-error",
+        "--min-support",
+        "--kind",
+        "--mae-ratio",
+        "--top",
+        "-n"
+      ],
+      "required": []
+    },
+    "error-recurrence": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--kind",
+        "--top",
+        "-n"
+      ],
+      "required": []
+    },
+    "compare-rows": {
+      "arguments": [
+        "experiment_hash"
+      ],
+      "options": [
+        "--groups",
+        "--json"
+      ],
+      "required": []
+    },
+    "compare": {
+      "arguments": [
+        "model_a",
+        "model_b"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--sweep",
+        "--split"
+      ],
+      "required": []
+    },
+    "near-miss": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "--width",
+        "--split",
+        "--date",
+        "--json"
+      ],
+      "required": []
+    },
+    "prototypes": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--parameter",
+        "-p",
+        "-n",
+        "--n",
+        "--split",
+        "--date",
+        "--deviations",
+        "--json"
+      ],
+      "required": []
+    },
+    "residuals": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--by",
+        "--top",
+        "-n",
+        "--quantiles",
+        "--json"
+      ],
+      "required": []
+    },
+    "baseline": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--baseline",
+        "--cut",
+        "--entity-group-query",
+        "--experiment",
+        "--json"
+      ],
+      "required": []
+    },
+    "structure": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--min-rows",
+        "--json"
+      ],
+      "required": []
+    },
+    "importance": {
+      "arguments": [
+        "model_group_id"
+      ],
+      "options": [
+        "--top",
+        "--json"
+      ],
+      "required": []
+    },
+    "sensitivity": {
+      "arguments": [
+        "experiment_hash"
+      ],
+      "options": [
+        "--param",
+        "--metric",
+        "--parameter",
+        "-p",
+        "--model-type",
+        "--common-rows",
+        "--json"
+      ],
+      "required": [
+        "--param"
+      ]
+    },
+    "survival": {
+      "arguments": [
+        "model_id"
+      ],
+      "options": [
+        "--horizon",
+        "--times",
+        "--json"
+      ],
+      "required": [
+        "--horizon"
+      ]
+    }
+  },
+  "check": {
+    "leakage": {
+      "arguments": [
+        "config"
+      ],
+      "options": [
+        "--dates",
+        "--json",
+        "--dbfile",
+        "-d"
+      ],
+      "required": []
+    },
+    "metrics": {
+      "arguments": [],
+      "options": [
+        "--model",
+        "--group",
+        "--experiment",
+        "--tolerance",
+        "--json"
+      ],
+      "required": []
+    },
+    "history": {
+      "arguments": [
+        "config"
+      ],
+      "options": [
+        "--as-of",
+        "--json",
+        "--dbfile",
+        "-d"
+      ],
+      "required": []
+    }
+  },
+  "audition": {
+    "arguments": [
+      "experiment_hash"
+    ],
+    "options": [
+      "--metric",
+      "-m",
+      "--parameter",
+      "-p",
+      "--rule",
+      "--from",
+      "--to",
+      "--common-rows",
+      "--groups",
+      "--json"
+    ],
+    "required": []
+  }
+}

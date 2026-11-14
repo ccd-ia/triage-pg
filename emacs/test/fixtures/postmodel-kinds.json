@@ -1,0 +1,212 @@
+{
+  "contract": 1,
+  "problem_types": [
+    "classification",
+    "regression_ranking",
+    "regression",
+    "survival"
+  ],
+  "commands": {
+    "postmodel residuals": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL or triage postmodel error-tree MODEL",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot forecast-actual": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot residuals": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot bias": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot curve-dates GROUP",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "postmodel crosstabs --by abs-error": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage postmodel crosstabs MODEL -p 10_pct",
+        "survival": "triage postmodel crosstabs MODEL -p 10_pct"
+      }
+    },
+    "plot forecast-time": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot curve-dates GROUP",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot gains": {
+      "accepts": [
+        "classification",
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "postmodel survival": {
+      "accepts": [
+        "survival"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "regression": "triage postmodel residuals MODEL",
+        "regression_ranking": "triage plot gains MODEL"
+      }
+    },
+    "plot km": {
+      "accepts": [
+        "survival"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "regression": "triage postmodel residuals MODEL",
+        "regression_ranking": "triage plot gains MODEL"
+      }
+    },
+    "plot brier": {
+      "accepts": [
+        "survival"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "regression": "triage postmodel residuals MODEL",
+        "regression_ranking": "triage plot gains MODEL"
+      }
+    },
+    "plot survival-calibration": {
+      "accepts": [
+        "survival"
+      ],
+      "instead": {
+        "classification": "triage plot calibration MODEL",
+        "regression": "triage plot calibration MODEL",
+        "regression_ranking": "triage plot calibration MODEL"
+      }
+    },
+    "postmodel near-miss": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage plot gains MODEL",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "postmodel prototypes": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage postmodel crosstabs MODEL --by abs-error",
+        "survival": "triage postmodel error-tree MODEL --kind confusion --horizon H"
+      }
+    },
+    "postmodel baseline": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot overlap GROUP_A GROUP_B",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot segments": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot overlap GROUP_A GROUP_B",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    },
+    "plot win-consistency": {
+      "accepts": [
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "classification": "triage plot overlap GROUP_A GROUP_B",
+        "survival": "triage postmodel survival MODEL --horizon H"
+      }
+    }
+  },
+  "error_tree": {
+    "classification": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion",
+        "both",
+        "all"
+      ],
+      "horizon": "refused"
+    },
+    "regression_ranking": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion",
+        "both",
+        "all",
+        "abs-error",
+        "beats-baseline"
+      ],
+      "horizon": "refused"
+    },
+    "regression": {
+      "kinds": [
+        "abs-error",
+        "beats-baseline"
+      ],
+      "horizon": "refused"
+    },
+    "survival": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion",
+        "both",
+        "all"
+      ],
+      "horizon": "required"
+    }
+  }
+}
