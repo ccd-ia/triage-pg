@@ -739,15 +739,35 @@ export interface ModelCardResponse {
   windowed: WindowedEvalRow[]
 }
 
-/** GET /api/models/{id}/calibration — reliability deciles (migration 0012's function). */
+/** GET /api/models/{id}/calibration — reliability deciles (migration 0029). Tied scores
+ *  share a decile, so a decile a block of ties covers is absent. `realized_rate` is null
+ *  unless the model is a classifier; `lift` is null when the population's mean outcome is 0. */
 export interface CalibrationDecile {
   decile: number
   n: number
   avg_score: number | null
+  mean_outcome: number | null
+  lift: number | null
   realized_rate: number | null
+  n_distinct_scores: number
+}
+/** The largest block of tied scores on the calibrated date (`triage.score_ties`). */
+export interface ScoreTies {
+  n: number
+  n_distinct: number
+  largest_tie_n: number | null
+  largest_tie_score: number | null
+  largest_tie_share: number | null
 }
 export type CalibrationResponse =
-  | { as_of_date: string; deciles: CalibrationDecile[] }
+  | {
+      as_of_date: string
+      label_timespan: string
+      problem_type: ProblemType
+      bins: number
+      deciles: CalibrationDecile[]
+      ties: ScoreTies | null
+    }
   | EmptyState
 
 /** The two crosstab rankings the route serves (`?stat=`): the ratio of means, ranked by
@@ -881,13 +901,16 @@ export type ModelGroupCurvesResponse = GroupCurveSeries[] | EmptyState
 /* GET /api/models/{id}/histogram — score histogram                             */
 /* -------------------------------------------------------------------------- */
 
-/** One score-histogram bin (width_bucket over prediction_ranks.score). */
+/** One score-histogram bin (migration 0029): [0, 1] bins for a classifier, the model's own
+ *  score range otherwise. `n_pos` is null unless the model is a classifier; `mean_outcome`
+ *  averages the bin's labeled rows. */
 export interface HistogramBin {
   bin: number
   lo: number
   hi: number
   n: number
-  n_pos: number
+  n_pos: number | null
+  mean_outcome: number | null
 }
 
 export type ModelHistogramResponse = HistogramBin[]

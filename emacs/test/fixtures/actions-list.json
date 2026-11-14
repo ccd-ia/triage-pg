@@ -294,6 +294,13 @@
     "args": "CONFIG"
   },
   {
+    "name": "triage check history",
+    "description": "Is the target-history series complete on the calendar?",
+    "source": "cli",
+    "destructive": false,
+    "args": "CONFIG"
+  },
+  {
     "name": "triage plot curve",
     "description": "Precision and recall over the population selected, per Subset or model.",
     "source": "cli",
@@ -348,6 +355,20 @@
     "source": "cli",
     "destructive": false,
     "args": "GROUP_A GROUP_B"
+  },
+  {
+    "name": "triage plot calibration",
+    "description": "Does the model's score match what its rows realized?",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
+  },
+  {
+    "name": "triage plot scores",
+    "description": "How the model's test scores spread.",
+    "source": "cli",
+    "destructive": false,
+    "args": "MODEL_ID"
   },
   {
     "name": "triage experiment show",

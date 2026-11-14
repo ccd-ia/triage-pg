@@ -14,6 +14,7 @@
 import { useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
+import { fmtNum, fmtPct } from '../api/format'
 import { prettyFeature } from '../api/transforms'
 import { useExperiment } from '../hooks/useExperiment'
 import { isEmpty, type FeatureImportanceRow } from '../api/types'
@@ -353,7 +354,7 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
         </section>
 
         <section>
-          <h4>calibration · score deciles vs realized rate</h4>
+          <h4>calibration · score deciles vs outcome</h4>
           {calibration.error ? (
             <div className="muted" style={{ fontSize: 11 }}>
               calibration unavailable: {calibration.error.message}
@@ -364,9 +365,24 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             <div className="muted" style={{ fontSize: 11 }}>{calibration.data.reason}</div>
           ) : (
             <>
-              <CalibrationChart deciles={calibration.data.deciles} />
+              <CalibrationChart
+                deciles={calibration.data.deciles}
+                problemType={calibration.data.problem_type}
+              />
               <div className="muted" style={{ fontSize: 10.5 }}>
-                at {calibration.data.as_of_date} — dots on bars = well calibrated
+                at {calibration.data.as_of_date} —{' '}
+                {calibration.data.problem_type === 'classification'
+                  ? 'realized rate'
+                  : 'mean outcome'}{' '}
+                dots on bars = well calibrated
+                {(calibration.data.ties?.largest_tie_share ?? 0) > 0.1 &&
+                calibration.data.ties?.largest_tie_score != null ? (
+                  <>
+                    {' '}
+                    · {fmtPct(calibration.data.ties.largest_tie_share, 0)} of rows share score{' '}
+                    {fmtNum(calibration.data.ties.largest_tie_score, 4)}, kept in one decile
+                  </>
+                ) : null}
               </div>
             </>
           )}

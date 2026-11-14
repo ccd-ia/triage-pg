@@ -168,6 +168,19 @@ def _use_dirtyduck_config(pool, seeded: SeededExperiment) -> None:
         )
 
 
+def _score_the_shown_model(pool, seeded: SeededExperiment) -> None:
+    """Score the model ``model show`` prints at its evaluated date, so the fixture pins the
+    shape of a calibration decile and not an empty list."""
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.predictions"
+            " (model_id, entity_id, as_of_date, split_kind, score)"
+            " select %(shown)s, entity_id, as_of_date, split_kind, score"
+            " from triage.predictions where model_id = %(first)s",
+            {"shown": seeded.latest_model["mg1"], "first": seeded.all_models["mg1"][0]},
+        )
+
+
 def _cli_payloads(cli: Cli, seeded: SeededExperiment) -> dict[str, Any]:
     run_id, model_id = seeded.run_id, seeded.latest_model["mg1"]
     exp = seeded.experiment_hash
@@ -201,6 +214,7 @@ def test_seeded_verbs_keep_the_fixture_shapes(
 ) -> None:
     seeded = _seed_full_experiment(db_pool_greenfield)
     _use_dirtyduck_config(db_pool_greenfield, seeded)
+    _score_the_shown_model(db_pool_greenfield, seeded)
     shutil.copy(DIRTYDUCK_CONFIG, tmp_path / CONFIG_NAME)
     live = _cli_payloads(_cli(monkeypatch, tmp_path, db_url), seeded)
     live["status-full-offline"] = _cli(monkeypatch, tmp_path, UNREACHABLE_URL).json(

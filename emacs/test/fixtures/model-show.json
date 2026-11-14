@@ -7,7 +7,8 @@
     "train_end_time": "2015-01-01",
     "label_timespan": "6 mons",
     "train_duration_ms": null,
-    "model_size_bytes": null
+    "model_size_bytes": null,
+    "problem_type": "classification"
   },
   "windowed": [
     {
@@ -28,6 +29,50 @@
     }
   ],
   "importances": [],
-  "calibration": [],
+  "calibration": [
+    {
+      "decile": 3,
+      "n": 1,
+      "avg_score": 0.9,
+      "mean_outcome": 1.0,
+      "lift": 2.0,
+      "realized_rate": 1.0,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 5,
+      "n": 1,
+      "avg_score": 0.7,
+      "mean_outcome": 0.0,
+      "lift": 0.0,
+      "realized_rate": 0.0,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 8,
+      "n": 1,
+      "avg_score": 0.4,
+      "mean_outcome": 1.0,
+      "lift": 2.0,
+      "realized_rate": 1.0,
+      "n_distinct_scores": 1
+    },
+    {
+      "decile": 10,
+      "n": 1,
+      "avg_score": 0.1,
+      "mean_outcome": 0.0,
+      "lift": 0.0,
+      "realized_rate": 0.0,
+      "n_distinct_scores": 1
+    }
+  ],
+  "calibration_ties": {
+    "n": 4,
+    "n_distinct": 4,
+    "largest_tie_n": 1,
+    "largest_tie_score": 0.9,
+    "largest_tie_share": 0.25
+  },
   "crosstabs": []
 }

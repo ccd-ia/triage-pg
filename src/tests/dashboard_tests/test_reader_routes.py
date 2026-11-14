@@ -203,3 +203,88 @@ def test_error_rules_carry_the_population_reference_rate(
     ).json()
     by_kind = {r["error_kind"]: r["reference_error_rate"] for r in suspicious}
     assert by_kind == {"fp": pytest.approx(1 / 3), "confusion": pytest.approx(1 / 4)}
+
+
+# ------------------------------------------------------- calibration, score histogram
+
+
+def test_calibration_returns_the_typed_deciles_and_the_ties(client, seeded):
+    """mg1's first model is scored at the last split: 0.9 / 0.7 / 0.4 / 0.1, outcomes
+    1 / 0 / 1 / 0. Four rows in ten buckets: ceil(c · 10 / 4) puts them in 3, 5, 8, 10."""
+    model_id = seeded.all_models["mg1"][0]
+    resp = client.get(
+        f"/api/models/{model_id}/calibration", params={"as_of_date": SPLITS[-1]}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["problem_type"] == "classification" and body["bins"] == 10
+    assert [d["decile"] for d in body["deciles"]] == [3, 5, 8, 10]
+    assert [d["realized_rate"] for d in body["deciles"]] == [1.0, 0.0, 1.0, 0.0]
+    assert [d["mean_outcome"] for d in body["deciles"]] == [1.0, 0.0, 1.0, 0.0]
+    assert [d["lift"] for d in body["deciles"]] == [2.0, 0.0, 2.0, 0.0]
+    assert body["ties"] == {
+        "n": 4,
+        "n_distinct": 4,
+        "largest_tie_n": 1,
+        "largest_tie_score": 0.9,
+        "largest_tie_share": 0.25,
+    }
+
+
+def test_calibration_bins_and_unknown_model(client, seeded):
+    model_id = seeded.all_models["mg1"][0]
+    two = client.get(
+        f"/api/models/{model_id}/calibration",
+        params={"as_of_date": SPLITS[-1], "bins": 2},
+    ).json()
+    assert [d["n"] for d in two["deciles"]] == [2, 2]
+    assert (
+        client.get(
+            f"/api/models/{model_id}/calibration", params={"bins": 0}
+        ).status_code
+        == 422
+    )
+    assert client.get("/api/models/999999/calibration").status_code == 404
+
+
+def test_histogram_of_a_classifier_keeps_its_unit_bins(client, seeded):
+    model_id = seeded.all_models["mg1"][0]
+    rows = client.get(f"/api/models/{model_id}/histogram", params={"bins": 10}).json()
+    assert [(r["bin"], r["lo"], r["hi"], r["n"]) for r in rows] == [
+        (2, 0.1, 0.2, 1),
+        (5, 0.4, 0.5, 1),
+        (8, 0.7, 0.8, 1),
+        (10, 0.9, 1.0, 1),
+    ]
+    assert [r["n_pos"] for r in rows] == [0, 1, 0, 1]
+    assert [r["mean_outcome"] for r in rows] == [0.0, 1.0, 0.0, 1.0]
+
+
+def test_histogram_of_a_regression_model_bins_its_own_range(
+    client, seeded, db_pool_greenfield
+):
+    model_id = seeded.all_models["mg1"][0]
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "update triage.experiments set problem_type = 'regression'"
+            " where experiment_hash = %(h)s",
+            {"h": seeded.experiment_hash},
+        )
+        for entity_id, score in ((1, 27_200.0), (2, 9_000.0), (3, 400.0), (4, 0.0)):
+            conn.execute(
+                "update triage.predictions set score = %(s)s"
+                " where model_id = %(m)s and entity_id = %(e)s",
+                {"s": score, "m": model_id, "e": entity_id},
+            )
+    rows = client.get(f"/api/models/{model_id}/histogram", params={"bins": 4}).json()
+    assert [(r["bin"], r["lo"], r["hi"], r["n"]) for r in rows] == [
+        (1, 0.0, 6_800.0, 2),
+        (2, 6_800.0, 13_600.0, 1),
+        (4, 20_400.0, 27_200.0, 1),
+    ]
+    assert all(r["n_pos"] is None for r in rows)
+    assert [r["mean_outcome"] for r in rows] == [0.5, 0.0, 1.0]
+    assert (
+        client.get(f"/api/models/{model_id}/histogram", params={"bins": 0}).status_code
+        == 422
+    )
