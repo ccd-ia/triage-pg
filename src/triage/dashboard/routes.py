@@ -752,13 +752,13 @@ def model_curve(
 def model_histogram(
     model_id: int, bins: int = 20, pool: DictRowPool = Depends(_pool)
 ) -> list[dict[str, Any]]:
-    """Predicted-score histogram (by class) for the model card."""
-    return _rows(
-        pool,
-        "select bin, lo, hi, n, n_pos"
-        " from triage.model_score_histogram(%(model_id)s, %(bins)s) order by bin",
-        {"model_id": model_id, "bins": bins},
-    )
+    """Predicted-score histogram for the model card (migration 0029): ``[0, 1]`` bins for a
+    classifier, the model's own score range otherwise; ``n_pos`` is null unless the model
+    is a classifier."""
+    try:
+        return readers.score_histogram(pool, model_id, bins)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/models/{model_id}/calibration")
@@ -766,49 +766,28 @@ def model_calibration(
     model_id: int,
     split_kind: str = "test",
     as_of_date: Optional[str] = None,
+    bins: int = 10,
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
-    """Reliability deciles for the model card (migration 0012's function is model-generic
-    despite its ``monitoring_`` name): decile mean score vs realized outcome rate.
+    """Reliability deciles for the model card (migration 0029): per decile the mean score,
+    the mean outcome and its lift, the realized rate for a classifier, and the largest
+    block of tied scores, which shares one decile.
 
     Defaults: the model's LATEST evaluated test date and its training label timespan —
     exactly the slice the per-split evaluations describe.
     """
-    ctx = _one(
-        pool,
-        "select m.training_label_timespan,"
-        "       coalesce(cast(%(date)s as date),"
-        "                (select max(e.as_of_date) from triage.evaluations e"
-        "                  where e.model_id = m.model_id"
-        "                    and e.split_kind = cast(%(split)s as triage.split_kind)"
-        "                    and e.subset_hash = '')) as as_of_date"
-        " from triage.models m where m.model_id = %(model_id)s",
-        {"model_id": model_id, "split": split_kind, "date": as_of_date},
-    )
-    if ctx is None:
-        raise HTTPException(status_code=404, detail="model not found")
-    if ctx["as_of_date"] is None or ctx["training_label_timespan"] is None:
+    try:
+        result = readers.calibration(pool, model_id, split_kind, as_of_date, bins)
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="model not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
         return _empty(
             "no evaluated date / label timespan for this model",
             "calibration needs labeled predictions — run an evaluation first.",
         )
-    return {
-        "as_of_date": ctx["as_of_date"],
-        "deciles": _rows(
-            pool,
-            "select decile, n, avg_score, realized_rate"
-            " from triage.monitoring_calibration(%(model_id)s,"
-            "        cast(%(split)s as triage.split_kind),"
-            "        cast(%(date)s as date), %(timespan)s)"
-            " order by decile",
-            {
-                "model_id": model_id,
-                "split": split_kind,
-                "date": str(ctx["as_of_date"]),
-                "timespan": ctx["training_label_timespan"],
-            },
-        ),
-    }
+    return result
 
 
 @router.get("/models/{model_id}/overlap/{other_model_id}")

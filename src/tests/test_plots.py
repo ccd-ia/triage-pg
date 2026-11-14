@@ -28,6 +28,7 @@ from tests.test_readers import (  # noqa: F401 — group is a fixture
     D2,
     D3,
     LABEL_TIMESPAN,
+    POPULATION,
     SUBSET,
     SUBSET_NAME,
     Group,
@@ -206,6 +207,8 @@ DRAWS = {
     "overlap": lambda pool, d: plots.overlap(
         pool, d.group.model_group_id, d.other_group, CUT
     ),
+    "calibration": lambda pool, d: plots.calibration(pool, d.group.model_a),
+    "scores": lambda pool, d: plots.scores(pool, d.group.model_a),
 }
 
 
@@ -433,6 +436,79 @@ def test_overlap_pairs_the_groups_by_training_window(
 # ----------------------------------------------------------------------------- errors
 
 
+# ------------------------------------------------------------ calibration, scores
+
+
+def _as_regression(pool) -> None:
+    """Make model A's experiment a regression one, its scores spread over 0-27,200."""
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.experiments set problem_type = 'regression'"
+            " where experiment_hash = 'exp-a'"
+        )
+        conn.execute("update triage.predictions set score = score * 27200")
+
+
+def test_calibration_draws_the_readers_deciles(db_pool_greenfield, group):  # noqa: F811
+    pool = db_pool_greenfield
+    result = plots.calibration(pool, group.model_a, bins=5)
+    read = readers.calibration(pool, group.model_a, bins=5)
+    assert read is not None
+    assert result.data == {"deciles": read["deciles"], "ties": read["ties"]}
+    assert [r["decile"] for r in read["deciles"]] == [1, 2, 3, 4, 5]
+    assert all(r["realized_rate"] is not None for r in read["deciles"])
+    assert result.summary.startswith(f"5 of 5 buckets at {D1} (classification)")
+
+
+def test_calibration_of_a_regression_model_reads_the_mean_outcome(
+    db_pool_greenfield,
+    group,  # noqa: F811
+):
+    pool = db_pool_greenfield
+    _as_regression(pool)
+    read = readers.calibration(pool, group.model_a)
+    assert read is not None and read["problem_type"] == "regression"
+    assert all(r["realized_rate"] is None for r in read["deciles"])
+    result = plots.calibration(pool, group.model_a)
+    assert "(regression): mean outcome" in result.summary
+
+
+def test_scores_draws_the_histogram_rows(db_pool_greenfield, group):  # noqa: F811
+    pool = db_pool_greenfield
+    result = plots.scores(pool, group.model_a)
+    rows = readers.score_histogram(pool, group.model_a, 20)
+    assert result.data == {"bins": rows}
+    # a classifier: [0, 1] bins and its positives
+    assert all(0.0 <= r["lo"] < r["hi"] <= 1.0 for r in rows)
+    assert all(r["n_pos"] is not None for r in rows)
+    total = POPULATION[D1] + POPULATION[D2]
+    assert result.summary.startswith(f"{total} scored rows over")
+
+
+def test_scores_of_a_regression_model_span_its_own_range(
+    db_pool_greenfield,
+    group,  # noqa: F811
+):
+    pool = db_pool_greenfield
+    _as_regression(pool)
+    rows = readers.score_histogram(pool, group.model_a, 20)
+    with pool.connection() as conn:
+        lo, hi = (
+            conn.execute(
+                "select min(score) as lo, max(score) as hi from triage.predictions"
+                " where model_id = %(m)s and split_kind = 'test'",
+                {"m": group.model_a},
+            )
+            .fetchone()
+            .values()
+        )
+    assert rows[0]["lo"] == pytest.approx(lo) and rows[-1]["hi"] == pytest.approx(hi)
+    assert rows[-1]["bin"] == 20  # the maximum lands in the last bin, not above it
+    assert all(r["n_pos"] is None for r in rows)
+    assert sum(r["n"] for r in rows) == POPULATION[D1] + POPULATION[D2]
+    assert "positives" not in plots.scores(pool, group.model_a).summary
+
+
 def test_more_than_eight_series_is_refused(db_pool_greenfield, group):  # noqa: F811
     pool = db_pool_greenfield
     with pool.connection() as conn:
@@ -460,6 +536,7 @@ def test_nothing_persisted_names_the_command_that_creates_it(
         (lambda: plots.crosstabs(pool, m), "triage postmodel crosstabs"),
         (lambda: plots.crosstabs_dates(pool, gid), "triage postmodel crosstabs"),
         (lambda: plots.curve(pool, group.model_b, D1), "triage run"),
+        (lambda: plots.calibration(pool, group.model_b), "triage run"),  # no evaluation
     ):
         with pytest.raises(NothingToDraw, match=command):
             draw()
@@ -475,6 +552,7 @@ def test_unknown_ids_are_bad_input(db_pool_greenfield, group):  # noqa: F811
         lambda: plots.crosstabs_dates(pool, 999999),
         lambda: plots.overlap(pool, group.model_group_id, 999999, CUT),
         lambda: plots.curve(pool, group.model_a, D1, ["nowhere"]),
+        lambda: plots.calibration(pool, 999999),
     ):
         with pytest.raises(readers.NotFoundError):
             draw()

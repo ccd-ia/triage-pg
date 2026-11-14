@@ -809,14 +809,29 @@ export function modelCard(id: number): ModelCardResponse {
 /** Reliability deciles: a mildly over-confident model (top deciles under the diagonal). */
 export function modelCalibration(id: number): CalibrationResponse {
   void id
+  const rates = [...Array(10).keys()].map((i) => Math.max(0.02, 0.82 - i * 0.085))
+  const base = rates.reduce((a, b) => a + b, 0) / rates.length
   return {
     as_of_date: SPLITS[SPLITS.length - 1],
-    deciles: [...Array(10).keys()].map((i) => ({
+    label_timespan: '6 mons',
+    problem_type: 'classification',
+    bins: 10,
+    deciles: rates.map((rate, i) => ({
       decile: i + 1,
       n: 200,
       avg_score: 0.95 - i * 0.09,
-      realized_rate: Math.max(0.02, 0.82 - i * 0.085),
+      mean_outcome: rate,
+      lift: rate / base,
+      realized_rate: rate,
+      n_distinct_scores: 200,
     })),
+    ties: {
+      n: 2000,
+      n_distinct: 2000,
+      largest_tie_n: 1,
+      largest_tie_score: 0.95,
+      largest_tie_share: 0.0005,
+    },
   }
 }
 
@@ -1061,6 +1076,7 @@ export function modelHistogram(id: number): ModelHistogramResponse {
       hi: Number(((i + 1) / counts.length).toFixed(3)),
       n: counts[i],
       n_pos: posCounts[i],
+      mean_outcome: posCounts[i] / counts[i],
     })
   }
   return bins

@@ -862,20 +862,35 @@ def models_command(
         console.print(table)
 
 
+#: ``model show`` notes a block of tied scores holding more than this share of the rows.
+TIE_NOTE_SHARE = 0.10
+#: Below this many labeled rows a bucket, ``model show`` suggests fewer buckets.
+MIN_ROWS_PER_BIN = 20
+
+
 @model_app.command("show")
 def model_show(
     ctx: typer.Context,
     model_id: int = typer.Argument(..., callback=natural_number),
     as_json: bool = typer.Option(False, "--json", help="Print the raw card as JSON."),
+    bins: int = typer.Option(
+        10,
+        "--bins",
+        callback=natural_number,
+        help="Score buckets of the calibration table. Tied scores share one bucket.",
+    ),
 ) -> None:
     """One model's card, headless: identity, windowed evaluations, top importances,
     calibration deciles, and the top crosstab features when a diagnostics pass ran."""
+    from triage.diagnostics import readers
+
     engine = get_pool(ctx)
     with engine.connection() as conn:
         card = conn.execute(
             "select m.model_id, m.model_group_id, mg.model_type, mg.hyperparameters,"
             "       m.train_end_time, m.training_label_timespan::text as label_timespan,"
-            "       m.train_duration_ms, m.model_size_bytes"
+            "       m.train_duration_ms, m.model_size_bytes,"
+            "       triage.model_problem_type(m.model_id)::text as problem_type"
             " from triage.models m"
             " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
             " where m.model_id = %(m)s",
@@ -896,21 +911,6 @@ def model_show(
             " where model_id = %(m)s order by rank_abs nulls last limit 10",
             {"m": model_id},
         ).fetchall()
-        calibration = []
-        cal_date = returned_row(
-            conn.execute(
-                "select max(as_of_date) as d from triage.evaluations"
-                " where model_id = %(m)s and split_kind = 'test' and subset_hash = ''",
-                {"m": model_id},
-            ).fetchone()  # an aggregate SELECT always yields one row
-        )["d"]
-        if cal_date is not None and card["label_timespan"] is not None:
-            calibration = conn.execute(
-                "select decile, n, avg_score, realized_rate"
-                " from triage.monitoring_calibration(%(m)s, 'test', %(d)s,"
-                "        cast(%(t)s as interval)) order by decile",
-                {"m": model_id, "d": str(cal_date), "t": card["label_timespan"]},
-            ).fetchall()
         crosstabs = conn.execute(
             "select feature, ratio from triage.crosstabs"
             " where model_id = %(m)s and stat = 'mean'"
@@ -918,6 +918,11 @@ def model_show(
             " order by abs(ln(ratio)) desc limit 5",
             {"m": model_id},
         ).fetchall()
+    # the latest evaluated test date, at the training label timespan
+    cal = readers.calibration(engine, model_id, bins=bins)
+    calibration = cal["deciles"] if cal is not None else []
+    ties = cal["ties"] if cal is not None else None
+    cal_date = cal["as_of_date"] if cal is not None else None
 
     if as_json:
         console.print_json(
@@ -927,6 +932,7 @@ def model_show(
                     "windowed": windowed,
                     "importances": importances,
                     "calibration": calibration,
+                    "calibration_ties": ties,
                     "crosstabs": crosstabs,
                 },
                 default=str,
@@ -972,17 +978,33 @@ def model_show(
             t.add_row(f["feature"], _fmt(f["feature_importance"]))
         console.print(t)
     if calibration:
+        classifier = card["problem_type"] == "classification"
         t = Table(title=f"Calibration @ {cal_date}", box=box.SIMPLE_HEAVY)
-        for col in ("Decile", "n", "Mean score", "Realized"):
+        cols = ["Decile", "n", "Mean score", "Mean outcome", "Lift"]
+        for col in cols + (["Realized"] if classifier else []):
             t.add_column(col)
         for c in calibration:
-            t.add_row(
+            cells = [
                 str(c["decile"]),
                 str(c["n"]),
                 _fmt(c["avg_score"]),
-                _fmt(c["realized_rate"]),
-            )
+                _fmt(c["mean_outcome"]),
+                _fmt(c["lift"], 2),
+            ]
+            t.add_row(*cells, *([_fmt(c["realized_rate"])] if classifier else []))
         console.print(t)
+        if ties is not None and (ties["largest_tie_share"] or 0) > TIE_NOTE_SHARE:
+            console.print(
+                f"[dim]{ties['largest_tie_share']:.0%} of rows share score"
+                f" {ties['largest_tie_score']:.4g} — tied rows are kept in one"
+                " decile[/dim]"
+            )
+        n_labeled = sum(c["n"] for c in calibration)
+        if n_labeled / bins < MIN_ROWS_PER_BIN and bins > 5:
+            console.print(
+                f"[dim]{n_labeled} labeled rows over {bins} buckets is under"
+                f" {MIN_ROWS_PER_BIN} a bucket — try --bins 5[/dim]"
+            )
     if crosstabs:
         t = Table(title="Crosstabs (top |log ratio|)", box=box.SIMPLE_HEAVY)
         t.add_column("Feature")
@@ -3866,6 +3888,57 @@ def plot_overlap(
         return plots.overlap(pool, group_a, group_b, parameter)
 
     _write_plot(ctx, output, f"overlap-{group_a}-{group_b}.svg", draw)
+
+
+@plot_app.command("calibration")
+def plot_calibration(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    bins: int = typer.Option(
+        10,
+        "--bins",
+        callback=natural_number,
+        help="Score buckets. Tied scores share one bucket.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("calibration-MODEL.svg")
+    ),
+) -> None:
+    """Does the model's score match what its rows realized?
+
+    Mean score against the realized rate (a classifier) or the mean outcome (the other
+    types) per score bucket, on the latest evaluated test date, with the score = outcome
+    diagonal.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.calibration(pool, model_id, bins)
+
+    _write_plot(ctx, output, f"calibration-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("scores")
+def plot_scores(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("scores-MODEL.svg")
+    ),
+) -> None:
+    """How the model's test scores spread.
+
+    A histogram over every test date: over [0, 1] with the positives for a classifier,
+    over the model's own score range otherwise.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.scores(pool, model_id)
+
+    _write_plot(ctx, output, f"scores-{model_id}.svg", draw, [model_id])
 
 
 def execute() -> None:

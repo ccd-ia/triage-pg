@@ -1,4 +1,4 @@
-"""``triage plot``: eight commands, each writing its figure and one summary line.
+"""``triage plot``: ten commands, each writing its figure and one summary line.
 
 Exit codes: 0 written; 1 nothing persisted to draw, naming the command that creates it;
 2 bad input (an unknown model, model group or Subset, an unsupported extension, the
@@ -76,6 +76,11 @@ def _commands(d: Diagnosed) -> list[tuple[list[str], str, str]]:
          f"crosstabs-dates-{g}.svg", "2 feature(s) by nonzero rate"),
         (["overlap", str(g), str(d.other_group), "-p", CUT],
          f"overlap-{g}-{d.other_group}.svg", "1 shared test date(s) at 10_pct"),
+        (["calibration", str(a)], f"calibration-{a}.svg",
+         f"10 of 10 buckets at {D1} (classification): realized rate"),
+        (["calibration", str(a), "--bins", "4"], f"calibration-{a}.svg",
+         f"4 of 4 buckets at {D1}"),
+        (["scores", str(a)], f"scores-{a}.svg", "230 scored rows over"),
     ]  # fmt: skip
 
 
@@ -121,6 +126,9 @@ def test_unknown_ids_and_bad_options_exit_2(plot, diagnosed, tmp_path):  # noqa:
         (["crosstabs", a, "--feature", "nowhere"], "crosstabs at 10_pct on"),
         (["error-rules", a, "--kind", "tp"], "'tp' is not an error-rule kind"),
         (["curve", a, "--date", "2014-13-01"], "invalid date"),
+        (["calibration", "999999"], "No model with id 999999"),
+        (["scores", "999999"], "No model with id 999999"),
+        (["calibration", a, "--bins", "0"], "0 is not a natural number"),
     ):
         result = plot(*args)
         assert result.exit_code == 2, (args, result.output)
@@ -138,6 +146,7 @@ def test_nothing_persisted_exits_1_naming_the_command(plot, diagnosed, tmp_path)
             "triage postmodel error-tree",
         ),
         (["curve", str(diagnosed.group.model_b), "--date", str(D1)], "triage run"),
+        (["calibration", c], "triage run"),  # scored, never evaluated
     ):
         result = plot(*args)
         assert result.exit_code == 1, (args, result.output)
@@ -145,7 +154,7 @@ def test_nothing_persisted_exits_1_naming_the_command(plot, diagnosed, tmp_path)
     assert not list(tmp_path.glob("*.svg"))
 
 
-def test_the_help_lists_the_eight_commands():
+def test_the_help_lists_the_ten_commands():
     result = CliRunner().invoke(cli.app, ["plot", "--help"])
     assert result.exit_code == 0
     plain = _plain(result.output)
@@ -158,6 +167,8 @@ def test_the_help_lists_the_eight_commands():
         "crosstabs",
         "crosstabs-dates",
         "overlap",
+        "calibration",
+        "scores",
     ):
         assert f" {command} " in plain, command
 
@@ -178,7 +189,7 @@ def test_the_cli_does_not_import_matplotlib_until_a_plot_is_drawn():
         check=True,
     )
     assert loaded.stdout.split()[-2:] == ["False", "False"], loaded.stdout
-    assert Path(cli.__file__).read_text().count("from triage import plots") == 8
+    assert Path(cli.__file__).read_text().count("from triage import plots") == 10
 
 
 def test_a_file_that_cannot_be_written_exits_2_not_1(plot, diagnosed, tmp_path):  # noqa: F811

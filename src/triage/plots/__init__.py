@@ -21,6 +21,7 @@ unsupported extension, or more than :data:`MAX_SERIES` series.
 
 from triage.plots.crosstabs import crosstabs, crosstabs_dates
 from triage.plots.curves import curve, curve_dates
+from triage.plots.distributions import calibration, scores
 from triage.plots.errors import error_rules, leaves, recurrence
 from triage.plots.overlap import overlap
 from triage.plots.style import (
@@ -36,6 +37,7 @@ __all__ = [
     "MAX_SERIES",
     "NothingToDraw",
     "PlotResult",
+    "calibration",
     "crosstabs",
     "crosstabs_dates",
     "curve",
@@ -45,4 +47,5 @@ __all__ = [
     "output_format",
     "overlap",
     "recurrence",
+    "scores",
 ]

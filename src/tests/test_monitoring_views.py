@@ -208,6 +208,120 @@ def test_calibration_deciles(db_pool_greenfield):
     assert all(r["realized_rate"] == pytest.approx(0.0) for r in rows[5:])
     # scores fall with decile — the ranking orientation held
     assert rows[0]["avg_score"] > rows[-1]["avg_score"]
+    # a model with no run lineage reads as a classifier; the base rate is 0.5
+    assert all(r["mean_outcome"] == r["realized_rate"] for r in rows)
+    assert [r["lift"] for r in rows] == pytest.approx([2.0] * 5 + [0.0] * 5)
+    assert all(r["n_distinct_scores"] == 10 for r in rows)
+
+
+def _seed_labels(pool, outcomes):
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) "
+            "values ('labels-art-m', 'labels-log-m', 'labels', '{}'::jsonb)"
+        )
+        for entity_id, outcome in enumerate(outcomes, start=1):
+            conn.execute(
+                "insert into triage.labels (label_hash, entity_id, as_of_date,"
+                " label_timespan, outcome) values ('labels-art-m', %(e)s, %(d)s,"
+                " cast(%(ts)s as interval), %(o)s)",
+                {"e": entity_id, "d": AS_OF, "ts": TIMESPAN, "o": float(outcome)},
+            )
+
+
+def _as_problem_type(pool, model_id, problem_type):
+    """Give the hand-seeded model a run of an experiment of ``problem_type``."""
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.experiments set problem_type = %(t)s"
+            " where experiment_hash = 'exp-mon'",
+            {"t": problem_type},
+        )
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile)"
+            " values ('exp-mon', 'local') returning run_id"
+        ).fetchone()["run_id"]
+        conn.execute(
+            "update triage.models set run_id = %(r)s where model_id = %(m)s",
+            {"r": run_id, "m": model_id},
+        )
+
+
+def _calibration(pool, model_id, bins=10):
+    with pool.connection() as conn:
+        return conn.execute(
+            "select * from triage.monitoring_calibration(%(m)s, 'production',"
+            " %(d)s::date, cast(%(ts)s as interval), '', %(b)s) order by decile",
+            {"m": model_id, "d": AS_OF, "ts": TIMESPAN, "b": bins},
+        ).fetchall()
+
+
+def test_regression_calibration_reports_the_mean_outcome(db_pool_greenfield):
+    _, model_id = _seed_group_and_model(db_pool_greenfield)
+    _as_problem_type(db_pool_greenfield, model_id, "regression")
+    rng = np.random.default_rng(3)
+    outcomes = rng.gamma(2.0, 400.0, 100).round(1)
+    scores = np.linspace(2700.0, 10.0, 100)  # entity 1 scores highest
+    _seed_scores(db_pool_greenfield, model_id, scores, "2026-01-02T12:00:00+00")
+    _seed_labels(db_pool_greenfield, outcomes)
+
+    rows = _calibration(db_pool_greenfield, model_id)
+
+    assert [r["decile"] for r in rows] == list(range(1, 11))
+    overall = outcomes.mean()
+    for r in rows:
+        block = outcomes[(r["decile"] - 1) * 10 : r["decile"] * 10]
+        assert r["n"] == 10
+        assert r["mean_outcome"] == pytest.approx(block.mean())
+        assert r["lift"] == pytest.approx(block.mean() / overall)
+        assert r["realized_rate"] is None  # "share above zero" is not a regression rate
+
+
+def test_tied_scores_share_one_decile(db_pool_greenfield):
+    """84 of 100 rows share a score: ntile spread them over 8 deciles, cume_dist keeps one."""
+    _, model_id = _seed_group_and_model(db_pool_greenfield)
+    _as_problem_type(db_pool_greenfield, model_id, "regression")
+    scores = (
+        [100.0 - i for i in range(8)] + [15.9] * 84 + [5.0 - i * 0.5 for i in range(8)]
+    )
+    _seed_scores(db_pool_greenfield, model_id, scores, "2026-01-02T12:00:00+00")
+    _seed_labels(db_pool_greenfield, [float(i % 7) for i in range(100)])
+
+    rows = _calibration(db_pool_greenfield, model_id)
+    by_decile = {r["decile"]: r for r in rows}
+    # rows 1-8: deciles 1 (rows 1-8 have c ≤ 8 → ceil(c/10) = 1); the block's last row is
+    # row 92, so all 84 tied rows land in decile 10 with the 8 rows below them
+    assert sorted(by_decile) == [1, 10]
+    assert by_decile[1]["n"] == 8 and by_decile[1]["n_distinct_scores"] == 8
+    assert by_decile[10]["n"] == 92 and by_decile[10]["n_distinct_scores"] == 9
+    assert sum(r["n"] for r in rows) == 100
+
+    with db_pool_greenfield.connection() as conn:
+        ties = conn.execute(
+            "select * from triage.score_ties(%(m)s, 'production', %(d)s::date)",
+            {"m": model_id, "d": AS_OF},
+        ).fetchone()
+    assert ties["n"] == 100 and ties["n_distinct"] == 17
+    assert ties["largest_tie_n"] == 84
+    assert ties["largest_tie_score"] == pytest.approx(15.9)
+    assert ties["largest_tie_share"] == pytest.approx(0.84)
+
+
+def test_score_ties_on_a_date_with_no_scores(db_pool_greenfield):
+    _, model_id = _seed_group_and_model(db_pool_greenfield)
+    with db_pool_greenfield.connection() as conn:
+        ties = conn.execute(
+            "select * from triage.score_ties(%(m)s, 'production', %(d)s::date)",
+            {"m": model_id, "d": AS_OF},
+        ).fetchone()
+    assert (ties["n"], ties["n_distinct"]) == (0, 0)
+    assert ties["largest_tie_n"] is None and ties["largest_tie_share"] is None
+
+
+def test_calibration_refuses_zero_bins(db_pool_greenfield):
+    _, model_id = _seed_group_and_model(db_pool_greenfield)
+    with pytest.raises(Exception, match="bins must be 1 or more"):
+        _calibration(db_pool_greenfield, model_id, bins=0)
 
 
 # ------------------------------------------------------------------ outcome tracking
@@ -287,3 +401,50 @@ def test_migration_0012_roundtrip(db_url, db_pool_greenfield):
     upgrade_db(dburl=db_url, revision="head")
     with db_pool_greenfield.connection() as conn:
         assert _has_view(conn, "triage.monitoring_volume")
+
+
+def test_migration_0029_round_trips(db_pool_greenfield, db_url):
+    """Down to 0028: the 0012 calibration (realized rate only) and no score_ties. Up: 0029."""
+    from triage.component.results_schema import downgrade_db, upgrade_db
+
+    _, model_id = _seed_group_and_model(db_pool_greenfield)
+    _seed_scores(
+        db_pool_greenfield,
+        model_id,
+        np.linspace(0.99, 0.0, 100),
+        "2026-01-02T12:00:00+00",
+    )
+    _seed_labels(db_pool_greenfield, [float(e <= 50) for e in range(1, 101)])
+
+    def columns() -> list[str]:
+        with db_pool_greenfield.connection() as conn:
+            return list(
+                conn.execute(
+                    "select * from triage.monitoring_calibration(%(m)s, 'production',"
+                    " %(d)s::date, cast(%(ts)s as interval)) limit 1",
+                    {"m": model_id, "d": AS_OF, "ts": TIMESPAN},
+                ).fetchone()
+            )
+
+    def has(signature: str) -> bool:
+        with db_pool_greenfield.connection() as conn:
+            return conn.execute(
+                "select to_regprocedure(%(s)s) is not null as e", {"s": signature}
+            ).fetchone()["e"]
+
+    downgrade_db(dburl=db_url, revision="0028_subset_threshold_curve")
+    assert columns() == ["decile", "n", "avg_score", "realized_rate"]
+    assert not has("triage.score_ties(bigint, triage.split_kind, date)")
+    assert not has("triage.model_problem_type(bigint)")
+
+    upgrade_db(dburl=db_url, revision="head")
+    assert columns() == [
+        "decile",
+        "n",
+        "avg_score",
+        "mean_outcome",
+        "lift",
+        "realized_rate",
+        "n_distinct_scores",
+    ]
+    assert has("triage.score_ties(bigint, triage.split_kind, date)")

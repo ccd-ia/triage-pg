@@ -725,6 +725,134 @@ def list_overlap(
     )
 
 
+# ------------------------------------------------------ calibration, score distribution
+
+
+def _check_bins(bins: int) -> None:
+    if bins < 1:
+        raise ValueError(f"bins={bins} holds no rows — pass 1 or more")
+
+
+def calibration(
+    pool: DictRowPool,
+    model_id: int,
+    split_kind: str = "test",
+    as_of_date: Optional[DateLike] = None,
+    bins: int = 10,
+) -> Optional[dict[str, Any]]:
+    """Does a model's score match the outcome its rows realize? Deciles of one date.
+
+    Reads ``triage.monitoring_calibration`` over the labeled rows of one evaluated date,
+    at the model's training label timespan, and ``triage.score_ties`` over the scored
+    rows of that date. The decile is ``ceil(cume_dist · bins)`` over the score order, so
+    tied scores share a decile and a decile that a block of ties covers is absent.
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        split_kind: the prediction split.
+        as_of_date: the date; ``None`` reads the model's latest evaluated date of the
+            split (over everyone, not a Subset).
+        bins: the number of score buckets.
+
+    Returns:
+        ``None`` when the model has no evaluated date or no training label timespan.
+        Otherwise ``as_of_date``, ``label_timespan``, ``problem_type``, ``bins``,
+        ``deciles`` (rows ``decile, n, avg_score, mean_outcome, lift, realized_rate,
+        n_distinct_scores``; ``realized_rate`` is ``None`` unless the model is a
+        classifier) and ``ties`` (``n, n_distinct, largest_tie_n, largest_tie_score,
+        largest_tie_share``).
+
+    Raises:
+        NotFoundError: no model has this id.
+        ValueError: ``bins`` is below 1.
+    """
+    _check_bins(bins)
+    ctx = _one(
+        pool,
+        "select m.training_label_timespan::text as label_timespan,"
+        "       triage.model_problem_type(m.model_id)::text as problem_type,"
+        "       coalesce(cast(%(date)s as date),"
+        "                (select max(e.as_of_date) from triage.evaluations e"
+        "                  where e.model_id = m.model_id"
+        "                    and e.split_kind = cast(%(split)s as triage.split_kind)"
+        "                    and e.subset_hash = '')) as as_of_date"
+        " from triage.models m where m.model_id = %(m)s",
+        {
+            "m": model_id,
+            "split": split_kind,
+            "date": None if as_of_date is None else str(as_of_date),
+        },
+    )
+    if ctx is None:
+        raise NotFoundError(f"model {model_id} not found")
+    if ctx["as_of_date"] is None or ctx["label_timespan"] is None:
+        return None
+    params = {
+        "m": model_id,
+        "split": split_kind,
+        "date": str(ctx["as_of_date"]),
+        "ts": ctx["label_timespan"],
+        "bins": bins,
+    }
+    deciles = _rows(
+        pool,
+        "select decile, n, avg_score, mean_outcome, lift, realized_rate,"
+        "       n_distinct_scores"
+        " from triage.monitoring_calibration(%(m)s, cast(%(split)s as triage.split_kind),"
+        "        cast(%(date)s as date), cast(%(ts)s as interval), '', %(bins)s)"
+        " order by decile",
+        params,
+    )
+    ties = _one(
+        pool,
+        "select n, n_distinct, largest_tie_n, largest_tie_score, largest_tie_share"
+        " from triage.score_ties(%(m)s, cast(%(split)s as triage.split_kind),"
+        "        cast(%(date)s as date))",
+        params,
+    )
+    return {
+        "as_of_date": ctx["as_of_date"],
+        "label_timespan": ctx["label_timespan"],
+        "problem_type": ctx["problem_type"],
+        "bins": bins,
+        "deciles": deciles,
+        "ties": ties,
+    }
+
+
+def score_histogram(
+    pool: DictRowPool, model_id: int, bins: int = 20
+) -> list[dict[str, Any]]:
+    """How a model's test scores spread, and what the rows of each score bucket realized.
+
+    Reads ``triage.model_score_histogram`` over every test date. A classifier whose
+    scores all lie in ``[0, 1]`` is binned over ``[0, 1]``; any other model over the range
+    of its own scores.
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        bins: the number of equal-width buckets.
+
+    Returns:
+        Rows ``bin, lo, hi, n, n_pos, mean_outcome``, ordered by bin; empty bins are
+        absent. ``n`` counts every scored row, labeled or not. ``n_pos`` (the positives)
+        is ``None`` unless the model is a classifier; ``mean_outcome`` averages the
+        labeled rows of the bin.
+
+    Raises:
+        ValueError: ``bins`` is below 1.
+    """
+    _check_bins(bins)
+    return _rows(
+        pool,
+        "select bin, lo, hi, n, n_pos, mean_outcome"
+        " from triage.model_score_histogram(%(m)s, %(bins)s) order by bin",
+        {"m": model_id, "bins": bins},
+    )
+
+
 # ------------------------------------------------------------- leaderboard, model groups
 
 
