@@ -34,8 +34,8 @@
     }
   ],
   "extra": {
-    "size": "9630 kB \u00b7 26 tables \u00b7 19 views",
-    "schema": "0031_common_rows_and_coverage",
+    "size": "9638 kB \u00b7 26 tables \u00b7 19 views",
+    "schema": "0032_average_precision_ties",
     "artifacts": "11 built"
   },
   "gauges": [

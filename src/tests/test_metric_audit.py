@@ -396,3 +396,24 @@ def test_the_cli_exit_codes(check, db_pool_greenfield, group: Group, tmp_path): 
         code, text = check(*args)
         assert code == 2, (args, text)
         assert message in text, (args, text)
+
+
+def test_average_precision_on_tied_scores_matches_the_audit(
+    db_pool_greenfield,
+    group: Group,  # noqa: F811
+):
+    """Migration 0032: a tie block is one threshold in SQL as in sklearn."""
+    pool = db_pool_greenfield
+    with pool.connection() as conn:
+        conn.execute("update triage.predictions set score = round(score::numeric, 1)")
+    evaluate_in_db(
+        pool,
+        group.model_a,
+        D1,
+        LABEL_TIMESPAN,
+        metric_config={"metrics": ["average_precision", "auc_roc"], "thresholds": []},
+    )
+    report = metric_audit.audit(pool, [group.model_a])
+    by_name = {m.metric: m for m in report.metrics}
+    assert by_name["average_precision"].failed == 0
+    assert by_name["average_precision"].max_gap <= 1e-9

@@ -243,6 +243,78 @@ def test_average_precision_matches_sklearn(greenfield_engine):
     assert ap["value"] == pytest.approx(expected_ap)
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_average_precision_matches_sklearn_on_tied_scores(greenfield_engine, seed):
+    """A block of tied scores is one threshold, as in sklearn: every row of the block enters
+    the list together, so the order of the rows inside it does not change the value."""
+    engine = greenfield_engine
+    rng = np.random.default_rng(seed)
+    scores = rng.integers(0, 6, 60) / 5.0  # six distinct values: every row is in a tie
+    labels = (rng.random(60) < 0.2 + 0.6 * scores).astype(int).tolist()
+    entity_ids = list(range(1, 61))
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, scores.tolist(), labels, entity_ids)
+
+    evaluate_in_db(
+        engine,
+        model_id,
+        AS_OF_DATE,
+        LABEL_TIMESPAN,
+        metric_config={"metrics": ["average_precision"], "thresholds": []},
+    )
+    ap = _eval_row(engine, model_id, "average_precision", "")
+    expected = skmetrics.average_precision_score(labels, scores)
+    assert ap["value"] == pytest.approx(expected, abs=1e-9)
+
+
+def test_migration_0032_recomputes_stored_average_precision(db_pool_greenfield, db_url):
+    """A value stored by the 0015 function is corrected on upgrade; downgrade restores the
+    function (not the value)."""
+    engine = db_pool_greenfield
+    scores = [0.8, 0.8, 0.8, 0.8, 0.4, 0.4, 0.4, 0.4, 0.1, 0.1]
+    labels = [0, 0, 1, 1, 1, 0, 0, 0, 1, 0]
+    model_id = _seed_model(engine)
+    _seed_predictions_and_labels(engine, model_id, scores, labels, ENTITY_IDS)
+    with engine.connection() as conn:  # the matrix lineage the recompute reads
+        conn.execute(
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config)"
+            " values ('matrix-ap', 'matrix-ap', 'matrix', '{}'::jsonb)"
+        )
+        conn.execute(
+            "insert into triage.artifact_inputs (artifact_id, parent_id)"
+            " values ('matrix-ap', 'labels-art-1')"
+        )
+        conn.execute(
+            "insert into triage.matrices (matrix_uuid, artifact_id, matrix_kind,"
+            " storage_uri, label_timespan) values (gen_random_uuid(), 'matrix-ap', 'test',"
+            " 'mem://ap', cast(%(ts)s as interval))",
+            {"ts": LABEL_TIMESPAN},
+        )
+        conn.execute(
+            "update triage.predictions set matrix_uuid ="
+            " (select matrix_uuid from triage.matrices where artifact_id = 'matrix-ap')"
+        )
+    config = {"metrics": ["average_precision"], "thresholds": []}
+    expected = skmetrics.average_precision_score(labels, scores)
+
+    downgrade_db(dburl=db_url, revision="0031_common_rows_and_coverage")
+    evaluate_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, metric_config=config)
+    stale = _eval_row(engine, model_id, "average_precision", "")["value"]
+    assert abs(stale - expected) > 1e-3  # the entity-id tiebreak moved it
+
+    upgrade_db(dburl=db_url, revision="head")
+    assert _eval_row(engine, model_id, "average_precision", "")[
+        "value"
+    ] == pytest.approx(expected, abs=1e-9)
+
+    downgrade_db(dburl=db_url, revision="0031_common_rows_and_coverage")
+    evaluate_in_db(engine, model_id, AS_OF_DATE, LABEL_TIMESPAN, metric_config=config)
+    assert _eval_row(engine, model_id, "average_precision", "")[
+        "value"
+    ] == pytest.approx(stale)
+    upgrade_db(dburl=db_url, revision="head")
+
+
 def test_precision_at_k_tie_bounds(greenfield_engine):
     """When the top-k boundary falls inside a score-tie block, value_worst /
     value_best bracket the deterministic realized value."""
