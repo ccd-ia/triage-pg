@@ -18,15 +18,26 @@ problem_type: regression_ranking
 #   (persistence / moving-average / drift / promedio read these).
 # history_query: the RAW periodic series the seasonal / Holt-Winters / Croston baselines forecast
 #   over — per-facility MONTHLY inspection counts, point-in-time correct (only events KNOWN
-#   strictly before {as_of_date}). It is pivoted into reserved _hist_* columns (width below).
+#   strictly before {as_of_date}). Each value is placed at its calendar offset in the reserved
+#   _hist_* columns (width below), one slot per history_period. The query returns a row for
+#   EVERY month, zeros included: a month with no inspections is a zero, not a missing row.
+#   `triage check history experiment-regression.yaml` confirms it before a run.
 target_history_lags: 6
 history_series_width: 24
+history_period: '1 month'
 history_query: |
-  select entity_id,
-         date_trunc('month', date)::date as period,
-         count(*) as value
-  from ontology.events
-  where date < {as_of_date}
+  with months as (
+    select f.entity_id, m::date as period
+    from (select distinct entity_id from ontology.events) f
+    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
+                               interval '1 month') m
+  )
+  select months.entity_id, months.period, count(e.entity_id) as value
+  from months
+  left join ontology.events e
+    on e.entity_id = months.entity_id
+   and date_trunc('month', e.date)::date = months.period
+   and e.date < {as_of_date}
   group by 1, 2
 
 temporal_config:

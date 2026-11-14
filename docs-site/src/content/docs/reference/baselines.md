@@ -103,13 +103,24 @@ run start) and the exponential-smoothing pair needs `statsmodels` (the
 problem_type: regression_ranking
 
 # the raw periodic series the raw-series baselines forecast over: per-entity
-# MONTHLY counts, point-in-time correct (only events known before {as_of_date}).
+# MONTHLY counts, point-in-time correct (only events known before {as_of_date}),
+# one row per month with zeros included, so every value sits at its calendar offset.
 target_history_lags: 6
 history_series_width: 24
+history_period: '1 month'
 history_query: |
-  select entity_id, date_trunc('month', date)::date as period, count(*) as value
-  from ontology.events
-  where date < {as_of_date}
+  with months as (
+    select f.entity_id, m::date as period
+    from (select distinct entity_id from ontology.events) f
+    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
+                               interval '1 month') m
+  )
+  select months.entity_id, months.period, count(e.entity_id) as value
+  from months
+  left join ontology.events e
+    on e.entity_id = months.entity_id
+   and date_trunc('month', e.date)::date = months.period
+   and e.date < {as_of_date}
   group by 1, 2
 
 grid_config:

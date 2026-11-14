@@ -35,6 +35,12 @@ label. The lags arrive as reserved matrix columns `_target_lag_1`
 (most recent) … `_target_lag_N`, controlled by `target_history_lags: N`
 (default 12). No extra config — they reuse the label you already defined.
 
+Lag `k` is the entity's label at the `k`-th most recent label date of the
+Experiment whose window has closed, the same dates for every entity. An entity
+with no label at one of those dates (outside the cohort that date, say) has an
+empty lag there; its older labels stay at their own lags. The spacing follows
+the label dates, so a 6-month training frequency gives 6-month lags.
+
 ## Shape 2 — raw periodic series
 
 Seasonal-naive, Holt–Winters/ETS, and Croston need a **fine, evenly-spaced**
@@ -44,18 +50,38 @@ cadence. That is a genuinely different quantity, so it gets its own **optional
 discipline:
 
 ```yaml
+history_period: '1 month'
 history_query: |
-  select entity_id, date_trunc('month', date)::date as period, count(*) as value
-  from ontology.events
-  where date < {as_of_date}      -- the raw-series leakage boundary
+  with months as (
+    select f.entity_id, m::date as period
+    from (select distinct entity_id from ontology.events) f
+    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
+                               interval '1 month') m
+  )
+  select months.entity_id, months.period, count(e.entity_id) as value
+  from months
+  left join ontology.events e
+    on e.entity_id = months.entity_id
+   and date_trunc('month', e.date)::date = months.period
+   and e.date < {as_of_date}      -- the raw-series leakage boundary
   group by 1, 2
 ```
 
-Only rows with `knowledge_date < as_of_date` may be selected. The series is
-pivoted into reserved columns `_hist_0` (oldest) … `_hist_{width-1}` (newest),
-left-padded for short histories, capped by `history_series_width` (default 24).
+Only rows with `knowledge_date < as_of_date` may be selected. Each value is
+placed on the calendar in reserved columns `_hist_0` (oldest) …
+`_hist_{width-1}` (newest): slot `_hist_{width-k}` holds the period that starts
+`k × history_period` before the as_of_date, for `history_series_width` slots
+(default 24). A month the query does not return stays empty in its own slot;
+nothing older moves into it. Slots before an entity's first period stay empty
+(the series starts later). An empty slot after the first period is a **gap**:
+with seasonal / Holt–Winters / Croston in the grid, a gap stops the run unless
+`fill_missing_periods` is `zero` (gaps become 0) or `null` (those baselines make
+no prediction for that row). That is why the query above returns a row for
+every month, zeros included. `triage check history CONFIG` reports the gaps
+before a run.
+
 A raw-series baseline in the grid **without** a `history_query` is a hard error
-at run start.
+at run start, and so is a `history_query` without a `history_period`.
 
 ## Why reserved columns
 
@@ -78,7 +104,9 @@ so the baseline sees the history and nothing else sees the label's lags.
 | --- | --- | --- |
 | `target_history_lags` | 12 (when a lag baseline is present) | Shape 1 — how many `_target_lag_*` columns. |
 | `history_query` | none | Shape 2 — required by seasonal / Holt–Winters / Croston. |
-| `history_series_width` | 24 | Shape 2 — max `_hist_*` width. |
+| `history_series_width` | 24 | Shape 2 — number of `_hist_*` slots. |
+| `history_period` | none | Shape 2 — the length of one period; required with `history_query`. |
+| `fill_missing_periods` | unset | Shape 2 — `zero` or `null` for gaps; unset stops the run on a gap. |
 
-All three enter the matrix's content-addressed identity, so changing them
+All five enter the matrix's content-addressed identity, so changing them
 rebuilds the matrix rather than silently reusing a mismatched one.

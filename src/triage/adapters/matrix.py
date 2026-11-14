@@ -75,8 +75,11 @@ import yaml
 
 from triage.adapters.imputation import ImputationPolicy, ImputationRule
 from triage.adapters.target_history import (
+    NO_TARGET_HISTORY,
+    TargetHistory,
     build_target_history_lags,
     build_target_history_series,
+    check_history_gaps,
     is_reserved_history_column,
     pivot_series_to_history_columns,
 )
@@ -137,6 +140,10 @@ _FIT_STATS_KEY = "fit_based_stats"
 # transform fitted on the train split only and reused for test (ADR-0009 extension).
 _CAT_ENC_KEY = "cat_encodings"
 
+# The raw target-history series' gap counts ({n_series, n_series_with_gaps, example}), stored
+# so a reused matrix is checked against the grid of the run that reuses it.
+_HISTORY_GAPS_KEY = "history_gaps"
+
 # Above this many distinct *train* categories an ordinal-encoded column is almost certainly an
 # identifier (or a leakage/overfit risk). We still ordinal-encode it (one column, no width
 # blow-up) but warn loudly so it gets a featurizer ``role: identifier``. One-hot is never
@@ -159,6 +166,8 @@ class MatrixResult:
     # train-fitted categorical code maps (adapter-spec §4); default-empty so existing
     # constructors are unaffected. {feature: {category: code}}, code 0 = unknown.
     cat_encodings: dict[str, dict[str, int]] = field(default_factory=dict)
+    # the raw target-history series' gap counts (PivotResult.summary()); empty without one.
+    history_gaps: dict[str, Any] = field(default_factory=dict)
 
 
 def _reconstruct_derivation(
@@ -819,9 +828,7 @@ def build_matrix(
     train_matrix_artifact_id: str | None = None,
     source_pins: Mapping[str, str | None] | None = None,
     policy: str = "exact",
-    target_history_lags: int = 0,
-    history_query: str | None = None,
-    history_series_width: int = 0,
+    target_history: TargetHistory = NO_TARGET_HISTORY,
     missing_label_fill: int | None = None,
 ) -> MatrixResult:
     """Assemble (or reuse) a Parquet design matrix and register it in the artifact DAG.
@@ -855,6 +862,8 @@ def build_matrix(
             for a test matrix — the leakage-boundary parent that carries the fitted stats.
         source_pins: declared-source → version pins (volatile if unpinned, ADR-0014).
         policy: cache lookup policy ('exact' default).
+        target_history: the resolved target-history knobs (ADR-0030) — the reserved lag and
+            calendar-placed series columns to attach, and the strict gap check.
         missing_label_fill: ``label_config.include_missing_labels_in_train_as`` resolved to
             ``0``/``1`` (#21): the ``outcome`` written for a cohort row with no label. Train
             matrices only. ``None`` keeps the NULL, and the fit drops the row.
@@ -905,7 +914,7 @@ def build_matrix(
     # matrix would cache-hit an earlier split's content (a different row set). Note this
     # is the matrix's *own* date slice entering its *own* identity — unlike the cohort and
     # labels, which deliberately span ALL split dates and never fold per-split dates in.
-    matrix_config = {
+    matrix_config: dict[str, Any] = {
         "temporal_config": temporal_config.canonical(),
         "feature_group": fg_config["featurizer"],
         "imputation_policy": imputation_policy.canonical(),
@@ -913,12 +922,11 @@ def build_matrix(
         "label_timespan": label_timespan,
         "as_of_dates": sorted(d.isoformat() for d in as_of_dates),
         "lookback": lookback,
-        # Target-history (ADR-0030) enters identity: attaching reserved lag/series columns
-        # changes the Parquet, so a matrix with them must hash distinctly from one without.
-        "target_history_lags": target_history_lags,
-        "history_query": history_query,
-        "history_series_width": history_series_width,
     }
+    # Target-history (ADR-0030) enters identity: attaching reserved lag/series columns changes
+    # the Parquet, so a matrix with them must hash distinctly from one without. The layout
+    # keys enter only with history, so a matrix without it hashes exactly as it did before.
+    matrix_config.update(target_history.identity())
     # The train-label fill (#21) changes the Parquet's outcome column, so it is identity — but
     # only when set: a matrix built without it hashes exactly as it did before the key existed.
     if missing_label_fill is not None:
@@ -943,6 +951,11 @@ def build_matrix(
     if hit is not None:
         existing = _existing_matrix_row(db_engine, matrix_derivation.id)
         if existing is not None and storage.exists(existing["storage_uri"]):
+            # The strict gap check depends on this run's grid, not on the Parquet, so a reused
+            # matrix is checked again with its stored gap counts.
+            check_history_gaps(
+                target_history, (existing["metadata"] or {}).get(_HISTORY_GAPS_KEY)
+            )
             logger.info(
                 f"Matrix {matrix_derivation.id[:12]}… ({matrix_kind}) already built — reusing"
             )
@@ -956,6 +969,7 @@ def build_matrix(
                 feature_names=list(existing["feature_names"] or []),
                 fit_based_stats=(existing["metadata"] or {}).get(_FIT_STATS_KEY, {}),
                 cat_encodings=(existing["metadata"] or {}).get(_CAT_ENC_KEY, {}),
+                history_gaps=(existing["metadata"] or {}).get(_HISTORY_GAPS_KEY, {}),
                 cache_hit=True,
             )
         logger.warning(
@@ -1008,9 +1022,7 @@ def build_matrix(
             matrix_artifact_id=matrix_derivation.id,
             storage=storage,
             storage_root=storage_root,
-            target_history_lags=target_history_lags,
-            history_query=history_query,
-            history_series_width=history_series_width,
+            target_history=target_history,
             missing_label_fill=missing_label_fill,
         )
         if not fg_built:
@@ -1060,6 +1072,7 @@ def build_matrix(
         fit_based_stats=result.fit_based_stats,
         cat_encodings=result.cat_encodings,
         cache_hit=False,
+        history_gaps=result.history_gaps,
     )
 
 
@@ -1113,13 +1126,37 @@ def _assemble(
     matrix_artifact_id: str,
     storage: StorageAdapter,
     storage_root: str,
-    target_history_lags: int = 0,
-    history_query: str | None = None,
-    history_series_width: int = 0,
+    target_history: TargetHistory = NO_TARGET_HISTORY,
     missing_label_fill: int | None = None,
 ) -> MatrixResult:
     """The assembly itself: features ⋈ cohort ⋈ labels, impute, write Parquet."""
     import polars as pl
+
+    # The raw target-history series is placed and gap-checked FIRST, so a config whose
+    # history has gaps fails before featurizer runs and long before any model is fitted.
+    history_pivot = None
+    if target_history.history_query:
+        if not target_history.history_period:
+            raise ValueError(
+                "a history_query needs history_period (for example '1 month') to place the"
+                + " series on the calendar"
+            )
+        series = build_target_history_series(
+            db_engine, target_history.history_query, as_of_dates
+        )
+        history_pivot = pivot_series_to_history_columns(
+            series,
+            target_history.series_width,
+            target_history.history_period,
+            target_history.fill_missing_periods,
+        )
+        check_history_gaps(target_history, history_pivot.summary())
+        if history_pivot.n_series_with_gaps:
+            logger.warning(
+                f"{history_pivot.n_series_with_gaps} of {history_pivot.n_series} target-history"
+                + " series have missing periods; fill_missing_periods ="
+                + f" {target_history.fill_missing_periods!r}"
+            )
 
     feature_table, target_id_col = _run_featurizer(
         db_engine, featurizer_config, as_of_dates, cohort_artifact_id
@@ -1217,19 +1254,17 @@ def _assemble(
     # Joined AFTER feature_columns/imputation, so they are never features, never imputed, and
     # never checked for NULLs (their missingness is structural, baseline-owned) — but they DO
     # land in the written Parquet for the estimator seam (model._history_design_X) to read.
-    if target_history_lags and target_history_lags > 0:
+    if target_history.n_lags > 0:
         lags = build_target_history_lags(
             db_engine,
             labels_artifact_id,
             as_of_dates,
             label_timespan,
-            target_history_lags,
+            target_history.n_lags,
         )
         design = _attach_reserved(design, lags)
-    if history_query:
-        series = build_target_history_series(db_engine, history_query, as_of_dates)
-        hist = pivot_series_to_history_columns(series, history_series_width)
-        design = _attach_reserved(design, hist)
+    if history_pivot is not None:
+        design = _attach_reserved(design, history_pivot.frame)
 
     storage_uri = storage.join(storage_root, f"{as_uuid(matrix_artifact_id)}.parquet")
     write_parquet(storage, storage_uri, design)
@@ -1244,6 +1279,7 @@ def _assemble(
         fit_based_stats=fitted,
         cat_encodings=cat_encodings,
         cache_hit=False,
+        history_gaps=history_pivot.summary() if history_pivot is not None else {},
     )
 
 
@@ -1368,6 +1404,8 @@ def _insert_matrix_row(
         _FIT_STATS_KEY: result.fit_based_stats,
         _CAT_ENC_KEY: result.cat_encodings,
     }
+    if result.history_gaps:
+        metadata[_HISTORY_GAPS_KEY] = result.history_gaps
     with db_engine.connection() as conn:
         conn.execute(
             "insert into triage.matrices"

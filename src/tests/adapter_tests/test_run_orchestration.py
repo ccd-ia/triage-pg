@@ -783,3 +783,80 @@ def test_the_train_label_fill_moves_only_what_it_changes(db_pool_greenfield, tmp
             {"a": retrained.train_matrix_artifact_id},
         ).fetchone()["config"]
     assert config["missing_label_fill"] == 0
+
+
+# ------------------------------------------------- target history on the calendar (ADR-0030)
+
+_TS = "triage.component.catwalk.baselines.timeseries"
+# Monthly order counts: every customer's orders fall in Jan-Mar 2012, so for any as_of_date
+# from 2013 on the months between are missing rows — a sparse series.
+_SPARSE_HISTORY = (
+    "select customer_id as entity_id, date_trunc('month', order_date)::date as period,"
+    " count(*) as value from orders where order_date < {as_of_date} group by 1, 2"
+)
+
+
+def _history_config(fill: str | None) -> dict[str, Any]:
+    config = _experiment_config()
+    config["problem_type"] = "regression"
+    config["grid_config"] = {
+        f"{_TS}.Persistence": {},
+        f"{_TS}.SeasonalNaive": {"season": [3]},
+    }
+    config["history_query"] = _SPARSE_HISTORY
+    config["history_period"] = "1 month"
+    config["history_series_width"] = 18
+    config["target_history_lags"] = 2
+    if fill is not None:
+        config["fill_missing_periods"] = fill
+    return config
+
+
+def test_history_gaps_stop_the_run_before_any_model_is_fitted(
+    db_pool_greenfield, tmp_path
+):
+    from triage.adapters.target_history import HistoryGapsError
+
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    with pytest.raises(
+        HistoryGapsError, match="SeasonalNaive need a complete calendar"
+    ):
+        run_experiment(
+            engine,
+            _history_config(None),
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "store"),
+            random_seed=42,
+        )
+    with engine.connection() as conn:
+        n_models = conn.execute("select count(*) as n from triage.models").fetchone()[
+            "n"
+        ]
+    assert n_models == 0
+
+
+def test_zero_filled_history_fits_both_baselines(db_pool_greenfield, tmp_path):
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    experiment = run_experiment(
+        engine,
+        _history_config("zero"),
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "store"),
+        random_seed=42,
+    )
+
+    with engine.connection() as conn:
+        types = {
+            r["model_type"]
+            for r in conn.execute(
+                "select distinct mg.model_type from triage.models m"
+                " join triage.model_groups mg using (model_group_id)"
+                " where m.run_id = %(r)s",
+                {"r": experiment.runs[0].run_id},
+            ).fetchall()
+        }
+    assert types == {f"{_TS}.Persistence", f"{_TS}.SeasonalNaive"}

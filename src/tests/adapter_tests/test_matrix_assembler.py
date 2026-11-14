@@ -1029,3 +1029,77 @@ def test_missing_label_fill_reaches_the_train_matrix_only(db_pool_greenfield, tm
     ):
         with pytest.raises(ValueError, match="train matrices only"):
             build(kind, TEST_AS_OF, fill=0, parent=parent)
+
+
+# ------------------------------------------------- target history on the calendar (ADR-0030)
+
+ORDERS_HISTORY = (
+    "select customer_id as entity_id, date_trunc('month', order_date)::date as period,"
+    " sum(amount) as value from orders where order_date < {as_of_date} group by 1, 2"
+)
+SEASONAL = "triage.component.catwalk.baselines.timeseries.SeasonalNaive"
+
+
+def test_history_gaps_fail_the_build_unless_filled(db_pool_greenfield, tmp_path):
+    """Entity 1 ordered in 2013-12 and 2014-06 only, so its monthly series has four missing
+    months before the test as_of_date. With a complete-calendar baseline in the grid and no
+    fill, the build stops with the counts; a filled build places the values on the calendar
+    and the fill mode enters identity."""
+    from triage.adapters.target_history import HistoryGapsError, TargetHistory
+
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF, TEST_AS_OF])
+    policy = ImputationPolicy.model_validate({"all": {"type": "zero"}})
+    pins = {"customers": "v1", "orders": "v1", "label_src": "v1"}
+
+    def build(fill, complete=(SEASONAL,)):
+        return build_matrix(
+            engine,
+            run_id,
+            featurizer_config=_featurizer_config(),
+            cohort_artifact_id=cohort,
+            labels_artifact_id=labels,
+            temporal_config=_temporal_config(),
+            imputation_policy=policy,
+            matrix_kind="train",
+            as_of_dates=[TEST_AS_OF],
+            label_timespan=LABEL_TIMESPAN,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "matrices"),
+            source_pins=pins,
+            target_history=TargetHistory(
+                history_query=ORDERS_HISTORY,
+                series_width=8,
+                history_period="1 month",
+                fill_missing_periods=fill,
+                complete_calendar_baselines=complete,
+            ),
+        )
+
+    with pytest.raises(HistoryGapsError, match="1 of 1 target-history series"):
+        build(None)
+
+    zero = build("zero")
+    null = build("null")
+    assert zero.matrix_artifact_id != null.matrix_artifact_id
+    assert _matrix_artifact_config(engine, zero.matrix_artifact_id)[
+        "history_layout"
+    ] == ("calendar")
+    assert zero.history_gaps["n_series_with_gaps"] == 1
+
+    row = (
+        pl.read_parquet(zero.storage_uri).filter(pl.col("entity_id") == 1).to_dicts()[0]
+    )
+    assert row["_hist_7"] == 300.0  # 2014-06, 1 month back
+    assert [row[f"_hist_{s}"] for s in range(2, 7)] == [0.0] * 5  # 2014-01 .. 2014-05
+    assert row["_hist_1"] == 100.0  # 2013-12, 7 months back
+    assert row["_hist_0"] is None  # 2013-11: before the series starts
+
+    # Without a complete-calendar baseline the gaps are not an error; a strict reuse of
+    # that matrix is checked again against the stored counts.
+    lenient = build(None, complete=())
+    assert lenient.history_gaps["n_series_with_gaps"] == 1
+    with pytest.raises(HistoryGapsError):
+        build(None)

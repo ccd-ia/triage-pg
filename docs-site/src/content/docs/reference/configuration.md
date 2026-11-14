@@ -76,6 +76,8 @@ emits a warning to surface a typo or a misplacement instead of letting it pass.
 | `target_history_lags` | optional | yes (matrix) | How many `_target_lag_*` columns to attach for lag baselines. |
 | `history_query` | optional | yes (matrix) | The raw periodic series for the raw-series baselines. |
 | `history_series_width` | optional | yes (matrix) | Max `_hist_*` width for the raw series. |
+| `history_period` | with `history_query` | yes (matrix) | The length of one period of the raw series, e.g. `'1 month'`. |
+| `fill_missing_periods` | optional | yes (matrix) | `zero` or `null`: what a missing period of the raw series becomes. Unset = a gap stops the run. |
 | `name` | optional | no | Cosmetic experiment label. |
 | `description` | optional | no | Cosmetic free text. |
 | `config_version` | optional | no | Recognized but not enforced; reserved. |
@@ -532,12 +534,12 @@ evaluation:
   `{as_of_date}` placeholder.** A subset is re-ranked within itself — its
   precision@k is the top-k of the subset's own ranking.
 
-## `target_history_lags`, `history_query`, `history_series_width`
+## `target_history_lags`, `history_query`, `history_series_width`, `history_period`, `fill_missing_periods`
 
 **Purpose.** Expose each entity's own prior target values, point-in-time-correctly,
 for the [time-series baselines](/triage-pg/reference/baselines/). See
 [target history](/triage-pg/concepts/target-history/) for the leakage boundary.
-All three enter **matrix identity** (a change rebuilds the matrix).
+All five enter **matrix identity** (a change rebuilds the matrix).
 
 **Optional.** Resolved automatically from `grid_config`: a **lag-family** baseline
 (`Persistence`, `PromedioDisponible`, `MovingAverage`, `Drift`) turns on the lags;
@@ -547,23 +549,48 @@ a **raw-series** baseline (`SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`,
 **Shape.**
 
 - `target_history_lags` (int, default 12 when a lag baseline is present) — how many
-  reserved `_target_lag_*` columns (windowed-label lags, admissible where
-  `t + w ≤ as_of_date`) to attach.
+  reserved `_target_lag_*` columns to attach. Lag `k` is the entity's label at the
+  `k`-th most recent label date of the Experiment whose window has closed
+  (`t + w ≤ as_of_date`). An entity with no label at that date gets an empty lag.
 - `history_query` (SQL, no default) — a period-level aggregation returning
   `entity_id, period, value`, with an `{as_of_date}` placeholder and its own
-  knowledge-date discipline (`where knowledge_date < {as_of_date}`). Pivoted into
-  reserved `_hist_*` columns.
-- `history_series_width` (int, default 24) — the max `_hist_*` width.
+  knowledge-date discipline (`where knowledge_date < {as_of_date}`). Each value is
+  placed in the reserved `_hist_*` columns at its calendar offset from the
+  as_of_date.
+- `history_series_width` (int, default 24) — the number of `_hist_*` slots, one per
+  period.
+- `history_period` (interval, **required with `history_query`**) — the length of one
+  period, e.g. `'1 month'`. Slot `_hist_{width-k}` holds the period that starts
+  `k × history_period` before the as_of_date. A `period` that is not on that grid,
+  or that is at or after the as_of_date, is an error.
+- `fill_missing_periods` (`zero` | `null`, default unset) — a period between an
+  entity's first returned period and the as_of_date with no row is a *gap*. Unset,
+  a gap stops the matrix build when a baseline that needs a complete calendar
+  (`SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`, `CrostonSBA`) is in the grid.
+  `zero` fills gaps with 0; `null` leaves them empty, and those baselines make no
+  prediction for that row. Periods before an entity's first row are never filled.
+  `triage check history CONFIG` lists the gaps before a run.
 
 ```yaml
 problem_type: regression_ranking
 
 target_history_lags: 6
 history_series_width: 24
+history_period: '1 month'
 history_query: |
-  select entity_id, date_trunc('month', date)::date as period, count(*) as value
-  from ontology.events
-  where date < {as_of_date}          -- point-in-time correct
+  -- one row per facility and month, zeros included
+  with months as (
+    select f.entity_id, m::date as period
+    from (select distinct entity_id from ontology.events) f
+    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
+                               interval '1 month') m
+  )
+  select months.entity_id, months.period, count(e.entity_id) as value
+  from months
+  left join ontology.events e
+    on e.entity_id = months.entity_id
+   and date_trunc('month', e.date)::date = months.period
+   and e.date < {as_of_date}          -- point-in-time correct
   group by 1, 2
 
 grid_config:
