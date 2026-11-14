@@ -342,12 +342,15 @@ def audition(
     params = {"hash": experiment_hash, "metric": metric, "parameter": parameter}
     ranking = _rows(
         pool,
-        "select experiment_hash, metric, parameter, model_group_id, n_splits_evaluated,"
-        "       avg_value, stddev_value, avg_distance_from_best, max_regret"
-        " from triage.audition"
-        " where experiment_hash = %(hash)s and metric = %(metric)s"
-        "   and parameter = %(parameter)s"
-        " order by avg_distance_from_best asc, max_regret asc, model_group_id asc",
+        "select a.experiment_hash, a.metric, a.parameter, a.model_group_id,"
+        "       a.n_splits_evaluated, a.avg_value, a.stddev_value,"
+        "       a.avg_distance_from_best, a.max_regret, c.coverage"
+        " from triage.audition a"
+        " left join triage.model_group_coverage(%(hash)s) c"
+        "        on c.model_group_id = a.model_group_id"
+        " where a.experiment_hash = %(hash)s and a.metric = %(metric)s"
+        "   and a.parameter = %(parameter)s"
+        " order by a.avg_distance_from_best asc, a.max_regret asc, a.model_group_id asc",
         params,
     )
     n_groups = len(ranking)
@@ -542,13 +545,18 @@ def evaluations(
 def experiment_model_groups(
     experiment_hash: str, pool: DictRowPool = Depends(_pool)
 ) -> list[dict[str, Any]]:
-    """Model-group cards for the experiment (the Experiment ▸ Model Group level)."""
+    """Model-group cards for the experiment (the Experiment ▸ Model Group level), with each
+    group's coverage: the share of the labeled rows it scored (migration 0031)."""
     return _rows(
         pool,
-        "select experiment_hash, model_group_id, model_group_hash, model_type,"
-        "       hyperparameters, feature_list, n_models, first_train_end, last_train_end"
-        " from triage.model_group_summary where experiment_hash = %(hash)s"
-        " order by model_group_id",
+        "select s.experiment_hash, s.model_group_id, s.model_group_hash, s.model_type,"
+        "       s.hyperparameters, s.feature_list, s.n_models, s.first_train_end,"
+        "       s.last_train_end, c.coverage, c.min_coverage"
+        " from triage.model_group_summary s"
+        " left join triage.model_group_coverage(%(hash)s) c"
+        "        on c.model_group_id = s.model_group_id"
+        " where s.experiment_hash = %(hash)s"
+        " order by s.model_group_id",
         {"hash": experiment_hash},
     )
 

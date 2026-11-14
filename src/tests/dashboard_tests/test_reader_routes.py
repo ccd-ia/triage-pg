@@ -288,3 +288,20 @@ def test_histogram_of_a_regression_model_bins_its_own_range(
         client.get(f"/api/models/{model_id}/histogram", params={"bins": 0}).status_code
         == 422
     )
+
+
+def test_model_groups_and_audition_carry_coverage(client, seeded, db_pool_greenfield):
+    """Coverage (migration 0031): mg1's first model scored its four labeled rows at the
+    last split, so mg1's coverage over that model-date is 1.0."""
+    groups = client.get(
+        f"/api/experiments/{seeded.experiment_hash}/model-groups"
+    ).json()
+    assert all("coverage" in g and "min_coverage" in g for g in groups)
+    by_id = {g["model_group_id"]: g for g in groups}
+    assert by_id[seeded.group_ids["mg1"]]["coverage"] == 1.0
+
+    audition = client.get(
+        f"/api/experiments/{seeded.experiment_hash}/audition",
+        params={"metric": "auc_roc"},
+    ).json()
+    assert all("coverage" in r for r in audition["ranking"])

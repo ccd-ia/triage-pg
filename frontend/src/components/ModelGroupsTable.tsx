@@ -8,6 +8,7 @@
  */
 import { useMemo, useState } from 'react'
 import type { ExpAuditionRankRow, ModelGroupSummaryRow } from '../api/types'
+import { fmtPct } from '../api/format'
 import { abbrevAlgo } from '../api/transforms'
 
 type SortKey = 'model_group_id' | 'model_type' | 'n_models' | 'last_train_end' | 'avg'
@@ -88,6 +89,9 @@ export function ModelGroupsTable({
           <th className="clickrow" onClick={() => toggle('last_train_end')}>
             train-end span{arrow('last_train_end')}
           </th>
+          <th className="num" title="share of the labeled rows the group scored">
+            coverage
+          </th>
           {hasAgg ? (
             <>
               <th className="num clickrow" onClick={() => toggle('avg')}>
@@ -115,6 +119,7 @@ export function ModelGroupsTable({
             <td className="mono">
               {g.first_train_end?.slice(0, 7) ?? '—'} → {g.last_train_end?.slice(0, 7) ?? '—'}
             </td>
+            <td className="num">{fmtPct(g.coverage)}</td>
             {hasAgg ? (
               <>
                 <td className="num">

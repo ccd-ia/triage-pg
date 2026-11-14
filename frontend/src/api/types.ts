@@ -549,6 +549,8 @@ export interface ExpAuditionRankRow {
   stddev_value: number | null
   avg_distance_from_best: number
   max_regret: number
+  /** share of the labeled rows the group scored (migration 0031); null when unknown. */
+  coverage?: number | null
 }
 
 /** experiment_audition_distances — a model_group's per-split distance row. */
@@ -651,9 +653,20 @@ export interface ModelGroupSummaryRow {
   n_models: number
   first_train_end: string | null
   last_train_end: string | null
+  /** mean share of the labeled rows the group's models scored (migration 0031), and the
+   *  lowest. A baseline with no history to forecast from abstains on a row. */
+  coverage?: number | null
+  min_coverage?: number | null
 }
 
 export type ModelGroupsResponse = ModelGroupSummaryRow[]
+
+/** True when groups' coverage spans more than one percentage point: they were evaluated on
+ *  different rows (the CLI's `--common-rows` compares them on equal rows). */
+export function coverageDiffers(values: (number | null | undefined)[]): boolean {
+  const defined = values.filter((v): v is number => v != null)
+  return defined.length > 0 && Math.max(...defined) - Math.min(...defined) > 0.01
+}
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/experiments/{hash}/selected-model — selected_model_exp              */

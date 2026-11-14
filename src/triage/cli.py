@@ -571,6 +571,36 @@ def _fmt(value, digits: int = 4) -> str:
     return "—" if value is None else f"{float(value):.{digits}f}"
 
 
+def _fmt_share(value) -> str:
+    """A 0..1 share as a percentage; em-dash for NULL."""
+    return "—" if value is None else f"{float(value):.1%}"
+
+
+def _coverage_note(values) -> None:
+    """One dim line when the compared groups were scored on different shares of the rows."""
+    from triage.diagnostics.readers import coverage_differs
+
+    if coverage_differs(values):
+        console.print(
+            "[dim]The groups scored different shares of the labeled rows (coverage"
+            " column), so each is evaluated on its own rows. Compare them on the rows all"
+            " of them scored with --common-rows.[/dim]"
+        )
+
+
+def _parse_group_ids(value: str) -> list[int]:
+    """``'12,15,19'`` as model group ids."""
+    try:
+        ids = [int(part) for part in value.split(",") if part.strip()]
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"{value!r} is not a comma-separated list of model group ids"
+        ) from exc
+    if not ids or any(i <= 0 for i in ids):
+        raise typer.BadParameter(f"{value!r} names no model group")
+    return ids
+
+
 def _resolve_experiment_hash(conn, prefix: str) -> str:
     """Resolve a (possibly truncated) experiment hash to the full one — fail loud.
 
@@ -800,6 +830,7 @@ def models_command(
                 "Avg ± σ",
                 "Max regret",
                 "Avg fit",
+                "Coverage",
             ):
                 table.add_column(col)
             for r in rows:
@@ -811,8 +842,10 @@ def models_command(
                     f"{_fmt(r['avg_value'])} ± {_fmt(r['stddev_value'])}",
                     _fmt(r["max_regret"]),
                     f"{dur / 1000:.1f}s" if dur is not None else "—",
+                    _fmt_share(r["coverage"]),
                 )
             console.print(table)
+            _coverage_note([r["coverage"] for r in rows])
             return
 
         group_avg = (
@@ -1204,6 +1237,18 @@ def audition_command(
         "--to",
         help="Only consider splits on or before this date (YYYY-MM-DD).",
     ),
+    common_rows: bool = typer.Option(
+        False,
+        "--common-rows",
+        help="Compare the groups on the labeled rows every one of them scored: register"
+        " those rows as a Subset, evaluate each model on it, and select on it.",
+    ),
+    groups: Optional[str] = typer.Option(
+        None,
+        "--groups",
+        help="With --common-rows: the model groups to compare, comma-separated."
+        " Default: every group of the experiment.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Print the raw result as JSON."),
 ) -> None:
     """Model selection over the in-PG audition views (ADR-0007), headless (ADR-0012).
@@ -1216,15 +1261,35 @@ def audition_command(
     """
     from triage.component.catwalk.in_pg_evaluation import AUDITION_RULES
 
+    from triage.diagnostics import readers
+
     rule_names = [name for name, _ in AUDITION_RULES]
     if rule not in rule_names:
         raise typer.BadParameter(
             f"unknown audition rule {rule!r} — one of: {', '.join(rule_names)}"
         )
+    if groups is not None and not common_rows:
+        raise typer.BadParameter("--groups selects the groups of --common-rows")
+    group_ids = _parse_group_ids(groups) if groups is not None else None
 
     engine = get_pool(ctx)
     with engine.connection() as conn:
         experiment_hash = _resolve_experiment_hash(conn, experiment_hash)
+    common = None
+    if common_rows:
+        from triage.adapters.common_rows import evaluate_on_common_rows
+
+        try:
+            common = evaluate_on_common_rows(engine, experiment_hash, group_ids)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+    subset_hash = common.subset_hash if common is not None else ""
+    coverage = {
+        r["model_group_id"]: r["coverage"]
+        for r in readers.coverage(engine, experiment_hash)
+    }
+    with engine.connection() as conn:
         # Default (metric, parameter): the experiment's most-evaluated pair.
         if metric is None or parameter is None:
             sql = (
@@ -1254,6 +1319,7 @@ def audition_command(
             "p": parameter,
             "f": window_from,
             "t": window_to,
+            "s": subset_hash,
         }
         # audition_windowed with both bounds null is triage.audition exactly (migration 0022),
         # so one query serves both the windowed and the unwindowed case.
@@ -1261,7 +1327,7 @@ def audition_command(
             "select model_group_id, n_splits_evaluated, avg_value, stddev_value,"
             "       avg_distance_from_best, max_regret,"
             "       avg_regret_next_time, max_regret_next_time"
-            " from triage.audition_windowed(%(h)s, %(m)s, %(p)s, %(f)s, %(t)s)"
+            " from triage.audition_windowed(%(h)s, %(m)s, %(p)s, %(f)s, %(t)s, %(s)s)"
             " order by avg_distance_from_best asc, max_regret asc, model_group_id asc",
             params,
         ).fetchall()
@@ -1311,7 +1377,7 @@ def audition_command(
                 }
             gid = conn.execute(
                 "select triage.audition_pick(%(h)s, %(m)s, %(p)s, %(r)s,"
-                " %(rp)s::jsonb, %(f)s, %(t)s) as model_group_id",
+                " %(rp)s::jsonb, %(f)s, %(t)s, %(s)s) as model_group_id",
                 {**params, "r": rule_name, "rp": json.dumps(rule_params)},
             ).fetchone()
             strategies.append(
@@ -1323,7 +1389,7 @@ def audition_command(
 
         selected = conn.execute(
             "select * from triage.selected_model(%(h)s, %(m)s, %(p)s, %(r)s,"
-            " %(f)s, %(t)s)",
+            " %(f)s, %(t)s, %(s)s)",
             {**params, "r": rule},
         ).fetchone()
 
@@ -1336,6 +1402,8 @@ def audition_command(
                     "parameter": parameter,
                     "rule": rule,
                     "window": {"from": window_from, "to": window_to},
+                    "common_rows": None if common is None else common.__dict__,
+                    "coverage": coverage,
                     "ranking": ranking,
                     "strategies": strategies,
                     "selected": selected,
@@ -1350,6 +1418,11 @@ def audition_command(
     window_note = ""
     if window_from is not None or window_to is not None:
         window_note = f"  ·  splits {window_from or 'start'} → {window_to or 'latest'}"
+    if common is not None:
+        window_note += (
+            f"  ·  Subset {common.name!r}: {common.n_rows:,} rows on"
+            f" {common.n_dates} date(s)"
+        )
     table = Table(
         title=(
             f"Audition — experiment {experiment_hash[:12]}…"
@@ -1364,6 +1437,7 @@ def audition_command(
         "Dist. from best (avg)",
         "Max regret",
         "Regret next time (max)",
+        "Coverage",
     ):
         table.add_column(col)
     for r in ranking:
@@ -1375,9 +1449,12 @@ def audition_command(
             _fmt(r["avg_distance_from_best"]),
             _fmt(r["max_regret"]),
             _fmt(r["max_regret_next_time"]),
+            _fmt_share(coverage.get(r["model_group_id"])),
             style=style,
         )
     console.print(table)
+    if common is None:
+        _coverage_note([coverage.get(r["model_group_id"]) for r in ranking])
 
     st = Table(title="Selection rules — pick per rule", box=box.SIMPLE_HEAVY)
     st.add_column("Rule")
@@ -2974,6 +3051,82 @@ def postmodel_error_recurrence(
             _fmt(r["mean_error_rate"], 2),
             _fmt(r["mean_support"], 1),
             r["example_rule"],
+        )
+    console.print(table)
+
+
+@postmodel_app.command("compare-rows")
+def postmodel_compare_rows(
+    ctx: typer.Context,
+    experiment_hash: str = typer.Argument(
+        ..., help="Experiment hash (a prefix is enough)."
+    ),
+    groups: Optional[str] = typer.Option(
+        None,
+        "--groups",
+        help="Model groups to compare, comma-separated. Default: every group.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """Each model group's error on its own rows and on the rows all of them scored.
+
+    Per test date and group: the labeled rows, those the group scored, those every listed
+    group scored, the MAE on the group's own rows, and MAE, RMSE, WAPE and bias on the
+    common rows. Reads only; nothing is written.
+    """
+    import psycopg
+
+    from triage.adapters.common_rows import compared_groups
+    from triage.diagnostics import readers
+
+    engine = get_pool(ctx)
+    with engine.connection() as conn:
+        experiment_hash = _resolve_experiment_hash(conn, experiment_hash)
+    ids = _parse_group_ids(groups) if groups is not None else None
+    try:
+        ids = compared_groups(engine, experiment_hash, ids)
+        rows = readers.common_rows(engine, ids)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except psycopg.errors.RaiseException as exc:
+        console.print(f"[red]{exc.diag.message_primary}[/red]")
+        raise typer.Exit(code=2) from exc
+    if as_json:
+        console.print_json(json.dumps(rows, default=str))
+        return
+    if not rows:
+        console.print("[yellow]These groups have no scored test date.[/yellow]")
+        raise typer.Exit(code=1)
+    table = Table(
+        title=f"Own rows and common rows — groups {', '.join(map(str, ids))}",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in (
+        "Date",
+        "Group",
+        "Labeled",
+        "Scored",
+        "Common",
+        "MAE own",
+        "MAE common",
+        "RMSE common",
+        "WAPE common",
+        "Bias common",
+    ):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            str(r["as_of_date"]),
+            str(r["model_group_id"]),
+            str(r["n_labeled"]),
+            str(r["n_scored_own"]),
+            str(r["n_common"]),
+            _fmt(r["mae_own"]),
+            _fmt(r["mae_common"]),
+            _fmt(r["rmse_common"]),
+            _fmt(r["wape_common"]),
+            _fmt(r["bias_common"]),
         )
     console.print(table)
 
