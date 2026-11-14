@@ -562,7 +562,7 @@ experiment), `triage gc` (collect artifacts unreachable from any root),
 `triage runs status` (AWS Batch backfill in the cloud profile).
 
 `triage serve` starts the dashboard from any project that has the `dashboard`
-extra (`uv add 'triage-pg[dashboard]'`). It finds the database the same way
+extra (`uv add 'triage[dashboard] @ git+https://github.com/ccd-ia/triage-pg.git@v1.5.0'`). It finds the database the same way
 every command does: `database.yaml`, then `DATABASE_URL`, then `PG*`. It
 refuses the global `--dbfile` (exit code 2), because the dashboard would not
 read that file. It passes `--host` (default `127.0.0.1`), `--port` (default
