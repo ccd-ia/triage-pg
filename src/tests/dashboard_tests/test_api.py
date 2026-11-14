@@ -395,11 +395,13 @@ def test_model_detail(client, seeded):
     assert set(body) == {
         "model_id",
         "model_group_id",
+        "problem_type",
         "feature_importances",
         "evaluations",
         "windowed",
     }
     assert body["model_group_id"] == seeded.group_ids["mg1"]
+    assert body["problem_type"] == "classification"
     assert {fi["feature"] for fi in body["feature_importances"]} == {"f1", "f2"}
     assert body["evaluations"]
     assert all(e["model_id"] == model_id for e in body["evaluations"])

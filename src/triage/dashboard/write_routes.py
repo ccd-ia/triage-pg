@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import os
 import pathlib
+from dataclasses import asdict
 from typing import Any, Optional
 
+import psycopg
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -35,7 +37,12 @@ from triage.dashboard.auth import (
     current_principal,
     require_admin,
 )
-from triage.dashboard.project_routing import pool_for_slug, project_dburl
+from triage.dashboard.project_routing import (
+    active_project_slug,
+    pool_for_slug,
+    project_dburl,
+    resolve_active_pool,
+)
 from triage.logging import get_logger
 from triage.profiles.execution import RunHandle
 from triage.util.db import DictRowPool
@@ -89,6 +96,13 @@ class ConfigPayload(BaseModel):
 
     config: Optional[dict[str, Any]] = None
     config_text: Optional[str] = None
+
+
+class CommonRowsCreate(BaseModel):
+    model_group_ids: Optional[list[int]] = Field(
+        None,
+        description="the model groups to compare; omitted, every group of the experiment",
+    )
 
 
 # --------------------------------------------------------------------------- helpers
@@ -516,3 +530,61 @@ def post_submission(
             "status": "submitted",
         }
     return {"submission": submission, "result": run_summary}
+
+
+# --------------------------------------------------------------------------- common rows
+
+
+@write_router.post("/experiments/{experiment_hash}/common-rows")
+def post_common_rows(
+    experiment_hash: str,
+    body: CommonRowsCreate,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    """Register the rows every compared group scored as a Subset and evaluate the groups'
+    models on it: what ``triage audition --common-rows`` does before it selects
+    (``adapters.common_rows.evaluate_on_common_rows``, migration 0031).
+
+    Runs against the active project (``X-Triage-Project``, else the bound database) and
+    writes evaluation rows, so the caller must be an owner or contributor of a registry
+    project (admins anywhere). Returns the Subset: pass its ``subset_hash`` to
+    ``GET /experiments/{hash}/audition`` to select on the common rows. Calling it again with
+    the same groups refills the same Subset.
+    """
+    from triage.adapters.common_rows import evaluate_on_common_rows
+
+    slug = active_project_slug(request)
+    if slug is not None and not principal.is_admin:
+        reg = _registry_pool(request)
+        project = registry.get_project(reg, slug)
+        if project is not None:
+            role = registry.member_role(
+                reg, project_id=project["project_id"], user_id=principal.user_id
+            )
+            if role not in ("owner", "contributor"):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"not authorized to evaluate in {slug!r} (role={role})",
+                )
+    pool = resolve_active_pool(request)
+    with pool.connection() as conn:
+        found = conn.execute(
+            "select 1 as found from triage.experiments where experiment_hash = %(h)s",
+            {"h": experiment_hash},
+        ).fetchone()
+    if found is None:
+        raise HTTPException(status_code=404, detail="experiment not found")
+    try:
+        common = evaluate_on_common_rows(pool, experiment_hash, body.model_group_ids)
+    except psycopg.errors.RaiseException as exc:  # a group with two models on one date
+        raise HTTPException(
+            status_code=422, detail=exc.diag.message_primary or str(exc)
+        ) from exc
+    except ValueError as exc:  # fewer than two groups, or one outside the experiment
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    logger.info(
+        f"common rows: {principal.email} evaluated groups {common.model_group_ids} of"
+        f" {experiment_hash[:12]} on subset {common.subset_hash[:12]}"
+    )
+    return asdict(common)

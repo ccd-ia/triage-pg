@@ -6,6 +6,11 @@
  *   - metric-over-time per model group + a "best at each point" line
  *   - a regret bar (max_regret per group, lower better)
  *   - the all-8-strategy table with the audition-picked winner highlighted
+ *   - when the groups scored different shares of the labeled rows, a "common rows" toggle:
+ *     it registers the rows every group scored as a Subset and evaluates the groups on it
+ *     (POST /experiments/{hash}/common-rows, a write), then shows the audition of that
+ *     Subset (?subset_hash=) and each group's MAE on its own rows against the common ones
+ *     (GET /experiments/{hash}/common-rows). What `triage audition --common-rows` does.
  * Data: /experiments/{hash}/audition (ranking + curves + strategies + pick).
  */
 import {
@@ -19,15 +24,20 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { ExpAuditionResponse, MetricCatalogRow } from '../api/types'
+import { useState } from 'react'
+import { ApiError, api } from '../api/client'
+import { useAsync } from '../hooks/useAsync'
+import type { CommonRowsRow, CommonRowsSubset, ExpAuditionResponse, MetricCatalogRow } from '../api/types'
 import { coverageDiffers, isEmpty } from '../api/types'
 import { expAuditionChart, groupLabel } from '../api/transforms'
-import { fmtPct, tooltipFormatter } from '../api/format'
+import { fmtNum, fmtPct, tooltipFormatter } from '../api/format'
 import { EmptyPanel } from './EmptyPanel'
 
 const COLORS = ['#3fb950', '#d29922', '#f85149', '#58a6ff', '#bc8cff', '#56d4dd']
 
 interface Props {
+  /** The experiment, for the common-rows routes. */
+  hash: string
   data: ExpAuditionResponse
   metrics: MetricCatalogRow[]
   metric: string
@@ -37,8 +47,47 @@ interface Props {
   onRule: (rule: string) => void
 }
 
+/** Each group's MAE on its own rows and on the common rows, on the latest test date. */
+function CommonRowsTable({ rows }: { rows: CommonRowsRow[] }) {
+  const last = rows.reduce((d, r) => (r.as_of_date > d ? r.as_of_date : d), rows[0].as_of_date)
+  return (
+    <table style={{ marginTop: 6 }}>
+      <thead>
+        <tr>
+          <th>model group</th>
+          <th className="num">labeled</th>
+          <th className="num">scored</th>
+          <th className="num">common</th>
+          <th className="num">MAE own rows</th>
+          <th className="num">MAE common rows</th>
+          <th className="num">WAPE common</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows
+          .filter((r) => r.as_of_date === last)
+          .map((r) => (
+            <tr key={r.model_group_id}>
+              <td>{groupLabel(r.model_group_id)}</td>
+              <td className="num">{r.n_labeled}</td>
+              <td className="num">{r.n_scored_own}</td>
+              <td className="num">{r.n_common}</td>
+              <td className="num">{fmtNum(r.mae_own, 3)}</td>
+              <td className="num">{fmtNum(r.mae_common, 3)}</td>
+              <td className="num">{fmtPct(r.wape_common)}</td>
+            </tr>
+          ))}
+      </tbody>
+      <caption className="muted" style={{ captionSide: 'bottom', fontSize: 10, textAlign: 'left' }}>
+        at {last}
+      </caption>
+    </table>
+  )
+}
+
 export function ExperimentAuditionTab({
-  data,
+  hash,
+  data: ownRows,
   metrics,
   metric,
   parameter,
@@ -46,9 +95,78 @@ export function ExperimentAuditionTab({
   onMetric,
   onRule,
 }: Props) {
-  if (isEmpty(data)) {
-    return <EmptyPanel reason={data.reason} hint={data.hint} />
+  // The common-rows Subset, once the write route registered it; the toggle shows its
+  // audition in place of each group's own rows.
+  const [subset, setSubset] = useState<CommonRowsSubset | null>(null)
+  const [commonOn, setCommonOn] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const onCommon = commonOn && subset != null
+  const common = useAsync(
+    () =>
+      onCommon
+        ? api.expAudition(hash, metric, parameter, rule, subset.subset_hash)
+        : Promise.resolve(undefined),
+    [hash, metric, parameter, rule, onCommon, subset?.subset_hash],
+  )
+  const commonRows = useAsync(
+    () => (onCommon ? api.expCommonRows(hash) : Promise.resolve(undefined)),
+    [hash, onCommon],
+  )
+
+  const toggleCommon = async () => {
+    if (commonOn) {
+      setCommonOn(false)
+      return
+    }
+    setBusy(true)
+    setFailure(null)
+    try {
+      // POST refills the Subset of the same groups, so a second toggle stays current
+      setSubset(await api.materializeCommonRows(hash))
+      setCommonOn(true)
+    } catch (e) {
+      setFailure(e instanceof ApiError ? e.detail : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const metricValue = `${metric}|${parameter}`
+  // the metric catalog is the project's: an experiment of another problem type may have no
+  // row on the selected metric, and the selector must stay reachable from that empty state
+  const metricSelect = (
+    <label>
+      metric
+      <select
+        value={metricValue}
+        onChange={(e) => {
+          const [m, p] = e.target.value.split('|')
+          onMetric(m, p ?? '')
+        }}
+      >
+        {metrics.map((m) => (
+          <option key={`${m.metric}|${m.parameter}`} value={`${m.metric}|${m.parameter}`}>
+            {m.metric}
+            {m.parameter}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+
+  if (isEmpty(ownRows)) {
+    return (
+      <>
+        <div className="selectors" style={{ marginBottom: 10 }}>
+          {metricSelect}
+        </div>
+        <EmptyPanel reason={ownRows.reason} hint={ownRows.hint} />
+      </>
+    )
+  }
+  const data = onCommon && common.data && !isEmpty(common.data) ? common.data : ownRows
+  const differs = coverageDiffers(ownRows.ranking.map((r) => r.coverage))
 
   const { rows, groups } = expAuditionChart(data.curves)
   const nText = data.n == null ? '?' : `${data.n}`
@@ -58,28 +176,10 @@ export function ExperimentAuditionTab({
     .sort((a, b) => a.max_regret - b.max_regret)
     .map((r) => ({ group: groupLabel(r.model_group_id), regret: r.max_regret }))
 
-  const metricValue = `${metric}|${parameter}`
-
   return (
     <>
       <div className="selectors" style={{ marginBottom: 10 }}>
-        <label>
-          metric
-          <select
-            value={metricValue}
-            onChange={(e) => {
-              const [m, p] = e.target.value.split('|')
-              onMetric(m, p ?? '')
-            }}
-          >
-            {metrics.map((m) => (
-              <option key={`${m.metric}|${m.parameter}`} value={`${m.metric}|${m.parameter}`}>
-                {m.metric}
-                {m.parameter}
-              </option>
-            ))}
-          </select>
-        </label>
+        {metricSelect}
         <label>
           rule
           <select value={rule} onChange={(e) => onRule(e.target.value)}>
@@ -127,14 +227,34 @@ export function ExperimentAuditionTab({
           <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>
             lower is better · thick line = audition pick for rule “{rule}”
           </div>
-          {coverageDiffers(data.ranking.map((r) => r.coverage)) ? (
+          {differs || commonOn ? (
             <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
               the groups scored different shares of the labeled rows (
-              {data.ranking
+              {ownRows.ranking
                 .map((r) => `${groupLabel(r.model_group_id)} ${fmtPct(r.coverage, 0)}`)
                 .join(', ')}
-              ), so each is evaluated on its own rows — `triage audition --common-rows`
-              compares them on the rows all of them scored
+              ),{' '}
+              {onCommon
+                ? `so this audition compares them on the ${subset.n_rows} rows all of them scored (${subset.n_dates} test dates)`
+                : 'so each is evaluated on its own rows'}{' '}
+              <button
+                type="button"
+                className={`commonrows${onCommon ? ' active' : ''}`}
+                aria-pressed={onCommon}
+                disabled={busy}
+                title="register the rows every group scored as a Subset, evaluate the groups on it, and select on it (writes evaluations)"
+                onClick={() => void toggleCommon()}
+              >
+                {busy ? 'evaluating on common rows…' : onCommon ? 'common rows · on' : 'common rows'}
+              </button>
+              {failure ? (
+                <div className="banner err" style={{ marginTop: 4 }}>
+                  {failure} — the CLI does the same: `triage audition {hash.slice(0, 12)} --common-rows`
+                </div>
+              ) : null}
+              {onCommon && common.data && isEmpty(common.data) ? (
+                <div className="muted">{common.data.reason}</div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -160,7 +280,7 @@ export function ExperimentAuditionTab({
 
       <h3 className="k" style={{ marginTop: 14 }}>
         all 8 strategies · winner picked by audition (metric: {metric}
-        {parameter})
+        {parameter}{onCommon ? ' · on common rows' : ''})
       </h3>
       <table>
         <thead>
@@ -183,6 +303,23 @@ export function ExperimentAuditionTab({
           })}
         </tbody>
       </table>
+
+      {onCommon ? (
+        <>
+          <h3 className="k" style={{ marginTop: 14 }}>own rows against common rows</h3>
+          {commonRows.error ? (
+            <div className="muted" style={{ fontSize: 11 }}>
+              common rows unavailable: {commonRows.error.message}
+            </div>
+          ) : !commonRows.data ? (
+            <div className="muted" style={{ fontSize: 11 }}>loading the common rows…</div>
+          ) : isEmpty(commonRows.data) ? (
+            <EmptyPanel reason={commonRows.data.reason} hint={commonRows.data.hint} />
+          ) : (
+            <CommonRowsTable rows={commonRows.data} />
+          )}
+        </>
+      ) : null}
     </>
   )
 }

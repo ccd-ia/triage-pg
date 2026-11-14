@@ -4119,45 +4119,21 @@ def postmodel_structure(
     Exit 1 when the estimator is neither a supported tree nor linear (HistGradientBoosting
     and LightGBM included): its leaves are not read.
     """
-    from triage import problem_types
-    from triage.diagnostics import readers
-    from triage.diagnostics.structure import (
-        StructureUnavailable,
-        leaf_support,
-        load_estimator,
-        mean_shift,
-    )
+    from triage.diagnostics.structure import model_structure
 
-    pool = get_pool(ctx)
     try:
-        problem_type = problem_types.model_problem_type(pool, model_id)
-        estimator = load_estimator(pool, model_id)
+        payload = model_structure(get_pool(ctx), model_id, min_rows)
     except (ValueError, OSError) as exc:
         _plot_fail(str(exc), 2)
-    payload: dict[str, Any] = {
-        "model_id": model_id,
-        "estimator": type(estimator).__name__,
-    }
-    if problem_type in problem_types.REGRESSION_TYPES:
-        dates = readers.residual_summary(pool, model_id)
-        payload["forecast_structure"] = dates[-1] if dates else None
-    unavailable: list[str] = []
-    try:
-        payload["leaf_support"] = leaf_support(estimator, min_rows)
-    except StructureUnavailable as exc:
-        unavailable.append(str(exc))
-    try:
-        payload["mean_shift"] = mean_shift(pool, model_id, estimator)
-    except StructureUnavailable as exc:
-        unavailable.append(str(exc))
-    except ValueError as exc:
-        _plot_fail(str(exc), 2)
+    unavailable: list[str] = payload["unavailable"]
     found = "leaf_support" in payload or "mean_shift" in payload
     if as_json:
-        payload["unavailable"] = unavailable
+        payload.pop("problem_type")  # the dashboard route reads it; --json never had it
         console.print_json(json.dumps(payload, default=str))
         raise typer.Exit(code=0 if found else 1)
-    console.print(f"Model {model_id}: {payload['estimator']} ({problem_type})")
+    console.print(
+        f"Model {model_id}: {payload['estimator']} ({payload['problem_type']})"
+    )
     structure = payload.get("forecast_structure")
     if structure:
         console.print(

@@ -352,6 +352,7 @@ export function ExperimentDetail({ hash }: { hash: string }) {
           {tab === 'audition' &&
             (audition.data ? (
               <ExperimentAuditionTab
+                hash={hash}
                 data={audition.data}
                 metrics={metricsCat.data ?? []}
                 metric={effectiveMetric.metric}

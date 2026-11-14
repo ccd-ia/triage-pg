@@ -9,7 +9,11 @@
  * FastAPI static mount.
  */
 import type {
+  BaselineResponse,
   CalibrationResponse,
+  CommonRowsResponse,
+  CommonRowsSubset,
+  CrosstabComparison,
   CrosstabStat,
   CrosstabsResponse,
   DerivationResponse,
@@ -18,6 +22,8 @@ import type {
   ErrorRecurrenceResponse,
   ErrorRulesResponse,
   ExampleConfig,
+  ForecastActualResponse,
+  GainsResponse,
   ListOverlapRow,
   ExpAuditionResponse,
   ExpBiasResponse,
@@ -38,17 +44,24 @@ import type {
   ModelGroupsResponse,
   ModelHistogramResponse,
   ModelPredictionsResponse,
+  NearMissResponse,
   OntologyResponse,
   Principal,
   ProgressResponse,
   Project,
   ProjectDerivationResponse,
+  PrototypesResponse,
+  ResidualCut,
+  ResidualSegmentsResponse,
+  ResidualsResponse,
   RunListItem,
   SourcePinsResponse,
   StatusResponse,
+  StructureResponse,
   Submission,
   SubmissionResult,
   SummaryResponse,
+  SurvivalResponse,
   SuspiciousRuleRow,
   TemporalVizResult,
   ValidateConfigResult,
@@ -243,14 +256,34 @@ export const api = {
     return get<ExperimentDetailResponse>(`/experiments/${hash}`)
   },
 
+  /** `subsetHash` selects on one Subset's evaluations — the common-rows Subset that
+   *  materializeCommonRows returns compares the groups on the rows all of them scored. */
   expAudition(
     hash: string,
     metric?: string,
     parameter?: string,
     rule?: string,
+    subsetHash?: string,
   ): Promise<ExpAuditionResponse> {
     if (USE_FIXTURE) return fake(fixture.expAuditionFor(hash, metric, parameter, rule))
-    return get<ExpAuditionResponse>(`/experiments/${hash}/audition${metricQuery(metric, parameter, rule)}`)
+    const qs = metricQuery(metric, parameter, rule)
+    const subset = subsetHash ? `${qs ? '&' : '?'}subset_hash=${encodeURIComponent(subsetHash)}` : ''
+    return get<ExpAuditionResponse>(`/experiments/${hash}/audition${qs}${subset}`)
+  },
+
+  /** Each group's error on its own rows and on the rows all of them scored (read only). */
+  expCommonRows(hash: string): Promise<CommonRowsResponse> {
+    if (USE_FIXTURE) return fake(fixture.expCommonRows(hash))
+    return get<CommonRowsResponse>(`/experiments/${hash}/common-rows`)
+  },
+
+  /** Register the common rows of every group as a Subset and evaluate the groups on it (a
+   *  write: needs the registry, 503 without one). */
+  materializeCommonRows(hash: string, modelGroupIds?: number[]): Promise<CommonRowsSubset> {
+    if (USE_FIXTURE) return fake(fixture.fxCommonRowsSubset(modelGroupIds))
+    return post<CommonRowsSubset>(`/experiments/${hash}/common-rows`, {
+      model_group_ids: modelGroupIds ?? null,
+    })
   },
 
   expBias(hash: string, modelId?: number): Promise<ExpBiasResponse> {
@@ -366,11 +399,19 @@ export const api = {
   },
 
   /** Top distinguishing features (persisted by `triage postmodel crosstabs`): the ratio of
-   *  means (`mean`, the default) or the nonzero rates of the list and the rest. */
-  modelCrosstabs(id: number, stat?: CrosstabStat): Promise<CrosstabsResponse> {
-    if (USE_FIXTURE) return fake(fixture.modelCrosstabs(id, stat))
-    const q = stat && stat !== 'mean' ? `?stat=${stat}` : ''
-    return get<CrosstabsResponse>(`/models/${id}/crosstabs${q}`)
+   *  means (`mean`, the default) or the nonzero rates of the list and the rest — or, with
+   *  `comparison: 'near_miss'`, of the list and the next k rows below the cut. */
+  modelCrosstabs(
+    id: number,
+    stat?: CrosstabStat,
+    comparison?: CrosstabComparison,
+  ): Promise<CrosstabsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelCrosstabs(id, stat, comparison))
+    const q = new URLSearchParams()
+    if (stat && stat !== 'mean') q.set('stat', stat)
+    if (comparison && comparison !== 'rest') q.set('comparison', comparison)
+    const qs = q.toString()
+    return get<CrosstabsResponse>(`/models/${id}/crosstabs${qs ? `?${qs}` : ''}`)
   },
 
   /** Error-tree rules of one kind (persisted by `triage postmodel error-tree`). */
@@ -397,6 +438,64 @@ export const api = {
     if (opts?.kind) q.set('error_kind', opts.kind)
     const qs = q.toString()
     return get<ErrorRecurrenceResponse>(`/model-groups/${id}/error-recurrence${qs ? `?${qs}` : ''}`)
+  },
+
+  /* -------------------- postmodel panels per problem type ------------------- */
+
+  /** A regression model's errors per test date (migration 0033). */
+  modelResiduals(id: number): Promise<ResidualsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelResiduals(id))
+    return get<ResidualsResponse>(`/models/${id}/residuals`)
+  },
+
+  /** A regression model's errors per history segment, pooled over its test dates. */
+  modelResidualSegments(id: number, cut: ResidualCut = 'band'): Promise<ResidualSegmentsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelResidualSegments(id, cut))
+    return get<ResidualSegmentsResponse>(`/models/${id}/residuals/segments?cut=${cut}&pooled=true`)
+  },
+
+  /** Forecast and outcome pairs of the labeled test rows, at most `cap`. */
+  modelForecastActual(id: number, cap?: number): Promise<ForecastActualResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelForecastActual(id))
+    const q = cap ? `?cap=${cap}` : ''
+    return get<ForecastActualResponse>(`/models/${id}/forecast-actual${q}`)
+  },
+
+  /** The model's group against the experiment's closest baseline group, per segment. */
+  modelBaseline(id: number): Promise<BaselineResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelBaseline(id))
+    return get<BaselineResponse>(`/models/${id}/baseline`)
+  },
+
+  /** Checks on the fitted estimator: leaf support, the linear mean shift. */
+  modelStructure(id: number): Promise<StructureResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelStructure(id))
+    return get<StructureResponse>(`/models/${id}/structure`)
+  },
+
+  /** The cumulative-gains curve of the latest evaluated date (migration 0035). */
+  modelGains(id: number): Promise<GainsResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelGains(id))
+    return get<GainsResponse>(`/models/${id}/gains`)
+  },
+
+  /** The persisted survival set at the most recent horizon (migration 0036). */
+  modelSurvival(id: number): Promise<SurvivalResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelSurvival(id))
+    return get<SurvivalResponse>(`/models/${id}/survival`)
+  },
+
+  /** The selected, near-miss and rest bands at a top-k cut (migration 0037). */
+  modelNearMiss(id: number, parameter?: string): Promise<NearMissResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelNearMiss(id, parameter))
+    const q = parameter ? `?parameter=${encodeURIComponent(parameter)}` : ''
+    return get<NearMissResponse>(`/models/${id}/near-miss${q}`)
+  },
+
+  /** The persisted class prototypes (every cut, every date). */
+  modelPrototypes(id: number): Promise<PrototypesResponse> {
+    if (USE_FIXTURE) return fake(fixture.modelPrototypes(id))
+    return get<PrototypesResponse>(`/models/${id}/prototypes`)
   },
 
   /** Top-k list overlap between two models (migration 0016). */

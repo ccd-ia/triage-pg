@@ -12,12 +12,17 @@
  *     zero) concentrated on one side show here too, where a ratio of two rates near zero
  *     would mislead.
  *
+ * Against: the rest (every row below the cut, the default) or, for a model with a top-k cut
+ * (classification, regression_ranking), the near miss — the next k rows below the cut
+ * (`triage postmodel crosstabs --against near-miss`, migration 0037). A feature that sets
+ * the list apart from the rest but not from the near miss does not explain the cut itself.
+ *
  * The ranking and every rate come from the route; the panel only lays them out.
  */
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
-import type { CrosstabRow, CrosstabStat } from '../api/types'
+import type { CrosstabComparison, CrosstabRow, CrosstabStat, ProblemType } from '../api/types'
 import { isEmpty } from '../api/types'
 import { prettyFeature } from '../api/transforms'
 
@@ -30,18 +35,30 @@ const STATS: { stat: CrosstabStat; label: string; title: string }[] = [
   },
 ]
 
+const COMPARISONS: { comparison: CrosstabComparison; label: string; title: string }[] = [
+  { comparison: 'rest', label: 'vs rest', title: 'every scored row below the cut' },
+  {
+    comparison: 'near_miss',
+    label: 'vs near miss',
+    title: 'the next k rows below the cut: what the cut itself separates',
+  },
+]
+
+/** The types whose rows have a top-k cut, and so a near-miss band. */
+const CUT_TYPES: ProblemType[] = ['classification', 'regression_ranking']
+
 function pct(v: number | null): string {
   return v == null ? '—' : `${(v * 100).toFixed(0)}%`
 }
 
-function RatioTable({ rows }: { rows: CrosstabRow[] }) {
+function RatioTable({ rows, other }: { rows: CrosstabRow[]; other: string }) {
   return (
     <table>
       <thead>
         <tr>
           <th>feature</th>
           <th className="num">selected</th>
-          <th className="num">rest</th>
+          <th className="num">{other}</th>
           <th className="num">ratio</th>
         </tr>
       </thead>
@@ -68,7 +85,7 @@ function RatioTable({ rows }: { rows: CrosstabRow[] }) {
   )
 }
 
-function NonzeroBars({ rows }: { rows: CrosstabRow[] }) {
+function NonzeroBars({ rows, other }: { rows: CrosstabRow[]; other: string }) {
   return (
     <div className="featlist">
       {rows.map((r) => {
@@ -88,8 +105,8 @@ function NonzeroBars({ rows }: { rows: CrosstabRow[] }) {
                 <div className="fill list" style={{ width: `${Math.min(1, r.selected_value ?? 0) * 100}%` }} />
               </div>
               <span className="val">{pct(r.selected_value)}</span>
-              <span>rest</span>
-              <div className="track" title={`nonzero in ${pct(r.rest_value)} of the rest`}>
+              <span>{other}</span>
+              <div className="track" title={`nonzero in ${pct(r.rest_value)} of the ${other}`}>
                 <div className="fill rest" style={{ width: `${Math.min(1, r.rest_value ?? 0) * 100}%` }} />
               </div>
               <span className="val">{pct(r.rest_value)}</span>
@@ -101,13 +118,28 @@ function NonzeroBars({ rows }: { rows: CrosstabRow[] }) {
   )
 }
 
-export function CrosstabsPanel({ modelId }: { modelId: number }) {
+export function CrosstabsPanel({
+  modelId,
+  problemType = 'classification',
+}: {
+  modelId: number
+  problemType?: ProblemType
+}) {
   const [stat, setStat] = useState<CrosstabStat>('mean')
-  // the statistic travels with its rows, so a stale response never draws in the other layout
+  const [picked, setComparison] = useState<CrosstabComparison>('rest')
+  const hasCut = CUT_TYPES.includes(problemType)
+  const comparison: CrosstabComparison = hasCut ? picked : 'rest'
+  // the statistic and comparison travel with their rows, so a stale response never draws
+  // in the other layout
   const res = useAsync(
-    async () => ({ stat, rows: await api.modelCrosstabs(modelId, stat) }),
-    [modelId, stat],
+    async () => ({
+      stat,
+      comparison,
+      rows: await api.modelCrosstabs(modelId, stat, comparison),
+    }),
+    [modelId, stat, comparison],
   )
+  const other = res.data?.comparison === 'near_miss' ? 'near miss' : 'rest'
 
   return (
     <>
@@ -124,6 +156,23 @@ export function CrosstabsPanel({ modelId }: { modelId: number }) {
             {s.label}
           </button>
         ))}
+        {hasCut ? (
+          <>
+            <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>against</span>
+            {COMPARISONS.map((c) => (
+              <button
+                key={c.comparison}
+                type="button"
+                title={c.title}
+                aria-pressed={comparison === c.comparison}
+                className={`seg${comparison === c.comparison ? ' active' : ''}`}
+                onClick={() => setComparison(c.comparison)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </>
+        ) : null}
       </div>
       {res.error ? (
         <div className="muted" style={{ fontSize: 11 }}>
@@ -139,13 +188,18 @@ export function CrosstabsPanel({ modelId }: { modelId: number }) {
         <>
           <div className="muted" style={{ fontSize: 10, margin: '0 0 4px' }}>
             share of rows with a nonzero value: <b style={{ color: 'var(--acc)' }}>list</b> = the
-            selected top-k, <b>rest</b> = everyone else. Near 100% against near 0% is the
-            leakage signature; check how the feature is known.
+            selected top-k,{' '}
+            {other === 'rest' ? (
+              <><b>rest</b> = everyone else. Near 100% against near 0% is the leakage
+              signature; check how the feature is known.</>
+            ) : (
+              <><b>near miss</b> = the next k rows below the cut.</>
+            )}
           </div>
-          <NonzeroBars rows={res.data.rows} />
+          <NonzeroBars rows={res.data.rows} other={other} />
         </>
       ) : (
-        <RatioTable rows={res.data.rows} />
+        <RatioTable rows={res.data.rows} other={other} />
       )}
     </>
   )
