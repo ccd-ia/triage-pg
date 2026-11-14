@@ -7,13 +7,15 @@ the database (``triage.model_problem_type``, which reads a model with no run lin
 classification) and refuses a type the command does not read, naming the command that
 answers the same question for that type.
 
-The table is data, so the CLI, the dashboard and an editor front end can read one copy.
+The table is data, so the CLI, the dashboard and an editor front end can read one copy:
+:func:`kinds_table` is what the hidden ``triage postmodel kinds --json`` prints for
+triage.el, which greys out a menu entry the model or Experiment at point would refuse.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Mapping
 
 from triage.util.db import DictRowPool
 
@@ -50,6 +52,17 @@ _NOT_SURVIVAL = {
     "regression": "triage postmodel residuals MODEL",
     "regression_ranking": "triage plot gains MODEL",
 }
+
+#: The baseline comparison reads the Experiment's problem type, not a model's: its gate
+#: in diagnostics/baseline_compare.py reads this entry, and both of its figures go
+#: through it.
+_BASELINE_COMPARISON = CommandTypes(
+    REGRESSION_TYPES,
+    {
+        "classification": "triage plot overlap GROUP_A GROUP_B",
+        "survival": _FOR_SURVIVAL,
+    },
+)
 
 #: Command → the problem types it reads.
 COMMANDS: dict[str, CommandTypes] = {
@@ -105,6 +118,9 @@ COMMANDS: dict[str, CommandTypes] = {
             "survival": "triage postmodel error-tree MODEL --kind confusion --horizon H",
         },
     ),
+    "postmodel baseline": _BASELINE_COMPARISON,
+    "plot segments": _BASELINE_COMPARISON,
+    "plot win-consistency": _BASELINE_COMPARISON,
 }
 
 
@@ -205,3 +221,53 @@ def error_tree_refusal(
             " dropped."
         )
     return None
+
+
+def error_tree_table() -> dict[str, dict[str, Any]]:
+    """The error-tree kinds each problem type reads, and its ``--horizon`` rule.
+
+    Derived from :func:`error_tree_refusal`, so the table cannot drift from the gate.
+    ``horizon`` is ``required`` when the type reads its kinds only at a horizon (survival),
+    ``refused`` when it reads them only without one, and ``optional`` when it reads both.
+    The kinds are spelled as ``--kind`` takes them (``abs-error``, not ``abs_error``).
+    """
+    kinds = CLASSIFICATION_TREE_KINDS + REGRESSION_TREE_KINDS
+    table: dict[str, dict[str, Any]] = {}
+    for problem_type in PROBLEM_TYPES:
+        plain = [k for k in kinds if error_tree_refusal(0, problem_type, k) is None]
+        at_horizon = [
+            k for k in kinds if error_tree_refusal(0, problem_type, k, 1.0) is None
+        ]
+        if plain and at_horizon:
+            horizon = "optional"
+        elif at_horizon:
+            horizon = "required"
+        else:
+            horizon = "refused"
+        read = [k for k in kinds if k in plain or k in at_horizon]
+        table[problem_type] = {
+            "kinds": [k.replace("_", "-") for k in read],
+            "horizon": horizon,
+        }
+    return table
+
+
+def kinds_table() -> dict[str, Any]:
+    """Which commands read which problem types, as ``triage postmodel kinds --json``
+    prints it.
+
+    Returns:
+        ``problem_types``; ``commands``, each gated command (as :data:`COMMANDS` names it,
+        an option included where the option is what is gated) with the types it
+        ``accepts`` and, for a type it refuses, the command to run ``instead``; and
+        ``error_tree`` from :func:`error_tree_table`. A command missing from
+        ``commands`` reads every problem type.
+    """
+    return {
+        "problem_types": list(PROBLEM_TYPES),
+        "commands": {
+            name: {"accepts": list(entry.accepts), "instead": dict(entry.instead)}
+            for name, entry in COMMANDS.items()
+        },
+        "error_tree": error_tree_table(),
+    }

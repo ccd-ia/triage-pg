@@ -34,8 +34,8 @@
     }
   ],
   "extra": {
-    "size": "9638 kB \u00b7 26 tables \u00b7 19 views",
-    "schema": "0032_average_precision_ties",
+    "size": "9814 kB \u00b7 29 tables \u00b7 19 views",
+    "schema": "0037_near_miss_and_prototypes",
     "artifacts": "11 built"
   },
   "gauges": [
@@ -191,6 +191,11 @@
       "est_rows": 0
     },
     {
+      "name": "error_tree_fits",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
       "name": "evaluations",
       "kind": "table",
       "est_rows": 0
@@ -301,6 +306,11 @@
       "est_rows": 0
     },
     {
+      "name": "prototypes",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
       "name": "results_schema_versions",
       "kind": "table",
       "est_rows": 0
@@ -347,6 +357,11 @@
     },
     {
       "name": "subsets",
+      "kind": "table",
+      "est_rows": 0
+    },
+    {
+      "name": "survival_diagnostics",
       "kind": "table",
       "est_rows": 0
     }

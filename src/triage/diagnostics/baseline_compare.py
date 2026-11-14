@@ -32,7 +32,7 @@ from typing import Any, LiteralString, Optional, cast
 import numpy as np
 import polars as pl
 
-from triage.problem_types import REGRESSION_TYPES
+from triage.problem_types import COMMANDS
 from triage.util.db import DictRowPool
 
 #: Model classes under this prefix are baselines.
@@ -125,10 +125,11 @@ def _check_regression(pool: DictRowPool, experiment_hash: str) -> None:
             {"h": experiment_hash},
         ).fetchone()
     problem_type = None if row is None else row["t"]
-    if problem_type not in REGRESSION_TYPES:
+    accepts = COMMANDS["postmodel baseline"].accepts
+    if problem_type not in accepts:
         raise ComparisonError(
             f"experiment {experiment_hash[:12]} is {problem_type}: the baseline"
-            " comparison reads regression and regression_ranking models. For a"
+            f" comparison reads {' and '.join(accepts)} models. For a"
             " classifier compare lists with: triage postmodel compare MODEL_A MODEL_B"
         )
 

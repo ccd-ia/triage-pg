@@ -46,9 +46,9 @@ MISALIGNED = (
 )
 
 
-@pytest.fixture(name="seeded")
-def fixture_seeded(db_url, db_pool):
-    with db_pool.connection() as conn:
+def seed_events(pool) -> None:
+    """The events table the queries above read; entity 1 misses months."""
+    with pool.connection() as conn:
         conn.execute("create table hist_events (entity_id bigint, event_date date)")
         # entity 1: July, August and October 2014 — September is missing
         # entity 2: every month July to December
@@ -59,6 +59,11 @@ def fixture_seeded(db_url, db_pool):
             " (2, date '2014-07-05'), (2, date '2014-08-05'), (2, date '2014-09-05'),"
             " (2, date '2014-10-05'), (2, date '2014-11-05'), (2, date '2014-12-05')"
         )
+
+
+@pytest.fixture(name="seeded")
+def fixture_seeded(db_url, db_pool):
+    seed_events(db_pool)
     return db_url
 
 

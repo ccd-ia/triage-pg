@@ -1,0 +1,373 @@
+{
+  "model_id": 4,
+  "forecast_quantile": null,
+  "dates": [
+    {
+      "as_of_date": "2015-01-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    },
+    {
+      "as_of_date": "2015-02-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    },
+    {
+      "as_of_date": "2015-03-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    },
+    {
+      "as_of_date": "2015-04-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    },
+    {
+      "as_of_date": "2015-05-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    },
+    {
+      "as_of_date": "2015-06-01",
+      "n": 200,
+      "sum_outcome": 27750.0,
+      "mae": 1.0,
+      "rmse": 1.0,
+      "wape": 0.007207207207207207,
+      "bias": 1.0,
+      "top100_error_share": 0.5,
+      "top1000_error_share": 1.0,
+      "top1pct_error_share": 0.01,
+      "negative_share": 0.0,
+      "n_distinct_scores": 4,
+      "mode_score": 1.0,
+      "mode_share": 0.25,
+      "min_score": 1.0,
+      "max_score": 501.0,
+      "coverage_point": 1.0
+    }
+  ],
+  "segments": {
+    "band": [
+      {
+        "as_of_date": null,
+        "segment": "<= 0",
+        "segment_order": 0,
+        "n": 300,
+        "entities": 50,
+        "sum_outcome": 0.0,
+        "sum_forecast": 300.0,
+        "mae": 1.0,
+        "wape": null,
+        "bias": 1.0,
+        "share_of_abs_error": 0.25
+      },
+      {
+        "as_of_date": null,
+        "segment": "(0, 10]",
+        "segment_order": 1,
+        "n": 300,
+        "entities": 50,
+        "sum_outcome": 1500.0,
+        "sum_forecast": 1800.0,
+        "mae": 1.0,
+        "wape": 0.2,
+        "bias": 1.0,
+        "share_of_abs_error": 0.25
+      },
+      {
+        "as_of_date": null,
+        "segment": "(10, 100]",
+        "segment_order": 2,
+        "n": 300,
+        "entities": 50,
+        "sum_outcome": 15000.0,
+        "sum_forecast": 15300.0,
+        "mae": 1.0,
+        "wape": 0.02,
+        "bias": 1.0,
+        "share_of_abs_error": 0.25
+      },
+      {
+        "as_of_date": null,
+        "segment": "(100, 1000]",
+        "segment_order": 3,
+        "n": 300,
+        "entities": 50,
+        "sum_outcome": 150000.0,
+        "sum_forecast": 150300.0,
+        "mae": 1.0,
+        "wape": 0.002,
+        "bias": 1.0,
+        "share_of_abs_error": 0.25
+      }
+    ],
+    "cold-start": [
+      {
+        "as_of_date": null,
+        "segment": "with history",
+        "segment_order": 0,
+        "n": 1200,
+        "entities": 200,
+        "sum_outcome": 166500.0,
+        "sum_forecast": 167700.0,
+        "mae": 1.0,
+        "wape": 0.007207207207207207,
+        "bias": 1.0,
+        "share_of_abs_error": 1.0
+      }
+    ]
+  },
+  "largest_errors": [
+    {
+      "entity_id": 1,
+      "as_of_date": "2015-01-01",
+      "forecast": 6.0,
+      "outcome": 5.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 2,
+      "as_of_date": "2015-01-01",
+      "forecast": 51.0,
+      "outcome": 50.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 3,
+      "as_of_date": "2015-01-01",
+      "forecast": 501.0,
+      "outcome": 500.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 4,
+      "as_of_date": "2015-01-01",
+      "forecast": 1.0,
+      "outcome": 0.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 5,
+      "as_of_date": "2015-01-01",
+      "forecast": 6.0,
+      "outcome": 5.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 6,
+      "as_of_date": "2015-01-01",
+      "forecast": 51.0,
+      "outcome": 50.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 7,
+      "as_of_date": "2015-01-01",
+      "forecast": 501.0,
+      "outcome": 500.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 8,
+      "as_of_date": "2015-01-01",
+      "forecast": 1.0,
+      "outcome": 0.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 9,
+      "as_of_date": "2015-01-01",
+      "forecast": 6.0,
+      "outcome": 5.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 10,
+      "as_of_date": "2015-01-01",
+      "forecast": 51.0,
+      "outcome": 50.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 11,
+      "as_of_date": "2015-01-01",
+      "forecast": 501.0,
+      "outcome": 500.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 12,
+      "as_of_date": "2015-01-01",
+      "forecast": 1.0,
+      "outcome": 0.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 13,
+      "as_of_date": "2015-01-01",
+      "forecast": 6.0,
+      "outcome": 5.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 14,
+      "as_of_date": "2015-01-01",
+      "forecast": 51.0,
+      "outcome": 50.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 15,
+      "as_of_date": "2015-01-01",
+      "forecast": 501.0,
+      "outcome": 500.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 16,
+      "as_of_date": "2015-01-01",
+      "forecast": 1.0,
+      "outcome": 0.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 17,
+      "as_of_date": "2015-01-01",
+      "forecast": 6.0,
+      "outcome": 5.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 18,
+      "as_of_date": "2015-01-01",
+      "forecast": 51.0,
+      "outcome": 50.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 19,
+      "as_of_date": "2015-01-01",
+      "forecast": 501.0,
+      "outcome": 500.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    },
+    {
+      "entity_id": 20,
+      "as_of_date": "2015-01-01",
+      "forecast": 1.0,
+      "outcome": 0.0,
+      "error": 1.0,
+      "abs_error": 1.0,
+      "label": null
+    }
+  ]
+}

@@ -9,6 +9,12 @@ a seeded value may legitimately be absent.
 A rename fails here first. Regenerate with ``just emacs-fixtures``
 (``TRIAGE_REGEN_EMACS_FIXTURES=1``), then run ``just emacs-test``: the ERT tests that still
 read the old field fail there, so the drift is caught on both sides.
+
+Two fixtures are compared by value, not shape: the problem-type table of ``triage
+postmodel kinds --json`` and the command tree (each plot, postmodel and check subcommand
+with its options). The ERT suite checks the menus against them, so a new plot kind or a
+newly gated command fails here until the fixtures are regenerated, and then fails in ERT
+until triage.el has an entry for it.
 """
 
 from __future__ import annotations
@@ -20,7 +26,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
+import typer
 import yaml
 from typer.testing import CliRunner
 
@@ -52,7 +60,25 @@ NAMES = (
     "query",
     "actions-list",
     "leakage-report",
+    "postmodel-kinds",
+    "cli-commands",
+    "model-show-regression",
+    "residuals",
+    "baseline",
+    "structure",
+    "structure-tree",
+    "importance",
+    "sensitivity",
+    "compare-rows",
+    "survival",
+    "near-miss",
+    "prototypes",
+    "metrics-report",
+    "history-report",
 )
+
+#: The fixtures compared by value: the ERT suite reads their values, not only their keys.
+VALUE_PINNED = ("postmodel-kinds", "cli-commands")
 
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 # Only timezone-aware timestamps: those are now()-generated. Seeded dates stay as they are.
@@ -142,7 +168,12 @@ def _check(live: dict[str, Any], tmp_path: Path) -> None:
         if not path.exists():
             failures.append(f"{path.name}: missing")
             continue
-        for diff in shape_differences(payload, json.loads(path.read_text())):
+        fixture = json.loads(path.read_text())
+        if name in VALUE_PINNED:
+            if _normalize(payload, tmp_path) != fixture:
+                failures.append(f"{path.name}: the live values differ from the fixture")
+            continue
+        for diff in shape_differences(payload, fixture):
             failures.append(f"{path.name} {diff}")
     if failures:
         pytest.fail(
@@ -247,3 +278,169 @@ def test_leakage_report_keeps_the_fixture_shape(
     report = json.loads(report_path.read_text())
     assert report["findings"]
     _check({"leakage-report": report}, tmp_path)
+
+
+# ------------------------------------------------------------------ the type table
+
+
+def _command_tree() -> dict[str, Any]:
+    """Each subcommand of plot, postmodel and check with its arguments and options, and
+    audition's options: what triage.el's menus pass. Hidden commands are left out, as
+    ``--help`` leaves them out."""
+    root = typer.main.get_command(app)
+    assert isinstance(root, click.Group)
+
+    def describe(command: click.Command) -> dict[str, Any]:
+        options = [p for p in command.params if isinstance(p, click.Option)]
+        return {
+            "arguments": [
+                p.name for p in command.params if isinstance(p, click.Argument)
+            ],
+            "options": [o for p in options for o in p.opts if o != "--help"],
+            "required": [max(p.opts, key=len) for p in options if p.required],
+        }
+
+    tree: dict[str, Any] = {}
+    for name in ("plot", "postmodel", "check"):
+        group = root.commands[name]
+        assert isinstance(group, click.Group)
+        tree[name] = {
+            sub: describe(command)
+            for sub, command in group.commands.items()
+            if not command.hidden
+        }
+    tree["audition"] = describe(root.commands["audition"])
+    return tree
+
+
+def test_the_type_table_and_the_command_tree_keep_their_values(tmp_path) -> None:
+    result = CliRunner().invoke(app, ["postmodel", "kinds", "--json"])
+    assert result.exit_code == 0, result.output
+    _check(
+        {"postmodel-kinds": json.loads(result.stdout), "cli-commands": _command_tree()},
+        tmp_path,
+    )
+
+
+# ------------------------------------------------------------------ the postmodel views
+
+
+def _evaluate(pool, experiment: str, timespan: str) -> None:
+    from triage.component.catwalk.in_pg_evaluation import evaluate_in_db
+
+    with pool.connection() as conn:
+        pairs = conn.execute(
+            "select distinct p.model_id, p.as_of_date from triage.predictions p"
+            " join triage.models m using (model_id) join triage.runs r using (run_id)"
+            " where r.experiment_hash = %(h)s and p.split_kind = 'test'",
+            {"h": experiment},
+        ).fetchall()
+    for p in pairs:
+        evaluate_in_db(pool, p["model_id"], p["as_of_date"], timespan)
+
+
+def _first_model(pool, model_group_id: int) -> int:
+    with pool.connection() as conn:
+        return conn.execute(
+            "select min(model_id) as m from triage.models where model_group_id = %(g)s",
+            {"g": model_group_id},
+        ).fetchone()["m"]
+
+
+def _seed_postmodel(pool, data: Path) -> dict[str, Any]:
+    """One Experiment per view, from the phase tests' seeders: the ids the verbs read."""
+    from tests.test_baseline_compare import _seed as seed_baseline
+    from tests.test_common_rows import EXP as COMMON_EXP
+    from tests.test_common_rows import _seed as seed_common_rows
+    from tests.test_near_miss_prototypes import seed_model
+    from tests.test_structure import _ridge_design, _seed_groups, _store
+    from tests.test_survival_diagnostics import seed_survival
+
+    ids: dict[str, Any] = {"classifier": seed_model(pool, data, tag="clf")}
+    _evaluate(pool, "exp-clf", "6 months")
+    groups = seed_baseline(pool)
+    _evaluate(pool, "exp-baseline", "1 month")
+    ids["regression_group"] = groups["dominant"]
+    ids["regression"] = _first_model(pool, groups["dominant"])
+    ridge, x_train, x_test = _ridge_design()
+    ids["ridge"] = _store(pool, data, ridge, x_train, x_test, "ridge")
+    from sklearn.tree import DecisionTreeRegressor
+
+    tree = DecisionTreeRegressor(max_depth=3).fit(x_train, x_train[:, 0])
+    ids["tree"] = _store(pool, data, tree, x_train, x_test, "tree")
+    ids["survival"] = seed_survival(pool, data)["model_id"]
+    seed_common_rows(pool)
+    ids["common"] = COMMON_EXP
+    ids["sensitivity_group"] = _seed_groups(
+        pool, [{"alpha": a, "fit_intercept": True} for a in (0.1, 1.0, 10.0)]
+    )[0]
+    return ids
+
+
+def test_postmodel_verbs_keep_the_fixture_shapes(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    ids = _seed_postmodel(db_pool_greenfield, data)
+    cli = _cli(monkeypatch, tmp_path, db_url)
+    report = tmp_path / "metrics.json"
+    audit = cli.run(
+        "check", "metrics", "--experiment", "exp-clf", "--json", str(report)
+    )
+    assert audit.exit_code == 0, audit.output
+    live = {
+        "model-show-regression": cli.json(
+            "model", "show", str(ids["regression"]), "--json"
+        ),
+        "residuals": cli.json(
+            "postmodel", "residuals", str(ids["regression"]), "--json"
+        ),
+        "baseline": cli.json(
+            "postmodel", "baseline", str(ids["regression_group"]), "--json"
+        ),
+        "structure": cli.json("postmodel", "structure", str(ids["ridge"]), "--json"),
+        "structure-tree": cli.json(
+            "postmodel", "structure", str(ids["tree"]), "--json"
+        ),
+        "importance": cli.json(
+            "postmodel", "importance", str(ids["sensitivity_group"]), "--json"
+        ),
+        "sensitivity": cli.json(
+            "postmodel", "sensitivity", "exp-sens", "--param", "alpha", "--json"
+        ),
+        "compare-rows": cli.json("postmodel", "compare-rows", ids["common"], "--json"),
+        "survival": cli.json(
+            "postmodel", "survival", str(ids["survival"]), "--horizon", "30", "--json"
+        ),
+        "near-miss": cli.json(
+            "postmodel", "near-miss", str(ids["classifier"]), "--json"
+        ),
+        "prototypes": cli.json(
+            "postmodel", "prototypes", str(ids["classifier"]), "-n", "2", "--json"
+        ),
+        "metrics-report": json.loads(report.read_text()),
+    }
+    # the views draw these parts: the fixture must not pin an empty list for them
+    assert live["residuals"]["dates"] and live["residuals"]["largest_errors"]
+    assert live["baseline"]["chance"] and live["baseline"]["segments"]
+    assert live["structure"]["mean_shift"]
+    assert live["structure-tree"]["leaf_support"]
+    assert live["importance"]["models"] and live["importance"]["stability"]
+    assert live["survival"]["dates"] and live["prototypes"] and live["near-miss"]
+    assert live["model-show-regression"]["calibration"]
+    assert live["model-show-regression"]["card"]["problem_type"] == "regression"
+    _check(live, tmp_path)
+
+
+def test_history_report_keeps_the_fixture_shape(
+    db_url, db_pool, tmp_path, monkeypatch
+) -> None:
+    """The report ``check history --json PATH`` writes; one series has gaps."""
+    from tests.test_history_check import SPARSE, _config, _run, seed_events
+
+    seed_events(db_pool)
+    result, report = _run(tmp_path, monkeypatch, db_url, _config(SPARSE))
+    assert result.exit_code == 1, result.output
+    assert report["worst_entities"]
+    _check({"history-report": report}, tmp_path)

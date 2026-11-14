@@ -251,7 +251,8 @@ that failed to parse."
                              (t "—"))))
           (triage--remember 'triage-experiment hash
                             (list :hash hash :experiment exp :configs configs :paths paths
-                                  :config (and (= (length paths) 1) (car paths))))
+                                  :config (and (= (length paths) 1) (car paths))
+                                  :type problem))
           (magit-insert-section (triage-experiment hash)
             (insert "  " (propertize (triage--pad name 24) 'font-lock-face 'magit-section-secondary-heading)
                     " " (triage--pad (triage--str problem) 18)

@@ -25,9 +25,10 @@
 ;; prints, so every number on screen also comes out of a CLI verb.
 ;;
 ;; This file holds what every buffer needs: project detection, the
-;; triage executable, the process environment and the asynchronous
-;; JSON call.  The buffers and menus live in triage-status.el,
-;; triage-object.el and triage-transient.el.
+;; triage executable, the process environment, the asynchronous JSON
+;; call and the problem-type table the menus grey entries out by.  The
+;; buffers and menus live in triage-status.el, triage-object.el,
+;; triage-transient.el and triage-postmodel.el.
 
 ;;; Code:
 
@@ -78,6 +79,14 @@ A list of strings is a command prefix, such as
 (defcustom triage-table-limit 200
   "How many rows the table browser reads from a relation."
   :type 'natnum
+  :group 'triage)
+
+(defcustom triage-kinds-timeout 10
+  "Seconds a menu waits, once per project, for the problem-type table.
+The table comes from triage postmodel kinds --json.  When it has not
+arrived in time, the menus grey nothing out by problem type and the
+CLI refuses a wrong type itself."
+  :type 'number
   :group 'triage)
 
 ;;;; Faces
@@ -136,11 +145,18 @@ A directory with no root maps to the symbol `none'.")
 (defvar triage--executable-cache (make-hash-table :test #'equal)
   "Command prefixes resolved so far, keyed by project root.")
 
+(defvar triage--kinds-cache (make-hash-table :test #'equal)
+  "The problem-type table of each project root.
+A root maps to the payload of triage postmodel kinds --json, to
+`loading' while the call is out, to `slow' when a menu stopped
+waiting for it, or to `failed'.")
+
 (defun triage-clear-caches ()
-  "Forget every cached project root and executable."
+  "Forget every cached project root, executable and problem-type table."
   (interactive)
   (clrhash triage--root-cache)
-  (clrhash triage--executable-cache))
+  (clrhash triage--executable-cache)
+  (clrhash triage--kinds-cache))
 
 ;;;; Project detection
 
@@ -394,35 +410,104 @@ REQUIRE-CONTRACT non-nil means PAYLOAD must carry a contract key."
       (format "triage-pg >= %s needed (%s missing)" triage--min-version
               require-contract)))))
 
-(cl-defun triage--call-json (args callback &key errback require-contract)
+(defun triage--failure-text (stdout stderr)
+  "Return the text of a failed call from its STDOUT and STDERR.
+The log lines come first on standard error.  The CLI prints its own
+refusal (the exit 1 or 2 of a command run on the wrong item) on
+standard output, so that output goes last and its last line is the
+message."
+  (if (string-blank-p (or stdout ""))
+      stderr
+    (concat stderr (if (string-suffix-p "\n" (or stderr "")) "" "\n") stdout)))
+
+(cl-defun triage--call-json (args callback &key errback require-contract accept)
   "Run triage with ARGS asynchronously and call CALLBACK with its JSON.
 The payload is parsed into alists (symbol keys) and lists, with
-JSON null as nil and false as :false.  On a non-zero exit, or when
-the output is not JSON, the error goes to `triage--report-error'
-and ERRBACK (or the echo area) gets its last line.  When the
-payload's contract is newer than this file's, or REQUIRE-CONTRACT
-\(a description of the call) is non-nil and the payload has none,
-ERRBACK gets a message that names the side to update.  Return
-immediately."
+JSON null as nil and false as :false.  ACCEPT lists the non-zero
+exit codes whose JSON output is still a payload, such as the exit 1
+of postmodel baseline when the groups share one test date.  On any
+other non-zero exit, or when the output is not JSON, the error goes
+to `triage--report-error' and ERRBACK (or the echo area) gets its
+last line.  When the payload's contract is newer than this file's,
+or REQUIRE-CONTRACT \(a description of the call) is non-nil and the
+payload has none, ERRBACK gets a message that names the side to
+update.  Return immediately."
   (let ((command (append (triage--executable) args)))
     (triage--call
      args
      (lambda (code stdout stderr)
-       (if (not (zerop code))
-           (triage--report-error command code stderr errback)
-         (let ((payload (triage--parse-json stdout)))
-           (if (eq payload 'invalid)
-               ;; `triage query --json' prints a failed statement's error on
-               ;; standard output and exits 0, so the output is the message.
-               (triage--report-error command code
-                                     (if (string-blank-p stdout) stderr stdout)
-                                     errback)
-             (let ((problem (triage--contract-problem payload require-contract)))
-               (if problem
-                   (progn (triage--log-error command code problem)
-                          (if errback (funcall errback problem)
-                            (message "triage: %s" problem)))
-                 (funcall callback payload))))))))))
+       (let ((payload (if (or (zerop code) (memq code accept))
+                          (triage--parse-json stdout)
+                        'failed)))
+         (cond
+          ((and (eq payload 'invalid) (zerop code))
+           ;; `triage query --json' prints a failed statement's error on
+           ;; standard output and exits 0, so the output is the message.
+           (triage--report-error command code
+                                 (if (string-blank-p stdout) stderr stdout)
+                                 errback))
+          ((memq payload '(failed invalid))
+           (triage--report-error command code (triage--failure-text stdout stderr) errback))
+          (t
+           (let ((problem (triage--contract-problem payload require-contract)))
+             (if problem
+                 (progn (triage--log-error command code problem)
+                        (if errback (funcall errback problem)
+                          (message "triage: %s" problem)))
+               (funcall callback payload))))))))))
+
+;;;; The problem-type table
+
+(defun triage--load-kinds (root)
+  "Start reading the problem-type table of ROOT, unless it is known.
+The call runs from the current buffer, whose environment it uses."
+  (unless (gethash root triage--kinds-cache)
+    (puthash root 'loading triage--kinds-cache)
+    (triage--call-json
+     '("postmodel" "kinds" "--json")
+     (lambda (payload) (puthash root payload triage--kinds-cache))
+     :errback (lambda (msg)
+                (puthash root 'failed triage--kinds-cache)
+                (message "triage: no problem-type table, so no entry is greyed out by type (%s)"
+                         msg)))))
+
+(defun triage--kinds ()
+  "Return the problem-type table of this buffer's project, or nil.
+The table is the payload of triage postmodel kinds --json: the
+commands gated by problem type and the error-tree rule of each type.
+The first call of a session reads it and waits up to
+`triage-kinds-timeout' seconds; later calls use the cache, and
+`triage-clear-caches' forgets it."
+  (when-let* ((root (or triage--root (triage-project-root))))
+    (triage--load-kinds root)
+    (let ((deadline (+ (float-time) triage-kinds-timeout)))
+      (while (and (eq (gethash root triage--kinds-cache) 'loading)
+                  (< (float-time) deadline))
+        (accept-process-output nil 0.05)))
+    (when (eq (gethash root triage--kinds-cache) 'loading)
+      (puthash root 'slow triage--kinds-cache))
+    (let ((table (gethash root triage--kinds-cache)))
+      (and (consp table) table))))
+
+(defun triage--command-entry (command)
+  "Return the table's entry for COMMAND, such as \"plot gains\", or nil.
+nil means the command reads every problem type."
+  (alist-get (intern command) (alist-get 'commands (triage--kinds))))
+
+(defun triage--refuses-p (command &optional type)
+  "Return non-nil when COMMAND refuses the problem TYPE.
+TYPE defaults to the problem type at point.  A command the table
+does not gate, an unknown type or a missing table refuse nothing:
+the CLI decides then."
+  (when-let* ((type (or type (triage--at-point :type)))
+              (entry (triage--command-entry command)))
+    (not (member type (alist-get 'accepts entry)))))
+
+(defun triage--error-tree-rule (type)
+  "Return the error-tree rule of the problem TYPE, or nil.
+It is an alist of `kinds', the kinds --kind takes for TYPE, and
+`horizon', one of \"required\", \"refused\" or \"optional\"."
+  (and type (alist-get (intern type) (alist-get 'error_tree (triage--kinds)))))
 
 ;;;; Long-running verbs
 
@@ -565,6 +650,49 @@ group of REGEXP, when the output first matches.  Return the buffer."
           (if face (propertize (triage--str value) 'font-lock-face face) (triage--str value))
           "\n"))
 
+(defun triage--cell (row getter)
+  "Return the text of the cell of ROW under GETTER.
+GETTER is a key of ROW, or a function called with ROW."
+  (triage--str (if (symbolp getter) (alist-get getter row) (funcall getter row))))
+
+(defun triage--insert-table (type title rows columns &optional row-section hide)
+  "Insert a section of TYPE headed TITLE and the count of ROWS.
+COLUMNS is a list of (LABEL GETTER): the column's heading, and a
+key of the row or a function from the row to its value.  Each column
+is as wide as its widest cell, up to 40; the last one is never cut
+short.  ROW-SECTION, when non-nil, is a function from a row to
+\(SECTION-TYPE VALUE DATA): the row becomes a section that RET and
+the menus read.  HIDE non-nil starts the section folded."
+  (let* ((cells (mapcar (lambda (row)
+                          (mapcar (lambda (col) (triage--cell row (cadr col))) columns))
+                        rows))
+         (last-column (1- (length columns)))
+         (widths (seq-map-indexed
+                  (lambda (col i)
+                    (funcall (if (= i last-column) #'identity (lambda (w) (min 40 w)))
+                             (apply #'max (string-width (car col))
+                                    (mapcar (lambda (r) (string-width (nth i r))) cells))))
+                  columns))
+         (line (lambda (texts)
+                 (concat "  " (string-trim-right
+                               (mapconcat #'identity
+                                          (seq-mapn #'triage--pad texts widths) " "))
+                         "\n"))))
+    (magit-insert-section ((eval type) nil hide)
+      (magit-insert-heading (format "%s (%d)" title (length rows)))
+      (when rows
+        (insert (propertize (funcall line (mapcar #'car columns)) 'font-lock-face 'triage-dim))
+        (seq-mapn
+         (lambda (row texts)
+           (if-let* ((spec (and row-section (funcall row-section row))))
+               (progn
+                 (triage--remember (car spec) (cadr spec) (caddr spec))
+                 (magit-insert-section ((eval (car spec)) (cadr spec))
+                   (insert (funcall line texts))))
+             (insert (funcall line texts))))
+         rows cells))
+      (insert "\n"))))
+
 ;;;; Section buffers
 
 (declare-function triage-dispatch "triage-transient" ())
@@ -578,6 +706,7 @@ group of REGEXP, when the output first matches.  Return the buffer."
 (declare-function triage-serve-menu "triage-transient" ())
 (declare-function triage-actions "triage-transient" ())
 (declare-function triage-tui "triage-transient" ())
+(declare-function triage-postmodel-menu "triage-postmodel" ())
 (declare-function triage-query "triage-object" (sql))
 
 (defvar-local triage--refresh-function nil
@@ -613,6 +742,7 @@ The function receives the section's value and its data.")
     (define-key map (kbd "l") #'triage-results-menu)
     (define-key map (kbd "f") #'triage-score-menu)
     (define-key map (kbd "p") #'triage-plot-menu)
+    (define-key map (kbd "P") #'triage-postmodel-menu)
     (define-key map (kbd "m") #'triage-maintain-menu)
     (define-key map (kbd "s") #'triage-serve-menu)
     (define-key map (kbd ":") #'triage-query)
@@ -669,10 +799,36 @@ When there is none, signal that there is nothing to WHAT."
 (defun triage--at-point (kind)
   "Return the KIND of item at point, or nil.
 KIND is one of :config (a config path relative to the root),
-:hash (an experiment_hash), :run (a run id), :model (a model id)
-or :group (a model group id).  The section at point and its
-parents are asked first, then the buffer's `triage--context', then
-a config file the current buffer visits."
+:hash (an experiment_hash), :run (a run id), :model (a model id),
+:group (a model group id) or :type (the problem_type of the item at
+point).  The section at point and its parents are asked first, then
+the buffer's `triage--context', then a config file the current
+buffer visits.  A :type nothing records is the problem type the
+status buffer lists for the Experiment at point."
+  (if (eq kind :type)
+      (or (triage--lookup :type)
+          (triage--hash-problem-type (triage--lookup :hash)))
+    (triage--lookup kind)))
+
+(defun triage--hash-problem-type (hash)
+  "Return the problem_type the status buffer lists for the Experiment HASH."
+  (when-let* (((stringp hash))
+              (status (triage--status-payload)))
+    (seq-some (lambda (row)
+                (and (equal (alist-get 'experiment_hash row) hash)
+                     (alist-get 'problem_type row)))
+              (append (alist-get 'experiments status) (alist-get 'configs status)))))
+
+(defun triage--problem-type-of-hash (hash)
+  "Return the problem type of the Experiment HASH, or nil.
+The status buffer is asked first, then the current buffer, when the
+Experiment at point is HASH."
+  (or (triage--hash-problem-type hash)
+      (and (equal hash (triage--lookup :hash)) (triage--lookup :type))))
+
+(defun triage--lookup (kind)
+  "Return the KIND that the section at point, the row or the buffer records.
+See `triage--at-point', which also derives a :type."
   (or (let ((section (and (derived-mode-p 'magit-section-mode) (magit-current-section)))
             found)
         (while (and section (not found))
@@ -799,6 +955,7 @@ Signal a `user-error' when there is neither."
 (cl-eval-when (load eval)
   (require 'triage-status)
   (require 'triage-object)
-  (require 'triage-transient))
+  (require 'triage-transient)
+  (require 'triage-postmodel))
 
 ;;; triage.el ends here

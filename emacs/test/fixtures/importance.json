@@ -1,0 +1,29 @@
+{
+  "model_group_id": 13,
+  "top": 5,
+  "models": [
+    {
+      "model_id": 13,
+      "train_end_time": "2014-06-01",
+      "families": {
+        "inspections.date": 0.75,
+        "x.y": 0.25
+      }
+    },
+    {
+      "model_id": 14,
+      "train_end_time": "2014-12-01",
+      "families": {
+        "inspections.date": 0.75,
+        "facilities.zip_code": 0.25
+      }
+    }
+  ],
+  "stability": [
+    {
+      "model_id": 14,
+      "previous_model_id": 13,
+      "jaccard": 0.3333333333333333
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "model_id": 7,
+  "estimator": "Ridge",
+  "forecast_structure": null,
+  "mean_shift": {
+    "estimator": "Ridge",
+    "intercept": 4.003845958672751,
+    "mean_forecast_train": 3.877315899288877,
+    "mean_forecast_test": 4.6018779118110835,
+    "stored_mean_test": 4.601877911811083,
+    "check_error": 8.881784197001252e-16,
+    "shift": 0.724562012522207,
+    "features": [
+      {
+        "feature": "COUNT(inspections.date|interval=P1M)",
+        "family": "inspections.date",
+        "beta": 1.9996723825891252,
+        "mean_train": -0.018164518335082414,
+        "mean_test": 1.0498512513967464,
+        "contribution": 2.1356816389024047
+      },
+      {
+        "feature": "x",
+        "family": "x",
+        "beta": 0.5016384944133343,
+        "mean_train": 0.01172332235309553,
+        "mean_test": -1.9166761339511913,
+        "contribution": -0.9673593998879748
+      },
+      {
+        "feature": "facilities.zip_code=60622",
+        "family": "facilities.zip_code",
+        "beta": -0.9995563381513324,
+        "mean_train": 0.09613049293311304,
+        "mean_test": 0.540087686294472,
+        "contribution": -0.44376022649222296
+      }
+    ],
+    "families": [
+      {
+        "family": "inspections.date",
+        "n_features": 1,
+        "contribution": 2.1356816389024047,
+        "share": 0.6021430238584957
+      },
+      {
+        "family": "x",
+        "n_features": 1,
+        "contribution": -0.9673593998879748,
+        "share": 0.27274135975895947
+      },
+      {
+        "family": "facilities.zip_code",
+        "n_features": 1,
+        "contribution": -0.44376022649222296,
+        "share": 0.1251156163825449
+      }
+    ]
+  },
+  "unavailable": [
+    "leaf support not available for Ridge"
+  ]
+}

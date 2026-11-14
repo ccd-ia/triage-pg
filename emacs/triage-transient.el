@@ -13,6 +13,12 @@
 ;; otherwise the suffix asks for one.  Each infix maps to one flag of
 ;; the verb.
 ;;
+;; An entry is greyed out when nothing it can run on is at hand, and
+;; when the problem type at point is one its CLI command refuses.  The
+;; second test reads the table triage postmodel kinds --json prints
+;; (see `triage--refuses-p'), so the menus hold no copy of it.  The
+;; postmodel menu lives in triage-postmodel.el.
+;;
 ;; triage reset is in no menu.  It is reachable through `triage-actions'
 ;; (!), where the CLI's own confirmation applies.
 
@@ -25,6 +31,7 @@
 (declare-function triage-model-group-show "triage-object" (hash group))
 (declare-function triage-table--show "triage-object" (name args &rest keys))
 (declare-function triage-model-show "triage-object" (model-id))
+(declare-function triage-postmodel-menu "triage-postmodel" ())
 (declare-function vterm "vterm" (&optional arg))
 (declare-function make-term "term" (name program &optional startfile &rest switches))
 (declare-function term-mode "term" ())
@@ -62,6 +69,45 @@ At hand means at point or offered by a prompt."
 (defun triage-transient--no-plot-target-p ()
   "Return non-nil when neither a model nor a model group is at hand."
   (triage-transient--lacks :model :group))
+
+(defun triage-transient--no-postmodel-target-p ()
+  "Return non-nil when no model, model group or Experiment is at hand."
+  (triage-transient--lacks :model :group :hash))
+
+(defun triage-transient--inapt-p (kinds command)
+  "Return non-nil when no item of KINDS is at hand, or the type refuses COMMAND.
+COMMAND names a CLI command as the problem-type table does, such as
+\"plot gains\"; the problem type is the one at point in the buffer
+the menu was opened from."
+  (or (apply #'triage-transient--lacks kinds)
+      (with-current-buffer (triage-transient--buffer)
+        (triage--refuses-p command))))
+
+(defmacro triage-transient--define-gate (name kinds command)
+  "Define NAME, the :inapt-if predicate of the entry running COMMAND.
+The entry runs on an item of KINDS, a list such as (:model).  NAME's
+`triage-command' property holds COMMAND, so the ERT suite can check
+that every command the table gates has an entry."
+  `(progn
+     (defun ,name ()
+       ,(format "Return non-nil when no %s is at hand, or its type is refused.\nThe entry runs triage %s."
+                (mapconcat (lambda (k) (substring (symbol-name k) 1)) kinds " or ")
+                command)
+       (triage-transient--inapt-p ',kinds ,command))
+     (put ',name 'triage-command ,command)))
+
+(defun triage-transient--flag-value (args flag)
+  "Return the value of FLAG=VALUE in ARGS, or nil."
+  (when-let* ((arg (car (triage-transient--only args (list flag)))))
+    (and (string-prefix-p (concat flag "=") arg)
+         (substring arg (1+ (length flag))))))
+
+(defun triage-transient--read-cut (prompt initial-input history)
+  "Read a segment cut with PROMPT, INITIAL-INPUT and HISTORY.
+The candidates are the cuts the residual commands take; subset:NAME
+names a Subset and is completed by hand."
+  (completing-read prompt '("date" "band" "sbc" "cold-start" "all" "subset:")
+                   nil nil initial-input history))
 
 (defun triage-transient--only (args flags)
   "Return the elements of ARGS that are one of FLAGS.
@@ -139,11 +185,41 @@ The status buffer refreshes when the run ends.  With
 
 ;;;###autoload (autoload 'triage-check-menu "triage-transient" nil t)
 (transient-define-prefix triage-check-menu ()
-  "Check an Experiment's config for leakage with triage check leakage."
+  "Check a config or the stored metrics with triage check."
   ["Arguments"
-   ("-d" "Only these as_of_dates (D1,D2)" "--dates=")]
-  ["Check"
-   ("c" "Leakage check" triage-check-leakage)])
+   ("-d" "Leakage: only these as_of_dates (D1,D2)" "--dates=")
+   ("-a" "History: render at these as_of_dates (D1,D2)" "--as-of=")
+   ("-t" "Metrics: the largest gap that passes" "--tolerance=")]
+  [["Config"
+    ("c" "Leakage check" triage-check-leakage)
+    ("h" "History on the calendar" triage-check-history)]
+   ["Stored metrics against a second implementation"
+    ("m" "Of the model" triage-check-metrics-model :inapt-if triage-transient--no-model-p)
+    ("g" "Of the model group" triage-check-metrics-group :inapt-if triage-transient--no-group-p)
+    ("e" "Of the Experiment" triage-check-metrics-experiment
+     :inapt-if triage-transient--no-hash-p)]])
+
+(cl-defun triage-check--run (label head flags &key clean render)
+  "Run triage HEAD --json PATH FLAGS, a check that writes a JSON report.
+HEAD is the check and its target, such as (\"check\" \"leakage\"
+CONFIG); PATH is a temporary file.  LABEL names the check in
+messages.  Exit 1 opens the report: RENDER is called with PATH and
+deletes it.  Exit 0 says CLEAN, or opens the report too when CLEAN
+is nil.  Any other exit shows the CLI's error."
+  (let* ((report (triage-transient--temp ".json"))
+         (call (append head (list "--json" report) flags))
+         (command (append (triage--executable) call)))
+    (message "triage: %s…" label)
+    (triage--call
+     call
+     (lambda (code stdout stderr)
+       (pcase code
+         ((guard (and (zerop code) clean))
+          (delete-file report)
+          (message "triage: %s" clean))
+         ((or 0 1) (funcall render report))
+         (_ (when (file-exists-p report) (delete-file report))
+            (triage--report-error command code (triage--failure-text stdout stderr) nil)))))))
 
 (defun triage-check-leakage (config args)
   "Check CONFIG for leakage with the flags ARGS.
@@ -151,19 +227,145 @@ Exit 0 says there are no differences, exit 1 opens the report and
 any other exit shows the CLI's error."
   (interactive (list (triage--read-target :config "Config to check: ")
                      (transient-args 'triage-check-menu)))
-  (let* ((report (triage-transient--temp ".json"))
-         (args (append (list "check" "leakage" config "--json" report) args))
-         (command (append (triage--executable) args)))
-    (message "triage: checking %s for leakage…" config)
-    (triage--call
-     args
-     (lambda (code stdout stderr)
-       (pcase code
-         (0 (delete-file report)
-            (message "triage: leakage check of %s found no differences" config))
-         (1 (triage-leakage-report config report))
-         (_ (when (file-exists-p report) (delete-file report))
-            (triage--report-error command code (concat stdout stderr) nil)))))))
+  (triage-check--run (format "checking %s for leakage" config)
+                     (list "check" "leakage" config)
+                     (triage-transient--only args '("--dates"))
+                     :clean (format "leakage check of %s found no differences" config)
+                     :render (lambda (report) (triage-leakage-report config report))))
+
+(defun triage-check-history (config args)
+  "Check that CONFIG's target-history series is complete, with the flags ARGS.
+Exit 0 says every series is complete, exit 1 opens the report of
+the gaps and off-grid rows and any other exit shows the CLI's error."
+  (interactive (list (triage--read-target :config "Config to check: ")
+                     (transient-args 'triage-check-menu)))
+  (triage-check--run (format "checking the history of %s" config)
+                     (list "check" "history" config)
+                     (triage-transient--only args '("--as-of"))
+                     :clean (format "history of %s is complete on the calendar" config)
+                     :render (lambda (report)
+                               (triage-check--show-report
+                                (format "history %s" (file-name-nondirectory config))
+                                report (lambda (payload)
+                                         (triage-check--insert-history config payload))))))
+
+(defun triage-check-metrics (flag target args)
+  "Audit the stored metrics of TARGET, passed as FLAG, with the flags ARGS.
+FLAG is --model, --group or --experiment.  The report opens on exit
+0 and 1, since the metrics it lists are the result either way."
+  (let ((target (if (numberp target) (number-to-string target) target)))
+    (triage-check--run (format "auditing the metrics of %s %s" (substring flag 2) target)
+                       (list "check" "metrics" (concat flag "=" target))
+                       (triage-transient--only args '("--tolerance"))
+                       :render (lambda (report)
+                                 (triage-check--show-report
+                                  (format "metrics %s %s" (substring flag 2)
+                                          (triage--short target))
+                                  report #'triage-check--insert-metrics)))))
+
+(defun triage-check-metrics-model (model args)
+  "Audit the stored metrics of MODEL with the flags ARGS."
+  (interactive (list (triage--read-target :model "Model: ")
+                     (transient-args 'triage-check-menu)))
+  (triage-check-metrics "--model" model args))
+
+(defun triage-check-metrics-group (group args)
+  "Audit the stored metrics of the models of GROUP with the flags ARGS."
+  (interactive (list (triage--read-target :group "Model group: ")
+                     (transient-args 'triage-check-menu)))
+  (triage-check-metrics "--group" group args))
+
+(defun triage-check-metrics-experiment (hash args)
+  "Audit the stored metrics of the models of the Experiment HASH.
+ARGS are the flags of the check menu."
+  (interactive (list (triage--read-target :hash "Experiment: ")
+                     (transient-args 'triage-check-menu)))
+  (triage-check-metrics "--experiment" hash args))
+
+(define-derived-mode triage-check-report-mode triage-section-mode "Triage-Check"
+  "Mode for the report of a history or metrics check."
+  :group 'triage)
+
+(defun triage-check--show-report (name file insert)
+  "Show the report the CLI wrote to FILE in *triage: NAME*, then delete FILE.
+INSERT inserts the sections from the parsed report."
+  (let ((payload (with-temp-buffer
+                   (insert-file-contents file)
+                   (triage--parse-json (buffer-string))))
+        (state (triage--capture))
+        (buffer (get-buffer-create (format "*triage: %s*" name))))
+    (delete-file file)
+    (with-current-buffer buffer
+      (triage-check-report-mode)
+      (triage--restore state)
+      (setq triage--payload payload)
+      (triage--redraw 'triage-check-report
+                      (lambda ()
+                        (if (eq payload 'invalid)
+                            (insert (propertize "The report file is not JSON.\n"
+                                                'font-lock-face 'triage-danger))
+                          (funcall insert payload)))))
+    (pop-to-buffer buffer)
+    buffer))
+
+(defun triage-check--count-line (label value)
+  "Insert LABEL and the count VALUE, in the warning face when it is not 0."
+  (triage--key-line label value (if (and (numberp value) (> value 0)) 'triage-warning nil)))
+
+(defun triage-check--insert-history (config payload)
+  "Insert the history report PAYLOAD of CONFIG."
+  (magit-insert-section (triage-history-summary)
+    (magit-insert-heading (format "History of %s on the calendar" config))
+    (triage--key-line "as_of_dates" (mapconcat #'triage--str (alist-get 'as_of_dates payload) ", "))
+    (triage--key-line "history_period" (alist-get 'history_period payload))
+    (triage--key-line "series width" (alist-get 'history_series_width payload))
+    (triage--key-line "fill missing" (or (alist-get 'fill_missing_periods payload) "unset (strict)"))
+    (triage--key-line "series" (alist-get 'n_series payload))
+    (triage-check--count-line "with gaps" (alist-get 'n_series_with_gaps payload))
+    (triage-check--count-line "missing periods" (alist-get 'n_gaps payload))
+    (triage-check--count-line "off the grid" (alist-get 'n_misaligned payload))
+    (triage-check--count-line "at/after as_of" (alist-get 'n_leaked payload))
+    (triage--key-line "clean" (alist-get 'clean payload)
+                      (if (eq (alist-get 'clean payload) t) 'triage-ok 'triage-danger))
+    (insert "\n"))
+  (triage--insert-table 'triage-history-worst "Entities with the most missing periods"
+                        (alist-get 'worst_entities payload)
+                        '(("entity_id" entity_id) ("missing" n_gaps) ("present" n_present)))
+  (triage--insert-table 'triage-history-misaligned "Rows that cannot be placed"
+                        (alist-get 'misaligned_examples payload)
+                        '(("entity_id" entity_id) ("as_of_date" as_of_date) ("period" period)
+                          ("nearest grid date" nearest_grid_date) ("problem" problem))))
+
+(defun triage-check--insert-metrics (payload)
+  "Insert the metric-audit report PAYLOAD."
+  (magit-insert-section (triage-metrics-summary)
+    (magit-insert-heading
+      (format "Metric audit of %d model(s): %s" (length (alist-get 'model_ids payload))
+              (if (eq (alist-get 'passed payload) t)
+                  (propertize "passed" 'font-lock-face 'triage-ok)
+                (propertize "not passed" 'font-lock-face 'triage-danger))))
+    (triage--key-line "models" (mapconcat #'triage--str (alist-get 'model_ids payload) ", "))
+    (triage--key-line "tolerance" (format "%g" (alist-get 'tolerance payload)))
+    (triage--key-line "values checked" (alist-get 'checked payload))
+    (insert "\n"))
+  (triage--insert-table
+   'triage-metrics-rows "Metrics" (alist-get 'metrics payload)
+   `(("metric" metric) ("checked" checked) ("failed" failed)
+     ("largest gap" ,(lambda (m) (format "%.3g" (or (alist-get 'max_gap m) 0))))
+     ("worst row" ,(lambda (m)
+                     (let ((w (alist-get 'worst m)))
+                       (if (null w) "—"
+                         (format "model %s · %s · %s%s · stored %s vs %s"
+                                 (triage--str (alist-get 'model_id w))
+                                 (triage--str (alist-get 'split_kind w))
+                                 (triage--str (alist-get 'as_of_date w))
+                                 (let ((p (alist-get 'parameter w)))
+                                   (if (and p (not (string-empty-p p))) (concat " · " p) ""))
+                                 (triage--str (alist-get 'stored w))
+                                 (triage--str (alist-get 'recomputed w)))))))))
+  (triage--insert-table 'triage-metrics-not-audited "Not audited"
+                        (alist-get 'not_audited payload)
+                        '(("metric" metric) ("rows" rows) ("reason" reason))))
 
 (define-derived-mode triage-leakage-mode triage-section-mode "Triage-Leakage"
   "Mode for the report of a leakage check."
@@ -262,7 +464,9 @@ when the command ends."
   ["Arguments"
    ("-m" "Metric" "--metric=")
    ("-p" "Parameter" "--parameter=")
-   ("-w" "Windowed (leaderboard)" "--windowed")]
+   ("-w" "Windowed (leaderboard)" "--windowed")
+   ("-C" "Audition on the rows every group scored" "--common-rows")
+   ("-g" "Audition: only these groups (G1,G2)" "--groups=")]
   ["Results"
    ("l" "Leaderboard" triage-leaderboard :inapt-if triage-transient--no-hash-p)
    ("R" "Refresh the leaderboard" triage-leaderboard-refresh :inapt-if triage-transient--no-hash-p)
@@ -278,11 +482,12 @@ REFRESH non-nil adds --refresh."
 
 (defun triage--leaderboard-table (hash args name)
   "Show the leaderboard rows of triage ARGS for HASH in the table NAME."
-  (triage-table--show name args
-                      :on-ret (lambda (row) (triage-model-show (alist-get 'model_id row)))
-                      :row-context (lambda (row) (list :model (alist-get 'model_id row)
-                                                       :group (alist-get 'model_group_id row)
-                                                       :hash hash))))
+  (let ((type (triage--problem-type-of-hash hash)))
+    (triage-table--show name args
+                        :on-ret (lambda (row) (triage-model-show (alist-get 'model_id row)))
+                        :row-context (lambda (row) (list :model (alist-get 'model_id row)
+                                                         :group (alist-get 'model_group_id row)
+                                                         :hash hash :type type)))))
 
 (defun triage-leaderboard (hash args)
   "Show the leaderboard of the Experiment HASH, filtered by the flags ARGS."
@@ -302,24 +507,28 @@ too, since its pending list counts runs missing from the matview."
     (triage--refresh-status-buffer)))
 
 (defun triage-audition (hash args)
-  "Show the audition of the Experiment HASH with the flags ARGS."
+  "Show the audition of the Experiment HASH with the flags ARGS.
+With --common-rows the CLI first evaluates the groups on the rows
+all of them scored, and the audition reads that Subset."
   (interactive (list (triage--read-target :hash "Experiment: ")
                      (transient-args 'triage-results-menu)))
   (triage-json-show (format "audition %s" (triage--short hash))
                     (append (list "audition" hash "--json")
-                            (triage-transient--only args '("--metric" "--parameter")))))
+                            (triage-transient--only args '("--metric" "--parameter"
+                                                           "--common-rows" "--groups")))))
 
 (defun triage-model-groups (hash args)
   "Show the model groups of the Experiment HASH with the flags ARGS."
   (interactive (list (triage--read-target :hash "Experiment: ")
                      (transient-args 'triage-results-menu)))
-  (triage-table--show (format "models %s" (triage--short hash))
-                      (append (list "models" hash "--json")
-                              (triage-transient--only args '("--metric" "--parameter")))
-                      :on-ret (lambda (row) (triage-model-group-show
-                                             hash (alist-get 'model_group_id row)))
-                      :row-context (lambda (row) (list :group (alist-get 'model_group_id row)
-                                                       :hash hash))))
+  (let ((type (triage--problem-type-of-hash hash)))
+    (triage-table--show (format "models %s" (triage--short hash))
+                        (append (list "models" hash "--json")
+                                (triage-transient--only args '("--metric" "--parameter")))
+                        :on-ret (lambda (row) (triage-model-group-show
+                                               hash (alist-get 'model_group_id row)))
+                        :row-context (lambda (row) (list :group (alist-get 'model_group_id row)
+                                                         :hash hash :type type)))))
 
 ;;;; score
 
@@ -352,47 +561,103 @@ An empty DATE leaves it out, and the CLI scores as of today."
   '(("curve" :model ("--date" "--subset" "--compare" "--points"))
     ("error-rules" :model ("--date" "--parameter" "--kind" "--top"))
     ("crosstabs" :model ("--parameter" "--date" "--stat" "--compare" "--top"))
+    ("calibration" :model ("--bins"))
+    ("scores" :model ())
+    ("gains" :model ("--date" "--points"))
+    ("forecast-actual" :model ())
+    ("residuals" :model ())
+    ("bias" :model ("--by"))
+    ("forecast-time" :model ("--cut"))
+    ("km" :model ("--horizon" "--date"))
+    ("brier" :model ("--horizon" "--date"))
+    ("survival-calibration" :model ("--horizon" "--date"))
     ("curve-dates" :group ("--subset" "--points"))
     ("leaves" :group ("--parameter") "--parameter")
     ("recurrence" :group ("--parameter" "--kind") "--parameter")
     ("crosstabs-dates" :group ("--parameter" "--stat" "--top"))
-    ("overlap" :groups ("--parameter") "--parameter"))
+    ("segments" :group ("--baseline" "--cut"))
+    ("win-consistency" :group ("--baseline"))
+    ("importance" :group ())
+    ("overlap" :groups ("--parameter" "--sweep") ("--parameter" "--sweep")))
   "Each triage plot subcommand: its target, its flags, its required flag.
-Checked against triage plot SUB --help."))
+The required flag is a flag or a list of flags of which one must be
+given; when none is, the first is read, and an empty answer leaves
+it out (the cut of a regression group's abs-error leaves is none).
+The ERT suite checks every
+name and flag against the CLI's own command tree, and the problem
+types each one reads come from the table of `triage--refuses-p',
+under the name \"plot SUBCOMMAND\"."))
 
 ;;;###autoload (autoload 'triage-plot-menu "triage-transient" nil t)
 (transient-define-prefix triage-plot-menu ()
-  "Draw a model's or a model group's figures with triage plot."
+  "Draw a model's or a model group's figures with triage plot.
+An entry is greyed out when the problem type at point is one its
+figure does not read."
   ["Arguments"
-   ("-d" "Test date (YYYY-MM-DD)" "--date=")
-   ("-p" "Cut (parameter)" "--parameter=")
-   ("-k" "Kind" "--kind=" :choices ("fp" "fn" "confusion"))
-   ("-s" "Statistic" "--stat=" :choices ("mean" "nonzero"))
-   ("-t" "Top" "--top=" :reader transient-read-number-N+)
-   ("-c" "Compare with model" "--compare=" :reader transient-read-number-N+)
-   ("-b" "Subset" "--subset=")
-   ("-n" "Points per curve" "--points=" :reader transient-read-number-N+)]
+   [("-d" "Test date (YYYY-MM-DD)" "--date=")
+    ("-p" "Cut (parameter)" "--parameter=")
+    ("-k" "Kind" "--kind=" :choices ("fp" "fn" "confusion" "abs-error" "beats-baseline"))
+    ("-s" "Statistic" "--stat=" :choices ("mean" "nonzero"))
+    ("-t" "Top" "--top=" :reader transient-read-number-N+)
+    ("-c" "Compare with model" "--compare=" :reader transient-read-number-N+)
+    ("-b" "Subset" "--subset=")]
+   [("-n" "Points per curve" "--points=" :reader transient-read-number-N+)
+    ("-i" "Score buckets (calibration)" "--bins=" :reader transient-read-number-N+)
+    ("-y" "Bias by (date, band, sbc, cold-start, subset:NAME)" "--by="
+     :reader triage-transient--read-cut)
+    ("-u" "Segment cut (band, sbc, cold-start, all, subset:NAME)" "--cut="
+     :reader triage-transient--read-cut)
+    ("-a" "Baseline model group" "--baseline=" :reader transient-read-number-N+)
+    ("-H" "Horizon of the survival set" "--horizon=")
+    ("-w" "Sweep these cuts (overlap)" "--sweep=")]]
   [["Model"
-    ("c" "Threshold curve" triage-plot-curve :inapt-if triage-transient--no-model-p)
-    ("e" "Error rules" triage-plot-error-rules :inapt-if triage-transient--no-model-p)
-    ("x" "Crosstabs" triage-plot-crosstabs :inapt-if triage-transient--no-model-p)]
+    ("c" "Threshold curve" triage-plot-curve :inapt-if triage-plot-curve--inapt-p)
+    ("e" "Error rules" triage-plot-error-rules :inapt-if triage-plot-error-rules--inapt-p)
+    ("x" "Crosstabs" triage-plot-crosstabs :inapt-if triage-plot-crosstabs--inapt-p)
+    ("k" "Calibration" triage-plot-calibration :inapt-if triage-plot-calibration--inapt-p)
+    ("s" "Score distribution" triage-plot-scores :inapt-if triage-plot-scores--inapt-p)
+    ("g" "Cumulative gains" triage-plot-gains :inapt-if triage-plot-gains--inapt-p)]
+   ["Regression model"
+    ("f" "Forecast against actual" triage-plot-forecast-actual
+     :inapt-if triage-plot-forecast-actual--inapt-p)
+    ("R" "Residuals" triage-plot-residuals :inapt-if triage-plot-residuals--inapt-p)
+    ("b" "Bias" triage-plot-bias :inapt-if triage-plot-bias--inapt-p)
+    ("t" "Forecast over time" triage-plot-forecast-time
+     :inapt-if triage-plot-forecast-time--inapt-p)]
+   ["Survival model"
+    ("m" "Kaplan-Meier by risk" triage-plot-km :inapt-if triage-plot-km--inapt-p)
+    ("B" "Brier over time" triage-plot-brier :inapt-if triage-plot-brier--inapt-p)
+    ("S" "Survival calibration" triage-plot-survival-calibration
+     :inapt-if triage-plot-survival-calibration--inapt-p)]
    ["Model group"
-    ("C" "Curve across dates" triage-plot-curve-dates :inapt-if triage-transient--no-group-p)
-    ("l" "Leaves" triage-plot-leaves :inapt-if triage-transient--no-group-p)
-    ("r" "Recurrence" triage-plot-recurrence :inapt-if triage-transient--no-group-p)
-    ("X" "Crosstabs across dates" triage-plot-crosstabs-dates :inapt-if triage-transient--no-group-p)
-    ("o" "Overlap of two groups" triage-plot-overlap :inapt-if triage-transient--no-group-p)]])
+    ("C" "Curve across dates" triage-plot-curve-dates :inapt-if triage-plot-curve-dates--inapt-p)
+    ("l" "Leaves" triage-plot-leaves :inapt-if triage-plot-leaves--inapt-p)
+    ("r" "Recurrence" triage-plot-recurrence :inapt-if triage-plot-recurrence--inapt-p)
+    ("X" "Crosstabs across dates" triage-plot-crosstabs-dates
+     :inapt-if triage-plot-crosstabs-dates--inapt-p)
+    ("o" "Overlap of two groups" triage-plot-overlap :inapt-if triage-plot-overlap--inapt-p)
+    ("G" "Segments against the baseline" triage-plot-segments
+     :inapt-if triage-plot-segments--inapt-p)
+    ("w" "Win consistency" triage-plot-win-consistency
+     :inapt-if triage-plot-win-consistency--inapt-p)
+    ("i" "Importance by family" triage-plot-importance
+     :inapt-if triage-plot-importance--inapt-p)]])
 
 (defun triage-plot (subcommand targets args)
   "Draw triage plot SUBCOMMAND of TARGETS with the flags ARGS.
-Only the flags SUBCOMMAND accepts are passed.  A missing required
-flag is read from the minibuffer.  The figure goes to a temporary
-SVG that opens in an image buffer."
+Only the flags SUBCOMMAND accepts are passed.  When it needs one of
+its required flags and none is given, the first is read from the
+minibuffer; an empty answer leaves it out.  The figure goes to a
+temporary SVG that opens in an image buffer."
   (pcase-let* ((`(,_target ,flags ,required) (cdr (assoc subcommand triage-plot-subcommands)))
+               (required (ensure-list required))
                (args (triage-transient--only args flags))
-               (args (if (and required (not (triage-transient--has-flag-p args required)))
-                         (append args (list (concat required "="
-                                                    (read-string (format "%s (required): " required)))))
+               (missing (and required
+                             (not (seq-some (lambda (f) (triage-transient--has-flag-p args f))
+                                            required))))
+               (value (and missing (read-string (format "%s (required): " (car required)))))
+               (args (if (and value (not (string-empty-p value)))
+                         (append args (list (concat (car required) "=" value)))
                        args))
                (file (triage-transient--temp ".svg"))
                (call (append (list "plot" subcommand)
@@ -407,33 +672,53 @@ SVG that opens in an image buffer."
            (triage--show-image file (format "plot %s %s" subcommand
                                             (mapconcat #'triage--str targets " ")))
          (when (file-exists-p file) (delete-file file))
-         (triage--report-error command code (concat stdout stderr) nil))))))
+         (triage--report-error command code (triage--failure-text stdout stderr) nil))))))
 
 (defmacro triage-transient--define-plot (subcommand)
-  "Define the suffix that draws triage plot SUBCOMMAND."
+  "Define the suffix that draws triage plot SUBCOMMAND, and its predicate.
+The predicate, triage-plot-SUBCOMMAND--inapt-p, greys the entry out
+when its target is not at hand or the problem type at point is one
+\"plot SUBCOMMAND\" refuses."
   (let* ((spec (cdr (assoc subcommand triage-plot-subcommands)))
          (target (car spec))
-         (name (intern (format "triage-plot-%s" subcommand))))
-    `(defun ,name (targets args)
-       ,(format "Draw triage plot %s of TARGETS with the flags ARGS.\nTARGETS is a list of %s."
-                subcommand (pcase target (:model "one model id") (:group "one model group id")
-                             (:groups "two model group ids")))
-       (interactive
-        (list ,(pcase target
-                 (:model '(list (triage--read-target :model "Model: ")))
-                 (:group '(list (triage--read-target :group "Model group: ")))
-                 (:groups '(list (triage--read-target :group "First model group: ")
-                                 (read-string "Second model group: "))))
-              (transient-args 'triage-plot-menu)))
-       (triage-plot ,subcommand targets args))))
+         (name (intern (format "triage-plot-%s" subcommand)))
+         (gate (intern (format "triage-plot-%s--inapt-p" subcommand))))
+    `(progn
+       (triage-transient--define-gate ,gate ,(if (eq target :model) '(:model) '(:group))
+                                      ,(format "plot %s" subcommand))
+       (defun ,name (targets args)
+         ,(format "Draw triage plot %s of TARGETS with the flags ARGS.\nTARGETS is a list of %s."
+                  subcommand (pcase target (:model "one model id") (:group "one model group id")
+                               (:groups "two model group ids")))
+         (interactive
+          (list ,(pcase target
+                   (:model '(list (triage--read-target :model "Model: ")))
+                   (:group '(list (triage--read-target :group "Model group: ")))
+                   (:groups '(list (triage--read-target :group "First model group: ")
+                                   (read-string "Second model group: "))))
+                (transient-args 'triage-plot-menu)))
+         (triage-plot ,subcommand targets args)))))
 
 (triage-transient--define-plot "curve")
 (triage-transient--define-plot "error-rules")
 (triage-transient--define-plot "crosstabs")
+(triage-transient--define-plot "calibration")
+(triage-transient--define-plot "scores")
+(triage-transient--define-plot "gains")
+(triage-transient--define-plot "forecast-actual")
+(triage-transient--define-plot "residuals")
+(triage-transient--define-plot "bias")
+(triage-transient--define-plot "forecast-time")
+(triage-transient--define-plot "km")
+(triage-transient--define-plot "brier")
+(triage-transient--define-plot "survival-calibration")
 (triage-transient--define-plot "curve-dates")
 (triage-transient--define-plot "leaves")
 (triage-transient--define-plot "recurrence")
 (triage-transient--define-plot "crosstabs-dates")
+(triage-transient--define-plot "segments")
+(triage-transient--define-plot "win-consistency")
+(triage-transient--define-plot "importance")
 (triage-transient--define-plot "overlap")
 
 ;;;; maintain
@@ -559,12 +844,14 @@ An archived Experiment is no longer a root of garbage collection."
   "Every triage menu, and the commands of the current buffer."
   [["Experiment"
     ("r" "Run" triage-run-menu)
-    ("c" "Check leakage" triage-check-menu)
+    ("c" "Check" triage-check-menu)
     ("a" "Analyze config" triage-analyze-menu)]
    ["Results"
     ("l" "Results" triage-results-menu :inapt-if triage-transient--no-hash-p)
     ("f" "Forward score" triage-score-menu :inapt-if triage-transient--no-model-p)
-    ("p" "Plot" triage-plot-menu :inapt-if triage-transient--no-plot-target-p)]
+    ("p" "Plot" triage-plot-menu :inapt-if triage-transient--no-plot-target-p)
+    ("P" "Postmodel diagnostics" triage-postmodel-menu
+     :inapt-if triage-transient--no-postmodel-target-p)]
    ["Project"
     ("m" "Maintain" triage-maintain-menu)
     ("s" "Serve the dashboard" triage-serve-menu)

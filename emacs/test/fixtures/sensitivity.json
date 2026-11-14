@@ -1,0 +1,28 @@
+{
+  "experiment_hash": "exp-sens",
+  "model_type": "sklearn.linear_model.Ridge",
+  "param": "alpha",
+  "metric": "mae",
+  "parameter": "",
+  "subset_hash": "",
+  "rows": [
+    {
+      "model_group_id": 13,
+      "value": 0.1,
+      "mean_metric": 1.1,
+      "n_dates": 2
+    },
+    {
+      "model_group_id": 14,
+      "value": 1.0,
+      "mean_metric": 2.0,
+      "n_dates": 2
+    },
+    {
+      "model_group_id": 15,
+      "value": 10.0,
+      "mean_metric": 11.0,
+      "n_dates": 2
+    }
+  ]
+}

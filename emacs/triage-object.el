@@ -28,12 +28,16 @@
 (declare-function triage-dispatch "triage-transient" ())
 (declare-function triage-score-menu "triage-transient" ())
 (declare-function triage-plot-menu "triage-transient" ())
+(declare-function triage-postmodel-menu "triage-postmodel" ())
 
 (defvar-local triage-object--args nil
   "The triage arguments this view reads its payload with.")
 
 (defvar-local triage-object--renderer nil
   "The function that inserts this view's sections from its payload.")
+
+(defvar-local triage-object--accept nil
+  "The non-zero exit codes whose JSON this view still draws.")
 
 ;;;; Loading a view
 
@@ -57,7 +61,8 @@
       (triage--call-json
        triage-object--args
        (lambda (payload) (triage-object--receive buffer payload nil))
-       :errback (lambda (msg) (triage-object--receive buffer nil msg))))))
+       :errback (lambda (msg) (triage-object--receive buffer nil msg))
+       :accept triage-object--accept))))
 
 (defun triage-object--receive (buffer payload err)
   "Draw PAYLOAD, or the error message ERR, in the view BUFFER."
@@ -84,14 +89,16 @@
              (triage--load-error nil)
              (t (insert (propertize "Loading…\n" 'font-lock-face 'triage-dim))))))))
 
-(defun triage-object--show (name mode args renderer &optional context)
+(defun triage-object--show (name mode args renderer &optional context accept)
   "Open the view *triage: NAME* in MODE from the JSON of triage ARGS.
 RENDERER inserts the sections from the payload.  CONTEXT is the
-plist of `triage--context'.  Return the buffer."
+plist of `triage--context'.  ACCEPT lists the non-zero exit codes
+whose JSON is still drawn.  Return the buffer."
   (let ((buffer (triage-object--buffer name mode)))
     (with-current-buffer buffer
       (setq triage-object--args args
             triage-object--renderer renderer
+            triage-object--accept accept
             triage--context context
             triage--refresh-function #'triage-object--load
             mode-line-process '(triage--loading " reading…"))
@@ -160,7 +167,8 @@ or an experiment_hash or a prefix of one."
   "Insert the sections of the Experiment PAYLOAD."
   (let ((hash (alist-get 'experiment_hash payload))
         (path (alist-get 'path payload)))
-    (setq triage--context (list :hash hash :config path))
+    (setq triage--context (list :hash hash :config path
+                                :type (alist-get 'problem_type payload)))
     (triage-experiment--insert-identity payload)
     (triage-experiment--insert-validation (alist-get 'validation payload))
     (triage-experiment--insert-plan payload)
@@ -452,17 +460,22 @@ YAML the CLI formatted, in a read-only buffer."
 
 (defun triage-model--insert (payload)
   "Insert the sections of the model PAYLOAD."
-  (let ((card (alist-get 'card payload)))
+  (let* ((card (alist-get 'card payload))
+         (type (alist-get 'problem_type card)))
     (setq triage--context (list :model (alist-get 'model_id card)
-                                :group (alist-get 'model_group_id card)))
+                                :group (alist-get 'model_group_id card)
+                                :type type))
     (magit-insert-section (triage-card)
       (magit-insert-heading (format "Model %s" (alist-get 'model_id card)))
       (triage-object--insert-alist card)
       (insert "\n"))
-    (dolist (part '((windowed "Windowed metrics" metric parameter n_as_of_dates
+    (dolist (part `((windowed "Windowed metrics" metric parameter n_as_of_dates
                               value_mean value_min value_max)
                     (importances "Feature importances")
-                    (calibration "Calibration")
+                    (calibration ,(if (equal type "regression_ranking")
+                                      "Deciles with lift"
+                                    "Calibration")
+                                 ,@(triage-model--calibration-columns type))
                     (crosstabs "Crosstabs")))
       (let* ((rows (alist-get (car part) payload))
              (keys (or (cddr part) (mapcar #'car (car rows)))))
@@ -476,7 +489,30 @@ YAML the CLI formatted, in a read-only buffer."
                                 'font-lock-face 'triage-dim))
             (triage-object--insert-rows (seq-take rows 50)
                                         (mapcar (lambda (k) (list k 14)) keys)))
+          (when (eq (car part) 'calibration)
+            (triage-model--insert-ties (alist-get 'calibration_ties payload)))
           (insert "\n"))))))
+
+(defun triage-model--calibration-columns (type)
+  "Return the calibration columns `model show' prints for the problem TYPE.
+Every type has the decile's mean score, mean outcome and lift; a
+classifier also has the realized rate of its positive class."
+  (append '(decile n avg_score mean_outcome lift)
+          (and (equal type "classification") '(realized_rate))
+          '(n_distinct_scores)))
+
+(defun triage-model--insert-ties (ties)
+  "Insert the line on the tied scores of the calibration, from TIES."
+  (when ties
+    (insert (propertize
+             (format "  ties: %s distinct scores over %s rows; the largest block holds %s rows (%s) at %s, kept in one decile\n"
+                     (triage--str (alist-get 'n_distinct ties))
+                     (triage--str (alist-get 'n ties))
+                     (triage--str (alist-get 'largest_tie_n ties))
+                     (let ((share (alist-get 'largest_tie_share ties)))
+                       (if (numberp share) (format "%.0f%%" (* 100 share)) "—"))
+                     (triage--str (alist-get 'largest_tie_score ties)))
+             'font-lock-face 'triage-dim))))
 
 ;;;; Tables: model groups, relations, queries
 
@@ -493,6 +529,7 @@ YAML the CLI formatted, in a read-only buffer."
     (define-key map (kbd "?") #'triage-dispatch)
     (define-key map (kbd "f") #'triage-score-menu)
     (define-key map (kbd "p") #'triage-plot-menu)
+    (define-key map (kbd "P") #'triage-postmodel-menu)
     (define-key map (kbd ":") #'triage-query)
     (define-key map (kbd "q") #'quit-window)
     map)
