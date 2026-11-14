@@ -259,3 +259,47 @@ def test_error_rule_recurrence_counts_dates_per_signature(db_pool_greenfield) ->
     assert recurring["mean_error_rate"] == pytest.approx((0.5 * 3 + 0.25) / 4)
     assert recurring["example_rule"] == f"a>|b<= @ {DATES[0]} #2", "largest leaf"
     assert (by_sig["c>"]["n_dates"], by_sig["c>"]["n_dates_total"]) == (1, 3)
+
+
+def test_migration_0034_round_trips_and_guards_regression_leaves(
+    db_url, db_pool_greenfield, tmp_path
+):
+    """Classification leaves read the same at 0033 and at head; regression leaves block
+    the downgrade until they are deleted."""
+    from tests.test_diagnostics import _seed_matrix_model, _seed_regression_trees
+    from triage.component.results_schema import downgrade_db, upgrade_db
+    from triage.diagnostics import compute_error_analysis
+
+    pool = db_pool_greenfield
+    classifier = _seed_matrix_model(pool, tmp_path)
+    compute_error_analysis(pool, classifier, parameter="5_abs", kind="all",
+                           max_depth=2, min_samples_leaf=1)  # fmt: skip
+
+    def leaves():
+        with pool.connection() as conn:
+            return conn.execute(
+                "select error_kind, rule, n_matched, n_errors, error_rate, class_counts,"
+                " conditions, signature from triage.error_analysis"
+                " where model_id = %(m)s order by error_kind, rule_id",
+                {"m": classifier},
+            ).fetchall()
+
+    def suspicious():
+        with pool.connection() as conn:
+            return conn.execute(
+                "select as_of_date, error_kind, rule, lift"
+                " from triage.error_rules_suspicious(%(m)s, 0.5, 1)",
+                {"m": classifier},
+            ).fetchall()
+
+    at_head = (leaves(), suspicious())
+    seeded = _seed_regression_trees(pool, tmp_path)
+    compute_error_analysis(pool, seeded["model"], kind="abs_error", min_samples_leaf=20)
+    with pytest.raises(Exception, match="cannot downgrade below 0034"):
+        downgrade_db(dburl=db_url, revision="0033_regression_residuals")
+    with pool.connection() as conn:
+        conn.execute("delete from triage.error_analysis where error_kind = 'abs_error'")
+    downgrade_db(dburl=db_url, revision="0033_regression_residuals")
+    assert (leaves(), suspicious()) == at_head
+    upgrade_db(dburl=db_url, revision="head")
+    assert (leaves(), suspicious()) == at_head
