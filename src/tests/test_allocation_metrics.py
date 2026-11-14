@@ -35,6 +35,7 @@ def spearmanr(a: np.ndarray, b: np.ndarray) -> float:
     result: Any = _spearmanr(a, b)
     return float(result.statistic)
 
+
 LABEL_TIMESPAN = "6 months"
 R1, R2, R0 = date(2016, 1, 1), date(2016, 2, 1), date(2016, 3, 1)
 N, N_LABELED = 50, 40
