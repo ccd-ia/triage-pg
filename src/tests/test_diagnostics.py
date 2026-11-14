@@ -740,6 +740,57 @@ def test_migration_0016_roundtrip(db_url, db_pool_greenfield):
         assert _has(conn)
 
 
+def test_crosstabs_written_before_0037_read_as_rest(
+    db_url, db_pool_greenfield, tmp_path
+):
+    """Migration 0037 adds crosstabs.comparison to the primary key: old rows read 'rest'."""
+    from triage.component.results_schema import downgrade_db, upgrade_db
+    from triage.diagnostics import compute_crosstabs, readers
+
+    pool = db_pool_greenfield
+    model_id = _seed_matrix_model(pool, tmp_path)
+    downgrade_db(dburl=db_url, revision="0036_survival_diagnostics")
+    insert_0036 = (
+        "insert into triage.crosstabs (model_id, split_kind, as_of_date, parameter,"
+        " feature, stat, selected_value, rest_value, ratio)"
+        " values (%(m)s, 'test', %(d)s, '5_abs', %(f)s, 'mean', %(s)s, 1.0, %(s)s)"
+    )
+    with pool.connection() as conn:
+        for feature, value in (("f_signal", 2.0), ("f_sep", 4.5)):
+            conn.execute(
+                insert_0036,
+                {"m": model_id, "d": AS_OF, "f": feature, "s": value},
+            )
+    upgrade_db(dburl=db_url, revision="head")
+    with pool.connection() as conn:
+        assert conn.execute(
+            "select distinct comparison from triage.crosstabs"
+        ).fetchall() == [{"comparison": "rest"}]
+    before = readers.crosstabs(pool, model_id, "5_abs")
+    assert [(r["feature"], r["ratio"]) for r in before] == [
+        ("f_sep", 4.5),
+        ("f_signal", 2.0),
+    ]
+    # a near-miss crosstab of the same cut sits beside them and changes no rest read
+    compute_crosstabs(pool, model_id, parameter="5_abs", against="near_miss")
+    assert readers.crosstabs(pool, model_id, "5_abs") == before
+    assert readers.crosstabs(pool, model_id, "5_abs", comparison="near_miss")
+
+    # downgrade drops the near-miss rows and keeps the rest ones
+    downgrade_db(dburl=db_url, revision="0036_survival_diagnostics")
+    with pool.connection() as conn:
+        assert conn.execute(
+            "select count(*) as n from triage.crosstabs"
+        ).fetchone() == {"n": 2}
+        assert conn.execute(
+            "select to_regclass('triage.prototypes') is null as gone,"
+            " to_regprocedure('triage.near_miss(bigint, triage.split_kind, date, text,"
+            " text)') is null as fn_gone"
+        ).fetchone() == {"gone": True, "fn_gone": True}
+    upgrade_db(dburl=db_url, revision="head")
+    assert readers.crosstabs(pool, model_id, "5_abs") == before
+
+
 # ------------------------------------------------------------------ regression error trees
 
 REG_DATES = ("2015-01-01", "2015-02-01", "2015-03-01")

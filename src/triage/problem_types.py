@@ -23,6 +23,10 @@ PROBLEM_TYPES = ("classification", "regression_ranking", "regression", "survival
 #: The types with a continuous forecast and an observed value to subtract from it.
 REGRESSION_TYPES = ("regression", "regression_ranking")
 
+#: The types whose labeled rows split into TP, FP, FN and TN at a top-k cut: a binary
+#: outcome, or a regression_ranking target read as positive when ``outcome > 0``.
+CUT_CLASS_TYPES = ("classification", "regression_ranking")
+
 
 @dataclass(frozen=True)
 class CommandTypes:
@@ -88,6 +92,18 @@ COMMANDS: dict[str, CommandTypes] = {
     "plot survival-calibration": CommandTypes(
         ("survival",),
         {t: "triage plot calibration MODEL" for t in _NOT_SURVIVAL},
+    ),
+    # The bands and classes of a top-k cut (migration 0037): positive means outcome > 0.
+    "postmodel near-miss": CommandTypes(
+        CUT_CLASS_TYPES,
+        {"regression": "triage plot gains MODEL", "survival": _FOR_SURVIVAL},
+    ),
+    "postmodel prototypes": CommandTypes(
+        CUT_CLASS_TYPES,
+        {
+            "regression": "triage postmodel crosstabs MODEL --by abs-error",
+            "survival": "triage postmodel error-tree MODEL --kind confusion --horizon H",
+        },
     ),
 }
 

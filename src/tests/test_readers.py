@@ -510,6 +510,34 @@ def test_nonzero_rate_crosstabs_rank_by_absolute_difference(db_pool_greenfield, 
         readers.crosstabs(pool, m, stat="std")
 
 
+def test_near_miss_crosstabs_leave_the_rest_reading_unchanged(
+    db_pool_greenfield, group
+):
+    pool = db_pool_greenfield
+    m = group.model_a
+    for feature, s, r in (("double", 2.0, 1.0), ("quarter", 1.0, 4.0)):
+        _crosstab(pool, m, feature, "mean", s, r)
+    before = readers.crosstabs(pool, m)
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.crosstabs (model_id, split_kind, as_of_date, parameter,"
+            " comparison, feature, stat, selected_value, rest_value, ratio)"
+            " values (%(m)s, 'test', %(d)s, '10_pct', 'near_miss', 'double', 'mean',"
+            "         2.0, 1.9, 2.0 / 1.9),"
+            "        (%(m)s, 'test', %(d)s, '10_pct', 'near_miss', 'tenfold', 'mean',"
+            "         10.0, 1.0, 10.0)",
+            {"m": m, "d": D1},
+        )
+    assert readers.crosstabs(pool, m) == before
+    near = readers.crosstabs(pool, m, comparison="near_miss")
+    assert [(r["feature"], r["rest_value"]) for r in near] == [
+        ("tenfold", 1.0),
+        ("double", 1.9),
+    ]
+    with pytest.raises(ValueError, match="'next' is not a crosstab comparison"):
+        readers.crosstabs(pool, m, comparison="next")
+
+
 # --------------------------------------------------------------------------- subsets
 
 

@@ -1,7 +1,13 @@
-"""List overlap: do two model groups flag the same entities on each test date?"""
+"""List overlap: do two model groups flag the same entities on each test date?
+
+:func:`overlap` reads one cut. :func:`overlap_sweep` reads several and draws the Jaccard
+index against k, which shows whether two lists agree at the top and part further down, or
+the other way round.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from triage.diagnostics import readers
@@ -9,8 +15,10 @@ from triage.plots.style import (
     BLUE,
     INK,
     ORANGE,
+    SERIES,
     NothingToDraw,
     PlotResult,
+    check_series,
     nan,
     new_figure,
     no_grid,
@@ -28,6 +36,25 @@ def _models(pool: DictRowPool, model_group_id: int) -> list[dict[str, Any]]:
             " triage models <experiment>"
         )
     return models
+
+
+def _pairs(pool: DictRowPool, group_a: int, group_b: int) -> list[tuple[int, int]]:
+    """Each model of ``group_a`` with the model of ``group_b`` trained up to its date."""
+    models_a = _models(pool, group_a)
+    peers = {m["train_end_time"]: m["model_id"] for m in _models(pool, group_b)}
+    return [
+        (m["model_id"], peers[m["train_end_time"]])
+        for m in models_a
+        if m["train_end_time"] in peers
+    ]
+
+
+def _no_shared_date(group_a: int, group_b: int) -> NothingToDraw:
+    return NothingToDraw(
+        f"Model groups {group_a} and {group_b} share no test date: no two of their"
+        " models were trained on the same window and scored the same date. Score"
+        " both groups' models first (triage run <config>)."
+    )
 
 
 def overlap(
@@ -59,22 +86,13 @@ def overlap(
         NotFoundError: a model group is unknown.
         NothingToDraw: no pair of models shares a test date.
     """
-    models_a = _models(pool, group_a)
-    peers = {m["train_end_time"]: m["model_id"] for m in _models(pool, group_b)}
     data: dict[str, Any] = {}
-    for m in models_a:
-        peer = peers.get(m["train_end_time"])
-        if peer is None:
-            continue
-        rows = readers.list_overlap(pool, m["model_id"], peer, parameter, "test")
+    for model, peer in _pairs(pool, group_a, group_b):
+        rows = readers.list_overlap(pool, model, peer, parameter, "test")
         if rows:
-            data[f"model {m['model_id']} vs model {peer}"] = rows
+            data[f"model {model} vs model {peer}"] = rows
     if not data:
-        raise NothingToDraw(
-            f"Model groups {group_a} and {group_b} share no test date: no two of their"
-            " models were trained on the same window and scored the same date. Score"
-            " both groups' models first (triage run <config>)."
-        )
+        raise _no_shared_date(group_a, group_b)
     points = [(pair, r) for pair, rows in data.items() for r in rows]
 
     with style():
@@ -126,5 +144,86 @@ def overlap(
         f"{len(rows)} shared test date(s) at {parameter}: Jaccard"
         f" {span([r['jaccard'] for r in rows])}, rank correlation"
         f" {span([r['rank_corr'] for r in rows])}"
+    )
+    return PlotResult(fig, data, summary)
+
+
+def overlap_sweep(
+    pool: DictRowPool,
+    group_a: int,
+    group_b: int,
+    parameters: Sequence[str],
+    title: Optional[str] = None,
+) -> PlotResult:
+    """The Jaccard index of two model groups' top-k lists against k, over several cuts.
+
+    The models are paired by training window, as :func:`overlap` pairs them. Each pair
+    and test date is one line; its x is the first model's k at each cut, resolved over
+    its own population.
+
+    Args:
+        pool: the project database.
+        group_a: the first model group.
+        group_b: the second model group.
+        parameters: the top-k cuts, e.g. ``['50_abs', '100_abs', '200_abs']``.
+        title: replaces the default title.
+
+    Returns:
+        ``data`` maps ``'model <a> vs model <b>'`` to the
+        :func:`readers.list_overlap_sweep` rows of that pair.
+
+    Raises:
+        NotFoundError: a model group is unknown.
+        ValueError: the cuts are empty or repeated, or there are more lines than one
+            figure draws.
+        NothingToDraw: no pair of models shares a test date.
+    """
+    data: dict[str, Any] = {}
+    for model, peer in _pairs(pool, group_a, group_b):
+        rows = readers.list_overlap_sweep(pool, model, peer, parameters, "test")
+        if rows:
+            data[f"model {model} vs model {peer}"] = rows
+    if not data:
+        raise _no_shared_date(group_a, group_b)
+    lines: dict[str, list[dict[str, Any]]] = {}
+    for pair, rows in data.items():
+        for r in rows:
+            label = f"{r['as_of_date']}: {pair.replace('model ', '')}"
+            lines.setdefault(label, []).append(r)
+    check_series(
+        len(lines),
+        "pairs of models and test dates",
+        "compare two groups with fewer shared test dates",
+    )
+
+    with style():
+        fig, axes = new_figure(7.0, 3.6)
+        ax = axes[0, 0]
+        for color, (label, rows) in zip(SERIES, lines.items(), strict=False):
+            points = sorted(rows, key=lambda r: r["k_a"])
+            ax.plot(
+                [r["k_a"] for r in points],
+                [nan(r["jaccard"]) for r in points],
+                marker="o",
+                color=color,
+                label=label,
+            )
+        ax.set_ylim(0, 1.05)
+        ax.set_xlabel("k (the first group's model)")
+        ax.set_ylabel("Jaccard index of the two top-k lists")
+        ax.set_title(
+            title
+            or f"How model groups {group_a} and {group_b} agree as k grows"
+            f" ({', '.join(parameters)})"
+        )
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=7.5)
+
+    rows = [r for rows in data.values() for r in rows]
+    by_cut = {
+        cut: [r["jaccard"] for r in rows if r["parameter"] == cut] for cut in parameters
+    }
+    summary = (
+        f"{len(lines)} pair(s) of models and test dates over {len(parameters)} cut(s):"
+        + "; ".join(f" Jaccard {span(v)} at {cut}" for cut, v in by_cut.items())
     )
     return PlotResult(fig, data, summary)

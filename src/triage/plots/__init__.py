@@ -25,7 +25,7 @@ from triage.plots.crosstabs import crosstabs, crosstabs_dates
 from triage.plots.curves import curve, curve_dates
 from triage.plots.distributions import calibration, scores
 from triage.plots.errors import error_rules, leaves, recurrence
-from triage.plots.overlap import overlap
+from triage.plots.overlap import overlap, overlap_sweep
 from triage.plots.regression import bias, forecast_actual, forecast_time, residuals
 from triage.plots.structure import importance
 from triage.plots.survival import brier, km, survival_calibration
@@ -58,6 +58,7 @@ __all__ = [
     "leaves",
     "output_format",
     "overlap",
+    "overlap_sweep",
     "recurrence",
     "residuals",
     "scores",

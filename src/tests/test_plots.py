@@ -207,6 +207,9 @@ DRAWS = {
     "overlap": lambda pool, d: plots.overlap(
         pool, d.group.model_group_id, d.other_group, CUT
     ),
+    "overlap-sweep": lambda pool, d: plots.overlap_sweep(
+        pool, d.group.model_group_id, d.other_group, ["5_abs", CUT, "50_pct"]
+    ),
     "calibration": lambda pool, d: plots.calibration(pool, d.group.model_a),
     "scores": lambda pool, d: plots.scores(pool, d.group.model_a),
 }
