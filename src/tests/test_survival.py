@@ -24,6 +24,7 @@ from triage.adapters.run import _resolve_metric_config, validate_experiment_conf
 from triage.component.catwalk.in_pg_evaluation import (
     DEFAULT_CLASSIFICATION_CONFIG,
     DEFAULT_REGRESSION_CONFIG,
+    DEFAULT_REGRESSION_RANKING_CONFIG,
     DEFAULT_SURVIVAL_CONFIG,
     evaluate_in_db,
 )
@@ -293,7 +294,7 @@ def test_metric_config_defaults_follow_problem_type():
     assert _resolve_metric_config({}, "regression", None) == DEFAULT_REGRESSION_CONFIG
     assert (
         _resolve_metric_config({}, "regression_ranking", None)
-        == DEFAULT_REGRESSION_CONFIG
+        == DEFAULT_REGRESSION_RANKING_CONFIG
     )
     assert _resolve_metric_config({}, "survival", None) == DEFAULT_SURVIVAL_CONFIG
 

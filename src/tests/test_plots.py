@@ -676,3 +676,40 @@ def test_regression_leaf_bars_are_mean_errors_against_the_mae(
     assert set(group.data) == {"abs_error"}
     recur = plots.recurrence(db_pool_greenfield, seeded["group"], None, "abs_error")
     assert "on 3 of 3" in recur.summary
+
+
+# ------------------------------------------------------------------------ the gains curve
+
+
+def test_gains_writes_the_same_svg_and_draws_the_readers_rows(
+    db_pool_greenfield, tmp_path
+):
+    from tests.test_allocation_metrics import R1, seed_allocation
+
+    pool = db_pool_greenfield
+    model_id = seed_allocation(pool)["noisy"]
+    one = plots.gains(pool, model_id, str(R1), points=20)
+    two = plots.gains(pool, model_id, str(R1), points=20)
+    assert _svg(one, tmp_path / "one.svg") == _svg(two, tmp_path / "two.svg")
+    assert one.data["gains"] == readers.gains_curve(
+        pool, model_id, as_of_date=R1, points=20
+    )
+    assert len(one.data["gains"]["rows"]) == 21
+    assert one.summary.startswith(
+        f"{R1} (regression_ranking): the top 10% (5 rows) hold"
+    )
+
+
+def test_gains_reads_the_latest_evaluated_date_and_refuses_a_signed_one(
+    db_pool_greenfield,
+):
+    from tests.test_allocation_metrics import R0, R2, seed_allocation
+
+    pool = db_pool_greenfield
+    model_id = seed_allocation(pool)["noisy"]
+    # R0 (all zeros) is the latest evaluated date: the shares are undefined there
+    latest = readers.gains_curve(pool, model_id)
+    assert latest is not None and latest["as_of_date"] == R0
+    for day in (None, str(R2)):
+        with pytest.raises(plots.NothingToDraw, match="negative somewhere or sum to 0"):
+            plots.gains(pool, model_id, day)

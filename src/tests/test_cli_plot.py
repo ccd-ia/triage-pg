@@ -1,4 +1,4 @@
-"""``triage plot``: seventeen commands, each writing its figure and one summary line.
+"""``triage plot``: eighteen commands, each writing its figure and one summary line.
 
 Exit codes: 0 written; 1 nothing persisted to draw, naming the command that creates it;
 2 bad input (an unknown model, model group or Subset, an unsupported extension, the
@@ -154,7 +154,7 @@ def test_nothing_persisted_exits_1_naming_the_command(plot, diagnosed, tmp_path)
     assert not list(tmp_path.glob("*.svg"))
 
 
-def test_the_help_lists_the_seventeen_commands():
+def test_the_help_lists_the_eighteen_commands():
     result = CliRunner().invoke(cli.app, ["plot", "--help"])
     assert result.exit_code == 0
     plain = _plain(result.output)
@@ -169,6 +169,7 @@ def test_the_help_lists_the_seventeen_commands():
         "overlap",
         "calibration",
         "scores",
+        "gains",
         "forecast-actual",
         "residuals",
         "bias",
@@ -196,7 +197,7 @@ def test_the_cli_does_not_import_matplotlib_until_a_plot_is_drawn():
         check=True,
     )
     assert loaded.stdout.split()[-2:] == ["False", "False"], loaded.stdout
-    assert Path(cli.__file__).read_text().count("from triage import plots") == 17
+    assert Path(cli.__file__).read_text().count("from triage import plots") == 18
 
 
 def test_a_file_that_cannot_be_written_exits_2_not_1(plot, diagnosed, tmp_path):  # noqa: F811
@@ -316,3 +317,41 @@ def test_segments_refuses_an_unknown_group(plot_baseline):
     result = run("segments", "999999")
     assert result.exit_code == 2
     assert "model group 999999 has no model" in _plain(result.output)
+
+
+# ------------------------------------------------------------------------------ gains
+
+
+def test_gains_writes_its_file_and_refuses_survival(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+):
+    from tests.test_allocation_metrics import R1, R2, seed_allocation
+    from tests.test_regression_diagnostics import _seed
+
+    models = seed_allocation(db_pool_greenfield)
+    survival = _seed(db_pool_greenfield, "survival", "exp-survival")
+    monkeypatch.chdir(tmp_path)
+
+    def run(*args: str):
+        return CliRunner().invoke(
+            cli.app,
+            ["plot", *args],
+            env={"DATABASE_URL": db_url},
+            catch_exceptions=False,
+        )
+
+    m = models["noisy"]
+    result = run("gains", str(m), "--date", str(R1), "--points", "20")
+    assert result.exit_code == 0, result.output
+    plain = _plain(result.output)
+    assert f"wrote gains-{m}.svg" in plain and "of the outcome, lift" in plain, plain
+    assert "AUCC 0." in plain
+    assert ET.parse(tmp_path / f"gains-{m}.svg").getroot().tag.endswith("svg")
+
+    result = run("gains", str(m), "--date", str(R2), "-o", "signed.svg")
+    assert result.exit_code == 1, result.output
+    assert "negative somewhere or sum to 0" in _plain(result.output)
+
+    result = run("gains", str(survival), "-o", "survival.svg")
+    assert result.exit_code == 2, result.output
+    assert f"model {survival} is survival" in _plain(result.output)

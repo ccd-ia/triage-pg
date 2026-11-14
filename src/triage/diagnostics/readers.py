@@ -1237,3 +1237,84 @@ def forecast_actual(
     )
     n_total = 0 if total is None else total["n"]
     return {"n_total": n_total, "sampled": n_total > len(pairs), "pairs": pairs}
+
+
+def gains_curve(
+    pool: DictRowPool,
+    model_id: int,
+    split_kind: str = "test",
+    as_of_date: Optional[DateLike] = None,
+    points: int = 100,
+) -> Optional[dict[str, Any]]:
+    """The cumulative-gains curve of one scored date: the share of the outcome the top k hold.
+
+    Reads ``triage.gains_curve`` (migration 0035): ``points + 1`` cuts of the population
+    ranking, from k = 0 to every scored row. ``captured`` and ``lift`` are NULL on a date
+    whose labeled outcome is negative somewhere or sums to 0.
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        split_kind: the prediction split.
+        as_of_date: the date; ``None`` reads the model's latest evaluated date of the split
+            (over everyone, not a Subset).
+        points: the cuts after k = 0.
+
+    Returns:
+        ``None`` when the model has no evaluated date. Otherwise ``as_of_date``,
+        ``problem_type``, ``points``, ``aucc`` (the stored value, or ``None``) and ``rows``
+        (``k_pct, k, n_labeled_topk, captured, lift, mean_outcome_topk``).
+
+    Raises:
+        NotFoundError: no model has this id.
+        ValueError: ``points`` is below 1.
+    """
+    if points < 1:
+        raise ValueError(f"points={points} draws no curve — pass 1 or more")
+    ctx = _one(
+        pool,
+        "select triage.model_problem_type(m.model_id)::text as problem_type,"
+        "       coalesce(cast(%(date)s as date),"
+        "                (select max(e.as_of_date) from triage.evaluations e"
+        "                  where e.model_id = m.model_id"
+        "                    and e.split_kind = cast(%(split)s as triage.split_kind)"
+        "                    and e.subset_hash = '')) as as_of_date"
+        " from triage.models m where m.model_id = %(m)s",
+        {
+            "m": model_id,
+            "split": split_kind,
+            "date": None if as_of_date is None else str(as_of_date),
+        },
+    )
+    if ctx is None:
+        raise NotFoundError(f"model {model_id} not found")
+    if ctx["as_of_date"] is None:
+        return None
+    params = {
+        "m": model_id,
+        "split": split_kind,
+        "date": str(ctx["as_of_date"]),
+        "points": points,
+    }
+    rows = _rows(
+        pool,
+        "select k_pct, k, n_labeled_topk, captured, lift, mean_outcome_topk"
+        " from triage.gains_curve(%(m)s, cast(%(split)s as triage.split_kind),"
+        "                         cast(%(date)s as date), %(points)s)",
+        params,
+    )
+    aucc = _one(
+        pool,
+        "select value from triage.evaluations where model_id = %(m)s"
+        " and split_kind = cast(%(split)s as triage.split_kind)"
+        " and as_of_date = cast(%(date)s as date) and subset_hash = ''"
+        " and metric = 'aucc' and parameter = ''",
+        params,
+    )
+    return {
+        "as_of_date": ctx["as_of_date"],
+        "problem_type": ctx["problem_type"],
+        "points": points,
+        "aucc": None if aucc is None else aucc["value"],
+        "rows": rows,
+    }
