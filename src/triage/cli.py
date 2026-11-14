@@ -130,6 +130,27 @@ def natural_number(value: int) -> int:
     return value
 
 
+def _optional_positive(value: Optional[float]) -> Optional[float]:
+    if value is not None and not value > 0:
+        raise typer.BadParameter(f"{value:g} is not a positive duration")
+    return value
+
+
+def _positive_times(value: Optional[str]) -> Optional[list[float]]:
+    """``--times 7,14,30``: positive durations, comma-separated."""
+    if value is None:
+        return None
+    try:
+        times = [float(v) for v in value.split(",") if v.strip()]
+    except ValueError:
+        raise typer.BadParameter(
+            f"{value!r} is not a comma-separated list of durations (e.g. 7,14,30)"
+        ) from None
+    if not times or any(not t > 0 for t in times):
+        raise typer.BadParameter(f"{value!r} — every time must be a positive duration")
+    return times
+
+
 def _optional_natural(value: Optional[int]) -> Optional[int]:
     return None if value is None else natural_number(value)
 
@@ -2866,7 +2887,9 @@ def _leaf_kind(value: Optional[str]) -> Optional[str]:
     return None if value is None else value.replace("-", "_")
 
 
-def _error_tree_gate(ctx: typer.Context, model_id: int, kind: str) -> str:
+def _error_tree_gate(
+    ctx: typer.Context, model_id: int, kind: str, horizon: Optional[float] = None
+) -> str:
     """The model's problem type, or exit 2 when the tree kind does not apply to it."""
     from triage import problem_types
 
@@ -2874,7 +2897,7 @@ def _error_tree_gate(ctx: typer.Context, model_id: int, kind: str) -> str:
         problem_type = problem_types.model_problem_type(get_pool(ctx), model_id)
     except ValueError as exc:
         _plot_fail(str(exc), 2)
-    message = problem_types.error_tree_refusal(model_id, problem_type, kind)
+    message = problem_types.error_tree_refusal(model_id, problem_type, kind, horizon)
     if message is not None:
         _plot_fail(message, 2)
     return problem_type
@@ -2992,6 +3015,14 @@ def postmodel_error_tree(
         help="beats-baseline: the baseline model group. Default: the Experiment's"
         " baseline group with the lowest MAE on the rows it shares with the model's.",
     ),
+    horizon: Optional[float] = typer.Option(
+        None,
+        "--horizon",
+        callback=_optional_positive,
+        help="Survival models (required for them): positive means an observed event at"
+        " a duration ≤ H, in the label's duration units; rows censored before H are"
+        " dropped. Leaves are stored at -p '<cut>|horizon=<H>'.",
+    ),
 ) -> None:
     """Characterize WHERE the model fails: a shallow tree on the errors → rules.
 
@@ -3001,6 +3032,8 @@ def postmodel_error_tree(
     abs-error: over every labeled row, a regression tree on |forecast − outcome|.
     beats-baseline: where is the model closer than its baseline? Fitted on the test
     dates before the model's last and tested on the last; a tie is not closer.
+    A survival model reads fp, fn and confusion at --horizon H, which makes its label
+    binary.
     Rules persist to ``triage.error_analysis`` with a threshold-free signature (a
     diagnostic — never a score modifier). Linear models also get per-entity β·x
     contributions persisted (``individual_importances``).
@@ -3008,8 +3041,9 @@ def postmodel_error_tree(
     import psycopg
 
     from triage.diagnostics import compute_error_analysis
+    from triage.diagnostics.error_tree import horizon_parameter
 
-    _error_tree_gate(ctx, model_id, kind)
+    _error_tree_gate(ctx, model_id, kind, horizon)
     engine = get_pool(ctx)
     try:
         written = compute_error_analysis(
@@ -3020,6 +3054,7 @@ def postmodel_error_tree(
             max_depth=depth,
             min_samples_leaf=min_leaf,
             baseline_group_id=baseline,
+            horizon=horizon,
         )
     except (ValueError, psycopg.errors.RaiseException) as exc:
         _plot_fail(str(exc), 2)
@@ -3027,6 +3062,8 @@ def postmodel_error_tree(
     if kind in ("abs_error", "beats_baseline"):
         _print_regression_leaves(engine, model_id, kind)
         return
+    if horizon is not None:
+        parameter = horizon_parameter(parameter, horizon)
     with engine.connection() as conn:
         rows = conn.execute(
             "select as_of_date, error_kind, rule, n_matched, n_errors, error_rate"
@@ -3989,6 +4026,161 @@ def postmodel_sensitivity(
             str(r["n_dates"]),
         )  # fmt: skip
     console.print(table)
+
+
+def _undefined_note(kind: str, rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """Why every value of one survival kind is undefined, or None when one is defined."""
+    if not rows or any(r["value"] is not None for r in rows):
+        return None
+    reasons = sorted({r["extra"].get("undefined") or "no value" for r in rows})
+    return f"{kind}: {'; '.join(reasons)}"
+
+
+def _print_survival(model_id: int, estimator: str, result: Mapping[str, Any]) -> None:
+    """One date of ``postmodel survival``, as persisted."""
+    kinds = result["kinds"]
+    h = float(result["horizon"])
+    pop = next(r for r in kinds["km_decile"] if r["bin"] == 0)
+    console.print(
+        f"Model {model_id} ({estimator}) on {result['as_of_date']}, horizon {h:g}:"
+        f" {pop['n']} labeled rows, {pop['extra']['n_events']} events by the horizon,"
+        f" KM probability of the event {_fmt_share(pop['value'])}"
+    )
+    table = Table(title=f"Risk deciles at horizon {h:g}", box=box.SIMPLE_HEAVY)
+    for col in ("Decile", "Rows", f"Events ≤ {h:g}", "KM P(event)", "Lift", "Score"):
+        table.add_column(col)
+    for r in kinds["km_decile"]:
+        if r["bin"] == 0:
+            continue
+        table.add_row(
+            str(r["bin"]), str(r["n"]), str(r["extra"]["n_events"]),
+            _fmt_share(r["value"]), _fmt(r["extra"].get("lift"), 2),
+            _fmt(r["extra"].get("mean_score"), 3),
+        )  # fmt: skip
+    console.print(table)
+    logrank = kinds["logrank"][0] if kinds["logrank"] else None
+    uno = kinds["uno_c"][0] if kinds["uno_c"] else None
+    if logrank is not None and logrank["value"] is not None:
+        console.print(
+            f"Log-rank across the risk tertiles: p = {logrank['value']:.3g}"
+            f" (chi² {_fmt(logrank['extra'].get('chisq'), 2)})"
+        )
+    if uno is not None and uno["value"] is not None:
+        console.print(
+            f"Uno's C up to the horizon: {uno['value']:.4f}"
+            f" ({uno['extra'].get('n_before')} rows before {h:g})"
+        )
+    by_t: dict[float, dict[str, Any]] = {}
+    for kind in ("auc_t", "brier"):
+        for r in kinds[kind]:
+            by_t.setdefault(r["t"], {})[kind] = r
+    if any(r["value"] is not None for k in ("auc_t", "brier") for r in kinds[k]):
+        table = Table(title="Over time", box=box.SIMPLE_HEAVY)
+        for col in ("t", "AUC(t)", "Brier(t)", "Brier, training KM"):
+            table.add_column(col)
+        for t_, row in sorted(by_t.items()):
+            auc, brier = row.get("auc_t"), row.get("brier")
+            table.add_row(
+                f"{t_:g}",
+                _fmt(None if auc is None else auc["value"], 3),
+                _fmt(None if brier is None else brier["value"], 3),
+                _fmt(None if brier is None else brier["extra"].get("km_reference"), 3),
+            )
+        console.print(table)
+    deciles = [r for r in kinds["calibration"] if r["bin"] > 0]
+    if deciles:
+        table = Table(
+            title=f"Calibration at horizon {h:g}, per decile of predicted S({h:g})",
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in ("Decile", "Rows", "Predicted S", "KM S", "|gap|"):
+            table.add_column(col)
+        for r in deciles:
+            table.add_row(
+                str(r["bin"]), str(r["n"]), _fmt(r["extra"].get("predicted"), 3),
+                _fmt(r["value"], 3), _fmt(r["extra"].get("gap"), 3),
+            )  # fmt: skip
+        console.print(table)
+        summary = next(r for r in kinds["calibration"] if r["bin"] == 0)["extra"]
+        console.print(
+            f"ICI {_fmt(summary.get('ici'), 4)}, E50 {_fmt(summary.get('e50'), 4)}"
+            f" over {summary.get('n_deciles')} decile(s)"
+        )
+    for kind in ("km_decile", "logrank", "uno_c", "auc_t", "brier", "calibration"):
+        note = _undefined_note(kind, kinds[kind])
+        if note is not None:
+            # markup off: a reason may hold an interval in brackets
+            console.print(note, style="yellow", markup=False, highlight=False)
+
+
+@postmodel_app.command("survival")
+def postmodel_survival(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    horizon: float = typer.Option(
+        ...,
+        "--horizon",
+        callback=_optional_positive,
+        help="The time the deciles, Uno's C and calibration are read at, in the units"
+        " of the label's duration.",
+    ),
+    times: Optional[str] = typer.Option(
+        None,
+        "--times",
+        help="The AUC(t) and Brier(t) grid, comma-separated (e.g. 7,14,30,60). Default:"
+        " ten evenly spaced times up to the horizon.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """A survival model's censoring-aware diagnostics: compute, persist and print them.
+
+    Risk deciles with the Kaplan-Meier probability of the event by the horizon and its
+    lift; KM curves by risk tertile with a log-rank test; Uno's C up to the horizon and
+    AUC(t) over the grid; and, for an estimator with predict_survival_function, Brier(t)
+    over the grid and calibration at the horizon (ICI, E50). The censoring distribution is
+    read from the train matrix's labels. Rows persist to triage.survival_diagnostics, for
+    triage plot km, brier and survival-calibration. Survival models only.
+    """
+    import psycopg
+
+    from triage.diagnostics import readers
+    from triage.diagnostics.survival import compute_survival_diagnostics
+
+    grid = _positive_times(times)
+    _require_type(ctx, "postmodel survival", model_id)
+    pool = get_pool(ctx)
+    try:
+        computed = compute_survival_diagnostics(pool, model_id, horizon, grid)
+    except (ValueError, OSError) as exc:
+        _plot_fail(str(exc), 2)
+    except psycopg.errors.RaiseException as exc:
+        _plot_fail(exc.diag.message_primary or str(exc), 2)
+    if not computed.dates:
+        _plot_fail(
+            f"Model {model_id} has no scored test row with a survival label — score and"
+            " evaluate it first: triage run <config>.",
+            1,
+        )
+    results = [
+        readers.survival_diagnostics(pool, model_id, computed.horizon, d)
+        for d in computed.dates
+    ]
+    if as_json:
+        payload = {
+            "model_id": model_id,
+            "estimator": computed.estimator,
+            "horizon": computed.horizon,
+            "times": computed.times,
+            "dates": results,
+        }
+        console.print_json(json.dumps(payload, default=str))
+        return
+    console.print(
+        f"[green]{computed.rows_written} survival diagnostic row(s) persisted.[/green]"
+    )
+    for result in results:
+        if result is not None:
+            _print_survival(model_id, computed.estimator, result)
 
 
 @app.command("archive")
@@ -5039,7 +5231,8 @@ def plot_scores(
     """How the model's test scores spread.
 
     A histogram over every test date: over [0, 1] with the positives for a classifier,
-    over the model's own score range otherwise.
+    over the model's own score range otherwise. A survival model's bars split the rows
+    with an observed event from the censored ones.
     """
 
     def draw(pool: DictRowPool) -> PlotResult:
@@ -5264,6 +5457,102 @@ def plot_importance(
         return plots.importance(pool, model_group_id)
 
     _write_plot(ctx, output, f"importance-{model_group_id}.svg", draw)
+
+
+_HORIZON_HELP = (
+    "The horizon of the persisted set (label duration units). Default: the one computed"
+    " most recently."
+)
+_SURVIVAL_DATE_HELP = (
+    "Test as_of_date (YYYY-MM-DD). Default: the latest computed at the horizon."
+)
+
+
+@plot_app.command("km")
+def plot_km(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    horizon: Optional[float] = typer.Option(
+        None, "--horizon", callback=_optional_positive, help=_HORIZON_HELP
+    ),
+    as_of_date: Optional[str] = typer.Option(
+        None, "--date", callback=_plot_date, help=_SURVIVAL_DATE_HELP
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("km-MODEL.svg")
+    ),
+) -> None:
+    """Do the model's risk groups separate? Kaplan-Meier curves by risk tertile.
+
+    Beside them, the KM probability of the event by the horizon per risk decile, against
+    the population's. Reads what triage postmodel survival persisted. Survival models.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.km(pool, model_id, horizon, as_of_date)
+
+    _write_plot(ctx, output, f"km-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("brier")
+def plot_brier(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    horizon: Optional[float] = typer.Option(
+        None, "--horizon", callback=_optional_positive, help=_HORIZON_HELP
+    ),
+    as_of_date: Optional[str] = typer.Option(
+        None, "--date", callback=_plot_date, help=_SURVIVAL_DATE_HELP
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("brier-MODEL.svg")
+    ),
+) -> None:
+    """How far is the model's predicted survival from the outcome? Brier(t) over time.
+
+    Beside it, the Brier of the training Kaplan-Meier, which knows nothing of the
+    features. Needs an estimator with predict_survival_function. Survival models.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.brier(pool, model_id, horizon, as_of_date)
+
+    _write_plot(ctx, output, f"brier-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("survival-calibration")
+def plot_survival_calibration(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    horizon: Optional[float] = typer.Option(
+        None, "--horizon", callback=_optional_positive, help=_HORIZON_HELP
+    ),
+    as_of_date: Optional[str] = typer.Option(
+        None, "--date", callback=_plot_date, help=_SURVIVAL_DATE_HELP
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=_OUTPUT_HELP.format("survival-calibration-MODEL.svg"),
+    ),
+) -> None:
+    """Does the model's S(horizon) match what was observed? Predicted against KM.
+
+    Per decile of predicted survival at the horizon, with the diagonal, ICI and E50.
+    Needs an estimator with predict_survival_function. Survival models.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.survival_calibration(pool, model_id, horizon, as_of_date)
+
+    _write_plot(ctx, output, f"survival-calibration-{model_id}.svg", draw, [model_id])
 
 
 def execute() -> None:

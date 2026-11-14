@@ -6,6 +6,7 @@ from typing import Optional
 
 from triage.diagnostics import readers
 from triage.plots.style import (
+    AQUA,
     BASE_DASH,
     BLUE,
     INK,
@@ -108,8 +109,9 @@ def scores(
     """How a model's test scores spread over every test date.
 
     A classifier whose scores lie in ``[0, 1]`` is binned over ``[0, 1]`` and draws its
-    positives over all rows; any other model is binned over the range of its own scores
-    and draws one series.
+    positives over all rows; any other model is binned over the range of its own scores.
+    A survival model draws its rows with an observed event and, stacked on them, its
+    censored rows; the other types draw one series.
 
     Args:
         pool: the project database.
@@ -131,6 +133,7 @@ def scores(
             " test scores. Score the model first: triage run <config>."
         )
     has_pos = any(r["n_pos"] is not None for r in rows)
+    has_events = any(r["n_event"] is not None for r in rows)
 
     with style():
         fig, axes = new_figure(6.4, 3.4)
@@ -144,7 +147,8 @@ def scores(
             width=widths,
             align="edge",
             color=BLUE,
-            label="all rows",
+            # under the stacked survival bars, what shows is the rows with no label
+            label="no survival label" if has_events else "all rows",
         )
         if has_pos:
             ax.bar(
@@ -156,7 +160,14 @@ def scores(
                 label="positives",
             )
             ax.legend(loc="upper right")
-        ax.set_xlabel("score")
+        if has_events:
+            events = [r["n_event"] or 0 for r in rows]
+            ax.bar(lefts, events, width=widths, align="edge", color=ORANGE,
+                   label="event observed")  # fmt: skip
+            ax.bar(lefts, [r["n_censored"] or 0 for r in rows], bottom=events,
+                   width=widths, align="edge", color=AQUA, label="censored")  # fmt: skip
+            ax.legend(loc="upper right")
+        ax.set_xlabel("score" if not has_events else "risk score")
         ax.set_ylabel("rows")
         ax.set_title(title or f"How do model {model_id}'s test scores spread?")
         no_grid(ax, "x")
@@ -170,4 +181,9 @@ def scores(
     )
     if has_pos:
         summary += f"; {sum(r['n_pos'] or 0 for r in rows)} positives"
+    if has_events:
+        summary += (
+            f"; {sum(r['n_event'] or 0 for r in rows)} with an observed event,"
+            f" {sum(r['n_censored'] or 0 for r in rows)} censored"
+        )
     return PlotResult(fig, {"bins": rows}, summary)

@@ -28,6 +28,7 @@ from triage.plots.errors import error_rules, leaves, recurrence
 from triage.plots.overlap import overlap
 from triage.plots.regression import bias, forecast_actual, forecast_time, residuals
 from triage.plots.structure import importance
+from triage.plots.survival import brier, km, survival_calibration
 from triage.plots.style import (
     FORMATS,
     MAX_SERIES,
@@ -42,6 +43,7 @@ __all__ = [
     "NothingToDraw",
     "PlotResult",
     "bias",
+    "brier",
     "calibration",
     "crosstabs",
     "crosstabs_dates",
@@ -52,6 +54,7 @@ __all__ = [
     "forecast_time",
     "gains",
     "importance",
+    "km",
     "leaves",
     "output_format",
     "overlap",
@@ -59,5 +62,6 @@ __all__ = [
     "residuals",
     "scores",
     "segments",
+    "survival_calibration",
     "win_consistency",
 ]

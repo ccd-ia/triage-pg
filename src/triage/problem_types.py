@@ -38,7 +38,14 @@ class CommandTypes:
 
 
 _FOR_CLASSIFIERS = "triage plot calibration MODEL or triage postmodel error-tree MODEL"
-_FOR_SURVIVAL = "triage plot scores MODEL"
+_FOR_SURVIVAL = "triage postmodel survival MODEL --horizon H"
+
+#: For a model that is not survival, what answers the question a survival command asks.
+_NOT_SURVIVAL = {
+    "classification": "triage plot calibration MODEL",
+    "regression": "triage postmodel residuals MODEL",
+    "regression_ranking": "triage plot gains MODEL",
+}
 
 #: Command → the problem types it reads.
 COMMANDS: dict[str, CommandTypes] = {
@@ -73,6 +80,14 @@ COMMANDS: dict[str, CommandTypes] = {
     "plot gains": CommandTypes(
         ("classification", *REGRESSION_TYPES),
         {"survival": _FOR_SURVIVAL},
+    ),
+    # The censoring-aware set (migration 0036): a survival label only.
+    "postmodel survival": CommandTypes(("survival",), _NOT_SURVIVAL),
+    "plot km": CommandTypes(("survival",), _NOT_SURVIVAL),
+    "plot brier": CommandTypes(("survival",), _NOT_SURVIVAL),
+    "plot survival-calibration": CommandTypes(
+        ("survival",),
+        {t: "triage plot calibration MODEL" for t in _NOT_SURVIVAL},
     ),
 }
 
@@ -138,15 +153,23 @@ CLASSIFICATION_TREE_KINDS = ("fp", "fn", "confusion", "both", "all")
 REGRESSION_TREE_KINDS = ("abs_error", "beats_baseline")
 
 
-def error_tree_refusal(model_id: int, problem_type: str, kind: str) -> str | None:
-    """Why ``postmodel error-tree --kind KIND`` does not apply to the model, or None.
+def error_tree_refusal(
+    model_id: int, problem_type: str, kind: str, horizon: float | None = None
+) -> str | None:
+    """Why ``postmodel error-tree --kind KIND [--horizon H]`` does not apply, or None.
 
     ``regression`` has no positive class, so it reads only the regression kinds.
     ``regression_ranking`` reads both families: its classification trees read a positive
-    as ``outcome > 0``. ``classification`` and ``survival`` read only the classification
-    kinds.
+    as ``outcome > 0``. ``classification`` reads only the classification kinds.
+    ``survival`` reads them at a horizon only: ``--horizon H`` makes the label binary, and
+    no other type reads ``--horizon``.
     """
     shown = kind.replace("_", "-")
+    if horizon is not None and problem_type != "survival":
+        return (
+            f"model {model_id} is {problem_type}: --horizon binarizes a survival label"
+            " and reads survival models only. Drop --horizon."
+        )
     if problem_type == "regression" and kind in CLASSIFICATION_TREE_KINDS:
         return (
             f"model {model_id} is a regression model: --kind {shown} needs a positive"
@@ -157,5 +180,12 @@ def error_tree_refusal(model_id: int, problem_type: str, kind: str) -> str | Non
         return (
             f"model {model_id} is {problem_type}: --kind {shown} reads regression and"
             " regression_ranking models. Use --kind fp, fn, confusion, both or all."
+        )
+    if problem_type == "survival" and horizon is None:
+        return (
+            f"model {model_id} is a survival model: --kind {shown} needs a binary"
+            " outcome. Add --horizon H (in the units of the label's duration): positive"
+            " means an observed event at a duration ≤ H, and rows censored before H are"
+            " dropped."
         )
     return None

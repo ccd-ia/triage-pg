@@ -437,10 +437,14 @@ def _with_reference_rates(
 
     An ``abs_error`` leaf's reference is 1: its error rate is its mean |e| over the date's
     population MAE. A ``beats_baseline`` leaf's is the share of the training rows where the
-    model is not closer (``triage.error_tree_fits``).
+    model is not closer (``triage.error_tree_fits``). A survival tree at a horizon
+    (parameter ``<cut>|horizon=<H>``) reads the errors of all its leaves over their rows.
     """
+    from triage.diagnostics.error_tree import HORIZON_MARK
+
     rates: dict[tuple[Any, str], dict[str, Optional[float]]] = {}
     fits: dict[str, Optional[float]] = {}
+    pooled: dict[tuple[Any, str, str], Optional[float]] = {}
     out: list[dict[str, Any]] = []
     for row in rows:
         if row["error_kind"] == "abs_error":
@@ -456,6 +460,31 @@ def _with_reference_rates(
                 )
                 fits[row["parameter"]] = None if fit is None else fit["rate"]
             row["reference_error_rate"] = fits[row["parameter"]]
+        elif HORIZON_MARK in row["parameter"]:
+            # a survival tree at a horizon: its outcome is not in the threshold curve, and
+            # its leaves partition the tree's rows, so the pooled leaf rate is the
+            # population's
+            key = (row["as_of_date"], row["parameter"], row["error_kind"])
+            if key not in pooled:
+                found = _one(
+                    pool,
+                    "select sum(n_errors)::double precision / nullif(sum(n_matched), 0)"
+                    "       as rate"
+                    " from triage.error_analysis"
+                    " where model_id = %(m)s"
+                    "   and split_kind = cast(%(s)s as triage.split_kind)"
+                    "   and as_of_date = %(d)s and parameter = %(p)s"
+                    "   and error_kind = %(k)s",
+                    {
+                        "m": model_id,
+                        "s": row["split_kind"],
+                        "d": row["as_of_date"],
+                        "p": row["parameter"],
+                        "k": row["error_kind"],
+                    },
+                )
+                pooled[key] = None if found is None else found["rate"]
+            row["reference_error_rate"] = pooled[key]
         elif row["split_kind"] != "test":
             row["reference_error_rate"] = None  # the curve is drawn over test rows only
         else:
@@ -868,10 +897,12 @@ def score_histogram(
         bins: the number of equal-width buckets.
 
     Returns:
-        Rows ``bin, lo, hi, n, n_pos, mean_outcome``, ordered by bin; empty bins are
-        absent. ``n`` counts every scored row, labeled or not. ``n_pos`` (the positives)
-        is ``None`` unless the model is a classifier; ``mean_outcome`` averages the
-        labeled rows of the bin.
+        Rows ``bin, lo, hi, n, n_pos, mean_outcome, n_event, n_censored``, ordered by
+        bin; empty bins are absent. ``n`` counts every scored row, labeled or not.
+        ``n_pos`` (the positives) is ``None`` unless the model is a classifier;
+        ``mean_outcome`` averages the labeled rows of the bin. ``n_event`` and
+        ``n_censored`` count a survival model's rows with an observed event and its
+        censored rows (migration 0036), and are ``None`` for the other types.
 
     Raises:
         ValueError: ``bins`` is below 1.
@@ -879,7 +910,7 @@ def score_histogram(
     _check_bins(bins)
     return _rows(
         pool,
-        "select bin, lo, hi, n, n_pos, mean_outcome"
+        "select bin, lo, hi, n, n_pos, mean_outcome, n_event, n_censored"
         " from triage.model_score_histogram(%(m)s, %(bins)s) order by bin",
         {"m": model_id, "bins": bins},
     )
@@ -1317,4 +1348,106 @@ def gains_curve(
         "points": points,
         "aucc": None if aucc is None else aucc["value"],
         "rows": rows,
+    }
+
+
+# ------------------------------------------------------------------- survival diagnostics
+
+#: The kinds of row ``triage.survival_diagnostics`` holds (migration 0036).
+SURVIVAL_KINDS = (
+    "km_decile",
+    "km_group",
+    "logrank",
+    "calibration",
+    "brier",
+    "auc_t",
+    "uno_c",
+)
+
+
+def survival_diagnostics(
+    pool: DictRowPool,
+    model_id: int,
+    horizon: Optional[float] = None,
+    as_of_date: Optional[DateLike] = None,
+    split_kind: str = "test",
+) -> Optional[dict[str, Any]]:
+    """The persisted survival set of one model, date and horizon.
+
+    Reads ``triage.survival_diagnostics`` (written by ``triage postmodel survival``).
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        horizon: the horizon; ``None`` reads the one computed most recently.
+        as_of_date: the date; ``None`` reads the latest date computed at the horizon.
+        split_kind: the prediction split.
+
+    Returns:
+        ``None`` when nothing is persisted at that horizon and date. Otherwise
+        ``as_of_date``, ``horizon``, ``computed_at`` and ``kinds``: for each kind of
+        :data:`SURVIVAL_KINDS` its rows ``bin, t, value, n, extra``, ordered by bin and
+        t (an absent kind has no rows). ``value`` is ``None`` where the kind is undefined,
+        and ``extra['undefined']`` then says why.
+
+    Raises:
+        NotFoundError: no model has this id.
+    """
+    if (
+        _one(
+            pool,
+            "select 1 as found from triage.models where model_id = %(m)s",
+            {"m": model_id},
+        )
+        is None
+    ):
+        raise NotFoundError(f"model {model_id} not found")
+    params: dict[str, Any] = {
+        "m": model_id,
+        "split": split_kind,
+        "h": horizon,
+        "date": None if as_of_date is None else str(as_of_date),
+    }
+    ctx = _one(
+        pool,
+        "with pick as ("
+        "    select coalesce(%(h)s::double precision,"
+        "                    (select sd.horizon from triage.survival_diagnostics sd"
+        "                      where sd.model_id = %(m)s"
+        "                        and sd.split_kind = cast(%(split)s as triage.split_kind)"
+        "                      order by sd.computed_at desc, sd.horizon limit 1))"
+        "           as horizon"
+        ")"
+        " select p.horizon,"
+        "        coalesce(cast(%(date)s as date),"
+        "                 (select max(sd.as_of_date) from triage.survival_diagnostics sd"
+        "                   where sd.model_id = %(m)s"
+        "                     and sd.split_kind = cast(%(split)s as triage.split_kind)"
+        "                     and sd.horizon = p.horizon)) as as_of_date"
+        " from pick p",
+        params,
+    )
+    if ctx is None or ctx["horizon"] is None or ctx["as_of_date"] is None:
+        return None
+    params.update(h=ctx["horizon"], date=str(ctx["as_of_date"]))
+    rows = _rows(
+        pool,
+        "select kind, bin, t, value, n, extra, computed_at"
+        " from triage.survival_diagnostics"
+        " where model_id = %(m)s and split_kind = cast(%(split)s as triage.split_kind)"
+        "   and as_of_date = cast(%(date)s as date) and horizon = %(h)s"
+        " order by kind, bin, t",
+        params,
+    )
+    if not rows:
+        return None
+    kinds: dict[str, list[dict[str, Any]]] = {k: [] for k in SURVIVAL_KINDS}
+    for r in rows:
+        kinds[r.pop("kind")].append(r)
+    computed_at = max(r.pop("computed_at") for group in kinds.values() for r in group)
+    return {
+        "as_of_date": ctx["as_of_date"],
+        "horizon": ctx["horizon"],
+        "computed_at": computed_at,
+        "kinds": kinds,
     }
