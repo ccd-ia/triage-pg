@@ -388,13 +388,15 @@ def load_experiment_config(config_path: str) -> Dict[str, Any]:
 
 
 def _exit_on_bad_problem_blocks(config_data: Mapping[str, Any]) -> None:
-    """Exit 1 on an unknown key or a bad value in cohort_config / label_config (#21)."""
+    """Exit 1 on an unknown key or a bad value in cohort_config / label_config (#21), or in
+    the target-history keys (history_period, fill_missing_periods)."""
     from triage.adapters.problem_config import (
         cohort_config_errors,
         label_config_errors,
     )
+    from triage.adapters.target_history import target_history_config_errors
 
-    errors = []
+    errors = list(target_history_config_errors(config_data))
     if "cohort_config" in config_data:
         errors += cohort_config_errors(config_data["cohort_config"])
     if "label_config" in config_data:
@@ -1906,6 +1908,118 @@ def check_leakage_command(
         f" {status} (exit {code})."
     )
     raise typer.Exit(code=code)
+
+
+@check_app.command("history")
+def check_history_command(
+    ctx: typer.Context,
+    config: str = typer.Argument(..., help="Experiment config YAML to check."),
+    as_of: Optional[list[str]] = typer.Option(
+        None,
+        "--as-of",
+        metavar="DATE",
+        help="Render the history_query at this as_of_date (YYYY-MM-DD); repeatable."
+        " Default: the last test as_of_date of the temporal_config.",
+    ),
+    json_path: Optional[pathlib.Path] = typer.Option(
+        None, "--json", metavar="PATH", help="Also write the report to PATH as JSON."
+    ),
+    dbfile: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--dbfile",
+        "-d",
+        help="YAML file with the project database connection (else the usual"
+        " resolution: database.yaml, DATABASE_URL, PG*).",
+    ),
+) -> None:
+    """Is the target-history series complete on the calendar?
+
+    Renders the config's history_query at the given dates, places each row on the
+    history_period grid the matrix build uses, and reports the series with missing periods,
+    the rows whose period is off the grid or at/after the as_of_date, and the entities with
+    the most gaps. Builds nothing and writes nothing.
+
+    Exit codes: 0 clean; 1 gaps or off-grid rows found; 2 the check could not run.
+    """
+    from triage.diagnostics.history_check import HistoryCheckError, check_history
+
+    try:
+        db_url = resolve_db_url(dbfile) if dbfile else require_db_url(ctx)
+        config_data = load_experiment_config(config)
+        dates = _parse_check_dates(",".join(as_of)) if as_of else None
+        with connection_pool(db_url) as pool:
+            report = check_history(pool, config_data, dates)
+    except (HistoryCheckError, typer.BadParameter, OSError, yaml.YAMLError) as exc:
+        console.print(f"[red]The history check could not run:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        # Exit 1 means "gaps found", so an unexpected crash must not fall through to it.
+        logger.exception(f"triage check history failed on {config}")
+        console.print(f"[red]The history check could not run:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    dates_txt = ", ".join(d.isoformat() for d in report.as_of_dates)
+    console.print(
+        f"history_period {report.history_period!r}, width {report.width},"
+        + f" as_of_date(s) {dates_txt}"
+    )
+    summary = Table(box=box.SIMPLE_HEAVY)
+    summary.add_column("check")
+    summary.add_column("count", justify="right")
+    summary.add_row("series (entity × as_of_date)", f"{report.n_series:,}")
+    summary.add_row("series with missing periods", f"{report.n_series_with_gaps:,}")
+    summary.add_row("missing periods in all", f"{report.n_gaps:,}")
+    summary.add_row("rows off the period grid", f"{report.n_misaligned:,}")
+    summary.add_row("rows at or after the as_of_date", f"{report.n_leaked:,}")
+    console.print(summary)
+    if report.worst_entities:
+        worst = Table(title="entities with the most missing periods", box=box.SIMPLE)
+        worst.add_column("entity_id", justify="right")
+        worst.add_column("missing", justify="right")
+        worst.add_column("present", justify="right")
+        for row in report.worst_entities:
+            worst.add_row(
+                str(row["entity_id"]), str(row["n_gaps"]), str(row["n_present"])
+            )
+        console.print(worst)
+    if report.misaligned_examples:
+        off = Table(title="rows that cannot be placed", box=box.SIMPLE)
+        for col in (
+            "entity_id",
+            "as_of_date",
+            "period",
+            "nearest grid date",
+            "problem",
+        ):
+            off.add_column(col)
+        for row in report.misaligned_examples:
+            off.add_row(
+                str(row["entity_id"]),
+                str(row["as_of_date"]),
+                str(row["period"]),
+                str(row["nearest_grid_date"] or "—"),
+                str(row["problem"]),
+            )
+        console.print(off)
+    if report.n_series_with_gaps and not report.n_misaligned and not report.n_leaked:
+        console.print(
+            "Return a row for every period, zeros included, or set"
+            + " fill_missing_periods: zero."
+            + (
+                f" (fill_missing_periods is {report.fill_missing_periods!r} in this config.)"
+                if report.fill_missing_periods
+                else ""
+            )
+        )
+    if json_path is not None:
+        try:
+            json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
+        except OSError as exc:
+            console.print(
+                f"[red]Could not write the report to {json_path}:[/red] {exc}"
+            )
+            raise typer.Exit(code=2) from exc
+    raise typer.Exit(code=0 if report.clean else 1)
 
 
 @db_app.command("upgrade")

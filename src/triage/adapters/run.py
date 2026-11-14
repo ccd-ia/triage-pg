@@ -80,8 +80,10 @@ from triage.adapters.problem_config import (
 )
 from triage.adapters.subsets import register_subsets, validate_subsets_config
 from triage.adapters.target_history import (
-    DEFAULT_HISTORY_SERIES_WIDTH,
+    NO_TARGET_HISTORY,
+    TargetHistory,
     resolve_target_history,
+    target_history_config_errors,
 )
 from triage.adapters.temporal import TemporalConfig
 from triage.artifacts import _notify_run_progress, record_use
@@ -262,6 +264,8 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "history_query",
         "target_history_lags",
         "history_series_width",
+        "history_period",
+        "fill_missing_periods",
     }
 )
 
@@ -394,6 +398,11 @@ def validate_experiment_config(experiment_config: Mapping[str, Any]) -> dict[str
             n_feature_groups, n_runs = _resolve_fanout(
                 feature_config, fallback_groups=n_feature_groups
             )
+
+    # Target history (ADR-0030): history_period / fill_missing_periods, as run_experiment's
+    # resolve_target_history raises them.
+    for path, message in target_history_config_errors(experiment_config):
+        _err(path, message)
 
     task_framing = experiment_config.get("task_framing")
     if task_framing is not None and task_framing not in _TASK_FRAMINGS:
@@ -983,9 +992,7 @@ def _build_split(
     storage: StorageAdapter,
     storage_root: str,
     source_pins: Mapping[str, str | None],
-    target_history_lags: int = 0,
-    history_query: str | None = None,
-    history_series_width: int = 0,
+    target_history: TargetHistory = NO_TARGET_HISTORY,
     missing_label_fill: int | None = None,
 ) -> tuple[MatrixResult, MatrixResult, list[date], list[date], str, str]:
     """Build a split's train + test matrices; return both + their dates + label timespans.
@@ -1029,9 +1036,7 @@ def _build_split(
         storage_root=storage_root,
         lookback=lookback,
         source_pins=source_pins,
-        target_history_lags=target_history_lags,
-        history_query=history_query,
-        history_series_width=history_series_width,
+        target_history=target_history,
         missing_label_fill=missing_label_fill,
     )
     test_matrix = build_matrix(
@@ -1049,9 +1054,7 @@ def _build_split(
         storage_root=storage_root,
         train_matrix_artifact_id=train_matrix.matrix_artifact_id,
         source_pins=source_pins,
-        target_history_lags=target_history_lags,
-        history_query=history_query,
-        history_series_width=history_series_width,
+        target_history=target_history,
     )
     return (
         train_matrix,
@@ -1261,18 +1264,7 @@ def run_experiment(
         # carry the reserved lag / raw-series columns those estimators read. Resolve once —
         # enforcing the raw-series-baseline-needs-history_query contract — and thread the knobs
         # into every split's matrix build (they also enter matrix identity).
-        target_history_lags, history_query = resolve_target_history(
-            grid_config, experiment_config
-        )
-        history_series_width = (
-            int(
-                experiment_config.get(
-                    "history_series_width", DEFAULT_HISTORY_SERIES_WIDTH
-                )
-            )
-            if history_query
-            else 0
-        )
+        target_history = resolve_target_history(grid_config, experiment_config)
 
         train_label_fill = missing_label_fill(label_config)
 
@@ -1293,9 +1285,7 @@ def run_experiment(
                 storage=storage,
                 storage_root=storage_root,
                 source_pins=frozen_pins,
-                target_history_lags=target_history_lags,
-                history_query=history_query,
-                history_series_width=history_series_width,
+                target_history=target_history,
                 missing_label_fill=train_label_fill,
             )
             for split in splits

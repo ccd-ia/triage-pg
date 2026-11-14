@@ -1019,6 +1019,34 @@ def score_and_evaluate(
     )
 
 
+def _warn_abstentions(estimator, history, scores) -> None:
+    """Log one WARNING when a target-history baseline abstains (non-finite score) on rows.
+
+    Those rows are left out of the predictions, so the model is evaluated on fewer rows than
+    the cohort; the reason is named so the count is not a mystery.
+    """
+    import numpy as np
+
+    abstained = ~np.isfinite(np.asarray(scores, dtype=float))
+    n = int(abstained.sum())
+    if not n:
+        return
+    h = np.asarray(history, dtype=float)
+    rows = h[abstained] if h.ndim == 2 else h[:0]
+    empty = int(np.isnan(rows).all(axis=1).sum()) if rows.size else n
+    gapped = n - empty
+    reasons = []
+    if empty:
+        reasons.append(f"{empty} with no target history")
+    if gapped:
+        reasons.append(f"{gapped} with an interior gap in the target history")
+    logger.warning(
+        f"{type(estimator).__name__} abstained on {n} of {len(scores)} row(s) ("
+        + ", ".join(reasons)
+        + "); those rows have no prediction"
+    )
+
+
 def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]:
     """Build the append-only score rows from a matrix's keys + the estimator's scores.
 
@@ -1055,6 +1083,8 @@ def score_matrix(estimator, matrix_result: MatrixResult) -> list[dict[str, Any]]
     elif getattr(estimator, "consumes_named_features", False):
         x = frame.select(_feature_columns).to_pandas()
     scores = _score_column(estimator, x)
+    if getattr(estimator, "consumes_target_history", False):
+        _warn_abstentions(estimator, x, scores)
     entity_ids = frame.get_column("entity_id").to_list()
     as_of_dates = frame.get_column("as_of_date").to_list()
     return [
