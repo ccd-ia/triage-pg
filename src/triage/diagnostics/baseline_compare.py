@@ -49,6 +49,10 @@ class ComparisonError(ValueError):
     """The two groups cannot be compared: no shared rows, a wrong type, an unknown group."""
 
 
+class NoBaseline(ComparisonError):
+    """No baseline group of the Experiment shares a scored row with the model group."""
+
+
 @dataclass
 class Comparison:
     """A model group against a baseline group on the rows both scored."""
@@ -138,7 +142,7 @@ def default_baseline(
     MAE is averaged over the test dates on the rows it and the model group both scored.
 
     Raises:
-        ComparisonError: the Experiment has no baseline group with a shared row.
+        NoBaseline: the Experiment has no baseline group with a shared row.
     """
     with pool.connection() as conn:
         candidates = [
@@ -163,7 +167,7 @@ def default_baseline(
             if mae is not None and (best is None or (mae, candidate) < best):
                 best = (mae, candidate)
     if best is None:
-        raise ComparisonError(
+        raise NoBaseline(
             f"experiment {experiment_hash[:12]} has no baseline group ({BASELINE_PREFIX}*)"
             f" that shares a scored row with group {model_group_id} — pass --baseline GROUP"
         )

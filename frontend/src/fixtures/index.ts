@@ -46,6 +46,15 @@ import type {
   MetricsResponse,
   ModelCardResponse,
   CrosstabStat,
+  CrosstabComparison,
+  CommonRowsResponse,
+  CommonRowsSubset,
+  EmptyState,
+  NearMissBand,
+  NearMissResponse,
+  PrototypeRow,
+  PrototypesResponse,
+  ResidualCut,
   ModelCurveResponse,
   ModelGroupCurvesResponse,
   ModelGroupDetailResponse,
@@ -800,6 +809,9 @@ export function modelCard(id: number): ModelCardResponse {
   return {
     model_id: id,
     model_group_id: gid,
+    // the fixture experiments are classification: the regression and survival panels
+    // show their empty states in fixture mode
+    problem_type: 'classification',
     feature_importances: importances.map((f) => ({ ...f, model_id: id })),
     evaluations,
     windowed,
@@ -839,7 +851,11 @@ export function modelCalibration(id: number): CalibrationResponse {
  *  `nonzero_rate`, the shares of the list and of the rest with a nonzero value, ranked by
  *  their difference as the route ranks them: one near-total separation (the leakage
  *  signature), one feature missing mostly on the list. */
-export function modelCrosstabs(id: number, stat?: CrosstabStat): CrosstabsResponse {
+export function modelCrosstabs(
+  id: number,
+  stat?: CrosstabStat,
+  comparison?: CrosstabComparison,
+): CrosstabsResponse {
   void id
   const mk = (feature: string, sel: number, rest: number): CrosstabRow => ({
     as_of_date: SPLITS[SPLITS.length - 1],
@@ -849,6 +865,15 @@ export function modelCrosstabs(id: number, stat?: CrosstabStat): CrosstabsRespon
     rest_value: rest,
     ratio: rest === 0 ? null : sel / rest,
   })
+  if (comparison === 'near_miss') {
+    // the next k rows look much like the list: the ratios sit close to 1
+    return stat === 'nonzero_rate'
+      ? [mk('inspections__reinspection__max_none__all', 0.98, 0.81)]
+      : [
+          mk('inspections__entity_id__count_none__all', 6.1, 5.2),
+          mk('inspections__failed__sum_none__1y', 1.9, 1.4),
+        ]
+  }
   if (stat === 'nonzero_rate') {
     return [
       mk('inspections__reinspection__max_none__all', 0.98, 0.03),
@@ -1432,4 +1457,95 @@ export function fxValidateConfig(configText?: string): ValidateConfigResult {
         errors: [{ path: 'problem_type', message: 'required key is missing' }],
         warnings: [],
       }
+}
+
+/* ========================================================================== */
+/* The postmodel panels per problem type (plan Phase 13)                       */
+/* ========================================================================== */
+
+/** What a route answers in fixture mode for a panel no fixture model reaches. */
+function fxNoModel(panel: string, command: string): EmptyState {
+  return {
+    empty: true,
+    reason: `fixture mode has no ${panel}`,
+    hint: `the fixture models are classifiers; against a real project \`${command}\` fills it.`,
+  }
+}
+
+export const modelResiduals = (id: number) =>
+  fxNoModel('regression model', `triage postmodel residuals ${id}`)
+export const modelResidualSegments = (id: number, cut: ResidualCut) =>
+  fxNoModel('regression model', `triage postmodel residuals ${id} --by ${cut}`)
+export const modelForecastActual = (id: number) =>
+  fxNoModel('regression model', `triage plot forecast-actual ${id}`)
+export const modelBaseline = (id: number) =>
+  fxNoModel('regression model', `triage postmodel baseline GROUP (model ${id}'s group)`)
+export const modelStructure = (id: number) =>
+  fxNoModel('stored estimator', `triage postmodel structure ${id}`)
+export const modelGains = (id: number) =>
+  fxNoModel('regression_ranking model', `triage plot gains ${id}`)
+export const modelSurvival = (id: number) =>
+  fxNoModel('survival model', `triage postmodel survival ${id} --horizon H`)
+
+/** The fixture's three bands per test date: the near miss nearly as positive as the list. */
+export function modelNearMiss(id: number, parameter?: string): NearMissResponse {
+  void id
+  void parameter
+  const rows: NearMissBand[] = []
+  for (const d of SPLITS.slice(1)) {
+    rows.push(
+      { as_of_date: d, band: 'selected', first_rank: 1, last_rank: 100, n: 100, n_labeled: 92,
+        n_positive: 30, base_rate: 30 / 92, mean_outcome: 30 / 92, mean_score: 0.81 },
+      { as_of_date: d, band: 'near_miss', first_rank: 101, last_rank: 200, n: 100, n_labeled: 90,
+        n_positive: 26, base_rate: 26 / 90, mean_outcome: 26 / 90, mean_score: 0.62 },
+      { as_of_date: d, band: 'rest', first_rank: 201, last_rank: 2000, n: 1800, n_labeled: 1610,
+        n_positive: 240, base_rate: 240 / 1610, mean_outcome: 240 / 1610, mean_score: 0.21 },
+    )
+  }
+  return rows
+}
+
+/** One prototype per class at the fixture's cut, with its largest deviations. */
+export function modelPrototypes(id: number): PrototypesResponse {
+  void id
+  const d = SPLITS[SPLITS.length - 1]
+  const dev = (feature: string, deviation: number) => ({
+    feature,
+    value: 2 + deviation,
+    z: deviation + 0.4,
+    centroid_z: 0.4,
+    deviation,
+  })
+  const row = (cls: PrototypeRow['class'], entity: number, size: number): PrototypeRow => ({
+    as_of_date: d,
+    parameter: '100_abs',
+    class: cls,
+    class_size: size,
+    rank: 1,
+    entity_id: entity,
+    distance: 1.2 + entity / 10000,
+    deviations: [
+      dev('inspections__failed__sum_none__1y', 0.8),
+      dev('facility__age__identity_none__all', -0.5),
+    ],
+    computed_at: `${d}T12:00:00Z`,
+  })
+  return [row('tp', 9921, 30), row('fp', 9884, 70), row('fn', 7310, 210), row('tn', 5122, 1690)]
+}
+
+/** The fixture groups score every labeled row, so there is nothing to compare apart. */
+export function expCommonRows(hash: string): CommonRowsResponse {
+  return fxNoModel('groups with different coverage', `triage postmodel compare-rows ${hash}`)
+}
+
+export function fxCommonRowsSubset(ids?: number[]): CommonRowsSubset {
+  const groups = ids ?? [1, 2, 3, 4]
+  return {
+    subset_hash: 'common:fx00000000000000000000000000',
+    name: `rows scored by groups ${groups.join(', ')}`,
+    model_group_ids: groups,
+    n_rows: 8000,
+    n_dates: 4,
+    n_evaluations: 0,
+  }
 }

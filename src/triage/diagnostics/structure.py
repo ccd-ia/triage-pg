@@ -329,6 +329,53 @@ def mean_shift(
     }
 
 
+# ------------------------------------------------------------------------- one model
+
+
+def model_structure(
+    pool: DictRowPool, model_id: int, min_rows: int = 2
+) -> dict[str, Any]:
+    """Every structure check of one model: what ``triage postmodel structure`` prints.
+
+    Returns:
+        ``model_id``, ``problem_type``, ``estimator`` (its class name), ``unavailable``
+        (why a check does not apply to this estimator, one message per check) and, where
+        they apply, ``forecast_structure`` (a regression model's latest test date of
+        :func:`~triage.diagnostics.readers.residual_summary`, or ``None`` when it has no
+        labeled test row), ``leaf_support`` (:func:`leaf_support`) and ``mean_shift``
+        (:func:`mean_shift`).
+
+    Raises:
+        ValueError: no model has this id, it has no stored estimator, or the mean shift
+            cannot read its matrices.
+        OSError: the estimator's joblib file cannot be read.
+    """
+    from triage import problem_types
+    from triage.diagnostics import readers
+
+    problem_type = problem_types.model_problem_type(pool, model_id)
+    estimator = load_estimator(pool, model_id)
+    payload: dict[str, Any] = {
+        "model_id": model_id,
+        "problem_type": problem_type,
+        "estimator": type(estimator).__name__,
+    }
+    if problem_type in problem_types.REGRESSION_TYPES:
+        dates = readers.residual_summary(pool, model_id)
+        payload["forecast_structure"] = dates[-1] if dates else None
+    unavailable: list[str] = []
+    try:
+        payload["leaf_support"] = leaf_support(estimator, min_rows)
+    except StructureUnavailable as exc:
+        unavailable.append(str(exc))
+    try:
+        payload["mean_shift"] = mean_shift(pool, model_id, estimator)
+    except StructureUnavailable as exc:
+        unavailable.append(str(exc))
+    payload["unavailable"] = unavailable
+    return payload
+
+
 # ---------------------------------------------------------------- importance, sensitivity
 
 

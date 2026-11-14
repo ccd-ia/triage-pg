@@ -1948,3 +1948,93 @@ tr.winner td {
 .projswitch select:hover {
   border-color: var(--acc);
 }
+
+/* postmodel panels per problem type (plan Phase 13): KPI strips, warnings, the hexbin,
+   the near-miss bands and the compact tables inside the model sheet */
+.sheet .strip {
+  padding: 8px 2px;
+}
+.sheet .strip .cell {
+  padding: 2px 10px;
+}
+.banner.warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.sheet .banner {
+  padding: 6px 10px;
+  font-size: 11px;
+  margin: 6px 0;
+}
+.hexbin {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.hexbin text {
+  fill: var(--mut);
+  font-size: 9px;
+}
+.bands {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+.bands .track {
+  height: 8px;
+  background: var(--line2);
+  border-radius: 4px;
+  position: relative;
+}
+.bands .fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+  background: var(--acc);
+}
+.bands .fill.near_miss {
+  background: var(--warn);
+}
+.bands .fill.rest {
+  background: var(--mut);
+}
+.sheet table.compact td,
+.sheet table.compact th {
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.sheet h5 {
+  margin: 10px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mut);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* the audition tab's common-rows toggle: the sheet toggle's look, on the page panel */
+.commonrows {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-left: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--acc);
+  font: inherit;
+  font-size: 11px;
+}
+.commonrows.active {
+  background: var(--acc-bg);
+  border-color: var(--acc-border);
+}
+.commonrows:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+

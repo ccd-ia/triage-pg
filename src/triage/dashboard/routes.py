@@ -332,24 +332,36 @@ def audition(
     metric: str = "auc_roc",
     parameter: str = "",
     rule: str = "best_average_value",
+    subset_hash: str = "",
     pool: DictRowPool = Depends(_pool),
 ) -> dict[str, Any]:
     """Audition ranking + per-split curves + the pick + a pick per standard rule.
 
     Experiment-scoped (migration 0005): a re-run cache-shares models, so run-scoping is empty
     (the Q1 bug). Empty-state: < 2 model_groups AND < 2 evaluated splits.
+
+    ``subset_hash`` selects on one Subset's evaluations (migration 0031): the common-rows
+    Subset that ``POST /experiments/{hash}/common-rows`` returns compares the groups on the
+    rows every one of them scored. The default ``''`` is everyone, each group on its own
+    rows. ``coverage`` is always the group's share of the labeled rows it scored.
     """
-    params = {"hash": experiment_hash, "metric": metric, "parameter": parameter}
+    params = {
+        "hash": experiment_hash,
+        "metric": metric,
+        "parameter": parameter,
+        "subset": subset_hash,
+    }
+    # audition_windowed with both bounds null is triage.audition exactly (migration 0022);
+    # it is the form that takes a subset_hash.
     ranking = _rows(
         pool,
         "select a.experiment_hash, a.metric, a.parameter, a.model_group_id,"
         "       a.n_splits_evaluated, a.avg_value, a.stddev_value,"
         "       a.avg_distance_from_best, a.max_regret, c.coverage"
-        " from triage.audition a"
+        " from triage.audition_windowed(%(hash)s, %(metric)s, %(parameter)s, null, null,"
+        "                               %(subset)s) a"
         " left join triage.model_group_coverage(%(hash)s) c"
         "        on c.model_group_id = a.model_group_id"
-        " where a.experiment_hash = %(hash)s and a.metric = %(metric)s"
-        "   and a.parameter = %(parameter)s"
         " order by a.avg_distance_from_best asc, a.max_regret asc, a.model_group_id asc",
         params,
     )
@@ -366,16 +378,16 @@ def audition(
         pool,
         "select experiment_hash, model_group_id, metric, parameter, as_of_date,"
         "       raw_value, best_value, dist_from_best_case"
-        " from triage.audition_distances"
+        " from triage.audition_distances_by_subset"
         " where experiment_hash = %(hash)s and metric = %(metric)s"
-        "   and parameter = %(parameter)s"
+        "   and parameter = %(parameter)s and subset_hash = %(subset)s"
         " order by model_group_id, as_of_date",
         params,
     )
     pick = _one(
         pool,
         "select triage.audition_pick(%(hash)s, %(metric)s, %(parameter)s, %(rule)s,"
-        " '{}'::jsonb) as model_group_id",
+        " '{}'::jsonb, null, null, %(subset)s) as model_group_id",
         {**params, "rule": rule},
     )
 
@@ -402,7 +414,7 @@ def audition(
         gid = _one(
             pool,
             "select triage.audition_pick(%(hash)s, %(metric)s, %(parameter)s, %(rule)s,"
-            " %(params)s::jsonb) as model_group_id",
+            " %(params)s::jsonb, null, null, %(subset)s) as model_group_id",
             {**params, "rule": rule_name, "params": json.dumps(rule_params)},
         )
         strategies.append(
@@ -424,6 +436,7 @@ def audition(
         "metric": metric,
         "parameter": parameter,
         "rule": rule,
+        "subset_hash": subset_hash,
         "ranking": ranking,
         "curves": curves,
         "pick": (pick or {}).get("model_group_id"),
@@ -682,10 +695,13 @@ def model_group_detail(
 
 @router.get("/models/{model_id}")
 def model_detail(model_id: int, pool: DictRowPool = Depends(_pool)) -> dict[str, Any]:
-    """Model-detail drill-down: the model's group + feature importances + per-split evaluations."""
+    """Model-detail drill-down: the model's group and problem type, its feature importances
+    and its per-split evaluations."""
     model = _one(
         pool,
-        "select model_id, model_group_id from triage.models where model_id = %(model_id)s",
+        "select model_id, model_group_id,"
+        "       triage.model_problem_type(model_id)::text as problem_type"
+        " from triage.models where model_id = %(model_id)s",
         {"model_id": model_id},
     )
     if model is None:
@@ -720,7 +736,9 @@ def model_detail(model_id: int, pool: DictRowPool = Depends(_pool)) -> dict[str,
     )
     return {
         "model_id": model_id,
-        "model_group_id": (model or {}).get("model_group_id"),
+        "model_group_id": model["model_group_id"],
+        # the model card branches on it: which panels apply to this model
+        "problem_type": model["problem_type"],
         "feature_importances": importances,
         "evaluations": evals,
         "windowed": windowed,
@@ -839,12 +857,23 @@ def model_entity_importances(
     return rows
 
 
+def _problem_type(pool: DictRowPool, model_id: int) -> str:
+    """The model's problem type, for an empty state's hint (classification when unknown)."""
+    row = _one(
+        pool,
+        "select triage.model_problem_type(%(m)s)::text as problem_type",
+        {"m": model_id},
+    )
+    return "classification" if row is None else row["problem_type"]
+
+
 @router.get("/models/{model_id}/crosstabs")
 def model_crosstabs(
     model_id: int,
     parameter: Optional[str] = None,
     limit: int = 20,
     stat: Literal["mean", "nonzero_rate"] = "mean",
+    comparison: Literal["rest", "near_miss"] = "rest",
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """Top distinguishing features among the selected vs the rest — thin read over
@@ -852,21 +881,62 @@ def model_crosstabs(
 
     ``stat=mean`` (the default) ranks the ratio of means by |log ratio|; ``stat=nonzero_rate``
     ranks the nonzero rates by |selected − rest|, where a ratio of two rates near zero would
-    mislead.
+    mislead. ``comparison=near_miss`` compares the selected rows with the next k rows below
+    the cut instead of every row below it (migration 0037); ``rest_value`` then holds the
+    near-miss value.
     """
     rows = readers.crosstabs(
-        pool, model_id, parameter=parameter, stat=stat, limit=limit
+        pool,
+        model_id,
+        parameter=parameter,
+        stat=stat,
+        limit=limit,
+        comparison=comparison,
     )
     if not rows:
+        if comparison == "near_miss":
+            hint = (
+                f"run `triage postmodel crosstabs {model_id} --against near-miss` — it"
+                " compares the top k with the next k rows and persists here."
+            )
+        elif _problem_type(pool, model_id) == "regression":
+            hint = (
+                f"run `triage postmodel crosstabs {model_id} --by abs-error` — the rows"
+                " with the largest errors against the rest, computed from the matrix."
+            )
+        else:
+            hint = (
+                f"run `triage postmodel crosstabs {model_id}` — the CLI computes from the"
+                " matrix and persists here."
+            )
         return _empty(
-            "no crosstabs persisted for this model",
-            "run `triage postmodel crosstabs <model_id>` — the CLI computes from the"
-            " matrix and persists here (ADR-0011).",
+            "no crosstabs persisted for this model"
+            + (" against the near miss" if comparison == "near_miss" else ""),
+            hint,
         )
     return rows
 
 
-ErrorKind = Literal["fp", "fn", "confusion"]
+#: Every kind of error-tree leaf: the classification kinds (also a survival model's at a
+#: horizon) and the regression kinds (migration 0034).
+ErrorKind = Literal["fp", "fn", "confusion", "abs_error", "beats_baseline"]
+
+
+def _error_tree_hint(pool: DictRowPool, model_id: int, kind: Optional[str]) -> str:
+    """The ``triage postmodel error-tree`` command that fills an empty error-rules panel."""
+    problem_type = _problem_type(pool, model_id)
+    if kind == "beats_baseline":
+        option = "--kind beats-baseline"
+    elif kind == "abs_error" or problem_type == "regression":
+        option = "--kind abs-error"
+    elif problem_type == "survival":
+        option = "--kind all --horizon H"
+    else:
+        option = "--kind all"
+    return (
+        f"run `triage postmodel error-tree {model_id} {option}` — the CLI fits the error"
+        " trees from the matrix and persists the rules here."
+    )
 
 
 @router.get("/models/{model_id}/error-rules")
@@ -882,11 +952,13 @@ def model_error_rules(
     """The error-tree rules (where does this model fail?) — thin read over
     ``triage.error_analysis`` (persisted by ``triage postmodel error-tree``).
 
-    ``error_kind`` keeps one kind of leaf (fp | fn | confusion). ``suspicious=true`` reads
-    ``triage.error_rules_suspicious`` instead (migration 0027): the high-support leaves with
-    almost no error, each with its TP share and its lift over the model's precision@. That
-    list is a plain array — empty when nothing qualifies — since "nothing suspicious" is an
-    answer, not a missing diagnostic.
+    ``error_kind`` keeps one kind of leaf: fp | fn | confusion (a survival model's trees at
+    a horizon are these kinds, at parameter ``<cut>|horizon=<H>``), or the regression kinds
+    abs_error | beats_baseline. ``suspicious=true`` reads ``triage.error_rules_suspicious``
+    instead (migration 0027): the high-support leaves with almost no error, each with its
+    TP share and its lift over the model's precision@ (an abs_error leaf: the population
+    MAE over its own). That list is a plain array — empty when nothing qualifies — since
+    "nothing suspicious" is an answer, not a missing diagnostic.
 
     Every leaf carries ``reference_error_rate``: the population error rate of its kind at its
     date and cut (``readers.error_reference_rates``), the mark its own rate is read against.
@@ -905,8 +977,7 @@ def model_error_rules(
         return _empty(
             "no error analysis persisted for this model"
             + ("" if error_kind is None else f" ({error_kind} leaves)"),
-            "run `triage postmodel error-tree <model_id> --kind all` — the CLI fits the"
-            " error trees from the matrix and persists the rules here (ADR-0011).",
+            _error_tree_hint(pool, model_id, error_kind),
         )
     return rows
 
@@ -1020,6 +1091,319 @@ def model_predictions(
         {"model_id": model_id, "split": split_kind, "limit": limit, "offset": offset},
     )
     return {"rows": rows, "total": total}
+
+
+# ======================================================== postmodel panels per problem type
+# Each route wraps one reader of triage.diagnostics (or a diagnostics module) and adds only
+# the HTTP contract. A route whose diagnostic does not apply to the model's problem type
+# answers 422 with problem_types' refusal, which names the command that does apply. An
+# empty source answers the empty-state envelope, whose hint names the CLI command that
+# fills it or the run that scores the model.
+
+
+def _require_type(pool: DictRowPool, command: str, model_id: int) -> str:
+    """The model's problem type when ``command`` reads it; else 422 (unknown model: 404)."""
+    from triage import problem_types
+
+    try:
+        return problem_types.require(pool, command, model_id)
+    except problem_types.WrongProblemType as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:  # no model has this id
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _unscored(model_id: int, command: str, options: str = "") -> dict[str, Any]:
+    """The empty state of a diagnostic computed on read: the model scored no labeled row."""
+    return _empty(
+        f"model {model_id} has no labeled test rows",
+        f"score and evaluate it first (a `triage run` of its experiment does); then"
+        f" `triage {command} {model_id}{options}` reads the same rows.",
+    )
+
+
+@router.get("/models/{model_id}/residuals")
+def model_residuals(model_id: int, pool: DictRowPool = Depends(_pool)) -> Any:
+    """Per test date: a regression model's MAE, RMSE, WAPE, bias, error concentration,
+    point coverage and forecast shape (``readers.residual_summary``, migration 0033).
+
+    ``mode_share`` is the share of rows forecast the most frequent value: a forecast that
+    gives one value to most rows ranks nothing. Regression and regression_ranking only.
+    """
+    _require_type(pool, "postmodel residuals", model_id)
+    rows = readers.residual_summary(pool, model_id)
+    return rows or _unscored(model_id, "postmodel residuals")
+
+
+@router.get("/models/{model_id}/residuals/segments")
+def model_residual_segments(
+    model_id: int,
+    cut: str = "band",
+    pooled: Optional[bool] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """A regression model's errors per segment of its rows (``readers.residuals_by_segment``).
+
+    ``cut`` is ``band`` (the band of the entity's mean prior label), ``sbc`` (its
+    Syntetos–Boylan class), ``cold-start`` or ``subset:NAME``. ``pooled=true`` keeps the rows
+    pooled over the test dates, ``false`` the per-date rows; omitted, both (a pooled row has a
+    null ``as_of_date``).
+    """
+    _require_type(pool, "postmodel residuals", model_id)
+    try:
+        rows = readers.residuals_by_segment(pool, model_id, cut, pooled=pooled)
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return rows or _unscored(model_id, "postmodel residuals", f" --by {cut}")
+
+
+@router.get("/models/{model_id}/forecast-actual")
+def model_forecast_actual(
+    model_id: int,
+    cap: Annotated[int, Query(ge=1, le=readers.FORECAST_ACTUAL_CAP)] = 20_000,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """Forecast and outcome pairs of a regression model's labeled test rows, for the
+    forecast-against-actual panel (``readers.forecast_actual``).
+
+    Over ``cap`` pairs, the entities kept are the first in ``hashint8(entity_id)`` order, the
+    same on every call; ``sampled`` says so.
+    """
+    _require_type(pool, "plot forecast-actual", model_id)
+    result = readers.forecast_actual(pool, model_id, cap=cap)
+    if not result["n_total"]:
+        return _unscored(model_id, "plot forecast-actual")
+    return result
+
+
+@router.get("/models/{model_id}/baseline")
+def model_baseline(
+    model_id: int,
+    baseline: Annotated[Optional[int], Query(ge=1)] = None,
+    cut: str = "all",
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The model's group against a baseline group, on the rows both scored, over the
+    group's test dates in the model's experiment (``baseline_compare.compare_to_baseline``).
+
+    ``baseline`` is a model group; omitted, the experiment's baseline group with the lowest
+    MAE on the shared rows. ``cut`` is ``band``, ``sbc``, ``cold-start``, ``subset:NAME`` or
+    ``all``. A non-regression model, or groups that share no row, answer 422; an experiment
+    with no baseline group answers the empty state.
+    """
+    from triage.diagnostics.baseline_compare import (
+        ComparisonError,
+        NoBaseline,
+        compare_to_baseline,
+    )
+
+    model = _one(
+        pool,
+        "select m.model_group_id, r.experiment_hash from triage.models m"
+        " left join triage.runs r on r.run_id = m.run_id where m.model_id = %(m)s",
+        {"m": model_id},
+    )
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    group = model["model_group_id"]
+    try:
+        result = compare_to_baseline(
+            pool,
+            group,
+            baseline,
+            experiment_hash=model["experiment_hash"],
+            cut=cut,
+        )
+    except NoBaseline as exc:
+        return _empty(
+            "no baseline group shares a scored row with this model's group",
+            f"{exc}: `triage postmodel baseline {group} --baseline GROUP` compares it"
+            " with any other group of the experiment.",
+        )
+    except ComparisonError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return result.to_dict()
+
+
+@router.get("/models/{model_id}/structure")
+def model_structure(
+    model_id: int,
+    min_rows: Annotated[int, Query(ge=1)] = 2,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """Checks on the fitted estimator (``structure.model_structure``, what ``triage postmodel
+    structure`` prints): the forecast structure of a regression model, the leaves of a tree
+    fitted on fewer than ``min_rows`` training rows, and a linear forecast's mean shift from
+    train to test by feature family. ``unavailable`` says why a check does not apply.
+
+    Reads the model's joblib file and matrices. A model with no stored estimator answers the
+    empty state.
+    """
+    from triage import problem_types
+    from triage.diagnostics.structure import model_structure as structure_of
+
+    try:
+        problem_types.model_problem_type(pool, model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return structure_of(pool, model_id, min_rows)
+    except (ValueError, OSError) as exc:
+        return _empty(
+            f"the fitted model cannot be read: {exc}",
+            f"`triage postmodel structure {model_id}` reads the estimator the run stored"
+            " (models.artifact_uri) and its train and test matrices.",
+        )
+
+
+@router.get("/models/{model_id}/gains")
+def model_gains(
+    model_id: int,
+    as_of_date: Optional[str] = None,
+    points: Annotated[int, Query(ge=1)] = 100,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The cumulative-gains curve of one evaluated date (``readers.gains_curve``, migration
+    0035): the share of the outcome total the top k hold, its lift over a random list, and
+    the stored ``aucc``. Defaults to the model's latest evaluated test date.
+    """
+    _require_type(pool, "plot gains", model_id)
+    try:
+        result = readers.gains_curve(
+            pool, model_id, as_of_date=as_of_date, points=points
+        )
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result is None:
+        return _empty(
+            f"model {model_id} has no evaluated test date",
+            f"score and evaluate it first (a `triage run` of its experiment does); then"
+            f" `triage plot gains {model_id}` draws the same curve.",
+        )
+    return result
+
+
+@router.get("/models/{model_id}/survival")
+def model_survival(
+    model_id: int,
+    horizon: Optional[float] = None,
+    as_of_date: Optional[str] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The persisted survival set of one date and horizon (``readers.survival_diagnostics``,
+    migration 0036): KM by risk decile and group, log-rank, calibration at the horizon,
+    Brier(t), AUC(t) and Uno's C. Defaults to the horizon computed most recently and its
+    latest date. Survival models only.
+    """
+    _require_type(pool, "postmodel survival", model_id)
+    try:
+        result = readers.survival_diagnostics(
+            pool, model_id, horizon=horizon, as_of_date=as_of_date
+        )
+    except readers.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result is None:
+        return _empty(
+            "no survival diagnostics persisted for this model"
+            + ("" if horizon is None else f" at horizon {horizon:g}"),
+            f"run `triage postmodel survival {model_id} --horizon H` — it reads the"
+            " model's survival function and its train and test matrices, and persists"
+            " the set here.",
+        )
+    return result
+
+
+@router.get("/models/{model_id}/near-miss")
+def model_near_miss(
+    model_id: int,
+    parameter: str = "100_abs",
+    width: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The selected, near-miss and rest bands of each scored date (``readers.near_miss``,
+    migration 0037): k = the cut over the date's scored rows, and the near-miss band holds
+    the next ``width`` rows (the cut itself when omitted). Classification and
+    regression_ranking (positive means outcome > 0).
+    """
+    _require_type(pool, "postmodel near-miss", model_id)
+    rows = readers.near_miss(
+        pool, model_id, parameter, width=width, as_of_date=as_of_date
+    )
+    if not rows:
+        return _empty(
+            f"model {model_id} scored no test row",
+            f"score it first (a `triage run` of its experiment does); then `triage"
+            f" postmodel near-miss {model_id} -p {parameter}` reads the same bands.",
+        )
+    return rows
+
+
+@router.get("/models/{model_id}/prototypes")
+def model_prototypes(
+    model_id: int,
+    parameter: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """The most typical entities of each class (TP, FP, FN, TN) at a cut, as persisted by
+    ``triage postmodel prototypes`` (``readers.prototypes``). ``parameter`` keeps one cut;
+    omitted, every cut persisted. Classification and regression_ranking.
+    """
+    _require_type(pool, "postmodel prototypes", model_id)
+    rows = readers.prototypes(
+        pool, model_id, parameter=parameter, as_of_date=as_of_date
+    )
+    if not rows:
+        return _empty(
+            "no prototypes persisted for this model",
+            f"run `triage postmodel prototypes {model_id} -p {parameter or '100_abs'}` —"
+            " it z-scores the matrix's features and persists each class's nearest"
+            " entities here.",
+        )
+    return rows
+
+
+@router.get("/experiments/{experiment_hash}/common-rows")
+def experiment_common_rows(
+    experiment_hash: str,
+    groups: Annotated[Optional[list[int]], Query()] = None,
+    pool: DictRowPool = Depends(_pool),
+) -> Any:
+    """Each model group's errors on its own rows and on the rows all of them scored, per test
+    date (``readers.common_rows``, migration 0031). ``groups`` (repeatable) picks the groups;
+    omitted, every group of the experiment. Nothing is written: ``POST`` on the same path
+    registers the common rows as a Subset and evaluates the groups on it.
+    """
+    from triage.adapters.common_rows import compared_groups
+
+    if (
+        _one(
+            pool,
+            "select 1 as found from triage.experiments where experiment_hash = %(h)s",
+            {"h": experiment_hash},
+        )
+        is None
+    ):
+        raise HTTPException(status_code=404, detail="experiment not found")
+    try:
+        ids = compared_groups(pool, experiment_hash, groups)
+        rows = readers.common_rows(pool, ids)
+    except psycopg.errors.RaiseException as exc:  # a group with two models on one date
+        raise HTTPException(
+            status_code=422, detail=exc.diag.message_primary or str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not rows:
+        return _empty(
+            "these model groups have no scored test date",
+            f"score them first; then `triage postmodel compare-rows {experiment_hash[:12]}`"
+            " reads the same rows.",
+        )
+    return rows
 
 
 # ================================================================ project-level

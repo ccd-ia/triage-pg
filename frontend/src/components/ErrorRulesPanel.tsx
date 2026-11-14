@@ -1,28 +1,43 @@
 /*
  * ErrorRulesPanel — WHERE does this model fail (plan P5). Thin read over
  * triage.error_analysis (persisted by `triage postmodel error-tree`): each row is a
- * leaf of a shallow tree fitted at the top-k cut — a human-readable rule with its
- * support and error rate. fp = wrong flags within the top-k; fn = missed positives
- * among the passed-over; confusion = TP/FP/FN/TN over every labeled row (migration
- * 0027). The kind tab fetches that kind from the route, so a long fp list cannot crowd
- * the other kinds out of the route's row limit.
+ * leaf of a shallow tree — a human-readable rule with its support and error rate.
+ *
+ * The kinds offered follow the model's problem type (the route reads every kind):
+ *   - a top-k cut (classification, regression_ranking): fp = wrong flags within the top-k;
+ *     fn = missed positives among the passed-over; confusion = TP/FP/FN/TN over every
+ *     labeled row (migration 0027).
+ *   - a survival model: the same three kinds, fitted at a horizon (`--horizon H`, migration
+ *     0036), stored at parameter `<cut>|horizon=<H>`.
+ *   - a continuous forecast (regression, regression_ranking, migration 0034): abs_error =
+ *     where |error| is large, its rate the leaf's mean |e| over the population MAE;
+ *     beats_baseline = where the model is not closer than its baseline, a share.
+ * The kind tab fetches that kind from the route, so a long fp list cannot crowd the other
+ * kinds out of the route's row limit.
  *
  * The "suspiciously right" chip reads triage.error_rules_suspicious through the same
  * route (?suspicious=true): high-support leaves with almost no error, each with its
- * lift over the model's precision@. Which leaves qualify is decided in SQL; the panel
- * only shows the count and the rows. Diagnostic only, never a score modifier.
+ * lift over the model's precision@ (an abs_error leaf: the population MAE over its own).
+ * Which leaves qualify is decided in SQL; the panel only shows the count and the rows.
  *
  * Each leaf's bar carries a tick at its reference_error_rate: the population error rate of
- * the same kind at the same cut and date, as the route reads it from the threshold curve.
- * A leaf at 65% wrong flags is unremarkable when the whole top-k is 61% wrong.
+ * the same kind at the same cut and date, as the route reads it. A leaf at 65% wrong flags
+ * is unremarkable when the whole top-k is 61% wrong.
  */
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
-import type { ErrorKind } from '../api/types'
+import type { ErrorKind, ErrorRuleRow, ProblemType } from '../api/types'
 import { isEmpty } from '../api/types'
+import { fmtNum } from '../api/format'
 
-const KINDS: { kind: ErrorKind; label: string; title: string }[] = [
+interface KindTab {
+  kind: ErrorKind
+  label: string
+  title: string
+}
+
+const CUT_KINDS: KindTab[] = [
   { kind: 'fp', label: 'FP · wrong flags', title: 'within the top-k: where the model over-selects' },
   { kind: 'fn', label: 'FN · missed need', title: 'among the passed-over: where the model misses positives' },
   {
@@ -32,13 +47,39 @@ const KINDS: { kind: ErrorKind; label: string; title: string }[] = [
   },
 ]
 
+const REGRESSION_KINDS: KindTab[] = [
+  {
+    kind: 'abs_error',
+    label: '|error| · large misses',
+    title: 'where the absolute error is large: each leaf’s mean |e| over the population MAE',
+  },
+  {
+    kind: 'beats_baseline',
+    label: 'vs baseline · not closer',
+    title: 'where the model is not closer than its baseline, fitted on the earlier test dates',
+  },
+]
+
+/** The kinds a model of each problem type has (problem_types.error_tree_refusal). */
+const KINDS_OF: Record<ProblemType, KindTab[]> = {
+  classification: CUT_KINDS,
+  regression_ranking: [...CUT_KINDS, ...REGRESSION_KINDS],
+  regression: REGRESSION_KINDS,
+  survival: CUT_KINDS,
+}
+
 /** What each kind's reference_error_rate is the share of — the route computes it at the
  *  leaf's cut; the confusion tab reads the confusion rate. */
 const REFERENCE: Record<ErrorKind, string> = {
   fp: 'the wrong share of the top-k (1 − precision@k)',
   fn: 'the missed share of the labeled rest',
   confusion: 'the confusion rate, (FP + FN) over every labeled row',
+  abs_error: 'the population MAE (1×)',
+  beats_baseline: 'the share of the training rows where the model is not closer',
 }
+
+/** A survival tree at a horizon reads its reference from its own leaves. */
+const HORIZON_REFERENCE = 'the error rate of all the tree’s leaves at this horizon'
 
 /** " · tp 39 · fp 1" — the leaf's class counts, in the route's key order ('' when none). */
 function countsSuffix(counts: Record<string, number> | null): string {
@@ -47,17 +88,45 @@ function countsSuffix(counts: Record<string, number> | null): string {
     .join('')
 }
 
-export function ErrorRulesPanel({ modelId }: { modelId: number }) {
-  const [kind, setKind] = useState<ErrorKind>('fp')
+/** A regression leaf's own numbers, as a short suffix. */
+function statsSuffix(r: ErrorRuleRow): string {
+  const s = r.leaf_stats
+  if (!s) return ''
+  if (r.error_kind === 'abs_error') {
+    return ` · mean |e| ${fmtNum(s.mean_abs_error, 3)} · bias ${fmtNum(s.bias, 3)}`
+  }
+  if (r.error_kind === 'beats_baseline') {
+    const test = s.test_win_share == null ? '—' : `${((s.test_win_share as number) * 100).toFixed(0)}%`
+    return ` · closer on the eval date ${test} of ${s.test_n ?? 0} rows`
+  }
+  return ''
+}
+
+export function ErrorRulesPanel({
+  modelId,
+  problemType = 'classification',
+}: {
+  modelId: number
+  problemType?: ProblemType
+}) {
+  const kinds = KINDS_OF[problemType]
+  const [picked, setKind] = useState<ErrorKind>(kinds[0].kind)
+  // a kind the type does not have (the sheet switched models) falls back to the first
+  const kind = kinds.some((k) => k.kind === picked) ? picked : kinds[0].kind
   const [showSuspicious, setShowSuspicious] = useState(false)
   const rules = useAsync(() => api.modelErrorRules(modelId, kind), [modelId, kind])
   const suspicious = useAsync(() => api.modelSuspiciousRules(modelId), [modelId])
   const nSuspicious = suspicious.data?.length ?? 0
+  const ratio = kind === 'abs_error'
+  // an abs_error rate is a multiple of the MAE: the bars share the largest multiple's scale
+  const scale = ratio && rules.data && !isEmpty(rules.data)
+    ? Math.max(1, ...rules.data.map((r) => r.error_rate))
+    : 1
 
   return (
     <>
       <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        {KINDS.map((k) => (
+        {kinds.map((k) => (
           <button
             key={k.kind}
             type="button"
@@ -98,14 +167,25 @@ export function ErrorRulesPanel({ modelId }: { modelId: number }) {
               <div>
                 <div className="pretty mono" style={{ fontSize: 11 }}>{r.rule}</div>
                 <div className="rawsub">
-                  {r.as_of_date} · {r.error_kind} · @{r.parameter} · matches {r.n_matched}
+                  {r.as_of_date} · {r.error_kind}
+                  {r.parameter ? ` · @${r.parameter}` : ''} · matches {r.n_matched}
                   {r.tp_share != null ? ` · TP share ${(r.tp_share * 100).toFixed(0)}%` : ''}
+                  {r.mean_abs_error != null
+                    ? ` · mean |e| ${fmtNum(r.mean_abs_error, 3)} against MAE ${fmtNum(r.population_mae, 3)}`
+                    : ''}
                 </div>
               </div>
-              <div className="imp" title="1 − error rate over the model's precision@ at this date and cut">
+              <div
+                className="imp"
+                title={
+                  r.error_kind === 'abs_error'
+                    ? 'the population MAE over this leaf’s mean |e|'
+                    : '1 − error rate over the model’s precision@ at this date and cut'
+                }
+              >
                 {r.lift != null ? `${r.lift.toFixed(2)}× lift` : 'lift —'}
               </div>
-              <div className="bar" style={{ width: `${(r.tp_share ?? 0) * 100}%` }} />
+              <div className="bar" style={{ width: `${(r.tp_share ?? 1 / Math.max(1, r.lift ?? 1)) * 100}%` }} />
             </div>
           ))}
         </div>
@@ -121,32 +201,41 @@ export function ErrorRulesPanel({ modelId }: { modelId: number }) {
         <>
           <div className="muted" style={{ fontSize: 10, margin: '0 0 4px' }}>
             <span className="refkey" />
-            population error rate at this cut: {REFERENCE[kind]}. A bar past the mark fails
-            more often than the model does overall.
+            {ratio ? 'population MAE' : 'population error rate at this cut'}:{' '}
+            {problemType === 'survival' ? HORIZON_REFERENCE : REFERENCE[kind]}. A bar past the
+            mark fails more often than the model does overall.
           </div>
           <div className="featlist">
             {rules.data.map((r, i) => {
               const ref = r.reference_error_rate
+              const shown = (v: number) => (ratio ? `${v.toFixed(2)}×` : `${(v * 100).toFixed(1)}%`)
               const refText =
                 ref == null
                   ? undefined
-                  : `population error rate at this cut: ${(ref * 100).toFixed(1)}% — ${REFERENCE[r.error_kind]}, @${r.parameter} on ${r.as_of_date} · this leaf: ${(r.error_rate * 100).toFixed(1)}%`
+                  : `${ratio ? 'population MAE' : 'population error rate at this cut'}: ${shown(ref)} — ${
+                      r.parameter.includes('|horizon=') ? HORIZON_REFERENCE : REFERENCE[r.error_kind]
+                    }${r.parameter ? `, @${r.parameter}` : ''} on ${r.as_of_date} · this leaf: ${shown(r.error_rate)}`
               return (
                 <div className="featrow" key={`${r.as_of_date}-${r.error_kind}-${i}`}>
                   <div>
                     <div className="pretty mono" style={{ fontSize: 11 }}>{r.rule}</div>
                     <div className="rawsub">
-                      {r.as_of_date} · matches {r.n_matched} · {r.n_errors} error(s)
+                      {r.as_of_date}
+                      {r.parameter ? ` · @${r.parameter}` : ''} · matches {r.n_matched} ·{' '}
+                      {r.n_errors} {ratio ? 'row(s) above the MAE' : 'error(s)'}
                       {countsSuffix(r.class_counts)}
+                      {statsSuffix(r)}
                     </div>
                   </div>
-                  <div className="imp">{(r.error_rate * 100).toFixed(0)}%</div>
+                  <div className="imp">
+                    {ratio ? `${r.error_rate.toFixed(2)}×` : `${(r.error_rate * 100).toFixed(0)}%`}
+                  </div>
                   <div className="ratetrack" title={refText}>
-                    <div className="bar" style={{ width: `${r.error_rate * 100}%` }} />
+                    <div className="bar" style={{ width: `${(r.error_rate / scale) * 100}%` }} />
                     {ref != null ? (
                       <span
                         className="reftick"
-                        style={{ left: `${ref * 100}%` }}
+                        style={{ left: `${(ref / scale) * 100}%` }}
                         title={refText}
                         aria-label={refText}
                       />

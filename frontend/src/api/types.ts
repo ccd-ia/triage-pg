@@ -576,6 +576,8 @@ export interface ExpAuditionData {
   metric: string
   parameter: string
   rule: string
+  /** The Subset the groups were compared on; '' = everyone, each group on its own rows. */
+  subset_hash?: string
   ranking: ExpAuditionRankRow[]
   curves: ExpAuditionCurveRow[]
   /** model_group_id of the active rule's pick (audition_pick_exp), or null. */
@@ -746,6 +748,9 @@ export interface WindowedEvalRow {
 export interface ModelCardResponse {
   model_id: number
   model_group_id: number | null
+  /** The experiment's problem type (classification when the model has no run lineage): the
+   *  model card shows the panels that apply to it. */
+  problem_type: ProblemType
   feature_importances: FeatureImportanceRow[]
   evaluations: ModelEvaluationRow[]
   /** per-metric rollup over the model's test window (evaluations_windowed). */
@@ -787,6 +792,10 @@ export type CalibrationResponse =
  *  |log ratio|, or the nonzero rates, ranked by |selected − rest|. */
 export type CrosstabStat = 'mean' | 'nonzero_rate'
 
+/** What the selected rows are compared with (`?comparison=`, migration 0037): every row below
+ *  the cut, or the near miss — the next k rows. `rest_value` holds the comparison's value. */
+export type CrosstabComparison = 'rest' | 'near_miss'
+
 /** GET /api/models/{id}/crosstabs — top distinguishing features (triage postmodel).
  *  With `?stat=nonzero_rate`, `selected_value`/`rest_value` are the shares of the list
  *  and of the rest with a nonzero value (0..1). */
@@ -800,8 +809,17 @@ export interface CrosstabRow {
 }
 export type CrosstabsResponse = CrosstabRow[] | EmptyState
 
-/** The three error trees (migration 0027 added confusion: TP/FP/FN/TN over all labeled rows). */
-export type ErrorKind = 'fp' | 'fn' | 'confusion'
+/** The error-tree leaf kinds. fp / fn / confusion are a top-k cut's (migration 0027 added
+ *  confusion: TP/FP/FN/TN over all labeled rows); a survival model's trees at a horizon are
+ *  these kinds too, at parameter `<cut>|horizon=<H>`. abs_error and beats_baseline are a
+ *  regression model's (migration 0034): where |error| is large, and where the model is
+ *  closer than its baseline. */
+export type ErrorKind = 'fp' | 'fn' | 'confusion' | 'abs_error' | 'beats_baseline'
+
+/** A regression leaf's own numbers (`leaf_stats`). abs_error: n, mean_abs_error, bias,
+ *  share_of_abs_error, mean_outcome, population_mae. beats_baseline: train_n,
+ *  train_win_share, test_n, test_win_share, mean_gain, total_gain. */
+export type LeafStats = Record<string, number | null>
 
 /** GET /api/models/{id}/error-rules — the error-tree rules (triage postmodel). */
 export interface ErrorRuleRow {
@@ -819,8 +837,12 @@ export interface ErrorRuleRow {
   signature: string | null
   /** The population error rate of this leaf's kind at its date and cut: fp = fp/(tp+fp)
    *  (1 − precision@k), fn = fn/(fn+tn), confusion = (fp+fn)/labeled. Null on a train
-   *  leaf, or when the model has no test predictions at the date. */
+   *  leaf, or when the model has no test predictions at the date. An abs_error leaf's
+   *  error_rate is its mean |e| over the population MAE, so its reference is 1; a
+   *  beats_baseline leaf's is the share of the training rows where the model is not closer. */
   reference_error_rate: number | null
+  /** A regression leaf's own numbers; null on the classification kinds. */
+  leaf_stats?: LeafStats | null
 }
 export type ErrorRulesResponse = ErrorRuleRow[] | EmptyState
 
@@ -829,7 +851,7 @@ export interface SuspiciousRuleRow {
   split_kind: string
   as_of_date: string
   parameter: string
-  error_kind: 'fp' | 'confusion'
+  error_kind: 'fp' | 'confusion' | 'abs_error'
   rule_id: number
   rule: string
   n_matched: number
@@ -839,8 +861,12 @@ export interface SuspiciousRuleRow {
   class_counts: Record<string, number> | null
   signature: string | null
   precision_at_k: number | null
-  /** (1 − error_rate) / precision@ at the same date and cut; null when that cut was not evaluated. */
+  /** (1 − error_rate) / precision@ at the same date and cut; null when that cut was not
+   *  evaluated. An abs_error leaf's lift is the population MAE over its own. */
   lift: number | null
+  /** An abs_error leaf's mean |e| and the date's population MAE; null on the other kinds. */
+  mean_abs_error?: number | null
+  population_mae?: number | null
   /** The population error rate of the leaf's kind at its date and cut (see ErrorRuleRow). */
   reference_error_rate: number | null
 }
@@ -916,7 +942,8 @@ export type ModelGroupCurvesResponse = GroupCurveSeries[] | EmptyState
 
 /** One score-histogram bin (migration 0029): [0, 1] bins for a classifier, the model's own
  *  score range otherwise. `n_pos` is null unless the model is a classifier; `mean_outcome`
- *  averages the bin's labeled rows. */
+ *  averages the bin's labeled rows. `n_event` and `n_censored` count a survival model's rows
+ *  with an observed event and its censored rows (migration 0036); null for the other types. */
 export interface HistogramBin {
   bin: number
   lo: number
@@ -924,6 +951,8 @@ export interface HistogramBin {
   n: number
   n_pos: number | null
   mean_outcome: number | null
+  n_event?: number | null
+  n_censored?: number | null
 }
 
 export type ModelHistogramResponse = HistogramBin[]
@@ -1308,4 +1337,273 @@ export interface TemporalSplit {
 
 export interface TemporalVizResult {
   splits: TemporalSplit[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* The postmodel panels per problem type (routes.py, plan Phase 13). Each route  */
+/* wraps a triage.diagnostics reader; a wrong problem type answers 422 whose     */
+/* detail names the command that applies, an empty source the EmptyState.        */
+/* -------------------------------------------------------------------------- */
+
+/** GET /api/models/{id}/residuals — one row per test date (regression_residual_summary).
+ *  `bias` is the mean of forecast − outcome; `coverage_point` the share of rows with
+ *  outcome ≤ forecast; `mode_share` the share of rows forecast the most frequent value. */
+export interface ResidualDateRow {
+  as_of_date: string
+  n: number
+  sum_outcome: number | null
+  mae: number | null
+  rmse: number | null
+  wape: number | null
+  bias: number | null
+  top100_error_share: number | null
+  top1000_error_share: number | null
+  top1pct_error_share: number | null
+  negative_share: number | null
+  n_distinct_scores: number
+  mode_score: number | null
+  mode_share: number | null
+  min_score: number | null
+  max_score: number | null
+  coverage_point: number | null
+}
+export type ResidualsResponse = ResidualDateRow[] | EmptyState
+
+/** The history segment cuts of /residuals/segments (besides `subset:NAME`). */
+export type ResidualCut = 'band' | 'sbc' | 'cold-start'
+
+/** GET /api/models/{id}/residuals/segments — errors per segment; `as_of_date` is null on a
+ *  row pooled over the test dates. */
+export interface ResidualSegmentRow {
+  as_of_date: string | null
+  segment: string
+  segment_order: number
+  n: number
+  entities: number
+  sum_outcome: number | null
+  sum_forecast: number | null
+  mae: number | null
+  wape: number | null
+  bias: number | null
+  share_of_abs_error: number | null
+}
+export type ResidualSegmentsResponse = ResidualSegmentRow[] | EmptyState
+
+/** GET /api/models/{id}/forecast-actual — labeled (forecast, outcome) pairs, at most `cap`. */
+export interface ForecastActualPair {
+  entity_id: number
+  as_of_date: string
+  forecast: number
+  outcome: number
+}
+export type ForecastActualResponse =
+  | { n_total: number; sampled: boolean; pairs: ForecastActualPair[] }
+  | EmptyState
+
+/** One segment of the model-against-baseline table (baseline_compare.segment_table). */
+export interface BaselineSegmentRow {
+  cut: string
+  segment: string
+  segment_order: number
+  n: number
+  entities: number
+  sum_outcome: number
+  mae_m: number | null
+  mae_b: number | null
+  wape_m: number | null
+  wape_b: number | null
+  bias_m: number | null
+  bias_b: number | null
+  model_wins: boolean
+  closer_share: number | null
+  excess_abs_error: number
+  /** The segment's share of its cut's excess error where the model loses; null where it wins. */
+  excess_share: number | null
+  subset_hash?: string
+}
+
+/** GET /api/models/{id}/baseline — the model's group against a baseline group on the rows
+ *  both scored (baseline_compare.Comparison). `chance` and `out_of_time` are null with
+ *  fewer than two shared test dates. */
+export interface BaselineComparison {
+  experiment_hash: string
+  model_group_id: number
+  baseline_group_id: number
+  /** True when the route picked the baseline (lowest MAE on the shared rows). */
+  baseline_chosen: boolean
+  dates: string[]
+  n_rows: number
+  segments: BaselineSegmentRow[]
+  segment_win_share: number | null
+  entities: {
+    level: string
+    n: number
+    won_share: number | null
+    tie_share: number | null
+    outcome_share_won: number | null
+    median_error_ratio: number | null
+  }
+  chance: {
+    n_entities: number
+    n_dates: number
+    chi_square: number | null
+    dof: number
+    p_value: number | null
+    p_win_last: number
+    n_won_all_earlier: number
+    p_win_last_given_all_earlier: number | null
+  } | null
+  out_of_time: {
+    last_date: string
+    n_leaders: number
+    n_rows: number
+    mae_m: number | null
+    mae_b: number | null
+  } | null
+}
+export type BaselineResponse = BaselineComparison | EmptyState
+
+/** GET /api/models/{id}/structure — the fitted estimator's checks (structure.model_structure). */
+export interface StructureData {
+  model_id: number
+  problem_type: ProblemType
+  estimator: string
+  /** Why a check does not apply to this estimator, one message per check. */
+  unavailable: string[]
+  forecast_structure?: ResidualDateRow | null
+  leaf_support?: {
+    estimator: string
+    min_rows: number
+    n_trees: number
+    leaves: number
+    leaves_per_tree: { min: number; mean: number; max: number }
+    small_leaves: number
+    trees_with_small_leaf: number
+    small: { tree: number; node: number; n_rows: number; value: number }[]
+  }
+  mean_shift?: {
+    estimator: string
+    intercept: number
+    mean_forecast_train: number
+    mean_forecast_test: number
+    stored_mean_test: number | null
+    check_error: number | null
+    shift: number
+    families: { family: string; n_features: number; contribution: number; share: number | null }[]
+  }
+}
+export type StructureResponse = StructureData | EmptyState
+
+/** One cut of the cumulative-gains curve (triage.gains_curve, migration 0035). */
+export interface GainsRow {
+  k_pct: number
+  k: number
+  n_labeled_topk: number
+  /** Share of the date's outcome total held by the top k; null on a signed or zero target. */
+  captured: number | null
+  lift: number | null
+  mean_outcome_topk: number | null
+}
+/** GET /api/models/{id}/gains — one evaluated date's curve and its stored AUCC. */
+export type GainsResponse =
+  | {
+      as_of_date: string
+      problem_type: ProblemType
+      points: number
+      aucc: number | null
+      rows: GainsRow[]
+    }
+  | EmptyState
+
+/** One row of triage.survival_diagnostics: `bin` 0 is the population, decile or tertile 1
+ *  the riskiest; `value` is null where the kind is undefined and `extra.undefined` says why. */
+export interface SurvivalRow {
+  bin: number
+  t: number
+  value: number | null
+  n: number | null
+  extra: Record<string, unknown> | null
+}
+export type SurvivalKind =
+  | 'km_decile'
+  | 'km_group'
+  | 'logrank'
+  | 'calibration'
+  | 'brier'
+  | 'auc_t'
+  | 'uno_c'
+/** GET /api/models/{id}/survival — the persisted set of one date and horizon. */
+export type SurvivalResponse =
+  | {
+      as_of_date: string
+      horizon: number
+      computed_at: string
+      kinds: Record<SurvivalKind, SurvivalRow[]>
+    }
+  | EmptyState
+
+/** GET /api/models/{id}/near-miss — the three bands of each scored date (triage.near_miss).
+ *  Rates count labeled rows (positive = outcome > 0); a band with no row has null ranks. */
+export interface NearMissBand {
+  as_of_date: string
+  band: 'selected' | 'near_miss' | 'rest'
+  first_rank: number | null
+  last_rank: number | null
+  n: number
+  n_labeled: number
+  n_positive: number
+  base_rate: number | null
+  mean_outcome: number | null
+  mean_score: number | null
+}
+export type NearMissResponse = NearMissBand[] | EmptyState
+
+/** One deviation of a prototype from its class centroid, in standard deviations. */
+export interface PrototypeDeviation {
+  feature: string
+  value: number
+  z: number
+  centroid_z: number
+  deviation: number
+}
+/** GET /api/models/{id}/prototypes — the entities nearest each class's centroid at a cut. */
+export interface PrototypeRow {
+  as_of_date: string
+  parameter: string
+  class: 'tp' | 'fp' | 'fn' | 'tn'
+  class_size: number
+  rank: number
+  entity_id: number
+  distance: number
+  deviations: PrototypeDeviation[]
+  computed_at: string
+}
+export type PrototypesResponse = PrototypeRow[] | EmptyState
+
+/** GET /api/experiments/{hash}/common-rows — each group's error on its own rows and on the
+ *  rows every listed group scored, per test date (triage.common_rows_metrics). */
+export interface CommonRowsRow {
+  model_group_id: number
+  model_id: number
+  as_of_date: string
+  n_labeled: number
+  n_scored_own: number
+  n_common: number
+  mae_own: number | null
+  mae_common: number | null
+  rmse_common: number | null
+  wape_common: number | null
+  bias_common: number | null
+}
+export type CommonRowsResponse = CommonRowsRow[] | EmptyState
+
+/** POST /api/experiments/{hash}/common-rows — the Subset of common rows the groups were
+ *  evaluated on; its subset_hash selects on it in the audition route. */
+export interface CommonRowsSubset {
+  subset_hash: string
+  name: string
+  model_group_ids: number[]
+  n_rows: number
+  n_dates: number
+  n_evaluations: number
 }

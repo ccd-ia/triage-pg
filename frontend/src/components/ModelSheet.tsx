@@ -10,6 +10,15 @@
  *     their thinned curves (?points=101); one population keeps the full curve and slider.
  *   - feature importance (top 20 + "View all" modal), PRETTY + RAW names
  *   - PredictedList (top 20 + "View all" modal); each entity opens the EntityDrawer
+ *
+ * The card branches on the model's problem_type (/models/{id}): the Rayid curve reads a
+ * binary outcome (classification); the near-miss bands and the prototypes need a top-k cut
+ * (classification, regression_ranking, positive meaning outcome > 0);
+ * RegressionPanels (residuals, bias by band, forecast against actual, the baseline table,
+ * the fitted structure) read a continuous forecast (regression, regression_ranking);
+ * GainsChart and the decile lift table are regression_ranking's; SurvivalPanels replace the
+ * score-decile calibration for a survival model. Crosstabs and the error rules read every
+ * type, each offering the comparisons and leaf kinds its type has.
  */
 import { useMemo, useState } from 'react'
 import { api } from '../api/client'
@@ -17,10 +26,15 @@ import { useAsync } from '../hooks/useAsync'
 import { fmtNum, fmtPct } from '../api/format'
 import { prettyFeature } from '../api/transforms'
 import { useExperiment } from '../hooks/useExperiment'
-import { isEmpty, type FeatureImportanceRow } from '../api/types'
+import { isEmpty, type FeatureImportanceRow, type ProblemType } from '../api/types'
 import { CalibrationChart } from './CalibrationChart'
 import { CrosstabsPanel } from './CrosstabsPanel'
 import { ErrorRulesPanel } from './ErrorRulesPanel'
+import { DecileLiftTable, GainsChart } from './GainsChart'
+import { NearMissStrip } from './NearMissStrip'
+import { PrototypesTable } from './PrototypesTable'
+import { RegressionPanels } from './RegressionPanels'
+import { SurvivalPanels } from './SurvivalPanels'
 import { ModelCompareModal } from './ModelCompareModal'
 import { ScoreDistributionChart } from './ScoreDistributionChart'
 import { RayidCurveChart } from './RayidCurveChart'
@@ -36,6 +50,11 @@ const MAX_SUBSETS = 4
 const NO_PICKS: (string | null)[] = Array(MAX_SUBSETS).fill(null)
 /** An overlay draws thinned curves: 101 evenly spaced shares plus every configured cut. */
 const OVERLAY_POINTS = 101
+
+/** The problem types whose rows split at a top-k cut (problem_types.CUT_CLASS_TYPES). */
+const CUT_TYPES: ProblemType[] = ['classification', 'regression_ranking']
+/** The problem types with a continuous forecast (problem_types.REGRESSION_TYPES). */
+const REGRESSION_TYPES: ProblemType[] = ['regression', 'regression_ranking']
 
 interface Props {
   modelId: number
@@ -140,6 +159,11 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
     const free = picked.indexOf(null)
     if (free >= 0) setPicked(picked.map((h, i) => (i === free ? hash : h)))
   }
+
+  // the card of the model shown says which panels apply; undefined while it loads
+  const problemType = card.data?.model_id === activeId ? card.data.problem_type : undefined
+  const hasCut = problemType != null && CUT_TYPES.includes(problemType)
+  const regression = problemType != null && REGRESSION_TYPES.includes(problemType)
 
   const features = useMemo(() => card.data?.feature_importances ?? [], [card.data])
   const maxImp = features.reduce((m, f) => Math.max(m, f.feature_importance), 0) || 1
@@ -279,6 +303,7 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
           {histo.data ? <ScoreDistributionChart bins={histo.data} /> : <div className="muted" style={{ fontSize: 11 }}>loading histogram…</div>}
         </section>
 
+        {problemType === 'classification' ? (
         <section>
           <h4>{overlay ? 'Rayid curve · populations overlaid' : 'Rayid curve · k-slider'}</h4>
           {(subsets.data?.length ?? 0) > 0 ? (
@@ -352,7 +377,9 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             <div className="muted" style={{ fontSize: 11 }}>loading curve…</div>
           )}
         </section>
+        ) : null}
 
+        {problemType != null && problemType !== 'survival' ? (
         <section>
           <h4>calibration · score deciles vs outcome</h4>
           {calibration.error ? (
@@ -387,6 +414,37 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
             </>
           )}
         </section>
+        ) : null}
+
+        {regression ? <RegressionPanels key={activeId} modelId={activeId} /> : null}
+
+        {problemType === 'regression_ranking' ? (
+          <section>
+            <h4>gains · the outcome the top k hold</h4>
+            <GainsChart modelId={activeId} />
+            {calibration.data && !isEmpty(calibration.data) ? (
+              <>
+                <h5>deciles with lift</h5>
+                <DecileLiftTable deciles={calibration.data.deciles} />
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
+        {problemType === 'survival' ? <SurvivalPanels key={activeId} modelId={activeId} /> : null}
+
+        {hasCut ? (
+          <>
+            <section>
+              <h4>near miss · the rows just below the cut</h4>
+              <NearMissStrip modelId={activeId} parameter={choice.parameter} />
+            </section>
+            <section>
+              <h4>prototypes · the most typical entity of each class</h4>
+              <PrototypesTable modelId={activeId} onEntity={(id) => setEntityId(id)} />
+            </section>
+          </>
+        ) : null}
 
         <section>
           <h4>feature importance · pretty + raw</h4>
@@ -440,13 +498,18 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
         <section>
           <h4>crosstabs · what characterizes the list</h4>
           {/* the panel fetches the ranking its toggle picks (mean ratio | nonzero rate) */}
-          <CrosstabsPanel modelId={activeId} />
+          <CrosstabsPanel modelId={activeId} problemType={problemType} />
         </section>
 
         <section>
           <h4>error rules · where the model fails</h4>
-          {/* the panel fetches per kind (fp | fn | confusion) and its suspicious leaves */}
-          <ErrorRulesPanel modelId={activeId} />
+          {/* the panel fetches per kind (the kinds the problem type has) and its
+              suspicious leaves; keyed so a new model starts on its type's first kind */}
+          {problemType != null ? (
+            <ErrorRulesPanel key={`${activeId}-${problemType}`} modelId={activeId} problemType={problemType} />
+          ) : (
+            <div className="muted" style={{ fontSize: 11 }}>loading error rules…</div>
+          )}
         </section>
 
         <section>
