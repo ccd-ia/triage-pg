@@ -118,3 +118,27 @@ def top_k_entities(
             ).fetchall()
         }
     return entities, int(k or 0)
+
+
+def near_miss_entities(
+    db_engine, model_id: int, split_kind: str, as_of_date: Any, parameter: str
+) -> tuple[set[int], set[int], int]:
+    """The top-k entity set, the next k entities below it (the near miss), and k.
+
+    Both bands are cuts of the deterministic population ranking that
+    :func:`top_k_entities` reads: k = ``resolve_k(parameter, n)`` over the n scored rows,
+    the near miss is ranks k + 1 to 2k (fewer when the population ends first).
+    """
+    selected, k = top_k_entities(db_engine, model_id, split_kind, as_of_date, parameter)
+    with db_engine.connection() as conn:
+        near = {
+            r["entity_id"]
+            for r in conn.execute(
+                "select entity_id from triage.prediction_ranks"
+                " where model_id = %(m)s"
+                "   and split_kind = cast(%(s)s as triage.split_kind)"
+                "   and as_of_date = %(d)s and rank_abs > %(k)s and rank_abs <= 2 * %(k)s",
+                {"m": model_id, "s": split_kind, "d": str(as_of_date), "k": k},
+            ).fetchall()
+        }
+    return selected, near, k

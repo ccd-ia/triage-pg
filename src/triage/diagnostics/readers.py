@@ -19,7 +19,7 @@ caller decides how to say so.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import Any, LiteralString, Optional
 
@@ -33,6 +33,9 @@ REGRESSION_ERROR_KINDS = ("abs_error", "beats_baseline")
 
 #: The crosstab statistics a reader ranks: the ratio of means, or the nonzero rates.
 CROSSTAB_STATS = ("mean", "nonzero_rate")
+
+#: What a crosstab compares the selected rows with (migration 0037).
+CROSSTAB_COMPARISONS = ("rest", "near_miss")
 
 DateLike = date | str
 
@@ -321,6 +324,7 @@ def crosstabs(
     stat: str = "mean",
     limit: int = 20,
     as_of_date: Optional[DateLike] = None,
+    comparison: str = "rest",
 ) -> list[dict[str, Any]]:
     """The features that most distinguish the selected top-k from the rest.
 
@@ -335,19 +339,29 @@ def crosstabs(
             because a ratio of two rates near zero misleads.
         limit: the most rows returned.
         as_of_date: one prediction date; ``None`` reads every date.
+        comparison: ``'rest'`` (every row below the cut) or ``'near_miss'`` (the next k
+            rows, ``triage postmodel crosstabs --against near-miss``); ``rest_value``
+            holds the comparison's value.
 
     Returns:
         Rows ``as_of_date, parameter, feature, selected_value, rest_value, ratio``, the most
         distinguishing first. Empty when nothing is persisted for the model.
 
     Raises:
-        ValueError: ``stat`` is not one of :data:`CROSSTAB_STATS`.
+        ValueError: ``stat`` is not one of :data:`CROSSTAB_STATS`, or ``comparison`` is
+            not one of :data:`CROSSTAB_COMPARISONS`.
     """
+    if comparison not in CROSSTAB_COMPARISONS:
+        raise ValueError(
+            f"comparison={comparison!r} is not a crosstab comparison — expected one of"
+            f" {', '.join(CROSSTAB_COMPARISONS)}"
+        )
     params: dict[str, Any] = {
         "m": model_id,
         "p": parameter,
         "d": None if as_of_date is None else str(as_of_date),
         "limit": limit,
+        "c": comparison,
     }
     if stat == "mean":
         return _rows(
@@ -355,6 +369,7 @@ def crosstabs(
             "select as_of_date, parameter, feature, selected_value, rest_value, ratio"
             " from triage.crosstabs"
             " where model_id = %(m)s and stat = 'mean' and ratio is not null and ratio > 0"
+            "   and comparison = %(c)s"
             "   and (%(p)s::text is null or parameter = %(p)s)"
             "   and (%(d)s::date is null or as_of_date = %(d)s::date)"
             " order by abs(ln(ratio)) desc, as_of_date, parameter, feature"
@@ -368,6 +383,7 @@ def crosstabs(
             " from triage.crosstabs"
             " where model_id = %(m)s and stat = 'nonzero_rate'"
             "   and selected_value is not null and rest_value is not null"
+            "   and comparison = %(c)s"
             "   and (%(p)s::text is null or parameter = %(p)s)"
             "   and (%(d)s::date is null or as_of_date = %(d)s::date)"
             " order by abs(selected_value - rest_value) desc, as_of_date, parameter,"
@@ -783,6 +799,162 @@ def list_overlap(
         "        cast(%(split)s as triage.split_kind), null)"
         " order by as_of_date",
         {"a": model_id, "b": other_model_id, "p": parameter, "split": split_kind},
+    )
+
+
+def list_overlap_sweep(
+    pool: DictRowPool,
+    model_id: int,
+    other_model_id: int,
+    parameters: Sequence[str],
+    split_kind: str = "test",
+) -> list[dict[str, Any]]:
+    """How two models' top-k lists agree as k grows: :func:`list_overlap` at each cut.
+
+    Args:
+        pool: the project database.
+        model_id: the first model.
+        other_model_id: the second model.
+        parameters: the top-k cuts, in the order given.
+        split_kind: the prediction split.
+
+    Returns:
+        Rows ``parameter, as_of_date, k_a, k_b, n_intersection, jaccard, rank_corr``: one
+        per cut and date both models scored, by cut in the order given, then by date.
+
+    Raises:
+        ValueError: ``parameters`` is empty or names a cut twice.
+    """
+    if not parameters:
+        raise ValueError("a sweep needs at least one cut, e.g. 50_abs,100_abs,200_abs")
+    repeated = sorted({p for p in parameters if list(parameters).count(p) > 1})
+    if repeated:
+        raise ValueError(f"the sweep names {', '.join(repeated)} more than once")
+    return [
+        {"parameter": parameter, **row}
+        for parameter in parameters
+        for row in list_overlap(pool, model_id, other_model_id, parameter, split_kind)
+    ]
+
+
+# ------------------------------------------------------------------ near miss, prototypes
+
+
+def _require_model(pool: DictRowPool, model_id: int) -> None:
+    if (
+        _one(
+            pool,
+            "select 1 as found from triage.models where model_id = %(m)s",
+            {"m": model_id},
+        )
+        is None
+    ):
+        raise NotFoundError(f"model {model_id} not found")
+
+
+def near_miss(
+    pool: DictRowPool,
+    model_id: int,
+    parameter: str,
+    width: Optional[str] = None,
+    split_kind: str = "test",
+    as_of_date: Optional[DateLike] = None,
+) -> list[dict[str, Any]]:
+    """Do the rows just below the cut differ from the rows inside it?
+
+    Reads ``triage.near_miss`` (migration 0037) on each scored date: the ``selected``
+    band (rank ≤ k), the ``near_miss`` band (k < rank ≤ k + w) and the ``rest``, where k
+    and w are ``resolve_k`` of the cut and the width over the date's scored rows.
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        parameter: the top-k cut, e.g. ``'100_abs'``.
+        width: the near-miss band's size as a cut; ``None`` is the cut itself.
+        split_kind: the prediction split.
+        as_of_date: one scored date; ``None`` reads every one.
+
+    Returns:
+        Rows ``as_of_date, band, first_rank, last_rank, n, n_labeled, n_positive,
+        base_rate, mean_outcome, mean_score``, three per date in band order. The rates
+        count labeled rows, positive meaning ``outcome > 0``; ``mean_score`` reads every
+        row of the band. A band with no row has ``None`` ranks and rates. Empty when the
+        model scored nothing on the split.
+
+    Raises:
+        NotFoundError: no model has this id.
+    """
+    _require_model(pool, model_id)
+    return _rows(
+        pool,
+        "select d.as_of_date, nm.band, nm.first_rank, nm.last_rank, nm.n, nm.n_labeled,"
+        "       nm.n_positive, nm.base_rate, nm.mean_outcome, nm.mean_score"
+        " from (select distinct p.as_of_date from triage.predictions p"
+        "        where p.model_id = %(m)s"
+        "          and p.split_kind = cast(%(split)s as triage.split_kind)"
+        "          and (%(d)s::date is null or p.as_of_date = %(d)s::date)) d"
+        " cross join lateral triage.near_miss(%(m)s, cast(%(split)s as triage.split_kind),"
+        "                                     d.as_of_date, %(p)s, %(w)s) nm"
+        " order by d.as_of_date, nm.band_ix",
+        {
+            "m": model_id,
+            "split": split_kind,
+            "d": None if as_of_date is None else str(as_of_date),
+            "p": parameter,
+            "w": width,
+        },
+    )
+
+
+#: The classes of a labeled row at a top-k cut, in the order a reader lists them.
+PROTOTYPE_CLASSES = ("tp", "fp", "fn", "tn")
+
+
+def prototypes(
+    pool: DictRowPool,
+    model_id: int,
+    parameter: Optional[str] = None,
+    as_of_date: Optional[DateLike] = None,
+    split_kind: str = "test",
+) -> list[dict[str, Any]]:
+    """The most typical entities of each class at a cut, as persisted.
+
+    Reads ``triage.prototypes`` (written by ``triage postmodel prototypes``).
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        parameter: the top-k cut; ``None`` reads every cut persisted.
+        as_of_date: one prediction date; ``None`` reads every date.
+        split_kind: the prediction split.
+
+    Returns:
+        Rows ``as_of_date, parameter, class, class_size, rank, entity_id, distance,
+        deviations, computed_at``, by date, cut, class (tp, fp, fn, tn) and rank.
+        ``deviations`` lists the entity's largest departures from its class centroid,
+        each ``feature, value, z, centroid_z, deviation`` in z units. Empty when nothing
+        is persisted.
+
+    Raises:
+        NotFoundError: no model has this id.
+    """
+    _require_model(pool, model_id)
+    return _rows(
+        pool,
+        "select as_of_date, parameter, class, class_size, rank, entity_id, distance,"
+        "       deviations, computed_at"
+        " from triage.prototypes"
+        " where model_id = %(m)s and split_kind = cast(%(split)s as triage.split_kind)"
+        "   and (%(p)s::text is null or parameter = %(p)s)"
+        "   and (%(d)s::date is null or as_of_date = %(d)s::date)"
+        " order by as_of_date, parameter,"
+        "          array_position(array['tp', 'fp', 'fn', 'tn'], class), rank",
+        {
+            "m": model_id,
+            "split": split_kind,
+            "p": parameter,
+            "d": None if as_of_date is None else str(as_of_date),
+        },
     )
 
 

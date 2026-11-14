@@ -167,6 +167,10 @@ def parse_date(value: str | datetime) -> datetime:
         ) from exc
 
 
+def _plot_date(value: Optional[str]) -> Optional[str]:
+    return parse_date(value).date().isoformat() if value else None
+
+
 def load_file_from_store(path: str) -> str:
     """Read a config file's text through the profile storage seam (cloud-profile-spec §3).
 
@@ -1011,7 +1015,7 @@ def model_show(
         ).fetchall()
         crosstabs = conn.execute(
             "select feature, ratio from triage.crosstabs"
-            " where model_id = %(m)s and stat = 'mean'"
+            " where model_id = %(m)s and stat = 'mean' and comparison = 'rest'"
             "   and ratio is not null and ratio > 0"
             " order by abs(ln(ratio)) desc limit 5",
             {"m": model_id},
@@ -2805,16 +2809,33 @@ def postmodel_crosstabs(
         " (CUT, default 10_pct) with the rest, for a regression model. Persisted as"
         " parameter abs_error_CUT.",
     ),
+    against: str = typer.Option(
+        "rest",
+        "--against",
+        help="rest: every row below the cut. near-miss: the next k rows below it (the"
+        " near-miss band of triage postmodel near-miss at its default width). Persisted"
+        " as comparison rest or near_miss.",
+    ),
 ) -> None:
     """Feature means among the top-k vs the rest — what characterizes the list?
 
     Computes from the model's scored matrix (Parquet, via the storage seam), persists
     long-format rows into ``triage.crosstabs``, prints the most-distinguishing features
     by |log ratio| of means. The dashboard's model card reads the same table. With
-    --by abs-error the selected rows are the largest errors, not the top scores.
+    --by abs-error the selected rows are the largest errors, not the top scores. With
+    --against near-miss the list is compared with the rows just below the cut.
     """
     from triage.diagnostics import compute_crosstabs
 
+    if against not in ("rest", "near-miss"):
+        _plot_fail(f"--against {against!r}: expected rest or near-miss", 2)
+    comparison = against.replace("-", "_")
+    if by is not None and comparison == "near_miss":
+        _plot_fail(
+            "--by abs-error selects the largest errors, which have no near-miss band;"
+            " --against near-miss compares a top-k cut. Use one or the other.",
+            2,
+        )
     abs_error_cut: Optional[str] = None
     if by is not None:
         name, _, cut = by.partition(":")
@@ -2830,6 +2851,7 @@ def postmodel_crosstabs(
         parameter=parameter,
         split_kind=split_kind,
         abs_error_cut=abs_error_cut,
+        against=comparison,
     )
     console.print(f"[green]{written} crosstab row(s) persisted.[/green]")
     with engine.connection() as conn:
@@ -2837,15 +2859,17 @@ def postmodel_crosstabs(
             "select as_of_date, feature, selected_value, rest_value, ratio"
             " from triage.crosstabs"
             " where model_id = %(m)s and parameter = %(p)s and stat = 'mean'"
-            "   and ratio is not null and ratio > 0"
+            "   and comparison = %(c)s and ratio is not null and ratio > 0"
             " order by abs(ln(ratio)) desc limit %(n)s",
-            {"m": model_id, "p": parameter, "n": top},
+            {"m": model_id, "p": parameter, "c": comparison, "n": top},
         ).fetchall()
+    versus = "near miss" if comparison == "near_miss" else "rest"
     table = Table(
-        title=f"Crosstabs — model {model_id} @ {parameter} (top |log ratio| of means)",
+        title=f"Crosstabs — model {model_id} @ {parameter}, selected vs {versus}"
+        " (top |log ratio| of means)",
         box=box.SIMPLE_HEAVY,
     )
-    for col in ("As-of", "Feature", "Selected", "Rest", "Ratio"):
+    for col in ("As-of", "Feature", "Selected", versus.capitalize(), "Ratio"):
         table.add_column(col)
     for r in rows:
         table.add_row(
@@ -3371,18 +3395,94 @@ def postmodel_compare_rows(
     console.print(table)
 
 
+def _cuts(value: Optional[str]) -> Optional[list[str]]:
+    """``--sweep 50_abs,100_abs,200_abs``: top-k cuts, comma-separated, each once."""
+    if value is None:
+        return None
+    cuts = [v.strip() for v in value.split(",") if v.strip()]
+    malformed = [
+        c
+        for c in cuts
+        if c.count("_") != 1
+        or c.split("_")[1] not in ("abs", "pct")
+        or not c.split("_")[0].replace(".", "", 1).isdigit()
+    ]
+    if not cuts or malformed:
+        raise typer.BadParameter(
+            f"{value!r} — expected comma-separated cuts such as 50_abs,100_abs,10_pct"
+        )
+    if len(set(cuts)) != len(cuts):
+        raise typer.BadParameter(f"{value!r} names a cut more than once")
+    return cuts
+
+
+def _print_overlap_sweep(
+    model_a: int, model_b: int, rows: Sequence[Mapping[str, Any]]
+) -> None:
+    table = Table(
+        title=f"List overlap as k grows — m{model_a} vs m{model_b}",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in ("Cut", "As-of", "k(a)", "k(b)", "∩", "Jaccard"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            r["parameter"],
+            str(r["as_of_date"]),
+            str(r["k_a"]),
+            str(r["k_b"]),
+            str(r["n_intersection"]),
+            _fmt(r["jaccard"], 3),
+        )
+    console.print(table)
+    corr = {str(r["as_of_date"]): r["rank_corr"] for r in rows}
+    console.print(
+        "[dim]Rank correlation over the entities both scored (it does not depend on"
+        " k): " + "; ".join(f"{d} {_fmt(c, 3)}" for d, c in corr.items()) + "[/dim]"
+    )
+
+
 @postmodel_app.command("compare")
 def postmodel_compare(
     ctx: typer.Context,
     model_a: int = typer.Argument(..., callback=natural_number),
     model_b: int = typer.Argument(..., callback=natural_number),
-    parameter: str = typer.Option(
-        "100_abs", "--parameter", "-p", help="Top-k cut for the list comparison."
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="Top-k cut for the list comparison (default 100_abs).",
+    ),
+    sweep: Optional[str] = typer.Option(
+        None,
+        "--sweep",
+        callback=_cuts,
+        help="Compare the lists at each of these cuts instead of one, e.g."
+        " 50_abs,100_abs,200_abs,500_abs: how the agreement changes as k grows.",
     ),
     split_kind: str = typer.Option("test", "--split", help="Prediction split."),
 ) -> None:
-    """Do two models flag the same entities? Top-k overlap + Spearman (migration 0016)."""
+    """Do two models flag the same entities? Top-k overlap + Spearman (migration 0016).
+
+    With --sweep, the Jaccard index at each cut, per shared date (triage plot overlap
+    GROUP_A GROUP_B --sweep draws it).
+    """
     engine = get_pool(ctx)
+    if sweep is not None:
+        from triage.diagnostics import readers
+
+        if parameter is not None:
+            _plot_fail("Pass --parameter or --sweep, not both.", 2)
+        swept = readers.list_overlap_sweep(engine, model_a, model_b, sweep, split_kind)
+        if not swept:
+            console.print(
+                "[yellow]No shared prediction dates — are both models scored on the"
+                " same split?[/yellow]"
+            )
+            return
+        _print_overlap_sweep(model_a, model_b, swept)
+        return
+    parameter = parameter or "100_abs"
     with engine.connection() as conn:
         rows = conn.execute(
             "select as_of_date, k_a, k_b, n_intersection, jaccard, rank_corr"
@@ -3413,6 +3513,216 @@ def postmodel_compare(
             _fmt(r["rank_corr"], 3),
         )
     console.print(table)
+
+
+_BAND_NAMES = {"selected": "Selected", "near_miss": "Near miss", "rest": "Rest"}
+
+
+def _print_near_miss(
+    model_id: int, parameter: str, width: str, rows: Sequence[Mapping[str, Any]]
+) -> None:
+    by_date: dict[str, list[Mapping[str, Any]]] = {}
+    for r in rows:
+        by_date.setdefault(str(r["as_of_date"]), []).append(r)
+    for day, bands in by_date.items():
+        table = Table(
+            title=f"Near miss — model {model_id} at {day}, top {parameter}, band {width}",
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in (
+            "Band",
+            "Ranks",
+            "Rows",
+            "Labeled",
+            "Positive",
+            "Base rate",
+            "Mean outcome",
+            "Mean score",
+        ):
+            table.add_column(col)
+        for r in bands:
+            ranks = (
+                "—"
+                if r["first_rank"] is None
+                else f"{r['first_rank']}–{r['last_rank']}"
+            )
+            table.add_row(
+                _BAND_NAMES[r["band"]],
+                ranks,
+                str(r["n"]),
+                str(r["n_labeled"]),
+                str(r["n_positive"]),
+                _fmt_share(r["base_rate"]),
+                _fmt(r["mean_outcome"]),
+                _fmt(r["mean_score"]),
+            )
+        console.print(table)
+
+
+@postmodel_app.command("near-miss")
+def postmodel_near_miss(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(
+        "100_abs", "--parameter", "-p", help="Top-k cut (e.g. '100_abs', '10_pct')."
+    ),
+    width: Optional[str] = typer.Option(
+        None,
+        "--width",
+        help="The near-miss band's size, as a cut (default: the cut itself, so the band"
+        " holds the next k rows).",
+    ),
+    split_kind: str = typer.Option("test", "--split", help="Prediction split."),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="One scored date, YYYY-MM-DD (default: every one).",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """Do the rows just below the cut differ from the rows inside it?
+
+    Three bands of the population ranking on each scored date: the selected top k, the
+    near miss (the next w rows) and the rest. Each shows its rows, its labeled rows, the
+    base rate and mean outcome of the labeled ones and the mean score of all of them. A
+    near-miss base rate close to the selected one says the cut falls inside a block of
+    similar rows; triage postmodel crosstabs MODEL --against near-miss shows how their
+    features differ. Read from triage.near_miss, nothing persisted. Classification and
+    regression_ranking models (positive means outcome > 0).
+    """
+    import psycopg
+
+    from triage.diagnostics import readers
+
+    _require_type(ctx, "postmodel near-miss", model_id)
+    pool = get_pool(ctx)
+    try:
+        rows = readers.near_miss(
+            pool, model_id, parameter, width, split_kind, as_of_date
+        )
+    except psycopg.errors.RaiseException as exc:  # a malformed cut
+        _plot_fail(exc.diag.message_primary or str(exc), 2)
+    if not rows:
+        _plot_fail(
+            f"Model {model_id} has no scored {split_kind} row"
+            + (f" at {as_of_date}" if as_of_date else "")
+            + " — score it first: triage run <config>.",
+            1,
+        )
+    if as_json:
+        console.print_json(json.dumps(rows, default=str))
+        return
+    _print_near_miss(model_id, parameter, width or parameter, rows)
+
+
+def _print_prototypes(
+    model_id: int, parameter: str, rows: Sequence[Mapping[str, Any]], shown: int
+) -> None:
+    by_date: dict[str, list[Mapping[str, Any]]] = {}
+    for r in rows:
+        by_date.setdefault(str(r["as_of_date"]), []).append(r)
+    for day, protos in by_date.items():
+        table = Table(
+            title=f"Prototypes — model {model_id} at {day}, top {parameter}",
+            box=box.SIMPLE_HEAVY,
+        )
+        for col in (
+            "Class",
+            "Rows",
+            "Rank",
+            "Entity",
+            "Distance",
+            "Largest deviations",
+        ):
+            table.add_column(col)
+        for r in protos:
+            devs = ", ".join(
+                f"{d['feature']} {d['deviation']:+.2f}σ"
+                for d in r["deviations"][:shown]
+            )
+            table.add_row(
+                r["class"].upper(),
+                str(r["class_size"]),
+                str(r["rank"]),
+                str(r["entity_id"]),
+                _fmt(r["distance"], 3),
+                devs or "—",
+            )
+        console.print(table)
+
+
+@postmodel_app.command("prototypes")
+def postmodel_prototypes(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    parameter: str = typer.Option(
+        "100_abs", "--parameter", "-p", help="Top-k cut (e.g. '100_abs', '10_pct')."
+    ),
+    n: int = typer.Option(
+        3, "-n", "--n", callback=natural_number, help="Prototypes per class."
+    ),
+    split_kind: str = typer.Option("test", "--split", help="Prediction split."),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="One scored date, YYYY-MM-DD (default: every one).",
+    ),
+    deviations: int = typer.Option(
+        3,
+        "--deviations",
+        callback=natural_number,
+        help="Deviations printed per prototype (10 are persisted).",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """The most typical entities of each class at the cut: compute, persist, print.
+
+    On each scored date the labeled rows split into TP, FP, FN and TN at the top-k cut
+    (positive means outcome > 0). The features are z-scored over the date's labeled
+    rows, and each class keeps the -n entities nearest its centroid (Euclidean), with
+    their largest deviations from it in standard deviations. Descriptive: nothing is
+    fitted. Rows persist to triage.prototypes. Classification and regression_ranking
+    models.
+    """
+    import psycopg
+
+    from triage.diagnostics import readers
+    from triage.diagnostics.prototypes import compute_prototypes
+
+    _require_type(ctx, "postmodel prototypes", model_id)
+    pool = get_pool(ctx)
+    try:
+        computed = compute_prototypes(
+            pool, model_id, parameter, n, split_kind, as_of_date
+        )
+    except (ValueError, OSError) as exc:
+        _plot_fail(str(exc), 2)
+    except psycopg.errors.RaiseException as exc:  # a malformed cut
+        _plot_fail(exc.diag.message_primary or str(exc), 2)
+    if not computed.dates:
+        _plot_fail(
+            f"Model {model_id} has no labeled {split_kind} row in its scored matrix"
+            + (f" at {as_of_date}" if as_of_date else "")
+            + " — score and label it first: triage run <config>.",
+            1,
+        )
+    rows = [
+        r
+        for d in computed.dates
+        for r in readers.prototypes(pool, model_id, parameter, d, split_kind)
+    ]
+    if as_json:
+        console.print_json(json.dumps(rows, default=str))
+        return
+    console.print(f"[green]{computed.rows_written} prototype row(s) persisted.[/green]")
+    for d, dropped in computed.dropped_features.items():
+        console.print(
+            f"[dim]{d}: {len(dropped)} feature(s) constant over the labeled rows, left"
+            " out of the distance.[/dim]"
+        )
+    _print_prototypes(model_id, parameter, rows, deviations)
 
 
 def _require_type(ctx: typer.Context, command: str, model_id: int) -> str:
@@ -4771,10 +5081,6 @@ def _plot_stat(value: str) -> str:
     return _PLOT_STATS[value]
 
 
-def _plot_date(value: Optional[str]) -> Optional[str]:
-    return parse_date(value).date().isoformat() if value else None
-
-
 def _plot_fail(message: str, code: int) -> NoReturn:
     # markup off: a reader's message may hold brackets rich would read as styles
     console.print(message, style="red", markup=False, highlight=False, soft_wrap=True)
@@ -5172,7 +5478,16 @@ def plot_overlap(
     ctx: typer.Context,
     group_a: int = typer.Argument(..., callback=natural_number),
     group_b: int = typer.Argument(..., callback=natural_number),
-    parameter: str = typer.Option(..., "--parameter", "-p", help="The top-k cut."),
+    parameter: Optional[str] = typer.Option(
+        None, "--parameter", "-p", help="The top-k cut."
+    ),
+    sweep: Optional[str] = typer.Option(
+        None,
+        "--sweep",
+        callback=_cuts,
+        help="Draw the Jaccard index against k over these cuts instead of one, e.g."
+        " 50_abs,100_abs,200_abs,500_abs.",
+    ),
     output: Optional[pathlib.Path] = typer.Option(
         None, "--output", "-o", help=_OUTPUT_HELP.format("overlap-GROUP_A-GROUP_B.svg")
     ),
@@ -5180,13 +5495,19 @@ def plot_overlap(
     """Do two model groups flag the same entities?
 
     The Jaccard index of their top-k lists and the rank correlation of their scores, on
-    each test date both scored. Models are paired by training window.
+    each test date both scored. Models are paired by training window. With --sweep, the
+    Jaccard index against k, one line per pair of models and date. Pass -p or --sweep.
     """
+    if (parameter is None) == (sweep is None):
+        _plot_fail("Pass one of --parameter (one cut) or --sweep (several cuts).", 2)
+    cut = parameter or ""  # set whenever --sweep is not
 
     def draw(pool: DictRowPool) -> PlotResult:
         from triage import plots
 
-        return plots.overlap(pool, group_a, group_b, parameter)
+        if sweep is not None:
+            return plots.overlap_sweep(pool, group_a, group_b, sweep)
+        return plots.overlap(pool, group_a, group_b, cut)
 
     _write_plot(ctx, output, f"overlap-{group_a}-{group_b}.svg", draw)
 

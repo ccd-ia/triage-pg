@@ -4,6 +4,10 @@ For each feature and prediction date: mean / std / nonzero-rate among the SELECT
 (top-k at the cut) vs the REST of the scored population, plus their ratio. Descriptive
 by design — the |log ratio| ranking answers "which features characterize the list";
 significance testing is deliberately out (see the plan's Questionables).
+
+The comparison can also be the NEAR MISS: the next k rows below the cut (migration 0037).
+Those rows persist with ``comparison = 'near_miss'``, and ``rest_value`` then holds the
+near-miss value.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from typing import Any
 
 from triage.diagnostics.matrixio import (
     load_matrix_context,
+    near_miss_entities,
     scored_dates,
     top_k_entities,
 )
@@ -20,6 +25,9 @@ from triage.logging import get_logger
 logger = get_logger(__name__)
 
 _STATS = ("mean", "std", "nonzero_rate")
+
+#: What the selected rows are compared with (``triage.crosstabs.comparison``).
+COMPARISONS = ("rest", "near_miss")
 
 
 def _column_stats(values) -> dict[str, float | None]:
@@ -67,13 +75,31 @@ def compute_crosstabs(
     split_kind: str = "test",
     as_of_date: Any = None,
     abs_error_cut: str | None = None,
+    against: str = "rest",
 ) -> int:
     """Compute + persist crosstab rows for every prediction date (or one). Returns rows written.
 
     With ``abs_error_cut`` (e.g. ``'10_pct'``) the selected rows are the labeled rows with
     the largest |forecast − outcome| at that cut instead of the top-k by score, and the
     rows persist with ``parameter = 'abs_error_<cut>'``: a regression model's crosstab.
+
+    With ``against='near_miss'`` the top-k is compared with the next k rows of the
+    population ranking instead of every row below the cut, and the rows persist with
+    ``comparison = 'near_miss'``.
+
+    Raises:
+        ValueError: ``against`` is not one of :data:`COMPARISONS`, or a near-miss
+            comparison was asked of an abs-error cut (whose selected rows are not a top-k).
     """
+    if against not in COMPARISONS:
+        raise ValueError(
+            f"against={against!r} — expected one of {', '.join(COMPARISONS)}"
+        )
+    if against == "near_miss" and abs_error_cut is not None:
+        raise ValueError(
+            "a near-miss comparison reads the rows just below a top-k cut; the"
+            " abs-error crosstab selects the largest errors, which have no such band"
+        )
     if abs_error_cut is not None:
         parameter = f"abs_error_{abs_error_cut}"
     ctx = load_matrix_context(db_engine, model_id, split_kind)
@@ -84,9 +110,14 @@ def compute_crosstabs(
     )
     written = 0
     for date in dates:
+        near: set[int] | None = None
         if abs_error_cut is not None:
             selected, k = _largest_errors(
                 db_engine, model_id, split_kind, date, abs_error_cut
+            )
+        elif against == "near_miss":
+            selected, near, k = near_miss_entities(
+                db_engine, model_id, split_kind, date, parameter
             )
         else:
             selected, k = top_k_entities(
@@ -95,6 +126,12 @@ def compute_crosstabs(
         if not selected:
             logger.warning(f"model {model_id}: no top-k at {date} — skipping crosstabs")
             continue
+        if near is not None and not near:
+            logger.warning(
+                f"model {model_id}: no row below the top {k} at {date} — skipping"
+                " near-miss crosstabs"
+            )
+            continue
         day = ctx.frame.filter(ctx.frame["as_of_date"].cast(str) == str(date))
         if day.height == 0:
             logger.warning(
@@ -102,7 +139,12 @@ def compute_crosstabs(
             )
             continue
         sel_mask = day["entity_id"].is_in(list(selected))
-        sel_frame, rest_frame = day.filter(sel_mask), day.filter(~sel_mask)
+        sel_frame = day.filter(sel_mask)
+        rest_frame = (
+            day.filter(~sel_mask)
+            if near is None
+            else day.filter(day["entity_id"].is_in(list(near)))
+        )
         params: list[dict[str, Any]] = []
         for feature in ctx.feature_names:
             sel = _column_stats(sel_frame[feature])
@@ -115,6 +157,7 @@ def compute_crosstabs(
                         "sk": split_kind,
                         "d": str(date),
                         "p": parameter,
+                        "c": against,
                         "f": feature,
                         "stat": stat,
                         "sv": s,
@@ -127,11 +170,12 @@ def compute_crosstabs(
         with db_engine.connection() as conn, conn.cursor() as cur:
             cur.executemany(
                 "insert into triage.crosstabs"
-                " (model_id, split_kind, as_of_date, parameter, feature, stat,"
-                "  selected_value, rest_value, ratio)"
+                " (model_id, split_kind, as_of_date, parameter, comparison, feature,"
+                "  stat, selected_value, rest_value, ratio)"
                 " values (%(m)s, cast(%(sk)s as triage.split_kind), %(d)s, %(p)s,"
-                "         %(f)s, %(stat)s, %(sv)s, %(rv)s, %(ratio)s)"
-                " on conflict (model_id, split_kind, as_of_date, parameter, feature, stat)"
+                "         %(c)s, %(f)s, %(stat)s, %(sv)s, %(rv)s, %(ratio)s)"
+                " on conflict (model_id, split_kind, as_of_date, parameter, comparison,"
+                "              feature, stat)"
                 " do update set selected_value = excluded.selected_value,"
                 "               rest_value = excluded.rest_value,"
                 "               ratio = excluded.ratio,"
@@ -140,6 +184,7 @@ def compute_crosstabs(
             )
         written += len(params)
         logger.info(
-            f"crosstabs: model {model_id} @ {date} (k={k}) — {len(params)} row(s)"
+            f"crosstabs: model {model_id} @ {date} (k={k}, against {against}) —"
+            f" {len(params)} row(s)"
         )
     return written
