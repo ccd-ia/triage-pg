@@ -42,9 +42,16 @@ DEFAULT_REGRESSION_CONFIG = {
         "pinball@0.95",
     ],
 }
-# regression_ranking scores the same forecasts; its allocation metrics come with the ranking.
+# regression_ranking scores the same forecasts and the allocation they rank (0035): lift@k and
+# captured@k at the precision@ thresholds, the area under the gains curve and Spearman's rho.
 DEFAULT_REGRESSION_RANKING_CONFIG = {
-    "regression_metrics": list(DEFAULT_REGRESSION_CONFIG["regression_metrics"]),
+    "metrics": ["lift@", "captured@"],
+    "thresholds": ["100_abs", "10_pct"],
+    "regression_metrics": [
+        *DEFAULT_REGRESSION_CONFIG["regression_metrics"],
+        "aucc",
+        "spearman",
+    ],
 }
 DEFAULT_SURVIVAL_CONFIG = {
     "survival_metrics": ["c_index"],

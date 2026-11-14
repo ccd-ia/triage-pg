@@ -19,6 +19,7 @@ rows a figure needs, naming the command that creates them; ``ValueError`` (inclu
 unsupported extension, or more than :data:`MAX_SERIES` series.
 """
 
+from triage.plots.allocation import gains
 from triage.plots.baseline import segments, win_consistency
 from triage.plots.crosstabs import crosstabs, crosstabs_dates
 from triage.plots.curves import curve, curve_dates
@@ -49,6 +50,7 @@ __all__ = [
     "error_rules",
     "forecast_actual",
     "forecast_time",
+    "gains",
     "importance",
     "leaves",
     "output_format",

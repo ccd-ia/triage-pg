@@ -91,3 +91,23 @@ def test_a_regression_model_drops_the_realized_rate_and_names_the_tie(
     assert "Decile n Mean score Mean outcome Lift" in text
     assert "Realized" not in text
     assert "85% of rows share score 15.9 — tied rows are kept in one decile" in text
+
+
+def test_a_ranking_model_shows_its_deciles_with_lift_above_the_evaluations(
+    show,
+    db_pool_greenfield,
+):
+    from tests.test_allocation_metrics import R1, seed_allocation
+
+    model_id = seed_allocation(db_pool_greenfield)["noisy"]
+    # read R1: the latest evaluated date (R0) is all zeros
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "delete from triage.evaluations where model_id = %(m)s and as_of_date > %(d)s",
+            {"m": model_id, "d": R1},
+        )
+    text = _plain(show(str(model_id)))
+    assert f"Deciles with lift @ {R1}" in text
+    assert text.index("Deciles with lift") < text.index("Evaluations (test window)")
+    for metric in ("lift@", "captured@", "aucc", "spearman"):
+        assert metric in text, metric

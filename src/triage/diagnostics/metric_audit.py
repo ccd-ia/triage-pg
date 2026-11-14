@@ -231,6 +231,57 @@ def _recall_at(pop: Rows, parameter: str) -> Optional[float]:
     return float((_top_k(pop, parameter) > 0).sum() / n_positive)
 
 
+def _allocation_total(pop: Rows) -> Optional[float]:
+    """The labeled outcome total a share divides by, or None where a share is undefined:
+    no labeled row, a negative labeled outcome, or a zero total (migration 0035)."""
+    labeled = pop["outcome"][~np.isnan(pop["outcome"])]
+    if len(labeled) == 0 or (labeled < 0).any():
+        return None
+    total = float(labeled.sum())
+    return None if total == 0 else total
+
+
+def _captured_at(pop: Rows, parameter: str) -> Optional[float]:
+    total = _allocation_total(pop)
+    if total is None:
+        return None
+    return float(_top_k(pop, parameter).sum() / total)
+
+
+def _lift_at(pop: Rows, parameter: str) -> Optional[float]:
+    total = _allocation_total(pop)
+    top = _top_k(pop, parameter)
+    if total is None or len(top) == 0:
+        return None
+    n_labeled, _ = _counts(pop)
+    return float(top.mean() / (total / n_labeled))
+
+
+def _aucc(pop: Rows) -> Optional[float]:
+    """The area under the cumulative-gains curve by the trapezoid rule; a block of tied
+    scores is one segment, from the gains before it to the gains after it."""
+    total = _allocation_total(pop)
+    if total is None:
+        return None
+    y = np.nan_to_num(pop["outcome"], nan=0.0)
+    scores, block = np.unique(-pop["score"], return_inverse=True)
+    block_n = np.bincount(block, minlength=len(scores)).astype(float)
+    block_y = np.bincount(block, weights=y, minlength=len(scores))
+    after = np.cumsum(block_y)
+    before = after - block_y
+    return float(np.sum(block_n / len(y) * (before + after) / (2 * total)))
+
+
+def _spearman(rows: Rows) -> Optional[float]:
+    from scipy.stats import spearmanr
+
+    if len(rows["outcome"]) < 2:
+        return None
+    result: Any = spearmanr(rows["score"], rows["outcome"])  # scipy ships no type hints
+    rho = float(result.statistic)
+    return None if math.isnan(rho) else rho
+
+
 def _is_probability(s: np.ndarray) -> bool:
     return bool(len(s)) and bool(((s >= 0) & (s <= 1)).all())
 
@@ -256,6 +307,8 @@ def _labeled_metric(
     if metric == "wape":
         volume = float(np.abs(y).sum())
         return None if volume == 0 else float(np.abs(s - y).sum() / volume)
+    if metric == "spearman":
+        return _spearman(rows)
     if metric.startswith("pinball@"):
         tau = float(metric.split("@", 1)[1])
         if quantile is None or abs(quantile - tau) >= _QUANTILE_TOL:
@@ -305,19 +358,26 @@ _LABELED = (
     "mae",
     "r2",
     "wape",
+    "spearman",
     "auc_roc",
     "average_precision",
     "brier",
     "log_loss",
 )
 _LABELED_FAMILIES = ("pinball@", "ece@")
-_TOP_K = ("precision@", "recall@")
+#: The metrics read at a population top-k cut, by name.
+_TOP_K: dict[str, Any] = {
+    "precision@": _precision_at,
+    "recall@": _recall_at,
+    "lift@": _lift_at,
+    "captured@": _captured_at,
+}
 
 
 def _kind(metric: str) -> Optional[str]:
     if metric in _LABELED or metric.startswith(_LABELED_FAMILIES):
         return "labeled"
-    if metric in _TOP_K:
+    if metric in _TOP_K or metric == "aucc":
         return "population"
     if metric == "c_index":
         return "survival"
@@ -462,8 +522,11 @@ def audit(
             cache[cache_key] = _read(pool, kind, key)
         rows = cache[cache_key]
         if kind == "population":
-            top_k = _precision_at if metric == "precision@" else _recall_at
-            value = top_k(rows, row["parameter"])
+            value = (
+                _aucc(rows)
+                if metric == "aucc"
+                else _TOP_K[metric](rows, row["parameter"])
+            )
         elif kind == "survival":
             value = _c_index(rows)
         else:

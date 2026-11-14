@@ -905,6 +905,46 @@ TIE_NOTE_SHARE = 0.10
 MIN_ROWS_PER_BIN = 20
 
 
+def _print_deciles(
+    calibration: list[dict[str, Any]],
+    ties: Optional[dict[str, Any]],
+    bins: int,
+    cal_date: Any,
+    problem_type: str,
+) -> None:
+    """The calibration deciles of ``model show``, with the tie and bucket-size notes."""
+    classifier = problem_type == "classification"
+    title = (
+        "Deciles with lift" if problem_type == "regression_ranking" else "Calibration"
+    )
+    t = Table(title=f"{title} @ {cal_date}", box=box.SIMPLE_HEAVY)
+    cols = ["Decile", "n", "Mean score", "Mean outcome", "Lift"]
+    for col in cols + (["Realized"] if classifier else []):
+        t.add_column(col)
+    for c in calibration:
+        cells = [
+            str(c["decile"]),
+            str(c["n"]),
+            _fmt(c["avg_score"]),
+            _fmt(c["mean_outcome"]),
+            _fmt(c["lift"], 2),
+        ]
+        t.add_row(*cells, *([_fmt(c["realized_rate"])] if classifier else []))
+    console.print(t)
+    if ties is not None and (ties["largest_tie_share"] or 0) > TIE_NOTE_SHARE:
+        console.print(
+            f"[dim]{ties['largest_tie_share']:.0%} of rows share score"
+            f" {ties['largest_tie_score']:.4g} — tied rows are kept in one"
+            " decile[/dim]"
+        )
+    n_labeled = sum(c["n"] for c in calibration)
+    if n_labeled / bins < MIN_ROWS_PER_BIN and bins > 5:
+        console.print(
+            f"[dim]{n_labeled} labeled rows over {bins} buckets is under"
+            f" {MIN_ROWS_PER_BIN} a bucket — try --bins 5[/dim]"
+        )
+
+
 @model_app.command("show")
 def model_show(
     ctx: typer.Context,
@@ -993,6 +1033,10 @@ def model_show(
             title=f"model {model_id}",
         )
     )
+    # A ranking model is read by where its outcome sits: its deciles with lift come first.
+    ranking = card["problem_type"] == "regression_ranking"
+    if calibration and ranking:
+        _print_deciles(calibration, ties, bins, cal_date, card["problem_type"])
     if windowed:
         t = Table(title="Evaluations (test window)", box=box.SIMPLE_HEAVY)
         for col in ("Metric", "Param", "Dates", "Mean", "Min", "Max"):
@@ -1014,34 +1058,8 @@ def model_show(
         for f in importances:
             t.add_row(f["feature"], _fmt(f["feature_importance"]))
         console.print(t)
-    if calibration:
-        classifier = card["problem_type"] == "classification"
-        t = Table(title=f"Calibration @ {cal_date}", box=box.SIMPLE_HEAVY)
-        cols = ["Decile", "n", "Mean score", "Mean outcome", "Lift"]
-        for col in cols + (["Realized"] if classifier else []):
-            t.add_column(col)
-        for c in calibration:
-            cells = [
-                str(c["decile"]),
-                str(c["n"]),
-                _fmt(c["avg_score"]),
-                _fmt(c["mean_outcome"]),
-                _fmt(c["lift"], 2),
-            ]
-            t.add_row(*cells, *([_fmt(c["realized_rate"])] if classifier else []))
-        console.print(t)
-        if ties is not None and (ties["largest_tie_share"] or 0) > TIE_NOTE_SHARE:
-            console.print(
-                f"[dim]{ties['largest_tie_share']:.0%} of rows share score"
-                f" {ties['largest_tie_score']:.4g} — tied rows are kept in one"
-                " decile[/dim]"
-            )
-        n_labeled = sum(c["n"] for c in calibration)
-        if n_labeled / bins < MIN_ROWS_PER_BIN and bins > 5:
-            console.print(
-                f"[dim]{n_labeled} labeled rows over {bins} buckets is under"
-                f" {MIN_ROWS_PER_BIN} a bucket — try --bins 5[/dim]"
-            )
+    if calibration and not ranking:
+        _print_deciles(calibration, ties, bins, cal_date, card["problem_type"])
     if crosstabs:
         t = Table(title="Crosstabs (top |log ratio|)", box=box.SIMPLE_HEAVY)
         t.add_column("Feature")
@@ -5030,6 +5048,42 @@ def plot_scores(
         return plots.scores(pool, model_id)
 
     _write_plot(ctx, output, f"scores-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("gains")
+def plot_gains(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    as_of_date: Optional[str] = typer.Option(
+        None,
+        "--date",
+        callback=_plot_date,
+        help="Test as_of_date (YYYY-MM-DD). Default: the model's latest evaluated test"
+        " date.",
+    ),
+    points: int = typer.Option(
+        100,
+        "--points",
+        callback=natural_number,
+        help="Cuts of the ranking after k = 0.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("gains-MODEL.svg")
+    ),
+) -> None:
+    """How much of the outcome the model's top k hold: the cumulative-gains curve.
+
+    The share of the labeled outcome against the share of the scored rows selected, with
+    the random-ranking diagonal, and the lift on a second axis. Classification,
+    regression and regression_ranking models; undefined for a negative outcome.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.gains(pool, model_id, as_of_date, points)
+
+    _write_plot(ctx, output, f"gains-{model_id}.svg", draw, [model_id])
 
 
 @plot_app.command("forecast-actual")

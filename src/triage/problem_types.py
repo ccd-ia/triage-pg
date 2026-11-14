@@ -69,6 +69,11 @@ COMMANDS: dict[str, CommandTypes] = {
         REGRESSION_TYPES,
         {"classification": "triage plot curve-dates GROUP", "survival": _FOR_SURVIVAL},
     ),
+    # A ranking of a non-negative outcome: a binary one (recall@k) or a continuous one.
+    "plot gains": CommandTypes(
+        ("classification", *REGRESSION_TYPES),
+        {"survival": _FOR_SURVIVAL},
+    ),
 }
 
 
