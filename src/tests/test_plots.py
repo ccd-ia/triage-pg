@@ -588,3 +588,91 @@ def test_crosstabs_compare_names_the_features_it_leaves_out(
         f"1 of model {a}'s top 3 left out, not in model {b}'s crosstabs: {dropped}"
         in pair.summary
     )
+
+
+# --------------------------------------------------------------------------- regression
+
+#: Each regression figure, as its CLI command draws it on the residuals fixture.
+REGRESSION_DRAWS = {
+    "forecast-actual": lambda pool, m: plots.forecast_actual(pool, m),
+    "residuals": lambda pool, m: plots.residuals(pool, m),
+    "bias-date": lambda pool, m: plots.bias(pool, m, "date"),
+    "bias-band": lambda pool, m: plots.bias(pool, m, "band"),
+    "forecast-time": lambda pool, m: plots.forecast_time(pool, m, "band"),
+}
+
+
+@pytest.mark.parametrize("kind", list(REGRESSION_DRAWS))
+def test_regression_figures_write_the_same_svg(db_pool_greenfield, tmp_path, kind):
+    from tests.test_regression_diagnostics import _seed
+
+    model_id = _seed(db_pool_greenfield)
+    draw = REGRESSION_DRAWS[kind]
+    one = _svg(draw(db_pool_greenfield, model_id), tmp_path / "one.svg")
+    two = _svg(draw(db_pool_greenfield, model_id), tmp_path / "two.svg")
+    assert one == two
+    assert ET.fromstring(one).tag.endswith("svg")
+
+
+def test_regression_figures_draw_the_readers_rows(db_pool_greenfield):
+    from tests.test_regression_diagnostics import _seed
+
+    pool = db_pool_greenfield
+    model_id = _seed(pool)
+    assert plots.bias(pool, model_id, "date").data["rows"] == readers.residual_summary(
+        pool, model_id
+    )
+    by_band = plots.bias(pool, model_id, "band")
+    assert by_band.data["rows"] == readers.residuals_by_segment(
+        pool, model_id, "band", pooled=True
+    )
+    pairs = plots.forecast_actual(pool, model_id)
+    assert pairs.data["forecast_actual"] == readers.forecast_actual(pool, model_id)
+    assert pairs.summary.startswith("39 rows: forecast above the outcome on")
+    panels = plots.forecast_time(pool, model_id, "sbc")
+    assert set(panels.data) == {
+        "smooth", "erratic", "intermittent", "lumpy", "one demand period", "no demand",
+        "no history",
+    }  # fmt: skip
+    assert "7 segment(s) by sbc over 3 date(s)" in panels.summary
+
+
+def test_regression_figures_refuse_a_classifier(db_pool_greenfield):
+    from tests.test_regression_diagnostics import _seed
+    from triage.problem_types import WrongProblemType
+
+    model_id = _seed(db_pool_greenfield, "classification", "exp-classifier")
+    for draw in REGRESSION_DRAWS.values():
+        with pytest.raises(WrongProblemType, match="model .* is classification"):
+            draw(db_pool_greenfield, model_id)
+
+
+def _regression_leaves(pool, tmp_path):
+    from tests.test_diagnostics import _seed_regression_trees
+    from triage.diagnostics import compute_error_analysis
+
+    seeded = _seed_regression_trees(pool, tmp_path)
+    compute_error_analysis(
+        pool, seeded["model"], kind="abs_error", max_depth=2, min_samples_leaf=20
+    )
+    return seeded
+
+
+def test_regression_leaf_bars_are_mean_errors_against_the_mae(
+    db_pool_greenfield, tmp_path
+):
+    seeded = _regression_leaves(db_pool_greenfield, tmp_path)
+    model_id = seeded["model"]
+    result = plots.error_rules(db_pool_greenfield, model_id, kind="abs_error")
+    drawn = result.data["abs_error"]
+    assert drawn and all(r["leaf_stats"]["mean_abs_error"] >= 0 for r in drawn)
+    mae = drawn[0]["leaf_stats"]["population_mae"]
+    assert f"against {mae:.2f}" in result.summary and "no cut" in result.summary
+    one = _svg(plots.error_rules(db_pool_greenfield, model_id), tmp_path / "a.svg")
+    two = _svg(plots.error_rules(db_pool_greenfield, model_id), tmp_path / "b.svg")
+    assert one == two
+    group = plots.leaves(db_pool_greenfield, seeded["group"], "", 0.1, 30)
+    assert "in the suspicious zone" in group.summary
+    assert set(group.data) == {"abs_error"}
+    recur = plots.recurrence(db_pool_greenfield, seeded["group"], None, "abs_error")
+    assert "on 3 of 3" in recur.summary

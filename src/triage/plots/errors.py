@@ -31,22 +31,45 @@ _SIGNATURE_SEP = re.compile(r"(?<=[>=])\|")
 #: Read every persisted row; the figure picks what it draws.
 _ALL = 1_000_000
 
-_KIND_COLOUR = {"fp": BLUE, "fn": ORANGE, "confusion": AQUA}
+_KIND_COLOUR = {
+    "fp": BLUE,
+    "fn": ORANGE,
+    "confusion": AQUA,
+    "abs_error": BLUE,
+    "beats_baseline": ORANGE,
+}
 _KIND_TITLE = {
     "fp": "fp leaves: among the selected, where are the wrong flags?",
     "fn": "fn leaves: among the passed-over, where are the misses?",
     "confusion": "confusion leaves: where are the mistakes of either kind?",
+    "abs_error": "abs_error leaves: where are the forecast errors large?",
+    "beats_baseline": "beats_baseline leaves: where does the baseline stay closer?",
 }
 #: What each kind's reference rate is the share of.
 _KIND_REFERENCE = {
     "fp": "the whole list",
     "fn": "all passed over",
     "confusion": "all labeled",
+    "abs_error": "population MAE",
+    "beats_baseline": "all training rows",
 }
 
 
 def _error_tree_command(model: int | str, parameter: str) -> str:
+    if parameter == "":
+        return f"triage postmodel error-tree {model} --kind abs-error"
+    if parameter.startswith("baseline:"):
+        return f"triage postmodel error-tree {model} --kind beats-baseline"
     return f"triage postmodel error-tree {model} -p {parameter} --kind all"
+
+
+def _bar(row: dict[str, Any]) -> tuple[float, str]:
+    """A leaf's bar length and its label: mean |e| for an abs_error leaf, else the rate."""
+    if row["error_kind"] == "abs_error":
+        mae = float(row["leaf_stats"]["mean_abs_error"])
+        return mae, f"{mae:.3g}  ({row['n_matched']:,} rows)"
+    rate = float(row["error_rate"])
+    return rate, f"{rate:.2f}  ({row['n_errors']:,} of {row['n_matched']:,})"
 
 
 def _rule_label(rule: Optional[str]) -> str:
@@ -129,7 +152,11 @@ def error_rules(
     if kind is not None:
         kinds = [kind]
     else:
-        kinds = [k for k in ("fp", "fn") if k in present] or ["confusion"]
+        kinds = [k for k in ("fp", "fn") if k in present] or [
+            next(
+                k for k in ("confusion", "abs_error", "beats_baseline") if k in present
+            )
+        ]
 
     data: dict[str, Any] = {}
     for k in kinds:
@@ -138,11 +165,14 @@ def error_rules(
             key=lambda r: (-int(r["n_errors"]), str(r["rule"])),
         )
         data[k] = of_k[:top]
-    # one rate per kind at this date and cut; a leaf fitted on another split has none
+    # one rate per kind at this date and cut; a leaf fitted on another split has none.
+    # An abs_error bar is a mean |e|, so its reference is the date's population MAE.
     references = {
         k: next(
             (
-                r["reference_error_rate"]
+                float(r["leaf_stats"]["population_mae"])
+                if k == "abs_error"
+                else r["reference_error_rate"]
                 for r in data[k]
                 if r["reference_error_rate"] is not None
             ),
@@ -166,16 +196,17 @@ def error_rules(
         for ax, k in zip(axes[:, 0], kinds, strict=True):
             drawn = data[k][::-1]  # the most errors on top
             ypos = list(range(len(drawn)))
+            bars = [_bar(r) for r in drawn]
             ax.barh(
                 ypos,
-                [r["error_rate"] for r in drawn],
+                [value for value, _ in bars],
                 height=0.55,
                 color=_KIND_COLOUR[k],
             )
-            for y, r in zip(ypos, drawn, strict=True):
+            for y, (value, label) in zip(ypos, bars, strict=True):
                 ax.annotate(
-                    f"{r['error_rate']:.2f}  ({r['n_errors']:,} of {r['n_matched']:,})",
-                    (r["error_rate"], y),
+                    label,
+                    (value, y),
                     xytext=(4, 0),
                     textcoords="offset points",
                     va="center",
@@ -185,7 +216,7 @@ def error_rules(
             if reference is not None:
                 ax.axvline(reference, color=INK, linewidth=1.0, linestyle=BASE_DASH)
                 ax.annotate(
-                    f"{_KIND_REFERENCE[k]} {reference:.2f}",
+                    f"{_KIND_REFERENCE[k]} {reference:.3g}",
                     (reference, 1.0),
                     xycoords=("data", "axes fraction"),
                     xytext=(3, -2),
@@ -194,9 +225,14 @@ def error_rules(
                     fontsize=8,
                 )
             ax.set_yticks(ypos, [_rule_label(r["rule"]) for r in drawn], fontsize=7.5)
-            ax.set_xlim(0, 1.15)
+            if k == "abs_error":
+                top_value = max([v for v, _ in bars] + [reference or 0.0])
+                ax.set_xlim(0, top_value * 1.35 or 1.0)
+                ax.set_xlabel("mean |forecast − outcome| in the leaf (label: rows)")
+            else:
+                ax.set_xlim(0, 1.15)
+                ax.set_xlabel("error rate in the leaf (label: errors of rows matched)")
             ax.set_ylim(-0.6, max(len(drawn), 1) - 0.4)
-            ax.set_xlabel("error rate in the leaf (label: errors of rows matched)")
             ax.set_title(_KIND_TITLE[k])
             no_grid(ax, "y")
         fig.suptitle(
@@ -211,7 +247,7 @@ def error_rules(
     parts = [
         f"{len(data[k])} {k} leaves against {fmt_rate(references[k])}" for k in kinds
     ]
-    summary = f"model {model_id} at {day}, {parameter}: " + ", ".join(parts)
+    summary = f"model {model_id} at {day}, {parameter or 'no cut'}: " + ", ".join(parts)
     return PlotResult(fig, data, summary)
 
 
@@ -247,16 +283,16 @@ def leaves(
         NotFoundError: the model group is unknown.
         NothingToDraw: no fp or confusion leaf is persisted for the group at the cut.
     """
-    rows = readers.group_leaves(pool, model_group_id, parameter, ("fp", "confusion"))
+    # a regression group's leaves are abs_error ones, at no cut ('')
+    kinds: tuple[str, ...] = ("abs_error",) if parameter == "" else ("fp", "confusion")
+    rows = readers.group_leaves(pool, model_group_id, parameter, kinds)
     if not rows:
         raise NothingToDraw(
-            f"No fp or confusion leaves are persisted for model group {model_group_id}"
-            f" at {parameter} — run, for each of its models:"
-            f" {_error_tree_command('<model_id>', parameter)}"
+            f"No {' or '.join(kinds)} leaves are persisted for model group"
+            f" {model_group_id} at {parameter or 'no cut'} — run, for each of its"
+            f" models: {_error_tree_command('<model_id>', parameter)}"
         )
-    data: dict[str, Any] = {
-        k: [r for r in rows if r["error_kind"] == k] for k in ("fp", "confusion")
-    }
+    data: dict[str, Any] = {k: [r for r in rows if r["error_kind"] == k] for k in kinds}
     drawn = [r for r in rows if r["wrong_share"] is not None]
     in_zone = [
         r
@@ -287,10 +323,15 @@ def leaves(
             va="top",
             fontsize=8,
         )
-        for k, colour, label in (
-            ("fp", BLUE, "fp leaves (error rate)"),
-            ("confusion", AQUA, "confusion leaves (1 − TP share)"),
-        ):
+        series = (
+            (("abs_error", BLUE, "abs_error leaves (mean |e| / MAE)"),)
+            if kinds == ("abs_error",)
+            else (
+                ("fp", BLUE, "fp leaves (error rate)"),
+                ("confusion", AQUA, "confusion leaves (1 − TP share)"),
+            )
+        )
+        for k, colour, label in series:
             sel = [r for r in data[k] if r["wrong_share"] is not None]
             ax.scatter(
                 [r["wrong_share"] for r in sel],
@@ -303,8 +344,12 @@ def leaves(
             )
         ax.set_yscale("log")
         ax.set_ylim(lo, hi)
-        ax.set_xlim(0, 1)
-        ax.set_xlabel("share of the leaf the model gets wrong")
+        if kinds == ("abs_error",):
+            ax.set_xlim(0, max([1.0] + [float(r["wrong_share"]) for r in drawn]) * 1.05)
+            ax.set_xlabel("mean |e| in the leaf over the date's population MAE")
+        else:
+            ax.set_xlim(0, 1)
+            ax.set_xlabel("share of the leaf the model gets wrong")
         ax.set_ylabel("rows in the leaf (log)")
         ax.set_title(
             title
@@ -319,7 +364,7 @@ def leaves(
 def recurrence(
     pool: DictRowPool,
     model_group_id: int,
-    parameter: str,
+    parameter: Optional[str],
     kind: str = "fp",
     top: int = 12,
     title: Optional[str] = None,
@@ -335,8 +380,8 @@ def recurrence(
     Args:
         pool: the project database.
         model_group_id: the model group.
-        parameter: the cut the trees were fitted at.
-        kind: ``fp``, ``fn`` or ``confusion``.
+        parameter: the cut the trees were fitted at; ``None`` reads the latest one.
+        kind: ``fp``, ``fn``, ``confusion``, ``abs_error`` or ``beats_baseline``.
         top: the signatures drawn, the most recurrent first.
         title: replaces the default title.
 
@@ -351,15 +396,16 @@ def recurrence(
     """
     found = readers.error_recurrence(pool, model_group_id, parameter, kind, top)
     rules = found["rules"]
-    if parameter not in found["parameters"] or not rules:
-        cuts = ", ".join(found["parameters"]) or "none"
+    cut: str = parameter if parameter is not None else (found["parameter"] or "")
+    if cut not in found["parameters"] or not rules:
+        cuts = ", ".join(repr(c) for c in found["parameters"]) or "none"
         raise NothingToDraw(
             f"No {kind} error rules with a signature are persisted for model group"
-            f" {model_group_id} at {parameter} (its cuts: {cuts}) — run, for each of"
-            f" its models: {_error_tree_command('<model_id>', parameter)}"
+            f" {model_group_id} at {cut or 'no cut'} (its cuts: {cuts}) — run,"
+            f" for each of its models: {_error_tree_command('<model_id>', cut)}"
         )
     signatures = [r["signature"] for r in rules]
-    group_rows = readers.group_leaves(pool, model_group_id, parameter, (kind,))
+    group_rows = readers.group_leaves(pool, model_group_id, cut, (kind,))
     dates = sorted({r["as_of_date"] for r in group_rows})
     matched = [r for r in group_rows if r["signature"] in signatures]
     data: dict[str, Any] = {"rules": rules, "leaves": matched}
@@ -412,7 +458,8 @@ def recurrence(
         ax.grid(visible=False)
         ax.set_title(
             title
-            or f"{kind} rules that recur — model group {model_group_id} at {parameter}"
+            or f"{kind} rules that recur — model group {model_group_id} at"
+            f" {cut or 'no cut'}"
         )
     top_rule = rules[0]
     summary = (

@@ -1,4 +1,4 @@
-"""``triage plot``: ten commands, each writing its figure and one summary line.
+"""``triage plot``: seventeen commands, each writing its figure and one summary line.
 
 Exit codes: 0 written; 1 nothing persisted to draw, naming the command that creates it;
 2 bad input (an unknown model, model group or Subset, an unsupported extension, the
@@ -154,7 +154,7 @@ def test_nothing_persisted_exits_1_naming_the_command(plot, diagnosed, tmp_path)
     assert not list(tmp_path.glob("*.svg"))
 
 
-def test_the_help_lists_the_ten_commands():
+def test_the_help_lists_the_seventeen_commands():
     result = CliRunner().invoke(cli.app, ["plot", "--help"])
     assert result.exit_code == 0
     plain = _plain(result.output)
@@ -169,6 +169,13 @@ def test_the_help_lists_the_ten_commands():
         "overlap",
         "calibration",
         "scores",
+        "forecast-actual",
+        "residuals",
+        "bias",
+        "forecast-time",
+        "segments",
+        "win-consistency",
+        "importance",
     ):
         assert f" {command} " in plain, command
 
@@ -189,7 +196,7 @@ def test_the_cli_does_not_import_matplotlib_until_a_plot_is_drawn():
         check=True,
     )
     assert loaded.stdout.split()[-2:] == ["False", "False"], loaded.stdout
-    assert Path(cli.__file__).read_text().count("from triage import plots") == 10
+    assert Path(cli.__file__).read_text().count("from triage import plots") == 17
 
 
 def test_a_file_that_cannot_be_written_exits_2_not_1(plot, diagnosed, tmp_path):  # noqa: F811
@@ -203,3 +210,109 @@ def test_a_file_that_cannot_be_written_exits_2_not_1(plot, diagnosed, tmp_path):
         locked.chmod(0o700)
     assert result.exit_code == 2, result.output
     assert "could not be drawn or written" in _plain(result.output)
+
+
+# --------------------------------------------------------------------------- regression
+
+
+@pytest.fixture
+def plot_regression(db_url, db_pool_greenfield, tmp_path, monkeypatch):
+    """``triage plot …`` against the residuals fixture: (run, regression model, classifier)."""
+    from tests.test_regression_diagnostics import _seed
+
+    model_id = _seed(db_pool_greenfield)
+    classifier = _seed(db_pool_greenfield, "classification", "exp-classifier")
+    monkeypatch.chdir(tmp_path)
+
+    def run(*args: str):
+        return CliRunner().invoke(
+            cli.app,
+            ["plot", *args],
+            env={"DATABASE_URL": db_url},
+            catch_exceptions=False,
+        )
+
+    return run, model_id, classifier
+
+
+def test_regression_commands_write_their_default_file(plot_regression, tmp_path):
+    run, m, _ = plot_regression
+    for args, name, summary in (
+        (["forecast-actual", str(m)], f"forecast-actual-{m}.svg", "39 rows: forecast"),
+        (["residuals", str(m)], f"residuals-{m}.svg", "39 rows: mean residual"),
+        (["bias", str(m)], f"bias-{m}.svg", "bias by date over 3 date(s)"),
+        (["bias", str(m), "--by", "sbc"], f"bias-{m}.svg", "bias by sbc over 7"),
+        (["forecast-time", str(m)], f"forecast-time-{m}.svg", "segment(s) by band"),
+        (["forecast-time", str(m), "--cut", "cold-start"], f"forecast-time-{m}.svg",
+         "2 segment(s) by cold-start"),
+    ):  # fmt: skip
+        (tmp_path / name).unlink(missing_ok=True)
+        result = run(*args)
+        assert result.exit_code == 0, (args, result.output)
+        plain = _plain(result.output)
+        assert f"wrote {name}" in plain and summary in plain, (args, plain)
+        assert ET.parse(tmp_path / name).getroot().tag.endswith("svg")
+
+
+def test_regression_commands_exit_2_on_a_classifier(plot_regression, tmp_path):
+    run, m, classifier = plot_regression
+    for kind in ("forecast-actual", "residuals", "bias", "forecast-time"):
+        result = run(kind, str(classifier))
+        assert result.exit_code == 2, (kind, result.output)
+        assert f"model {classifier} is classification" in _plain(result.output)
+    for args, message in (
+        (["bias", str(m), "--by", "decile"], "'decile' is not a cut"),
+        (["forecast-time", str(m), "--cut", "date"], "use triage plot bias"),
+        (["bias", "999999"], "No model with id 999999"),
+    ):
+        result = run(*args)
+        assert result.exit_code == 2, (args, result.output)
+        assert message in _plain(result.output), (args, result.output)
+    assert not list(tmp_path.glob("*.svg"))
+
+
+@pytest.fixture
+def plot_baseline(db_url, db_pool_greenfield, tmp_path, monkeypatch):
+    """``triage plot …`` against the baseline-comparison fixture: (run, groups)."""
+    from tests.test_baseline_compare import _seed
+
+    groups = _seed(db_pool_greenfield)
+    monkeypatch.chdir(tmp_path)
+
+    def run(*args: str):
+        return CliRunner().invoke(
+            cli.app,
+            ["plot", *args],
+            env={"DATABASE_URL": db_url},
+            catch_exceptions=False,
+        )
+
+    return run, groups
+
+
+def test_segments_and_win_consistency_write_the_same_svg(plot_baseline, tmp_path):
+    run, groups = plot_baseline
+    g, coin = groups["persistent"], groups["coin"]
+    for args, name, summary in (
+        (["segments", str(g)], f"segments-{g}.svg", "wins 0 of 9 segments"),  # MAE 2 = 2
+        (["segments", str(g), "--cut", "band"], f"segments-{g}.svg", "of 4 segments"),
+        (["win-consistency", str(g)], f"win-consistency-{g}.svg", "p = "),
+        (["win-consistency", str(coin)], f"win-consistency-{coin}.svg",
+         "200 entities on 6 dates"),
+    ):  # fmt: skip
+        first = run(*args, "-o", "one.svg")
+        second = run(*args, "-o", "two.svg")
+        assert first.exit_code == 0 and second.exit_code == 0, (args, first.output)
+        assert summary in _plain(first.output), (args, _plain(first.output))
+        assert (tmp_path / "one.svg").read_bytes() == (
+            tmp_path / "two.svg"
+        ).read_bytes()
+        result = run(*args)
+        assert result.exit_code == 0 and (tmp_path / name).exists()
+
+
+def test_segments_refuses_an_unknown_group(plot_baseline):
+    run, _ = plot_baseline
+    result = run("segments", "999999")
+    assert result.exit_code == 2
+    assert "model group 999999 has no model" in _plain(result.output)

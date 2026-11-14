@@ -26,7 +26,10 @@ from typing import Any, LiteralString, Optional
 from triage.util.db import DictRowPool
 
 #: The kinds of error-tree leaf ``triage.error_analysis`` holds.
-ERROR_KINDS = ("fp", "fn", "confusion")
+ERROR_KINDS = ("fp", "fn", "confusion", "abs_error", "beats_baseline")
+
+#: The leaf kinds of a regression model (migration 0034): they take no top-k cut.
+REGRESSION_ERROR_KINDS = ("abs_error", "beats_baseline")
 
 #: The crosstab statistics a reader ranks: the ratio of means, or the nonzero rates.
 CROSSTAB_STATS = ("mean", "nonzero_rate")
@@ -430,11 +433,30 @@ def error_reference_rates(
 def _with_reference_rates(
     pool: DictRowPool, model_id: int, rows: Iterable[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Each leaf gains ``reference_error_rate``: its kind's population rate at its cut."""
+    """Each leaf gains ``reference_error_rate``: its kind's population rate at its cut.
+
+    An ``abs_error`` leaf's reference is 1: its error rate is its mean |e| over the date's
+    population MAE. A ``beats_baseline`` leaf's is the share of the training rows where the
+    model is not closer (``triage.error_tree_fits``).
+    """
     rates: dict[tuple[Any, str], dict[str, Optional[float]]] = {}
+    fits: dict[str, Optional[float]] = {}
     out: list[dict[str, Any]] = []
     for row in rows:
-        if row["split_kind"] != "test":
+        if row["error_kind"] == "abs_error":
+            row["reference_error_rate"] = 1.0
+        elif row["error_kind"] == "beats_baseline":
+            if row["parameter"] not in fits:
+                fit = _one(
+                    pool,
+                    "select 1 - base_rate_train as rate from triage.error_tree_fits"
+                    " where model_id = %(m)s and error_kind = 'beats_baseline'"
+                    "   and parameter = %(p)s",
+                    {"m": model_id, "p": row["parameter"]},
+                )
+                fits[row["parameter"]] = None if fit is None else fit["rate"]
+            row["reference_error_rate"] = fits[row["parameter"]]
+        elif row["split_kind"] != "test":
             row["reference_error_rate"] = None  # the curve is drawn over test rows only
         else:
             key = (row["as_of_date"], row["parameter"])
@@ -466,9 +488,11 @@ def error_rules(
 
     Returns:
         Rows ``as_of_date, parameter, error_kind, rule, n_matched, n_errors, error_rate,
-        depth, class_counts, signature, reference_error_rate``. The reference is the
-        population rate of the leaf's kind at its date and cut
-        (:func:`error_reference_rates`). Empty when nothing is persisted.
+        depth, class_counts, signature, leaf_stats, reference_error_rate``. The reference
+        is the population rate of the leaf's kind at its date and cut
+        (:func:`error_reference_rates`). ``leaf_stats`` holds a regression leaf's own
+        numbers and is ``None`` on the classification kinds. Empty when nothing is
+        persisted.
 
     Raises:
         ValueError: ``error_kind`` is not one of :data:`ERROR_KINDS`.
@@ -477,7 +501,7 @@ def error_rules(
     rows = _rows(
         pool,
         "select split_kind, as_of_date, parameter, error_kind, rule, n_matched,"
-        "       n_errors, error_rate, depth, class_counts, signature"
+        "       n_errors, error_rate, depth, class_counts, signature, leaf_stats"
         " from triage.error_analysis"
         " where model_id = %(m)s and (%(k)s::text is null or error_kind = %(k)s)"
         " order by error_rate desc, n_matched desc limit %(limit)s",
@@ -498,12 +522,14 @@ def suspicious_leaves(
     max_error_rate: float = 0.02,
     min_support: int = 30,
     limit: int = 20,
+    mae_ratio: float = 0.1,
 ) -> list[dict[str, Any]]:
     """The leaves that are suspiciously right: high support and almost no error.
 
     Reads ``triage.error_rules_suspicious``: fp leaves with an error rate at most
-    ``max_error_rate``, and confusion leaves whose TP share is at least
-    1 − ``max_error_rate``, each holding at least ``min_support`` rows.
+    ``max_error_rate``, confusion leaves whose TP share is at least 1 − ``max_error_rate``,
+    and ``abs_error`` leaves whose mean |e| is at most ``mae_ratio`` times the date's
+    population MAE, each holding at least ``min_support`` rows.
 
     Args:
         pool: the project database.
@@ -512,11 +538,13 @@ def suspicious_leaves(
         max_error_rate: the largest error rate (or non-TP share) a leaf may have.
         min_support: the fewest rows a leaf may hold.
         limit: the most rows returned.
+        mae_ratio: the largest mean |e| of an ``abs_error`` leaf, over population MAE.
 
     Returns:
         Rows ``split_kind, as_of_date, parameter, error_kind, rule_id, rule, n_matched,
         n_errors, error_rate, tp_share, class_counts, signature, precision_at_k, lift,
-        reference_error_rate``, highest lift first. Empty when no leaf qualifies — an
+        mean_abs_error, population_mae, reference_error_rate``, highest lift first. An
+        ``abs_error`` leaf's lift is the population MAE over its own. Empty when no leaf qualifies — an
         answer, not a missing diagnostic.
 
     Raises:
@@ -527,8 +555,8 @@ def suspicious_leaves(
         pool,
         "select split_kind, as_of_date, parameter, error_kind, rule_id, rule,"
         "       n_matched, n_errors, error_rate, tp_share, class_counts, signature,"
-        "       precision_at_k, lift"
-        " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s)"
+        "       precision_at_k, lift, mean_abs_error, population_mae"
+        " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s, %(r)s)"
         " where %(k)s::text is null or error_kind = %(k)s"
         " limit %(limit)s",
         {
@@ -536,6 +564,7 @@ def suspicious_leaves(
             "k": error_kind,
             "e": max_error_rate,
             "s": min_support,
+            "r": mae_ratio,
             "limit": limit,
         },
     )
@@ -563,7 +592,8 @@ def error_recurrence(
 
     Returns:
         ``model_group_id``, ``parameter`` (the cut read), ``error_kind``, ``parameters``
-        (every cut the group's error trees were fitted at, the latest first) and ``rules``.
+        (every cut the group's trees of this kind were fitted at, the latest first) and
+        ``rules``.
         ``parameters`` and ``rules`` are empty when nothing is persisted for the group.
 
     Raises:
@@ -578,9 +608,10 @@ def error_recurrence(
         " from triage.error_analysis ea"
         " join triage.models m using (model_id)"
         " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
+        "   and ea.error_kind = %(k)s"
         " group by ea.parameter"
         " order by max(ea.computed_at) desc, ea.parameter",
-        {"g": model_group_id},
+        {"g": model_group_id, "k": error_kind},
     )
     parameters = [c["parameter"] for c in cuts]
     if not parameters:
@@ -624,7 +655,8 @@ def group_leaves(
 
     Returns:
         Rows ``model_id, as_of_date, parameter, error_kind, rule_id, rule, n_matched,
-        n_errors, error_rate, tp_share, wrong_share, depth, class_counts, signature``,
+        n_errors, error_rate, tp_share, wrong_share, depth, class_counts, signature,
+        leaf_stats``,
         ordered by date, model, kind and leaf. ``tp_share`` is the leaf's TP count over its
         rows (``None`` on fn leaves). ``wrong_share`` is the share of the leaf the model
         gets wrong: the error rate, or 1 − ``tp_share`` on confusion leaves — the measure
@@ -648,7 +680,7 @@ def group_leaves(
         "            then 1 - (ea.class_counts ->> 'tp')::double precision"
         "                     / nullif(ea.n_matched, 0)"
         "            else ea.error_rate end as wrong_share,"
-        "       ea.depth, ea.class_counts, ea.signature"
+        "       ea.depth, ea.class_counts, ea.signature, ea.leaf_stats"
         " from triage.error_analysis ea"
         " join triage.models m on m.model_id = ea.model_id"
         " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
@@ -1049,3 +1081,159 @@ def model_groups(
         " order by a.avg_distance_from_best asc nulls last, mgs.model_group_id",
         {"h": experiment_hash, "m": metric, "p": parameter},
     )
+
+
+# ------------------------------------------------------------------ regression residuals
+
+#: The segment cuts of a regression model's rows, besides a Subset (``subset:NAME``).
+RESIDUAL_CUTS = ("band", "sbc", "cold-start")
+
+#: The most forecast-actual pairs :func:`forecast_actual` returns.
+FORECAST_ACTUAL_CAP = 200_000
+
+
+def residual_summary(
+    pool: DictRowPool, model_id: int, split_kind: str = "test"
+) -> list[dict[str, Any]]:
+    """Per date: a regression model's errors, their concentration and its forecast shape.
+
+    Reads ``triage.regression_residual_summary`` over the labeled rows of each scored date.
+
+    Returns:
+        Rows ``as_of_date, n, sum_outcome, mae, rmse, wape, bias, top100_error_share,
+        top1000_error_share, top1pct_error_share, negative_share, n_distinct_scores,
+        mode_score, mode_share, min_score, max_score, coverage_point``, by date. ``bias`` is
+        the mean of forecast − outcome; ``coverage_point`` is the share of rows with
+        outcome ≤ forecast; a ``topN_error_share`` is the share of the absolute error held
+        by the N largest errors (all of it when the date has N rows or fewer).
+    """
+    return _rows(
+        pool,
+        "select as_of_date, n, sum_outcome, mae, rmse, wape, bias, top100_error_share,"
+        "       top1000_error_share, top1pct_error_share, negative_share,"
+        "       n_distinct_scores, mode_score, mode_share, min_score, max_score,"
+        "       coverage_point"
+        " from triage.regression_residual_summary(%(m)s,"
+        "        cast(%(s)s as triage.split_kind))",
+        {"m": model_id, "s": split_kind},
+    )
+
+
+def _segment_cut(pool: DictRowPool, cut: str) -> tuple[str, Optional[str]]:
+    """``cut`` as ``regression_residuals_by_segment`` takes it, and the Subset's name."""
+    if cut in RESIDUAL_CUTS:
+        return cut.replace("-", "_"), None
+    if cut.startswith("subset:") and cut[len("subset:") :]:
+        return resolve_subset(pool, cut[len("subset:") :])
+    raise ValueError(
+        f"{cut!r} is not a segment cut — expected {' | '.join(RESIDUAL_CUTS)}"
+        " | subset:NAME"
+    )
+
+
+def residuals_by_segment(
+    pool: DictRowPool,
+    model_id: int,
+    cut: str = "band",
+    split_kind: str = "test",
+    pooled: Optional[bool] = None,
+) -> list[dict[str, Any]]:
+    """A regression model's errors per segment of its rows.
+
+    Segments come from the entity's target history before each date
+    (``triage.prior_label_history``): ``band`` (the band of its mean label), ``sbc`` (its
+    Syntetos–Boylan class), ``cold-start`` (no prior label against some), or
+    ``subset:NAME`` (in the Subset against outside it).
+
+    Args:
+        pool: the project database.
+        model_id: the model.
+        cut: ``band``, ``sbc``, ``cold-start`` or ``subset:NAME``.
+        split_kind: the prediction split.
+        pooled: ``True`` keeps the rows pooled over the dates, ``False`` the per-date rows,
+            ``None`` both.
+
+    Returns:
+        Rows ``as_of_date, segment, segment_order, n, entities, sum_outcome,
+        sum_forecast, mae, wape, bias, share_of_abs_error``. ``as_of_date`` is ``None`` on
+        a pooled row. ``share_of_abs_error`` is the segment's share of its scope's absolute
+        error. Pooled rows come first, then by date, each in segment order.
+
+    Raises:
+        NotFoundError: ``subset:NAME`` names no Subset.
+        ValueError: ``cut`` is none of the above, or names two Subsets.
+    """
+    sql_cut, _name = _segment_cut(pool, cut)
+    return _rows(
+        pool,
+        "select as_of_date, segment, segment_order, n, entities, sum_outcome,"
+        "       sum_forecast, mae, wape, bias, share_of_abs_error"
+        " from triage.regression_residuals_by_segment(%(m)s,"
+        "        cast(%(s)s as triage.split_kind), %(c)s)"
+        " where %(p)s::boolean is null or (as_of_date is null) = %(p)s::boolean",
+        {"m": model_id, "s": split_kind, "c": sql_cut, "p": pooled},
+    )
+
+
+def largest_errors(
+    pool: DictRowPool, model_id: int, n: int = 20, split_kind: str = "test"
+) -> list[dict[str, Any]]:
+    """The ``n`` rows with the largest absolute error, over every date of the split.
+
+    Returns:
+        Rows ``entity_id, as_of_date, forecast, outcome, error, abs_error, label``,
+        largest first. ``error`` is forecast − outcome. ``label`` is the entity's
+        ``name``, ``label``, ``display_name`` or ``title`` from ``entity_attributes``,
+        when its source has one.
+
+    Raises:
+        ValueError: ``n`` is below 1.
+    """
+    if n < 1:
+        raise ValueError(f"n={n} lists no rows — pass 1 or more")
+    return _rows(
+        pool,
+        "select entity_id, as_of_date, forecast, outcome, error, abs_error, label"
+        " from triage.largest_errors(%(m)s, cast(%(s)s as triage.split_kind), %(n)s)",
+        {"m": model_id, "s": split_kind, "n": n},
+    )
+
+
+def forecast_actual(
+    pool: DictRowPool,
+    model_id: int,
+    split_kind: str = "test",
+    cap: int = FORECAST_ACTUAL_CAP,
+) -> dict[str, Any]:
+    """Forecast and outcome pairs of a model's labeled rows, at most ``cap`` of them.
+
+    Over the cap, the pairs kept are those of the entities that come first in the order of
+    ``hashint8(entity_id)``: a sample by entity that is the same on every call.
+
+    Returns:
+        ``n_total`` (the labeled rows), ``sampled`` (whether the cap cut them) and
+        ``pairs``, rows ``entity_id, as_of_date, forecast, outcome``.
+
+    Raises:
+        ValueError: ``cap`` is below 1.
+    """
+    if cap < 1:
+        raise ValueError(f"cap={cap} keeps no pairs — pass 1 or more")
+    params = {"m": model_id, "s": split_kind, "cap": cap}
+    total = _one(
+        pool,
+        "select count(*) as n from triage.scored_labels(%(m)s,"
+        "        cast(%(s)s as triage.split_kind))"
+        " where outcome is not null and score is not null",
+        params,
+    )
+    pairs = _rows(
+        pool,
+        "select entity_id, as_of_date, score as forecast, outcome"
+        " from triage.scored_labels(%(m)s, cast(%(s)s as triage.split_kind))"
+        " where outcome is not null and score is not null"
+        " order by hashint8(entity_id), entity_id, as_of_date limit %(cap)s",
+        params,
+    )
+    n_total = 0 if total is None else total["n"]
+    return {"n_total": n_total, "sampled": n_total > len(pairs), "pairs": pairs}

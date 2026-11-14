@@ -29,6 +29,7 @@ import json
 from typing import Any
 
 from triage.diagnostics.matrixio import load_matrix_context, top_k_entities
+from triage.diagnostics.signatures import signature_of
 from triage.logging import get_logger
 
 logger = get_logger(__name__)
@@ -42,7 +43,13 @@ ERROR_TREE_KINDS: dict[str, tuple[str, ...]] = {
     "confusion": ("confusion",),
     "both": ("fp", "fn"),
     "all": ("fp", "fn", "confusion"),
+    # regression (migration 0034, diagnostics/regression_trees.py): no cut, no binary outcome
+    "abs_error": ("abs_error",),
+    "beats_baseline": ("beats_baseline",),
 }
+
+#: The kinds that read a top-k cut over a binary outcome.
+CLASSIFICATION_TREE_KINDS = ("fp", "fn", "confusion", "both", "all")
 
 #: The confusion tree's target classes, in the order its leaves report them.
 CONFUSION_CLASSES = ("tp", "fp", "fn", "tn")
@@ -85,17 +92,6 @@ def _leaf_counts(tree, node: int) -> dict[Any, int]:
         )
         for cls, v in zip(tree.classes_, value_row)
     }
-
-
-def signature_of(conditions: list[dict[str, Any]]) -> str:
-    """A rule's threshold-free identity: its distinct ``feature op`` pairs, sorted.
-
-    Sorting makes it independent of the order the tree split on the features, and dropping
-    the thresholds lets the same rule match on another date, where they move. A path that
-    splits one feature twice the same way (``a <= 3 AND a <= 1``) has the signature of one
-    split. The root-only tree has no conditions and the signature ``''``.
-    """
-    return "|".join(sorted({f"{c['feature']}{c['op']}" for c in conditions}))
 
 
 def _rules_from_tree(
@@ -185,11 +181,14 @@ def compute_error_analysis(
     max_depth: int = 3,
     min_samples_leaf: int = 30,
     random_seed: int = 0,
+    baseline_group_id: int | None = None,
 ) -> int:
     """Fit per-date error trees and persist their rules. Returns rules written.
 
     ``kind`` picks the trees: ``fp``, ``fn`` or ``confusion`` alone, ``both`` (fp + fn,
-    its meaning before the confusion tree existed) or ``all`` (fp + fn + confusion).
+    its meaning before the confusion tree existed) or ``all`` (fp + fn + confusion). The
+    regression kinds ``abs_error`` and ``beats_baseline`` (against ``baseline_group_id``,
+    or the default baseline) take no cut: see :mod:`triage.diagnostics.regression_trees`.
     Re-running replaces a date's rows of each kind fitted, so rows written before
     migration 0027 gain their class counts, conditions and signature.
 
@@ -199,6 +198,26 @@ def compute_error_analysis(
     """
     from sklearn.tree import DecisionTreeClassifier
 
+    if kind in ("abs_error", "beats_baseline"):
+        from triage.diagnostics import regression_trees
+
+        if kind == "abs_error":
+            return regression_trees.abs_error_trees(
+                db_engine,
+                model_id,
+                split_kind,
+                max_depth,
+                min_samples_leaf,
+                random_seed,
+            )
+        return regression_trees.beats_baseline_tree(
+            db_engine,
+            model_id,
+            baseline_group_id,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            random_seed=random_seed,
+        )
     kinds = ERROR_TREE_KINDS.get(kind)
     if kinds is None:
         raise ValueError(

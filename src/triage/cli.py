@@ -2759,18 +2759,38 @@ def postmodel_crosstabs(
     top: int = typer.Option(
         15, "--top", "-n", help="Rows to print (all are persisted)."
     ),
+    by: Optional[str] = typer.Option(
+        None,
+        "--by",
+        help="abs-error[:CUT]: compare the rows with the largest |forecast − outcome|"
+        " (CUT, default 10_pct) with the rest, for a regression model. Persisted as"
+        " parameter abs_error_CUT.",
+    ),
 ) -> None:
     """Feature means among the top-k vs the rest — what characterizes the list?
 
     Computes from the model's scored matrix (Parquet, via the storage seam), persists
     long-format rows into ``triage.crosstabs``, prints the most-distinguishing features
-    by |log ratio| of means. The dashboard's model card reads the same table.
+    by |log ratio| of means. The dashboard's model card reads the same table. With
+    --by abs-error the selected rows are the largest errors, not the top scores.
     """
     from triage.diagnostics import compute_crosstabs
 
+    abs_error_cut: Optional[str] = None
+    if by is not None:
+        name, _, cut = by.partition(":")
+        if name != "abs-error":
+            _plot_fail(f"--by {by!r}: expected abs-error or abs-error:CUT", 2)
+        abs_error_cut = cut or "10_pct"
+        parameter = f"abs_error_{abs_error_cut}"
+        _require_type(ctx, "postmodel crosstabs --by abs-error", model_id)
     engine = get_pool(ctx)
     written = compute_crosstabs(
-        engine, model_id, parameter=parameter, split_kind=split_kind
+        engine,
+        model_id,
+        parameter=parameter,
+        split_kind=split_kind,
+        abs_error_cut=abs_error_cut,
     )
     console.print(f"[green]{written} crosstab row(s) persisted.[/green]")
     with engine.connection() as conn:
@@ -2799,29 +2819,133 @@ def postmodel_crosstabs(
     console.print(table)
 
 
-#: The error kinds one persisted leaf can carry (migration 0027).
-_LEAF_KINDS = ("fp", "fn", "confusion")
+#: The error kinds one persisted leaf can carry (migrations 0027, 0034), as typed.
+_LEAF_KINDS = ("fp", "fn", "confusion", "abs-error", "beats-baseline")
 
 
 def _error_tree_kind(value: str) -> str:
-    """``--kind`` of ``postmodel error-tree``: one tree, or the ``both``/``all`` sets."""
+    """``--kind`` of ``postmodel error-tree``: one tree, or the ``both``/``all`` sets.
+
+    ``abs-error`` and ``beats-baseline`` are stored as ``abs_error`` and ``beats_baseline``.
+    """
     from triage.diagnostics.error_tree import ERROR_TREE_KINDS
 
-    if value not in ERROR_TREE_KINDS:
+    stored = value.replace("-", "_")
+    if stored not in ERROR_TREE_KINDS:
         raise typer.BadParameter(
             f"{value!r} is not an error-tree kind — expected"
-            f" {' | '.join(ERROR_TREE_KINDS)}"
+            f" {' | '.join(k.replace('_', '-') for k in ERROR_TREE_KINDS)}"
         )
-    return value
+    return stored
 
 
 def _leaf_kind(value: Optional[str]) -> Optional[str]:
     """``--kind`` of the commands that read persisted leaves: one kind of leaf."""
-    if value is not None and value not in _LEAF_KINDS:
+    if value is not None and value.replace("_", "-") not in _LEAF_KINDS:
         raise typer.BadParameter(
             f"{value!r} is not an error-rule kind — expected {' | '.join(_LEAF_KINDS)}"
         )
-    return value
+    return None if value is None else value.replace("-", "_")
+
+
+def _error_tree_gate(ctx: typer.Context, model_id: int, kind: str) -> str:
+    """The model's problem type, or exit 2 when the tree kind does not apply to it."""
+    from triage import problem_types
+
+    try:
+        problem_type = problem_types.model_problem_type(get_pool(ctx), model_id)
+    except ValueError as exc:
+        _plot_fail(str(exc), 2)
+    message = problem_types.error_tree_refusal(model_id, problem_type, kind)
+    if message is not None:
+        _plot_fail(message, 2)
+    return problem_type
+
+
+def _tree_flags(kind: str, parameter: Optional[str]) -> str:
+    """The ``error-tree`` flags that fit a kind of leaf at a cut."""
+    if kind == "abs_error":
+        return "--kind abs-error"
+    if kind == "beats_baseline":
+        return "--kind beats-baseline"
+    return f"-p {parameter} --kind all"
+
+
+def _leaf_parameter(
+    pool: DictRowPool, model_group_id: int, kind: str, parameter: Optional[str]
+) -> str:
+    """The cut a leaf reader reads: the one given, else the kind's default.
+
+    100_abs for the classification kinds, '' (no cut) for abs_error, and for
+    beats_baseline the baseline the group's trees were fitted against most recently.
+    """
+    if parameter is not None:
+        return parameter
+    if kind == "abs_error":
+        return ""
+    if kind != "beats_baseline":
+        return "100_abs"
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select ea.parameter from triage.error_analysis ea"
+            " join triage.models m on m.model_id = ea.model_id"
+            " where m.model_group_id = %(g)s and ea.error_kind = 'beats_baseline'"
+            " order by ea.computed_at desc limit 1",
+            {"g": model_group_id},
+        ).fetchone()
+    return "" if row is None else row["parameter"]
+
+
+def _print_regression_leaves(pool: DictRowPool, model_id: int, kind: str) -> None:
+    """The leaves of a regression tree just fitted, as error-tree prints them."""
+    from triage.diagnostics import readers
+
+    rows = readers.error_rules(pool, model_id, error_kind=kind, limit=15)
+    table = Table(title=f"{kind} leaves — model {model_id}", box=box.SIMPLE_HEAVY)
+    if kind == "abs_error":
+        for col in ("As-of", "Rule", "n", "Mean |e|", "× MAE", "Bias", "|e| share"):
+            table.add_column(col)
+        for r in rows:
+            s = r["leaf_stats"] or {}
+            table.add_row(
+                str(r["as_of_date"]),
+                r["rule"],
+                str(r["n_matched"]),
+                _fmt(s.get("mean_abs_error"), 3),
+                _fmt(r["error_rate"], 2),
+                _fmt(s.get("bias"), 3),
+                _fmt_share(s.get("share_of_abs_error")),
+            )
+        console.print(table)
+        return
+    for col in ("Rule", "Train n", "Train wins", "Test n", "Test wins", "Gain"):
+        table.add_column(col)
+    for r in rows:
+        s = r["leaf_stats"] or {}
+        table.add_row(
+            r["rule"],
+            str(s.get("train_n")),
+            _fmt_share(s.get("train_win_share")),
+            str(s.get("test_n")),
+            _fmt_share(s.get("test_win_share")),
+            _fmt(s.get("total_gain"), 2),
+        )
+    console.print(table)
+    with pool.connection() as conn:
+        fit = conn.execute(
+            "select parameter, fit_dates, eval_date, auc, base_rate_train,"
+            "       base_rate_test from triage.error_tree_fits"
+            " where model_id = %(m)s and error_kind = 'beats_baseline'"
+            " order by computed_at desc limit 1",
+            {"m": model_id},
+        ).fetchone()
+    if fit is not None:
+        console.print(
+            f"Fitted on {len(fit['fit_dates'])} date(s) before {fit['eval_date']} against"
+            f" {fit['parameter']}: closer on {_fmt_share(fit['base_rate_train'])} of the"
+            f" training rows and {_fmt_share(fit['base_rate_test'])} of the test rows;"
+            f" AUC on {fit['eval_date']} {_fmt(fit['auc'], 3)}"
+        )
 
 
 @postmodel_app.command("error-tree")
@@ -2835,11 +2959,20 @@ def postmodel_error_tree(
         "both",
         "--kind",
         callback=_error_tree_kind,
-        help="fp | fn | confusion | both (fp + fn) | all (fp + fn + confusion).",
+        help="fp | fn | confusion | both (fp + fn) | all (fp + fn + confusion) for a"
+        " classifier; abs-error | beats-baseline for a regression model."
+        " regression_ranking reads both families, with positive meaning outcome > 0.",
     ),
     depth: int = typer.Option(3, "--depth", help="Max tree depth (keep it readable)."),
     min_leaf: int = typer.Option(
         30, "--min-leaf", help="Min samples per leaf (rule support floor)."
+    ),
+    baseline: Optional[int] = typer.Option(
+        None,
+        "--baseline",
+        callback=_optional_natural,
+        help="beats-baseline: the baseline model group. Default: the Experiment's"
+        " baseline group with the lowest MAE on the rows it shares with the model's.",
     ),
 ) -> None:
     """Characterize WHERE the model fails: a shallow tree on the errors → rules.
@@ -2847,22 +2980,35 @@ def postmodel_error_tree(
     fp: within the selected top-k, what marks the wrong flags? fn: among the
     passed-over, what marks the missed positives? confusion: over every labeled row,
     what separates TP, FP, FN and TN (its first splits mostly redraw the cut itself).
-    Rules persist to ``triage.error_analysis`` with their class counts and a
-    threshold-free signature (a diagnostic — never a score modifier). Linear models
-    also get per-entity β·x contributions persisted (``individual_importances``).
+    abs-error: over every labeled row, a regression tree on |forecast − outcome|.
+    beats-baseline: where is the model closer than its baseline? Fitted on the test
+    dates before the model's last and tested on the last; a tie is not closer.
+    Rules persist to ``triage.error_analysis`` with a threshold-free signature (a
+    diagnostic — never a score modifier). Linear models also get per-entity β·x
+    contributions persisted (``individual_importances``).
     """
+    import psycopg
+
     from triage.diagnostics import compute_error_analysis
 
+    _error_tree_gate(ctx, model_id, kind)
     engine = get_pool(ctx)
-    written = compute_error_analysis(
-        engine,
-        model_id,
-        parameter=parameter,
-        kind=kind,
-        max_depth=depth,
-        min_samples_leaf=min_leaf,
-    )
+    try:
+        written = compute_error_analysis(
+            engine,
+            model_id,
+            parameter=parameter,
+            kind=kind,
+            max_depth=depth,
+            min_samples_leaf=min_leaf,
+            baseline_group_id=baseline,
+        )
+    except (ValueError, psycopg.errors.RaiseException) as exc:
+        _plot_fail(str(exc), 2)
     console.print(f"[green]{written} error rule(s) persisted.[/green]")
+    if kind in ("abs_error", "beats_baseline"):
+        _print_regression_leaves(engine, model_id, kind)
+        return
     with engine.connection() as conn:
         rows = conn.execute(
             "select as_of_date, error_kind, rule, n_matched, n_errors, error_rate"
@@ -2916,7 +3062,14 @@ def postmodel_error_rules(
         None,
         "--kind",
         callback=_leaf_kind,
-        help="Only one kind of leaf: fp | fn | confusion.",
+        help="Only one kind of leaf: fp | fn | confusion | abs-error | beats-baseline.",
+    ),
+    mae_ratio: float = typer.Option(
+        0.1,
+        "--mae-ratio",
+        min=0.0,
+        help="--suspicious: the largest mean |e| of an abs-error leaf, as a share of the"
+        " date's population MAE.",
     ),
     top: int = typer.Option(15, "--top", "-n", help="Rows to print."),
 ) -> None:
@@ -2927,7 +3080,9 @@ def postmodel_error_rules(
     error rate ≤ --max-error and confusion leaves whose TP share is ≥ 1 − --max-error,
     each holding ≥ --min-support rows. Lift is the leaf's 1 − error rate over the
     model's precision@ at the same date and cut; a leaf far above the list's own
-    precision is worth checking for leakage (a feature that knows the outcome).
+    precision is worth checking for leakage (a feature that knows the outcome). An
+    abs-error leaf is suspicious when its mean |e| is at most --mae-ratio of the date's
+    population MAE; its lift is the population MAE over its own.
     """
     engine = get_pool(ctx)
     with engine.connection() as conn:
@@ -2946,11 +3101,18 @@ def postmodel_error_rules(
         if suspicious:
             rows = conn.execute(
                 "select as_of_date, parameter, error_kind, rule, n_matched,"
-                "       error_rate, tp_share, lift"
-                " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s)"
+                "       error_rate, tp_share, lift, mean_abs_error, population_mae"
+                " from triage.error_rules_suspicious(%(m)s, %(e)s, %(s)s, %(r)s)"
                 " where %(k)s::text is null or error_kind = %(k)s"
                 " limit %(n)s",
-                {"m": model_id, "e": max_error, "s": min_support, "k": kind, "n": top},
+                {
+                    "m": model_id,
+                    "e": max_error,
+                    "s": min_support,
+                    "r": mae_ratio,
+                    "k": kind,
+                    "n": top,
+                },
             ).fetchall()
         else:
             rows = conn.execute(
@@ -2973,7 +3135,18 @@ def postmodel_error_rules(
             f" support ≥ {min_support})",
             box=box.SIMPLE_HEAVY,
         )
-        for col in ("As-of", "Cut", "Kind", "Rule", "n", "Rate", "TP share", "Lift"):
+        for col in (
+            "As-of",
+            "Cut",
+            "Kind",
+            "Rule",
+            "n",
+            "Rate",
+            "TP share",
+            "Mean |e|",
+            "MAE",
+            "Lift",
+        ):
             table.add_column(col)
         for r in rows:
             table.add_row(
@@ -2984,6 +3157,8 @@ def postmodel_error_rules(
                 str(r["n_matched"]),
                 _fmt(r["error_rate"], 3),
                 _fmt(r["tp_share"], 3),
+                _fmt(r["mean_abs_error"], 3),
+                _fmt(r["population_mae"], 3),
                 _fmt(r["lift"], 2),
             )
     else:
@@ -3007,11 +3182,19 @@ def postmodel_error_rules(
 def postmodel_error_recurrence(
     ctx: typer.Context,
     model_group_id: int = typer.Argument(..., callback=natural_number),
-    parameter: str = typer.Option(
-        "100_abs", "--parameter", "-p", help="Top-k cut the error trees were fitted at."
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="Top-k cut the error trees were fitted at. Default: 100_abs for the"
+        " classification kinds, no cut for abs-error, the latest baseline for"
+        " beats-baseline.",
     ),
     kind: str = typer.Option(
-        "fp", "--kind", callback=_leaf_kind, help="fp | fn | confusion."
+        "fp",
+        "--kind",
+        callback=_leaf_kind,
+        help="fp | fn | confusion | abs-error | beats-baseline.",
     ),
     top: int = typer.Option(20, "--top", "-n", help="Rows to print."),
 ) -> None:
@@ -3023,6 +3206,7 @@ def postmodel_error_recurrence(
     `triage postmodel error-tree` on the group's models first.
     """
     engine = get_pool(ctx)
+    parameter = _leaf_parameter(engine, model_group_id, kind, parameter)
     with engine.connection() as conn:
         rows = conn.execute(
             "select signature, n_dates, n_dates_total, mean_error_rate, mean_support,"
@@ -3033,13 +3217,14 @@ def postmodel_error_recurrence(
     if not rows:
         console.print(
             f"[yellow]no {kind} error rules with a signature for model group"
-            f" {model_group_id} at {parameter} — run `triage postmodel error-tree"
-            f" <model_id> -p {parameter} --kind all` on its models (rules written"
-            " before migration 0027 carry no signature until re-run).[/yellow]"
+            f" {model_group_id} at {parameter or 'no cut'} — run `triage postmodel"
+            f" error-tree <model_id> {_tree_flags(kind, parameter)}` on its models (rules"
+            " written before migration 0027 carry no signature until re-run).[/yellow]"
         )
         return
     table = Table(
-        title=f"Rule recurrence — group {model_group_id} @ {parameter}, {kind} leaves",
+        title=f"Rule recurrence — group {model_group_id} @ {parameter or 'no cut'},"
+        f" {kind} leaves",
         box=box.SIMPLE_HEAVY,
     )
     for col in ("Signature", "Dates", "Mean rate", "Mean n", "Example rule"):
@@ -3172,6 +3357,619 @@ def postmodel_compare(
             _fmt(r["jaccard"], 3),
             _fmt(r["rank_corr"], 3),
         )
+    console.print(table)
+
+
+def _require_type(ctx: typer.Context, command: str, model_id: int) -> str:
+    """The model's problem type, or exit 2 when ``command`` does not read it."""
+    from triage import problem_types
+
+    try:
+        return problem_types.require(get_pool(ctx), command, model_id)
+    except ValueError as exc:  # WrongProblemType, or an unknown model
+        _plot_fail(str(exc), 2)
+
+
+def _residual_cut(value: str) -> str:
+    """``--by`` of ``postmodel residuals``: date, a history segment or ``subset:NAME``."""
+    from triage.diagnostics.readers import RESIDUAL_CUTS
+
+    if (
+        value == "date"
+        or value in RESIDUAL_CUTS
+        or (value.startswith("subset:") and len(value) > len("subset:"))
+    ):
+        return value
+    raise typer.BadParameter(
+        f"{value!r} is not a cut — expected date | {' | '.join(RESIDUAL_CUTS)}"
+        " | subset:NAME"
+    )
+
+
+def _forecast_structure(row: Mapping[str, Any]) -> str:
+    """One line: how many distinct forecasts, the most frequent one, the range."""
+    return (
+        f"{row['n_distinct_scores']} distinct values; {row['mode_share']:.0%} of rows at"
+        f" {row['mode_score']:.4g}; minimum {row['min_score']:.4g}, maximum"
+        f" {row['max_score']:.4g}; {row['negative_share']:.1%} negative"
+    )
+
+
+def _print_residual_dates(
+    rows: Sequence[Mapping[str, Any]], quantile: Optional[float]
+) -> None:
+    table = Table(title="Errors per test date", box=box.SIMPLE_HEAVY)
+    columns = ["Date", "n", "Σy", "MAE", "RMSE", "WAPE", "Bias", "Top 100", "Top 1%"]
+    columns.append("y ≤ ŷ")
+    if quantile is not None:
+        columns.append(f"y ≤ ŷ − τ ({quantile:g})")
+    for col in columns:
+        table.add_column(col)
+    for r in rows:
+        cells = [
+            str(r["as_of_date"]),
+            str(r["n"]),
+            _fmt(r["sum_outcome"], 1),
+            _fmt(r["mae"]),
+            _fmt(r["rmse"]),
+            _fmt(r["wape"]),
+            _fmt(r["bias"]),
+            _fmt_share(r["top100_error_share"]),
+            _fmt_share(r["top1pct_error_share"]),
+            _fmt_share(r["coverage_point"]),
+        ]
+        if quantile is not None:
+            cells.append(_fmt(r["coverage_point"] - quantile, 3))
+        table.add_row(*cells)
+    console.print(table)
+
+
+def _print_residual_segments(cut: str, rows: Sequence[Mapping[str, Any]]) -> None:
+    table = Table(title=f"Errors by {cut}, pooled over the dates", box=box.SIMPLE_HEAVY)
+    for col in (
+        "Segment",
+        "Rows",
+        "Entities",
+        "Σy",
+        "MAE",
+        "WAPE",
+        "Bias",
+        "|e| share",
+    ):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            r["segment"],
+            str(r["n"]),
+            str(r["entities"]),
+            _fmt(r["sum_outcome"], 1),
+            _fmt(r["mae"]),
+            _fmt(r["wape"]),
+            _fmt(r["bias"]),
+            _fmt_share(r["share_of_abs_error"]),
+        )
+    console.print(table)
+
+
+def _print_largest_errors(rows: Sequence[Mapping[str, Any]]) -> None:
+    table = Table(title="Largest errors", box=box.SIMPLE_HEAVY)
+    for col in ("Entity", "Label", "Date", "Forecast", "Outcome", "Error"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            str(r["entity_id"]),
+            r["label"] or "—",
+            str(r["as_of_date"]),
+            _fmt(r["forecast"], 2),
+            _fmt(r["outcome"], 2),
+            _fmt(r["error"], 2),
+        )
+    console.print(table)
+
+
+@postmodel_app.command("residuals")
+def postmodel_residuals(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    by: Optional[str] = typer.Option(
+        None,
+        "--by",
+        callback=lambda v: None if v is None else _residual_cut(v),
+        help="One table only: date | band | sbc | cold-start | subset:NAME. Default:"
+        " the date summary, the band table, cold start against the rest, the forecast"
+        " structure and the largest errors.",
+    ),
+    top: int = typer.Option(
+        20, "--top", "-n", callback=natural_number, help="Largest errors to list."
+    ),
+    quantiles: bool = typer.Option(
+        False,
+        "--quantiles",
+        help="Add the gap between point coverage (share of y ≤ ŷ) and the quantile τ"
+        " the model declares.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the rows as JSON."),
+) -> None:
+    """Where a regression model's errors are: by date, history segment and entity.
+
+    Segments come from each entity's labels before the date, on the label-date grid the
+    target-history lags use: ``band`` cuts the mean prior label at 0, 10, 100 and 1,000,
+    ``sbc`` is its Syntetos–Boylan class, and ``cold-start`` sets the entities with no
+    prior label apart. Bias is the mean of forecast − outcome. Reads only; nothing is
+    written. Regression and regression_ranking models only.
+    """
+    import psycopg
+
+    from triage.diagnostics import readers
+
+    _require_type(ctx, "postmodel residuals", model_id)
+    pool = get_pool(ctx)
+    quantile: Optional[float] = None
+    if quantiles:
+        with pool.connection() as conn:
+            quantile = returned_row(
+                conn.execute(
+                    "select forecast_quantile from triage.models where model_id = %(m)s",
+                    {"m": model_id},
+                ).fetchone()
+            )["forecast_quantile"]
+    cuts = (
+        [by]
+        if by not in (None, "date")
+        else ([] if by == "date" else ["band", "cold-start"])
+    )
+    try:
+        dates = readers.residual_summary(pool, model_id) if by in (None, "date") else []
+        segments = {
+            cut: readers.residuals_by_segment(pool, model_id, cut, pooled=True)
+            for cut in cuts
+        }
+        largest = readers.largest_errors(pool, model_id, top) if by is None else []
+    except ValueError as exc:  # an unknown or ambiguous Subset
+        _plot_fail(str(exc), 2)
+    except psycopg.errors.RaiseException as exc:
+        _plot_fail(exc.diag.message_primary or str(exc), 2)
+    if as_json:
+        payload: dict[str, Any] = {"model_id": model_id, "forecast_quantile": quantile}
+        if by in (None, "date"):
+            payload["dates"] = dates
+        payload["segments"] = segments
+        if by is None:
+            payload["largest_errors"] = largest
+        console.print_json(json.dumps(payload, default=str))
+        return
+    if not dates and not any(segments.values()):
+        console.print(
+            f"[yellow]Model {model_id} has no labeled test rows — score and evaluate it"
+            " first: triage run <config>.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    if dates:
+        _print_residual_dates(dates, quantile)
+        if quantiles and quantile is None:
+            console.print(
+                f"[dim]Model {model_id} declares no forecast quantile: the y ≤ ŷ column"
+                " is its point coverage only.[/dim]"
+            )
+    for cut, rows in segments.items():
+        _print_residual_segments(cut, rows)
+    if by is None and dates:
+        latest = dates[-1]
+        console.print(
+            f"Forecast structure on {latest['as_of_date']}: {_forecast_structure(latest)}"
+        )
+    if largest:
+        _print_largest_errors(largest)
+
+
+def _print_baseline_segments(rows: Sequence[Mapping[str, Any]]) -> None:
+    table = Table(title="Model against baseline, per segment", box=box.SIMPLE_HEAVY)
+    for col in (
+        "Cut",
+        "Segment",
+        "Rows",
+        "Σy",
+        "MAE model",
+        "MAE base",
+        "WAPE model",
+        "WAPE base",
+        "Bias model",
+        "Closer",
+        "Wins",
+        "Excess |e|",
+        "Excess share",
+    ):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            r["cut"],
+            r["segment"],
+            str(r["n"]),
+            _fmt(r["sum_outcome"], 1),
+            _fmt(r["mae_m"]),
+            _fmt(r["mae_b"]),
+            _fmt(r["wape_m"]),
+            _fmt(r["wape_b"]),
+            _fmt(r["bias_m"]),
+            _fmt_share(r["closer_share"]),
+            "yes" if r["model_wins"] else "no",
+            _fmt(r["excess_abs_error"], 1),
+            _fmt_share(r["excess_share"]),
+        )
+    console.print(table)
+
+
+def _print_entity_wins(title: str, e: Mapping[str, Any]) -> None:
+    console.print(
+        f"{title}: {e['n']} — model wins {_fmt_share(e['won_share'])}, ties"
+        f" {_fmt_share(e['tie_share'])}; the won ones hold"
+        f" {_fmt_share(e['outcome_share_won'])} of Σy; median error ratio"
+        f" (model / baseline) {_fmt(e['median_error_ratio'], 3)}"
+    )
+
+
+@postmodel_app.command("baseline")
+def postmodel_baseline(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    baseline: Optional[int] = typer.Option(
+        None,
+        "--baseline",
+        callback=_optional_natural,
+        help="The baseline model group. Default: the Experiment's baseline group with"
+        " the lowest MAE on the rows it shares with MODEL_GROUP.",
+    ),
+    cut: str = typer.Option(
+        "all",
+        "--cut",
+        help="band | sbc | cold-start | subset:NAME | all (every cut and Subset).",
+    ),
+    entity_group_query: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--entity-group-query",
+        exists=True,
+        dir_okay=False,
+        help="SQL file returning entity_id, group_key: repeats the entity table at that"
+        " coarser level.",
+    ),
+    experiment: Optional[str] = typer.Option(
+        None,
+        "--experiment",
+        help="The Experiment (a hash prefix), when the group has models in several.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON."),
+) -> None:
+    """Where a regression model group beats its baseline, on the rows both scored.
+
+    Per segment (target-history band, Syntetos–Boylan class, cold start, each Subset):
+    both groups' MAE, WAPE and bias, and the model's excess error. Per entity, pooled
+    over the dates: the share won. Then whether wins concentrate on the same entities
+    beyond chance (Poisson-binomial counts and a chi-square test), and how the entities
+    won on the earlier dates fare on the last one. Ties are not wins. Reads only.
+
+    Exit 1 when the groups share fewer than two test dates: the chance and out-of-time
+    tables need two.
+    """
+    from triage.diagnostics.baseline_compare import (
+        ComparisonError,
+        compare_to_baseline,
+        entity_groups_from_query,
+    )
+
+    pool = get_pool(ctx)
+    try:
+        groups = (
+            entity_groups_from_query(pool, entity_group_query.read_text())
+            if entity_group_query is not None
+            else None
+        )
+        result = compare_to_baseline(
+            pool,
+            model_group_id,
+            baseline,
+            experiment_hash=experiment,
+            cut=cut,
+            entity_groups=groups,
+        )
+    except ComparisonError as exc:
+        _plot_fail(str(exc), 2)
+    if as_json:
+        console.print_json(json.dumps(result.to_dict(), default=str))
+        raise typer.Exit(code=0 if len(result.dates) >= 2 else 1)
+    chosen = " (chosen: lowest MAE on shared rows)" if result.baseline_chosen else ""
+    console.print(
+        f"Group {result.model_group_id} against baseline group"
+        f" {result.baseline_group_id}{chosen}: {result.n_rows} shared rows on"
+        f" {len(result.dates)} test date(s)."
+    )
+    _print_baseline_segments(result.segments)
+    if result.segment_win_share is not None:
+        console.print(f"Segments won: {_fmt_share(result.segment_win_share)}")
+    _print_entity_wins("Entities", result.entities)
+    if result.entity_groups is not None:
+        _print_entity_wins("Entity groups", result.entity_groups)
+        if result.entity_groups["n_unmapped_rows"]:
+            console.print(
+                f"[dim]{result.entity_groups['n_unmapped_rows']} rows have an entity the"
+                " query maps to no group; they are left out of that table.[/dim]"
+            )
+    if result.chance is None or result.out_of_time is None:
+        console.print(
+            "[yellow]The groups share fewer than two test dates (or no entity is on all"
+            " of them): the chance and out-of-time tables are skipped.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    c = result.chance
+    table = Table(
+        title=f"Dates won per entity — {c['n_entities']} entities on all"
+        f" {c['n_dates']} dates",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in ("Dates won", "Observed", "Expected by chance"):
+        table.add_column(col)
+    for cell in c["cells"]:
+        table.add_row(
+            cell["wins"], f"{cell['observed']:.0f}", f"{cell['expected']:.1f}"
+        )
+    console.print(table)
+    if c["p_value"] is None:
+        console.print("[dim]One cell after merging: no chi-square test.[/dim]")
+    else:
+        console.print(
+            f"chi-square {c['chi_square']:.2f} on {c['dof']} df, p = {c['p_value']:.3g}"
+        )
+    console.print(
+        f"P(win last date) {_fmt_share(c['p_win_last'])}; P(win last | won all"
+        f" {c['n_dates'] - 1} earlier) {_fmt_share(c['p_win_last_given_all_earlier'])}"
+        f" over {c['n_won_all_earlier']} entities"
+    )
+    o = result.out_of_time
+    console.print(
+        f"Out of time: the {o['n_leaders']} entities the model won before"
+        f" {o['last_date']}, on that date — MAE model {_fmt(o['mae_m'])}, baseline"
+        f" {_fmt(o['mae_b'])} ({o['n_rows']} rows)"
+    )
+
+
+@postmodel_app.command("structure")
+def postmodel_structure(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    min_rows: int = typer.Option(
+        2,
+        "--min-rows",
+        callback=natural_number,
+        help="Report the tree leaves fitted on fewer training rows than this.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON."),
+) -> None:
+    """Checks on the fitted model: its forecast's shape, its leaves or its coefficients.
+
+    For a regression model, the forecast structure of the latest test date (distinct
+    values, the most frequent one, the range, the negative share). For a tree or tree
+    ensemble, the leaves fitted on fewer than --min-rows training rows and their values.
+    For a linear forecast, the change of the mean forecast from train to test split by
+    feature family, β·(x̄ test − x̄ train), checked against the stored predictions.
+
+    Exit 1 when the estimator is neither a supported tree nor linear (HistGradientBoosting
+    and LightGBM included): its leaves are not read.
+    """
+    from triage import problem_types
+    from triage.diagnostics import readers
+    from triage.diagnostics.structure import (
+        StructureUnavailable,
+        leaf_support,
+        load_estimator,
+        mean_shift,
+    )
+
+    pool = get_pool(ctx)
+    try:
+        problem_type = problem_types.model_problem_type(pool, model_id)
+        estimator = load_estimator(pool, model_id)
+    except (ValueError, OSError) as exc:
+        _plot_fail(str(exc), 2)
+    payload: dict[str, Any] = {
+        "model_id": model_id,
+        "estimator": type(estimator).__name__,
+    }
+    if problem_type in problem_types.REGRESSION_TYPES:
+        dates = readers.residual_summary(pool, model_id)
+        payload["forecast_structure"] = dates[-1] if dates else None
+    unavailable: list[str] = []
+    try:
+        payload["leaf_support"] = leaf_support(estimator, min_rows)
+    except StructureUnavailable as exc:
+        unavailable.append(str(exc))
+    try:
+        payload["mean_shift"] = mean_shift(pool, model_id, estimator)
+    except StructureUnavailable as exc:
+        unavailable.append(str(exc))
+    except ValueError as exc:
+        _plot_fail(str(exc), 2)
+    found = "leaf_support" in payload or "mean_shift" in payload
+    if as_json:
+        payload["unavailable"] = unavailable
+        console.print_json(json.dumps(payload, default=str))
+        raise typer.Exit(code=0 if found else 1)
+    console.print(f"Model {model_id}: {payload['estimator']} ({problem_type})")
+    structure = payload.get("forecast_structure")
+    if structure:
+        console.print(
+            f"Forecast structure on {structure['as_of_date']}:"
+            f" {_forecast_structure(structure)}"
+        )
+    support = payload.get("leaf_support")
+    if support:
+        per = support["leaves_per_tree"]
+        console.print(
+            f"{support['n_trees']} tree(s), {per['min']}–{per['max']} leaves each (mean"
+            f" {per['mean']:.1f}); {support['small_leaves']} leaves fitted on fewer than"
+            f" {min_rows} training rows, in {support['trees_with_small_leaf']} tree(s)"
+        )
+        if support["small"]:
+            table = Table(title="Leaves on few training rows", box=box.SIMPLE_HEAVY)
+            for col in ("Tree", "Node", "Rows", "Value"):
+                table.add_column(col)
+            for r in support["small"]:
+                table.add_row(
+                    str(r["tree"]), str(r["node"]), str(r["n_rows"]), _fmt(r["value"])
+                )
+            console.print(table)
+    shift = payload.get("mean_shift")
+    if shift:
+        console.print(
+            f"Mean forecast {_fmt(shift['mean_forecast_train'])} on the train matrix,"
+            f" {_fmt(shift['mean_forecast_test'])} on the test matrix (stored"
+            f" {_fmt(shift['stored_mean_test'])}, gap {_fmt(shift['check_error'], 8)}):"
+            f" a shift of {_fmt(shift['shift'])}"
+        )
+        table = Table(title="Mean shift by feature family", box=box.SIMPLE_HEAVY)
+        for col in ("Family", "Features", "β·Δx̄", "|share|"):
+            table.add_column(col)
+        for r in shift["families"][:10]:
+            table.add_row(
+                r["family"],
+                str(r["n_features"]),
+                _fmt(r["contribution"]),
+                _fmt_share(r["share"]),
+            )
+        console.print(table)
+        table = Table(title="Largest feature contributions", box=box.SIMPLE_HEAVY)
+        for col in ("Feature", "β", "x̄ train", "x̄ test", "β·Δx̄"):
+            table.add_column(col)
+        for r in shift["features"][:10]:
+            table.add_row(
+                r["feature"],
+                _fmt(r["beta"]),
+                _fmt(r["mean_train"]),
+                _fmt(r["mean_test"]),
+                _fmt(r["contribution"]),
+            )
+        console.print(table)
+    if not found:
+        for message in unavailable:
+            console.print(f"[yellow]{message}[/yellow]")
+        raise typer.Exit(code=1)
+
+
+@postmodel_app.command("importance")
+def postmodel_importance(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    top: int = typer.Option(
+        5,
+        "--top",
+        callback=natural_number,
+        help="Features compared between train ends.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON."),
+) -> None:
+    """Each feature family's share of a model group's importance, and its stability.
+
+    A family is the source column a feature is built from: every aggregation and interval
+    of inspections.date is one family. Per model, in training order, the share of
+    Σ|importance| each family holds; then the Jaccard index of the --top features between
+    consecutive train ends. Reads triage.feature_importances.
+    """
+    from triage.diagnostics.structure import importance_by_family
+
+    result = importance_by_family(get_pool(ctx), model_group_id, top)
+    if as_json:
+        console.print_json(json.dumps(result, default=str))
+        return
+    if not result["models"]:
+        console.print(
+            f"[yellow]Model group {model_group_id} has no feature importances — its"
+            " estimators expose none, or it was never trained.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    families: list[str] = []
+    for m in result["models"]:
+        for fam in m["families"]:
+            if fam not in families:
+                families.append(fam)
+    shown = families[:8]
+    table = Table(
+        title=f"Importance share by family — group {model_group_id}",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in ("Model", "Train end", *shown):
+        table.add_column(col)
+    for m in result["models"]:
+        table.add_row(
+            str(m["model_id"]),
+            str(m["train_end_time"]),
+            *[_fmt_share(m["families"].get(f)) for f in shown],
+        )
+    console.print(table)
+    for s in result["stability"]:
+        console.print(
+            f"top-{top} Jaccard, model {s['previous_model_id']} → {s['model_id']}:"
+            f" {_fmt(s['jaccard'], 2)}"
+        )
+
+
+@postmodel_app.command("sensitivity")
+def postmodel_sensitivity(
+    ctx: typer.Context,
+    experiment_hash: str = typer.Argument(
+        ..., help="Experiment hash (a prefix is enough)."
+    ),
+    param: str = typer.Option(..., "--param", help="The hyperparameter, e.g. alpha."),
+    metric: str = typer.Option(
+        "mae", "--metric", help="The metric averaged over dates."
+    ),
+    parameter: str = typer.Option(
+        "", "--parameter", "-p", help="The metric parameter."
+    ),
+    model_type: Optional[str] = typer.Option(
+        None, "--model-type", help="The class, when several set --param."
+    ),
+    common_rows: bool = typer.Option(
+        False,
+        "--common-rows",
+        help="Evaluate the groups on the rows all of them scored first.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON."),
+) -> None:
+    """The metric for each value of one hyperparameter, other hyperparameters fixed.
+
+    Compares the model groups of one class in the Experiment whose hyperparameters differ
+    only in --param; refuses groups that differ in another one as well.
+    """
+    from triage.diagnostics.structure import sensitivity
+
+    pool = get_pool(ctx)
+    with pool.connection() as conn:
+        experiment_hash = _resolve_experiment_hash(conn, experiment_hash)
+    try:
+        result = sensitivity(
+            pool,
+            experiment_hash,
+            param,
+            metric=metric,
+            parameter=parameter,
+            model_type=model_type,
+            common_rows=common_rows,
+        )
+    except ValueError as exc:
+        _plot_fail(str(exc), 2)
+    if as_json:
+        console.print_json(json.dumps(result, default=str))
+        return
+    rows_note = " on common rows" if common_rows else ""
+    table = Table(
+        title=f"{result['model_type']}: {metric}{rows_note} by {param}",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in (param, "Group", f"Mean {metric}", "Dates"):
+        table.add_column(col)
+    for r in result["rows"]:
+        table.add_row(
+            str(r["value"]), str(r["model_group_id"]), _fmt(r["mean_metric"]),
+            str(r["n_dates"]),
+        )  # fmt: skip
     console.print(table)
 
 
@@ -3952,7 +4750,8 @@ def plot_error_rules(
         None,
         "--kind",
         callback=_leaf_kind,
-        help="fp | fn | confusion. Default: the fp and fn trees.",
+        help="fp | fn | confusion | abs-error | beats-baseline. Default: the fp and fn"
+        " trees, else the kind persisted.",
     ),
     top: int = typer.Option(
         12, "--top", callback=natural_number, help="Leaves drawn per kind."
@@ -3964,7 +4763,8 @@ def plot_error_rules(
     """A model's error-tree leaves with the most errors, against the population rate.
 
     One panel per kind of leaf. The dashed line is the kind's error rate over the whole
-    population at the cut — for fp leaves, 1 − precision@k.
+    population at the cut — for fp leaves, 1 − precision@k. An abs-error bar is the
+    leaf's mean |e|, against the date's population MAE.
     """
 
     def draw(pool: DictRowPool) -> PlotResult:
@@ -3979,15 +4779,19 @@ def plot_error_rules(
 def plot_leaves(
     ctx: typer.Context,
     model_group_id: int = typer.Argument(..., callback=natural_number),
-    parameter: str = typer.Option(
-        ..., "--parameter", "-p", help="The cut the trees were fitted at."
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="The cut the trees were fitted at. Omit it for a regression group's"
+        " abs-error leaves.",
     ),
-    max_error: float = typer.Option(
-        0.02,
+    max_error: Optional[float] = typer.Option(
+        None,
         "--max-error",
         min=0.0,
-        max=1.0,
-        help="The suspicious zone's largest wrong share.",
+        help="The suspicious zone's largest wrong share (default 0.02); for abs-error"
+        " leaves, its largest mean |e| over the population MAE (default 0.1).",
     ),
     min_support: int = typer.Option(
         30, "--min-support", min=1, help="The suspicious zone's fewest rows."
@@ -4002,10 +4806,13 @@ def plot_leaves(
     (--max-error, --min-support) shaded and the count inside it stated.
     """
 
+    cut = "" if parameter is None else parameter
+    zone = max_error if max_error is not None else (0.1 if cut == "" else 0.02)
+
     def draw(pool: DictRowPool) -> PlotResult:
         from triage import plots
 
-        return plots.leaves(pool, model_group_id, parameter, max_error, min_support)
+        return plots.leaves(pool, model_group_id, cut, zone, min_support)
 
     _write_plot(ctx, output, f"leaves-{model_group_id}.svg", draw)
 
@@ -4014,11 +4821,18 @@ def plot_leaves(
 def plot_recurrence(
     ctx: typer.Context,
     model_group_id: int = typer.Argument(..., callback=natural_number),
-    parameter: str = typer.Option(
-        ..., "--parameter", "-p", help="The cut the trees were fitted at."
+    parameter: Optional[str] = typer.Option(
+        None,
+        "--parameter",
+        "-p",
+        help="The cut the trees were fitted at. Default: no cut for abs-error, the"
+        " latest baseline for beats-baseline; required for the classification kinds.",
     ),
     kind: str = typer.Option(
-        "fp", "--kind", callback=_leaf_kind, help="fp | fn | confusion."
+        "fp",
+        "--kind",
+        callback=_leaf_kind,
+        help="fp | fn | confusion | abs-error | beats-baseline.",
     ),
     output: Optional[pathlib.Path] = typer.Option(
         None, "--output", "-o", help=_OUTPUT_HELP.format("recurrence-GROUP.svg")
@@ -4030,10 +4844,14 @@ def plot_recurrence(
     column per test date.
     """
 
+    if parameter is None and kind in ("fp", "fn", "confusion"):
+        _plot_fail(f"--kind {kind} needs the cut its trees were fitted at: pass -p", 2)
+
     def draw(pool: DictRowPool) -> PlotResult:
         from triage import plots
 
-        return plots.recurrence(pool, model_group_id, parameter, kind)
+        cut = "" if parameter is None and kind == "abs_error" else parameter
+        return plots.recurrence(pool, model_group_id, cut, kind)
 
     _write_plot(ctx, output, f"recurrence-{model_group_id}.svg", draw)
 
@@ -4212,6 +5030,186 @@ def plot_scores(
         return plots.scores(pool, model_id)
 
     _write_plot(ctx, output, f"scores-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("forecast-actual")
+def plot_forecast_actual(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("forecast-actual-MODEL.svg")
+    ),
+) -> None:
+    """Forecast against outcome, as a hexbin on log1p axes with the diagonal.
+
+    Over every labeled test row, at most 200,000 of them (a sample by entity beyond that).
+    Regression and regression_ranking models only.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.forecast_actual(pool, model_id)
+
+    _write_plot(ctx, output, f"forecast-actual-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("residuals")
+def plot_residuals(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("residuals-MODEL.svg")
+    ),
+) -> None:
+    """Residual (forecast − outcome) against the forecast, as a hexbin.
+
+    Regression and regression_ranking models only.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.residuals(pool, model_id)
+
+    _write_plot(ctx, output, f"residuals-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("bias")
+def plot_bias(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    by: str = typer.Option(
+        "date",
+        "--by",
+        callback=_residual_cut,
+        help="date | band | sbc | cold-start | subset:NAME.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("bias-MODEL.svg")
+    ),
+) -> None:
+    """Mean forecast − outcome per test date, or per segment pooled over the dates.
+
+    Regression and regression_ranking models only.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.bias(pool, model_id, by)
+
+    _write_plot(ctx, output, f"bias-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("forecast-time")
+def plot_forecast_time(
+    ctx: typer.Context,
+    model_id: int = typer.Argument(..., callback=natural_number),
+    cut: str = typer.Option(
+        "band",
+        "--cut",
+        callback=_residual_cut,
+        help="band | sbc | cold-start | subset:NAME: one panel per segment.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("forecast-time-MODEL.svg")
+    ),
+) -> None:
+    """Σ forecast and Σ outcome per test date, one panel per segment.
+
+    Regression and regression_ranking models only.
+    """
+    if cut == "date":
+        _plot_fail(
+            "--cut date draws one panel; use triage plot bias MODEL --by date", 2
+        )
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.forecast_time(pool, model_id, cut)
+
+    _write_plot(ctx, output, f"forecast-time-{model_id}.svg", draw, [model_id])
+
+
+@plot_app.command("segments")
+def plot_segments(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    baseline: Optional[int] = typer.Option(
+        None,
+        "--baseline",
+        callback=_optional_natural,
+        help="The baseline group. Default: the lowest MAE on the shared rows.",
+    ),
+    cut: str = typer.Option(
+        "all", "--cut", help="band | sbc | cold-start | subset:NAME | all."
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("segments-GROUP.svg")
+    ),
+) -> None:
+    """MAE per segment for a regression model group and its baseline, as paired dots.
+
+    On the rows both groups scored, as triage postmodel baseline computes them.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.segments(pool, model_group_id, baseline, cut)
+
+    _write_plot(ctx, output, f"segments-{model_group_id}.svg", draw)
+
+
+@plot_app.command("win-consistency")
+def plot_win_consistency(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    baseline: Optional[int] = typer.Option(
+        None,
+        "--baseline",
+        callback=_optional_natural,
+        help="The baseline group. Default: the lowest MAE on the shared rows.",
+    ),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("win-consistency-GROUP.svg")
+    ),
+) -> None:
+    """Entities by the test dates the model won, against the count expected by chance.
+
+    A model whose wins land on the same entities every date has more entities at 0 and
+    at every date than the chance curve.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.win_consistency(pool, model_group_id, baseline)
+
+    _write_plot(ctx, output, f"win-consistency-{model_group_id}.svg", draw)
+
+
+@plot_app.command("importance")
+def plot_importance(
+    ctx: typer.Context,
+    model_group_id: int = typer.Argument(..., callback=natural_number),
+    output: Optional[pathlib.Path] = typer.Option(
+        None, "--output", "-o", help=_OUTPUT_HELP.format("importance-GROUP.svg")
+    ),
+) -> None:
+    """Each feature family's share of the importance, across a model group's train ends.
+
+    One stacked bar per model in training order: the seven largest families and the rest.
+    """
+
+    def draw(pool: DictRowPool) -> PlotResult:
+        from triage import plots
+
+        return plots.importance(pool, model_group_id)
+
+    _write_plot(ctx, output, f"importance-{model_group_id}.svg", draw)
 
 
 def execute() -> None:

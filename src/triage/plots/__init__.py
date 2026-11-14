@@ -19,11 +19,14 @@ rows a figure needs, naming the command that creates them; ``ValueError`` (inclu
 unsupported extension, or more than :data:`MAX_SERIES` series.
 """
 
+from triage.plots.baseline import segments, win_consistency
 from triage.plots.crosstabs import crosstabs, crosstabs_dates
 from triage.plots.curves import curve, curve_dates
 from triage.plots.distributions import calibration, scores
 from triage.plots.errors import error_rules, leaves, recurrence
 from triage.plots.overlap import overlap
+from triage.plots.regression import bias, forecast_actual, forecast_time, residuals
+from triage.plots.structure import importance
 from triage.plots.style import (
     FORMATS,
     MAX_SERIES,
@@ -37,15 +40,22 @@ __all__ = [
     "MAX_SERIES",
     "NothingToDraw",
     "PlotResult",
+    "bias",
     "calibration",
     "crosstabs",
     "crosstabs_dates",
     "curve",
     "curve_dates",
     "error_rules",
+    "forecast_actual",
+    "forecast_time",
+    "importance",
     "leaves",
     "output_format",
     "overlap",
     "recurrence",
+    "residuals",
     "scores",
+    "segments",
+    "win_consistency",
 ]

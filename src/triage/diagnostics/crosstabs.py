@@ -36,14 +36,46 @@ def _column_stats(values) -> dict[str, float | None]:
     }
 
 
+def _largest_errors(
+    db_engine, model_id: int, split_kind: str, as_of_date: Any, cut: str
+) -> tuple[set[int], int]:
+    """The labeled entities with the largest |forecast − outcome| at the cut, and k.
+
+    k is ``resolve_k(cut, n)`` over the n labeled rows of the date; ties at the k-th error
+    are broken by entity_id, as the population ranks are.
+    """
+    with db_engine.connection() as conn:
+        rows = conn.execute(
+            "with r as ("
+            "    select entity_id, abs(score - outcome) as e"
+            "    from triage.scored_labels(%(m)s, cast(%(s)s as triage.split_kind))"
+            "    where as_of_date = %(d)s and outcome is not null and score is not null)"
+            " select entity_id, triage.resolve_k(%(c)s, (select count(*)::int from r)) as k"
+            " from r order by e desc, entity_id",
+            {"m": model_id, "s": split_kind, "d": str(as_of_date), "c": cut},
+        ).fetchall()
+    if not rows:
+        return set(), 0
+    k = int(rows[0]["k"] or 0)
+    return {int(r["entity_id"]) for r in rows[:k]}, k
+
+
 def compute_crosstabs(
     db_engine,
     model_id: int,
     parameter: str = "100_abs",
     split_kind: str = "test",
     as_of_date: Any = None,
+    abs_error_cut: str | None = None,
 ) -> int:
-    """Compute + persist crosstab rows for every prediction date (or one). Returns rows written."""
+    """Compute + persist crosstab rows for every prediction date (or one). Returns rows written.
+
+    With ``abs_error_cut`` (e.g. ``'10_pct'``) the selected rows are the labeled rows with
+    the largest |forecast − outcome| at that cut instead of the top-k by score, and the
+    rows persist with ``parameter = 'abs_error_<cut>'``: a regression model's crosstab.
+    """
+    if abs_error_cut is not None:
+        parameter = f"abs_error_{abs_error_cut}"
     ctx = load_matrix_context(db_engine, model_id, split_kind)
     dates = (
         [as_of_date]
@@ -52,7 +84,14 @@ def compute_crosstabs(
     )
     written = 0
     for date in dates:
-        selected, k = top_k_entities(db_engine, model_id, split_kind, date, parameter)
+        if abs_error_cut is not None:
+            selected, k = _largest_errors(
+                db_engine, model_id, split_kind, date, abs_error_cut
+            )
+        else:
+            selected, k = top_k_entities(
+                db_engine, model_id, split_kind, date, parameter
+            )
         if not selected:
             logger.warning(f"model {model_id}: no top-k at {date} — skipping crosstabs")
             continue
