@@ -1499,14 +1499,15 @@ def _resolve_metric_config(
     Explicit ``metric_config`` argument (CLI/tests) > the config's ``evaluation`` block
     (the ``triage.evaluate_model`` jsonb shape: ``metrics``/``thresholds``/
     ``regression_metrics``/``survival_metrics``) > the problem-type default. Defaults:
-    classification keeps the inherited set; the regression family gets rmse/mae/r2
-    (``regression_ranking`` users who want ranking metrics too must declare them —
+    classification keeps the inherited set; the regression family gets rmse/mae/r2/wape and
+    pinball@τ (``regression_ranking`` users who want ranking metrics too must declare them —
     precision@k assumes a binary outcome, which a continuous target does not have by
     default); survival gets the C-index (ADR-0010/0026).
     """
     from triage.component.catwalk.in_pg_evaluation import (
         DEFAULT_CLASSIFICATION_CONFIG,
         DEFAULT_REGRESSION_CONFIG,
+        DEFAULT_REGRESSION_RANKING_CONFIG,
         DEFAULT_SURVIVAL_CONFIG,
     )
 
@@ -1522,8 +1523,10 @@ def _resolve_metric_config(
         if resolved:
             return resolved
         # a subsets-only evaluation block still gets the problem-type metric default
-    if problem_type in ("regression", "regression_ranking"):
+    if problem_type == "regression":
         return dict(DEFAULT_REGRESSION_CONFIG)
+    if problem_type == "regression_ranking":
+        return dict(DEFAULT_REGRESSION_RANKING_CONFIG)
     if problem_type == "survival":
         return dict(DEFAULT_SURVIVAL_CONFIG)
     return dict(DEFAULT_CLASSIFICATION_CONFIG)
