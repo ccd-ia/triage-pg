@@ -11,6 +11,7 @@ comparison, allocation metrics, survival, near miss and prototypes, structure, c
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -33,9 +34,25 @@ from triage.dashboard.auth import TrustedHeaderAuth
 from triage.diagnostics import readers
 
 
+def _instants(value: Any) -> Any:
+    """``value`` with every timestamp string parsed: an encoder may write UTC as ``Z`` or
+    as ``+00:00`` (CI runs in UTC), and the two are one instant."""
+    if isinstance(value, dict):
+        return {k: _instants(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_instants(v) for v in value]
+    if isinstance(value, str) and "T" in value and value[:4].isdigit():
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    return value
+
+
 def _same(route_body: Any, reader_rows: Any) -> None:
     """The route's JSON is the reader's rows, encoded the way FastAPI encodes them."""
-    assert route_body == json.loads(json.dumps(jsonable_encoder(reader_rows)))
+    expected = json.loads(json.dumps(jsonable_encoder(reader_rows)))
+    assert _instants(route_body) == _instants(expected)
 
 
 def _model_of(pool, group_id: int) -> int:
