@@ -1,4 +1,4 @@
-"""``triage plot``: eighteen commands, each writing its figure and one summary line.
+"""``triage plot``: twenty-one commands, each writing its figure and one summary line.
 
 Exit codes: 0 written; 1 nothing persisted to draw, naming the command that creates it;
 2 bad input (an unknown model, model group or Subset, an unsupported extension, the
@@ -154,7 +154,7 @@ def test_nothing_persisted_exits_1_naming_the_command(plot, diagnosed, tmp_path)
     assert not list(tmp_path.glob("*.svg"))
 
 
-def test_the_help_lists_the_eighteen_commands():
+def test_the_help_lists_the_twenty_one_commands():
     result = CliRunner().invoke(cli.app, ["plot", "--help"])
     assert result.exit_code == 0
     plain = _plain(result.output)
@@ -177,6 +177,9 @@ def test_the_help_lists_the_eighteen_commands():
         "segments",
         "win-consistency",
         "importance",
+        "km",
+        "brier",
+        "survival-calibration",
     ):
         assert f" {command} " in plain, command
 
@@ -197,7 +200,7 @@ def test_the_cli_does_not_import_matplotlib_until_a_plot_is_drawn():
         check=True,
     )
     assert loaded.stdout.split()[-2:] == ["False", "False"], loaded.stdout
-    assert Path(cli.__file__).read_text().count("from triage import plots") == 18
+    assert Path(cli.__file__).read_text().count("from triage import plots") == 21
 
 
 def test_a_file_that_cannot_be_written_exits_2_not_1(plot, diagnosed, tmp_path):  # noqa: F811
@@ -355,3 +358,52 @@ def test_gains_writes_its_file_and_refuses_survival(
     result = run("gains", str(survival), "-o", "survival.svg")
     assert result.exit_code == 2, result.output
     assert f"model {survival} is survival" in _plain(result.output)
+
+
+# ------------------------------------------------------------------------------ survival
+
+
+def test_survival_commands_write_their_files_and_exit_1_before_postmodel(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+):
+    from tests.test_regression_diagnostics import _seed
+    from tests.test_survival_diagnostics import H, TIMES, seed_survival
+    from triage.diagnostics.survival import compute_survival_diagnostics
+
+    pool = db_pool_greenfield
+    m = seed_survival(pool, tmp_path)["model_id"]
+    regression = _seed(pool, "regression", "exp-survival-cli")
+    monkeypatch.chdir(tmp_path)
+
+    def run(*args: str):
+        return CliRunner().invoke(
+            cli.app,
+            ["plot", *args],
+            env={"DATABASE_URL": db_url},
+            catch_exceptions=False,
+        )
+
+    for command in ("km", "brier", "survival-calibration"):
+        result = run(command, str(m))
+        assert result.exit_code == 1, (command, result.output)
+        assert f"triage postmodel survival {m} --horizon H" in _plain(result.output)
+        result = run(command, str(regression))
+        assert result.exit_code == 2, (command, result.output)
+        assert f"model {regression} is regression" in _plain(result.output)
+    assert not list(tmp_path.glob("*.svg"))
+
+    compute_survival_diagnostics(pool, m, H, TIMES)
+    for command, summary in (
+        ("km", "at horizon 30: KM event probability"),
+        ("brier", "(4 of 4 times defined)"),
+        ("survival-calibration", "10 deciles at 2015-01-01, horizon 30"),
+    ):
+        result = run(command, str(m), "--horizon", "30", "--date", "2015-01-01")
+        assert result.exit_code == 0, (command, result.output)
+        plain = _plain(result.output)
+        assert f"wrote {command}-{m}.svg" in plain and summary in plain, plain
+        assert ET.parse(tmp_path / f"{command}-{m}.svg").getroot().tag.endswith("svg")
+    result = run("km", str(m), "--horizon", "45")
+    assert result.exit_code == 1 and "at horizon 45" in _plain(result.output)
+    result = run("scores", str(m), "-o", "scores.svg")
+    assert result.exit_code == 0 and "censored" in _plain(result.output)

@@ -55,3 +55,12 @@ class ScaledCoxPHSurvivalAnalysis(BaseEstimator):
 
     def predict(self, x):
         return self.model.predict(self.minmax_scaler.transform(x))
+
+    def predict_survival_function(self, x, return_array=False):
+        """Each row's survival function S(t), on the features ``predict`` scales.
+
+        What ``triage postmodel survival`` reads for Brier(t) and calibration at a horizon.
+        """
+        return self.model.predict_survival_function(
+            self.minmax_scaler.transform(x), return_array=return_array
+        )

@@ -69,6 +69,7 @@ _SCOPED_DELETES: tuple[tuple[str, LiteralString], ...] = (
     ("crosstabs", _BY_MODEL),
     ("error_analysis", _BY_MODEL),
     ("error_tree_fits", _BY_MODEL),
+    ("survival_diagnostics", _BY_MODEL),
     ("feature_importances", _BY_MODEL),
     ("individual_importances", _BY_MODEL),
     ("models", _BY_MODEL),

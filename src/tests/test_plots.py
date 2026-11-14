@@ -713,3 +713,101 @@ def test_gains_reads_the_latest_evaluated_date_and_refuses_a_signed_one(
     for day in (None, str(R2)):
         with pytest.raises(plots.NothingToDraw, match="negative somewhere or sum to 0"):
             plots.gains(pool, model_id, day)
+
+
+# ------------------------------------------------------------------------------ survival
+
+#: Each survival figure, as its CLI command draws it on the survival fixture.
+SURVIVAL_DRAWS = {
+    "km": lambda pool, m: plots.km(pool, m),
+    "brier": lambda pool, m: plots.brier(pool, m),
+    "survival-calibration": lambda pool, m: plots.survival_calibration(pool, m),
+}
+
+
+def _survival_model(pool, tmp_path, **kwargs) -> int:
+    from tests.test_survival_diagnostics import H, TIMES, seed_survival
+    from triage.diagnostics.survival import compute_survival_diagnostics
+
+    model_id = seed_survival(pool, tmp_path, **kwargs)["model_id"]
+    compute_survival_diagnostics(pool, model_id, H, TIMES)
+    return model_id
+
+
+@pytest.mark.parametrize("kind", list(SURVIVAL_DRAWS))
+def test_survival_figures_write_the_same_svg_and_draw_the_readers_rows(
+    db_pool_greenfield, tmp_path, kind
+):
+    pool = db_pool_greenfield
+    model_id = _survival_model(pool, tmp_path)
+    draw = SURVIVAL_DRAWS[kind]
+    one, two = draw(pool, model_id), draw(pool, model_id)
+    assert _svg(one, tmp_path / "one.svg") == _svg(two, tmp_path / "two.svg")
+    assert one.data["survival"] == readers.survival_diagnostics(pool, model_id)
+
+
+def test_survival_figure_summaries(db_pool_greenfield, tmp_path):
+    pool = db_pool_greenfield
+    model_id = _survival_model(pool, tmp_path)
+    stored = readers.survival_diagnostics(pool, model_id)
+    assert stored is not None
+    p = stored["kinds"]["logrank"][0]["value"]
+    km = plots.km(pool, model_id)
+    assert km.summary.startswith("2015-01-01 at horizon 30: KM event probability")
+    assert f"log-rank p = {p:.3g} across the tertiles" in km.summary
+    assert "across 10 deciles, decile 1" in km.summary
+    brier = plots.brier(pool, model_id)
+    assert "(4 of 4 times defined)" in brier.summary and "training KM" in brier.summary
+    ici = next(r for r in stored["kinds"]["calibration"] if r["bin"] == 0)["extra"]
+    calibration = plots.survival_calibration(pool, model_id)
+    assert calibration.summary.startswith("10 deciles at 2015-01-01, horizon 30")
+    assert f"ICI {ici['ici']:.3f}, E50 {ici['e50']:.3f}" in calibration.summary
+
+
+def test_survival_figures_name_the_command_and_refuse_other_types(
+    db_pool_greenfield, tmp_path
+):
+    from sksurv.svm import FastSurvivalSVM
+
+    from tests.test_regression_diagnostics import _seed
+    from tests.test_survival_diagnostics import seed_survival
+    from triage.problem_types import WrongProblemType
+
+    pool = db_pool_greenfield
+    bare = seed_survival(pool, tmp_path, tag="bare")["model_id"]
+    for draw in SURVIVAL_DRAWS.values():
+        with pytest.raises(NothingToDraw, match=f"triage postmodel survival {bare}"):
+            draw(pool, bare)
+    no_function = _survival_model(
+        pool,
+        tmp_path,
+        tag="svm",
+        estimator=FastSurvivalSVM(max_iter=20, random_state=0),
+    )
+    for kind in ("brier", "survival-calibration"):
+        with pytest.raises(NothingToDraw, match="needs predict_survival_function"):
+            SURVIVAL_DRAWS[kind](pool, no_function)
+    regression = _seed(pool, "regression", "exp-survival-plots")
+    for draw in SURVIVAL_DRAWS.values():
+        with pytest.raises(WrongProblemType, match="model .* is regression"):
+            draw(pool, regression)
+    with pytest.raises(ValueError, match="No model with id 999999"):
+        plots.km(pool, 999999)
+
+
+def test_scores_of_a_survival_model_split_events_from_censored_rows(
+    db_pool_greenfield, tmp_path
+):
+    from tests.test_survival_diagnostics import seed_survival
+
+    pool = db_pool_greenfield
+    seeded = seed_survival(pool, tmp_path)
+    result = plots.scores(pool, seeded["model_id"])
+    assert result.data["bins"] == readers.score_histogram(pool, seeded["model_id"])
+    events = int(seeded["event"].sum())
+    assert result.summary.endswith(
+        f"; {events} with an observed event, {300 - events} censored"
+    )
+    assert _svg(result, tmp_path / "a.svg") == _svg(
+        plots.scores(pool, seeded["model_id"]), tmp_path / "b.svg"
+    )

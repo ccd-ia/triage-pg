@@ -57,6 +57,50 @@ CONFUSION_CLASSES = ("tp", "fp", "fn", "tn")
 #: What the binary trees' two labels stand for: label 1 is the error class.
 _BINARY_CLASSES = {"fp": {1: "fp", 0: "tp"}, "fn": {1: "fn", 0: "tn"}}
 
+#: What joins the cut and the horizon in the parameter a survival tree is stored at.
+HORIZON_MARK = "|horizon="
+
+
+def horizon_parameter(parameter: str, horizon: float) -> str:
+    """The parameter a survival tree at a horizon is stored at: ``100_abs|horizon=30``.
+
+    Two horizons are two outcomes, so their leaves must not replace each other or be read
+    as recurrences of one rule.
+    """
+    return f"{parameter}{HORIZON_MARK}{horizon:g}"
+
+
+def _horizon_ranks(db_engine, model_id, split_kind, date, timespan, horizon):
+    """A survival model's rows binarized at the horizon, with their population ranks.
+
+    Positive: an observed event at a duration ≤ the horizon. Negative: a duration past the
+    horizon, or a row censored at the horizon or later. A row censored before the horizon
+    is dropped: nothing says whether its event came by then. Returns the rows and the
+    number dropped.
+    """
+    with db_engine.connection() as conn:
+        found = conn.execute(
+            "select pr.entity_id, pr.rank_abs, sr.duration, sr.event_observed"
+            " from triage.prediction_ranks pr"
+            " join triage.survival_ranks(%(m)s, cast(%(s)s as triage.split_kind),"
+            "        cast(%(d)s as date), cast(%(t)s as interval)) sr"
+            "   on sr.entity_id = pr.entity_id"
+            " where pr.model_id = %(m)s"
+            "   and pr.split_kind = cast(%(s)s as triage.split_kind)"
+            "   and pr.as_of_date = cast(%(d)s as date)",
+            {"m": model_id, "s": split_kind, "d": str(date), "t": timespan},
+        ).fetchall()
+    labeled = [
+        {
+            "entity_id": r["entity_id"],
+            "rank_abs": r["rank_abs"],
+            "outcome": int(r["event_observed"] and r["duration"] <= horizon),
+        }
+        for r in found
+        if r["event_observed"] or r["duration"] >= horizon
+    ]
+    return labeled, len(found) - len(labeled)
+
 
 def _labeled_ranks(db_engine, model_id, split_kind, date, timespan):
     """The labeled rows, each with its rank among ALL scored rows (ADR-0033).
@@ -182,6 +226,7 @@ def compute_error_analysis(
     min_samples_leaf: int = 30,
     random_seed: int = 0,
     baseline_group_id: int | None = None,
+    horizon: float | None = None,
 ) -> int:
     """Fit per-date error trees and persist their rules. Returns rules written.
 
@@ -192,6 +237,10 @@ def compute_error_analysis(
     Re-running replaces a date's rows of each kind fitted, so rows written before
     migration 0027 gain their class counts, conditions and signature.
 
+    ``horizon`` binarizes a survival label for the classification kinds: positive is an
+    observed event at a duration ≤ ``horizon``, and a row censored before it is dropped
+    (:func:`_horizon_ranks`). The leaves are stored at :func:`horizon_parameter`.
+
     Also persists linear per-entity contributions for the selected entities when the
     primary estimator exposes ``coef_`` (skipped otherwise — tree importances have no
     faithful per-entity decomposition).
@@ -199,6 +248,11 @@ def compute_error_analysis(
     from sklearn.tree import DecisionTreeClassifier
 
     if kind in ("abs_error", "beats_baseline"):
+        if horizon is not None:
+            raise ValueError(
+                f"--kind {kind.replace('_', '-')} reads a continuous outcome; a horizon"
+                " binarizes a survival label for fp, fn and confusion"
+            )
         from triage.diagnostics import regression_trees
 
         if kind == "abs_error":
@@ -224,6 +278,9 @@ def compute_error_analysis(
             f"unknown error kind {kind!r} — expected one of"
             f" {' | '.join(ERROR_TREE_KINDS)}"
         )
+    if horizon is not None and not horizon > 0:
+        raise ValueError(f"horizon={horizon} — pass a positive duration")
+    stored = parameter if horizon is None else horizon_parameter(parameter, horizon)
 
     ctx = load_matrix_context(db_engine, model_id, split_kind)
     if ctx.label_timespan is None:
@@ -234,9 +291,18 @@ def compute_error_analysis(
     written = 0
     dates = sorted({str(d) for d in ctx.frame["as_of_date"].cast(str).to_list()})
     for date in dates:
-        labeled = _labeled_ranks(
-            db_engine, model_id, split_kind, date, ctx.label_timespan
-        )
+        if horizon is None:
+            labeled = _labeled_ranks(
+                db_engine, model_id, split_kind, date, ctx.label_timespan
+            )
+        else:
+            labeled, dropped = _horizon_ranks(
+                db_engine, model_id, split_kind, date, ctx.label_timespan, horizon
+            )
+            logger.info(
+                f"model {model_id} @ {date}: {dropped} row(s) censored before the"
+                f" horizon {horizon:g} dropped, {len(labeled)} kept"
+            )
         if not labeled:
             logger.warning(f"model {model_id}: no labeled ranks at {date} — skipping")
             continue
@@ -286,7 +352,7 @@ def compute_error_analysis(
                         "m": model_id,
                         "s": split_kind,
                         "d": date,
-                        "p": parameter,
+                        "p": stored,
                         "ek": error_kind,
                     },
                 )
@@ -303,7 +369,7 @@ def compute_error_analysis(
                             "m": model_id,
                             "s": split_kind,
                             "d": date,
-                            "p": parameter,
+                            "p": stored,
                             "ek": error_kind,
                             "rid": i,
                             "rule": r["rule"],
