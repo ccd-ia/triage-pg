@@ -441,7 +441,7 @@ def _error_rows(pool, model_id: int) -> list[dict[str, Any]]:
     with pool.connection() as conn:
         return conn.execute(
             "select error_kind, rule, n_matched, n_errors, error_rate, class_counts,"
-            "       conditions, signature"
+            "       conditions, signature, parameter, as_of_date, leaf_stats"
             " from triage.error_analysis where model_id = %(m)s"
             " order by error_kind, rule_id",
             {"m": model_id},
@@ -738,3 +738,279 @@ def test_migration_0016_roundtrip(db_url, db_pool_greenfield):
     upgrade_db(dburl=db_url, revision="head")
     with db_pool_greenfield.connection() as conn:
         assert _has(conn)
+
+
+# ------------------------------------------------------------------ regression error trees
+
+REG_DATES = ("2015-01-01", "2015-02-01", "2015-03-01")
+REG_N = 1000
+
+
+def _seed_regression_trees(
+    pool, tmp_path, problem_type: str = "regression"
+) -> dict[str, int]:
+    """A regression model and a seasonal-naive baseline over three test dates.
+
+    Features: ``x1`` in 0..10, ``x2`` noise, ``x3`` a flag set only where ``x1 <= 5``. The
+    model misses by 10 where ``x1 > 5``, by 0.01 where ``x3 = 1`` (a near-perfect segment)
+    and by 1 elsewhere. The baseline misses by 3 everywhere, so the model is closer exactly
+    where ``x1 <= 5``.
+    """
+    import numpy as np
+    import polars as pl
+
+    from triage.adapters.model import as_uuid
+
+    rng = np.random.default_rng(11)
+    frames, preds = [], []
+    for d in REG_DATES:
+        x1 = rng.integers(0, 11, REG_N)
+        x2 = rng.random(REG_N)
+        x3 = ((x1 <= 5) & (rng.random(REG_N) < 0.3)).astype(float)
+        sign = np.where(rng.random(REG_N) < 0.5, -1.0, 1.0)
+        miss = np.where(x1 > 5, 10.0, np.where(x3 == 1, 0.01, 1.0))
+        entities = np.arange(1, REG_N + 1)
+        frames.append(
+            pl.DataFrame(
+                {
+                    "entity_id": entities,
+                    "as_of_date": [d] * REG_N,
+                    "x1": x1.astype(float),
+                    "x2": x2,
+                    "x3": x3,
+                }  # fmt: skip
+            )
+        )
+        preds += [
+            (int(e), d, 50.0 + s * m)
+            for e, s, m in zip(entities, sign, miss, strict=True)
+        ]
+    frame = pl.concat(frames).with_columns(pl.col("as_of_date").str.to_date())
+    uri = str(tmp_path / "reg-trees.parquet")
+    frame.write_parquet(uri)
+    matrix_uuid = str(as_uuid("mx-reg-trees"))
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into triage.experiments (experiment_hash, config, problem_type)"
+            " values ('exp-trees', '{}'::jsonb, %(t)s)",
+            {"t": problem_type},
+        )
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile) values ('exp-trees',"
+            " 'local') returning run_id"
+        ).fetchone()["run_id"]
+        conn.execute(
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config) values"
+            " ('lbl-reg', 'lbl-reg', 'labels', '{}'::jsonb),"
+            " ('mx-reg-trees', 'mx-reg-trees', 'matrix', '{}'::jsonb),"
+            " ('m-reg', 'm-reg', 'model', '{}'::jsonb),"
+            " ('m-reg-base', 'm-reg-base', 'model', '{}'::jsonb)"
+        )
+        conn.execute(
+            "insert into triage.artifact_inputs (artifact_id, parent_id)"
+            " values ('mx-reg-trees', 'lbl-reg')"
+        )
+        conn.execute(
+            "insert into triage.matrices (matrix_uuid, artifact_id, matrix_kind,"
+            " storage_uri, feature_names, label_timespan) values (%(u)s::uuid,"
+            " 'mx-reg-trees', 'test', %(uri)s, array['x1', 'x2', 'x3'],"
+            " interval '1 month')",
+            {"u": matrix_uuid, "uri": uri},
+        )
+        ids = {}
+        for tag, model_type in (
+            ("m-reg", "sklearn.linear_model.Ridge"),
+            (
+                "m-reg-base",
+                "triage.component.catwalk.baselines.timeseries.SeasonalNaive",
+            ),
+        ):
+            gid = conn.execute(
+                "insert into triage.model_groups"
+                " (model_group_hash, model_type, hyperparameters, feature_list)"
+                " values (%(h)s, %(t)s, '{}'::jsonb, array['x1', 'x2', 'x3'])"
+                " returning model_group_id",
+                {"h": f"mg-{tag}", "t": model_type},
+            ).fetchone()["model_group_id"]
+            mid = conn.execute(
+                "insert into triage.models (model_group_id, model_hash, run_id,"
+                " train_end_time, training_label_timespan) values (%(g)s, %(h)s, %(r)s,"
+                " date '2014-12-01', interval '1 month') returning model_id",
+                {"g": gid, "h": tag, "r": run_id},
+            ).fetchone()["model_id"]
+            ids[tag] = (mid, gid)
+        with conn.cursor() as cur:
+            cur.executemany(
+                "insert into triage.labels (label_hash, entity_id, as_of_date,"
+                " label_timespan, outcome) values ('lbl-reg', %(e)s, %(d)s,"
+                " interval '1 month', 50.0)",
+                [{"e": e, "d": d} for e in range(1, REG_N + 1) for d in REG_DATES],
+            )
+            for tag in ("m-reg", "m-reg-base"):
+                cur.executemany(
+                    "insert into triage.predictions (model_id, entity_id, as_of_date,"
+                    " split_kind, score, matrix_uuid) values (%(m)s, %(e)s, %(d)s,"
+                    " 'test', %(s)s, %(u)s::uuid)",
+                    [
+                        {
+                            "m": ids[tag][0],
+                            "e": e,
+                            "d": d,
+                            "s": s if tag == "m-reg" else 53.0,
+                            "u": matrix_uuid,
+                        }
+                        for e, d, s in preds
+                    ],  # fmt: skip
+                )
+    return {
+        "model": ids["m-reg"][0],
+        "group": ids["m-reg"][1],
+        "baseline_model": ids["m-reg-base"][0],
+        "baseline": ids["m-reg-base"][1],
+    }
+
+
+def test_abs_error_tree_splits_on_the_planted_region(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+
+    seeded = _seed_regression_trees(db_pool_greenfield, tmp_path)
+    written = compute_error_analysis(
+        db_pool_greenfield, seeded["model"], kind="abs_error", max_depth=2,
+        min_samples_leaf=20,
+    )  # fmt: skip
+    assert written > 0
+    rows = _error_rows(db_pool_greenfield, seeded["model"])
+    assert {r["error_kind"] for r in rows} == {"abs_error"}
+    assert {r["parameter"] for r in rows} == {""}
+    for d in REG_DATES:
+        day = [r for r in rows if str(r["as_of_date"]) == d]
+        roots = {r["conditions"][0]["feature"] for r in day}
+        assert roots == {"x1"}  # every leaf hangs off the x1 root split
+        assert all(5 <= r["conditions"][0]["threshold"] < 6 for r in day)
+        worst = max(day, key=lambda r: r["error_rate"])
+        assert worst["rule"].startswith("x1 > 5")
+        assert worst["leaf_stats"]["mean_abs_error"] == pytest.approx(10.0)
+        assert sum(r["leaf_stats"]["share_of_abs_error"] for r in day) == pytest.approx(
+            1
+        )
+        assert sum(r["n_matched"] for r in day) == REG_N
+
+
+def test_the_near_perfect_segment_is_suspicious(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis, readers
+
+    seeded = _seed_regression_trees(db_pool_greenfield, tmp_path)
+    compute_error_analysis(
+        db_pool_greenfield, seeded["model"], kind="abs_error", max_depth=2,
+        min_samples_leaf=20,
+    )  # fmt: skip
+    leaves = readers.suspicious_leaves(db_pool_greenfield, seeded["model"], limit=100)
+    assert leaves and {r["error_kind"] for r in leaves} == {"abs_error"}
+    for r in leaves:
+        assert "x3 > 0.5" in r["rule"]
+        assert r["mean_abs_error"] == pytest.approx(0.01)
+        assert r["lift"] == pytest.approx(r["population_mae"] / 0.01)
+        assert r["population_mae"] > 1
+    assert not readers.suspicious_leaves(
+        db_pool_greenfield, seeded["model"], mae_ratio=0.001
+    )
+
+
+def test_beats_baseline_tree_stores_its_fit(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_error_analysis
+
+    seeded = _seed_regression_trees(db_pool_greenfield, tmp_path)
+    written = compute_error_analysis(
+        db_pool_greenfield, seeded["model"], kind="beats_baseline", max_depth=2,
+        min_samples_leaf=20,
+    )  # fmt: skip
+    assert written > 0
+    with db_pool_greenfield.connection() as conn:
+        fit = conn.execute(
+            "select * from triage.error_tree_fits where model_id = %(m)s",
+            {"m": seeded["model"]},
+        ).fetchone()
+    assert fit["baseline_group_id"] == seeded["baseline"]  # the default baseline
+    assert [str(d) for d in fit["fit_dates"]] == list(REG_DATES[:2])
+    assert str(fit["eval_date"]) == REG_DATES[2]
+    assert fit["auc"] > 0.9
+    rows = _error_rows(db_pool_greenfield, seeded["model"])
+    assert {r["parameter"] for r in rows} == {f"baseline:{seeded['baseline']}"}
+    assert {str(r["as_of_date"]) for r in rows} == {REG_DATES[2]}
+    lose = [r for r in rows if r["rule"].startswith("x1 > 5")]
+    assert lose and all(r["leaf_stats"]["train_win_share"] == 0 for r in lose)
+    assert all(r["leaf_stats"]["mean_gain"] == pytest.approx(-7.0) for r in lose)
+
+
+def test_the_tree_kind_gate(db_url, db_pool_greenfield, tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import triage.cli as cli
+
+    seeded = _seed_regression_trees(db_pool_greenfield, tmp_path)
+    classifier = _seed_matrix_model(
+        db_pool_greenfield, tmp_path
+    )  # no run: classification
+    monkeypatch.chdir(tmp_path)
+
+    def run(*args: str) -> tuple[int, str]:
+        result = CliRunner().invoke(
+            cli.app, list(args), env={"DATABASE_URL": db_url, "COLUMNS": "200"}
+        )
+        return result.exit_code, " ".join(
+            re.sub(r"\x1b\[[0-9;]*m", "", result.output).split()
+        )
+
+    m = str(seeded["model"])
+    for kind in ("fp", "both", "all"):
+        code, text = run("postmodel", "error-tree", m, "--kind", kind)
+        assert code == 2 and "Use --kind abs-error" in text, (kind, text)
+    code, text = run("postmodel", "error-tree", str(classifier), "--kind", "abs-error")
+    assert code == 2 and "reads regression and regression_ranking models" in text
+    code, text = run(
+        "postmodel", "error-tree", m, "--kind", "abs-error", "--min-leaf", "20"
+    )
+    assert code == 0 and "abs_error leaves" in text and "Mean |e|" in text, text
+    code, text = run(
+        "postmodel", "error-tree", m, "--kind", "beats-baseline", "--min-leaf", "20"
+    )
+    assert code == 0 and "AUC on 2015-03-01" in text, text
+    code, text = run("postmodel", "error-rules", m, "--suspicious")
+    assert code == 0 and "x3 > 0.5" in text, text
+    code, text = run(
+        "postmodel", "error-recurrence", str(seeded["group"]), "--kind", "abs-error"
+    )
+    assert code == 0 and "Rule recurrence" in text and "3/3" in text, text
+    code, text = run("postmodel", "crosstabs", m, "--by", "abs-error:10_pct")
+    assert code == 0 and "abs_error_10_pct" in text, text
+    code, text = run("postmodel", "crosstabs", str(classifier), "--by", "abs-error")
+    assert code == 2 and "reads regression and regression_ranking models" in text
+
+
+def test_regression_ranking_reads_both_families(db_pool_greenfield, tmp_path):
+    from triage import problem_types
+
+    assert problem_types.error_tree_refusal(1, "regression_ranking", "fp") is None
+    assert (
+        problem_types.error_tree_refusal(1, "regression_ranking", "abs_error") is None
+    )
+    assert problem_types.error_tree_refusal(1, "survival", "beats_baseline")
+
+
+def test_crosstabs_by_abs_error_select_the_largest_errors(db_pool_greenfield, tmp_path):
+    from triage.diagnostics import compute_crosstabs
+
+    seeded = _seed_regression_trees(db_pool_greenfield, tmp_path)
+    compute_crosstabs(db_pool_greenfield, seeded["model"], abs_error_cut="10_pct")
+    with db_pool_greenfield.connection() as conn:
+        rows = conn.execute(
+            "select as_of_date, feature, selected_value, rest_value from triage.crosstabs"
+            " where model_id = %(m)s and parameter = 'abs_error_10_pct' and stat = 'mean'",
+            {"m": seeded["model"]},
+        ).fetchall()
+    assert len(rows) == 3 * 3  # 3 dates x 3 features
+    for r in rows:
+        if r["feature"] == "x1":
+            assert r["selected_value"] > 5  # the largest errors are all in x1 > 5
+        if r["feature"] == "x3":
+            assert r["selected_value"] == 0
