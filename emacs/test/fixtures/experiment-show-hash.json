@@ -105,7 +105,9 @@
         "avg_value": 0.8099999999999999,
         "stddev_value": 0.009999999999999898,
         "max_regret": 0.08999999999999997,
-        "avg_duration_ms": null
+        "avg_duration_ms": null,
+        "coverage": null,
+        "min_coverage": null
       },
       {
         "model_group_id": 3,
@@ -114,7 +116,9 @@
         "avg_value": 0.6999999999999998,
         "stddev_value": 6.409875621278546e-17,
         "max_regret": 0.20000000000000007,
-        "avg_duration_ms": null
+        "avg_duration_ms": null,
+        "coverage": null,
+        "min_coverage": null
       },
       {
         "model_group_id": 1,
@@ -123,7 +127,9 @@
         "avg_value": 0.6666666666666666,
         "stddev_value": 0.20816659994661327,
         "max_regret": 0.30000000000000004,
-        "avg_duration_ms": null
+        "avg_duration_ms": null,
+        "coverage": 1.0,
+        "min_coverage": 1.0
       }
     ],
     "leaderboard": [
@@ -138,7 +144,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 3,
-        "train_end_time": "2015-01-01"
+        "train_end_time": "2015-01-01",
+        "coverage": 1.0
       },
       {
         "model_group_id": 2,
@@ -151,7 +158,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 6,
-        "train_end_time": "2015-01-01"
+        "train_end_time": "2015-01-01",
+        "coverage": null
       },
       {
         "model_group_id": 3,
@@ -164,7 +172,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 9,
-        "train_end_time": "2015-01-01"
+        "train_end_time": "2015-01-01",
+        "coverage": null
       },
       {
         "model_group_id": 2,
@@ -177,7 +186,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 5,
-        "train_end_time": "2014-07-01"
+        "train_end_time": "2014-07-01",
+        "coverage": null
       },
       {
         "model_group_id": 3,
@@ -190,7 +200,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 8,
-        "train_end_time": "2014-07-01"
+        "train_end_time": "2014-07-01",
+        "coverage": null
       },
       {
         "model_group_id": 1,
@@ -203,7 +214,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 2,
-        "train_end_time": "2014-07-01"
+        "train_end_time": "2014-07-01",
+        "coverage": 1.0
       },
       {
         "model_group_id": 2,
@@ -216,7 +228,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 4,
-        "train_end_time": "2014-01-01"
+        "train_end_time": "2014-01-01",
+        "coverage": null
       },
       {
         "model_group_id": 3,
@@ -229,7 +242,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 7,
-        "train_end_time": "2014-01-01"
+        "train_end_time": "2014-01-01",
+        "coverage": null
       },
       {
         "model_group_id": 1,
@@ -242,7 +256,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 1,
-        "train_end_time": "2014-01-01"
+        "train_end_time": "2014-01-01",
+        "coverage": 1.0
       },
       {
         "model_group_id": 1,
@@ -255,7 +270,8 @@
         "value_expected": null,
         "value_std": null,
         "model_id": 3,
-        "train_end_time": "2015-01-01"
+        "train_end_time": "2015-01-01",
+        "coverage": 1.0
       }
     ]
   }

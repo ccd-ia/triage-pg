@@ -878,9 +878,10 @@ def leaderboard(
 
     Returns:
         Per date: ``model_group_id, model_type, split_kind, metric, parameter, as_of_date,
-        value, value_expected, value_std, model_id, train_end_time``. Windowed:
+        value, value_expected, value_std, model_id, train_end_time, coverage``. Windowed:
         ``model_group_id, model_type, split_kind, metric, parameter, n_as_of_dates,
-        value_mean, value_stddev, value_min, model_id, train_end_time``.
+        value_mean, value_stddev, value_min, model_id, train_end_time, coverage``.
+        ``coverage`` is the group's (:func:`coverage`).
 
     Raises:
         psycopg.errors.ObjectNotInPrerequisiteState: the per-date matview was never
@@ -892,32 +893,100 @@ def leaderboard(
         sql: LiteralString = (
             "select mg.model_group_id, mg.model_type, w.split_kind, w.metric,"
             "       w.parameter, w.n_as_of_dates, w.value_mean, w.value_stddev,"
-            "       w.value_min, w.model_id, m.train_end_time"
+            "       w.value_min, w.model_id, m.train_end_time, c.coverage"
             " from triage.evaluations_windowed w"
             " join triage.models m on m.model_id = w.model_id"
             " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
             " join triage.runs r on r.run_id = m.run_id"
+            " left join triage.model_group_coverage(%(hash)s) c"
+            "        on c.model_group_id = mg.model_group_id"
             " where r.experiment_hash = %(hash)s and w.subset_hash = ''"
         )
     else:
         sql = (
-            "select model_group_id, model_type, split_kind, metric, parameter, as_of_date,"
-            "       value, value_expected, value_std, model_id, train_end_time"
-            " from triage.leaderboard where experiment_hash = %(hash)s"
+            "select l.model_group_id, l.model_type, l.split_kind, l.metric, l.parameter,"
+            "       l.as_of_date, l.value, l.value_expected, l.value_std, l.model_id,"
+            "       l.train_end_time, c.coverage"
+            " from triage.leaderboard l"
+            " left join triage.model_group_coverage(%(hash)s) c"
+            "        on c.model_group_id = l.model_group_id"
+            " where l.experiment_hash = %(hash)s"
         )
     params: dict[str, Any] = {"hash": experiment_hash, "limit": limit}
+    t: LiteralString = "w" if windowed else "l"
     if metric:
-        sql += " and metric = %(metric)s"
+        sql += " and " + t + ".metric = %(metric)s"
         params["metric"] = metric
     if parameter is not None:
-        sql += " and parameter = %(parameter)s"
+        sql += " and " + t + ".parameter = %(parameter)s"
         params["parameter"] = parameter
     if windowed:
-        sql += " order by metric, parameter, value_mean desc nulls last"
+        sql += " order by w.metric, w.parameter, w.value_mean desc nulls last"
     else:
-        sql += " order by metric, parameter, as_of_date desc, value desc nulls last"
+        sql += " order by l.metric, l.parameter, l.as_of_date desc, l.value desc nulls last"
     sql += " limit %(limit)s"
     return _rows(pool, sql, params)
+
+
+#: Coverage spread across groups above which a comparison is told to use the common rows.
+COVERAGE_SPREAD = 0.01
+
+
+def coverage(pool: DictRowPool, experiment_hash: str) -> list[dict[str, Any]]:
+    """What share of the labeled rows each model group of an experiment scored.
+
+    A model that cannot forecast a row (a baseline with no target history) abstains and
+    leaves no prediction, so groups can be evaluated on different rows. Coverage is
+    ``scored labeled rows / labeled rows`` on each test date, averaged over the group's
+    model-dates.
+
+    Returns:
+        Rows ``model_group_id, n_dates, coverage, min_coverage``, ordered by group.
+    """
+    return _rows(
+        pool,
+        "select model_group_id, n_dates, coverage, min_coverage"
+        " from triage.model_group_coverage(%(h)s) order by model_group_id",
+        {"h": experiment_hash},
+    )
+
+
+def coverage_differs(values: Iterable[Optional[float]]) -> bool:
+    """True when the groups' coverage spans more than :data:`COVERAGE_SPREAD`."""
+    defined = [v for v in values if v is not None]
+    return bool(defined) and max(defined) - min(defined) > COVERAGE_SPREAD
+
+
+def common_rows(
+    pool: DictRowPool,
+    model_group_ids: Iterable[int],
+    split_kind: str = "test",
+    as_of_date: Optional[DateLike] = None,
+) -> list[dict[str, Any]]:
+    """Each group's errors on its own rows and on the rows every listed group scored.
+
+    Reads ``triage.common_rows_metrics``: the common rows of a date are the labeled rows that
+    every listed group scored on it, so a date some group did not score has none.
+
+    Returns:
+        Rows ``model_group_id, model_id, as_of_date, n_labeled, n_scored_own, n_common,
+        mae_own, mae_common, rmse_common, wape_common, bias_common``, by date then group.
+
+    Raises:
+        psycopg.errors.RaiseException: a group has two models scoring one date.
+    """
+    return _rows(
+        pool,
+        "select model_group_id, model_id, as_of_date, n_labeled, n_scored_own, n_common,"
+        "       mae_own, mae_common, rmse_common, wape_common, bias_common"
+        " from triage.common_rows_metrics(%(g)s, cast(%(s)s as triage.split_kind),"
+        "        %(d)s::date)",
+        {
+            "g": sorted(set(model_group_ids)),
+            "s": split_kind,
+            "d": None if as_of_date is None else str(as_of_date),
+        },
+    )
 
 
 def default_metric(
@@ -957,7 +1026,8 @@ def model_groups(
 
     Returns:
         Rows ``model_group_id, model_type, n_models, avg_value, stddev_value, max_regret,
-        avg_duration_ms``. A group with no evaluation on the metric has ``None`` values.
+        avg_duration_ms, coverage, min_coverage``. A group with no evaluation on the metric
+        has ``None`` values. Coverage is :func:`coverage`'s.
     """
     return _rows(
         pool,
@@ -966,8 +1036,11 @@ def model_groups(
         "       (select avg(mm.train_duration_ms)::bigint from triage.models mm"
         "          join triage.runs rr on rr.run_id = mm.run_id"
         "         where mm.model_group_id = mgs.model_group_id"
-        "           and rr.experiment_hash = %(h)s) as avg_duration_ms"
+        "           and rr.experiment_hash = %(h)s) as avg_duration_ms,"
+        "       c.coverage, c.min_coverage"
         " from triage.model_group_summary mgs"
+        " left join triage.model_group_coverage(%(h)s) c"
+        "        on c.model_group_id = mgs.model_group_id"
         " left join triage.audition a"
         "        on a.experiment_hash = mgs.experiment_hash"
         "       and a.model_group_id = mgs.model_group_id"

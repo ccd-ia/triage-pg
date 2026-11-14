@@ -252,6 +252,13 @@
     "args": "MODEL_GROUP_ID"
   },
   {
+    "name": "triage postmodel compare-rows",
+    "description": "Each model group's error on its own rows and on the rows all of them scored.",
+    "source": "cli",
+    "destructive": false,
+    "args": "EXPERIMENT_HASH"
+  },
+  {
     "name": "triage postmodel compare",
     "description": "Do two models flag the same entities? Top-k overlap + Spearman (migration 0016).",
     "source": "cli",

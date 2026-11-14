@@ -20,9 +20,9 @@ import {
   YAxis,
 } from 'recharts'
 import type { ExpAuditionResponse, MetricCatalogRow } from '../api/types'
-import { isEmpty } from '../api/types'
+import { coverageDiffers, isEmpty } from '../api/types'
 import { expAuditionChart, groupLabel } from '../api/transforms'
-import { tooltipFormatter } from '../api/format'
+import { fmtPct, tooltipFormatter } from '../api/format'
 import { EmptyPanel } from './EmptyPanel'
 
 const COLORS = ['#3fb950', '#d29922', '#f85149', '#58a6ff', '#bc8cff', '#56d4dd']
@@ -127,6 +127,16 @@ export function ExperimentAuditionTab({
           <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>
             lower is better · thick line = audition pick for rule “{rule}”
           </div>
+          {coverageDiffers(data.ranking.map((r) => r.coverage)) ? (
+            <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
+              the groups scored different shares of the labeled rows (
+              {data.ranking
+                .map((r) => `${groupLabel(r.model_group_id)} ${fmtPct(r.coverage, 0)}`)
+                .join(', ')}
+              ), so each is evaluated on its own rows — `triage audition --common-rows`
+              compares them on the rows all of them scored
+            </div>
+          ) : null}
         </div>
 
         <div>

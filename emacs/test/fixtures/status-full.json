@@ -34,8 +34,8 @@
     }
   ],
   "extra": {
-    "size": "9582 kB \u00b7 26 tables \u00b7 18 views",
-    "schema": "0030_wape_and_forecast_quantile",
+    "size": "9630 kB \u00b7 26 tables \u00b7 19 views",
+    "schema": "0031_common_rows_and_coverage",
     "artifacts": "11 built"
   },
   "gauges": [
@@ -152,6 +152,11 @@
     },
     {
       "name": "audition_distances",
+      "kind": "view",
+      "est_rows": null
+    },
+    {
+      "name": "audition_distances_by_subset",
       "kind": "view",
       "est_rows": null
     },

@@ -10,7 +10,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 3,
-    "train_end_time": "2015-01-01"
+    "train_end_time": "2015-01-01",
+    "coverage": 1.0
   },
   {
     "model_group_id": 2,
@@ -23,7 +24,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 6,
-    "train_end_time": "2015-01-01"
+    "train_end_time": "2015-01-01",
+    "coverage": null
   },
   {
     "model_group_id": 3,
@@ -36,7 +38,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 9,
-    "train_end_time": "2015-01-01"
+    "train_end_time": "2015-01-01",
+    "coverage": null
   },
   {
     "model_group_id": 2,
@@ -49,7 +52,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 5,
-    "train_end_time": "2014-07-01"
+    "train_end_time": "2014-07-01",
+    "coverage": null
   },
   {
     "model_group_id": 3,
@@ -62,7 +66,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 8,
-    "train_end_time": "2014-07-01"
+    "train_end_time": "2014-07-01",
+    "coverage": null
   },
   {
     "model_group_id": 1,
@@ -75,7 +80,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 2,
-    "train_end_time": "2014-07-01"
+    "train_end_time": "2014-07-01",
+    "coverage": 1.0
   },
   {
     "model_group_id": 2,
@@ -88,7 +94,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 4,
-    "train_end_time": "2014-01-01"
+    "train_end_time": "2014-01-01",
+    "coverage": null
   },
   {
     "model_group_id": 3,
@@ -101,7 +108,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 7,
-    "train_end_time": "2014-01-01"
+    "train_end_time": "2014-01-01",
+    "coverage": null
   },
   {
     "model_group_id": 1,
@@ -114,7 +122,8 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 1,
-    "train_end_time": "2014-01-01"
+    "train_end_time": "2014-01-01",
+    "coverage": 1.0
   },
   {
     "model_group_id": 1,
@@ -127,6 +136,7 @@
     "value_expected": null,
     "value_std": null,
     "model_id": 3,
-    "train_end_time": "2015-01-01"
+    "train_end_time": "2015-01-01",
+    "coverage": 1.0
   }
 ]
