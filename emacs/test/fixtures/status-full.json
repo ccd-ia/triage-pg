@@ -35,7 +35,7 @@
   ],
   "extra": {
     "size": "9582 kB \u00b7 26 tables \u00b7 18 views",
-    "schema": "0029_typed_calibration",
+    "schema": "0030_wape_and_forecast_quantile",
     "artifacts": "11 built"
   },
   "gauges": [

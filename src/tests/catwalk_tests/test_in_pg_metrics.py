@@ -307,24 +307,27 @@ _PINBALL_ACTUAL = [3.0, -0.5, 2.0, 7.0, 1.0, 2.5, 6.0, 6.5, 4.5, 5.5]
 
 
 def test_pinball_matches_numpy_parity(greenfield_engine):
-    """In-PG ``pinball@τ`` == the numpy ``pinball_loss`` to 1e-9 for every default quantile."""
+    """In-PG ``pinball@τ`` == the numpy ``pinball_loss`` to 1e-9 for every default quantile,
+    scored as the τ-quantile model each one applies to (0030: ``forecast_quantile``)."""
     engine = greenfield_engine
     model_id = _seed_model(engine)
     _seed_predictions_and_labels(
         engine, model_id, _PINBALL_PREDS, _PINBALL_ACTUAL, ENTITY_IDS
     )
 
-    evaluate_in_db(
-        engine,
-        model_id,
-        AS_OF_DATE,
-        LABEL_TIMESPAN,
-        metric_config={
-            "regression_metrics": ["pinball@0.5", "pinball@0.8", "pinball@0.95"]
-        },
-    )
-
     for tau in (0.5, 0.8, 0.95):
+        with engine.connection() as conn:
+            conn.execute(
+                "update triage.models set forecast_quantile = %(q)s where model_id = %(m)s",
+                {"q": tau, "m": model_id},
+            )
+        evaluate_in_db(
+            engine,
+            model_id,
+            AS_OF_DATE,
+            LABEL_TIMESPAN,
+            metric_config={"regression_metrics": [f"pinball@{tau}"]},
+        )
         row = _eval_row(engine, model_id, f"pinball@{tau}", "")
         assert row is not None, f"no evaluation row for pinball@{tau}"
         assert row["value"] == pytest.approx(

@@ -51,7 +51,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from triage.adapters.matrix import MatrixResult
 from triage.artifacts import (
@@ -93,6 +93,54 @@ MODEL_KIND = "model"
 # keep this set documented for the label/key reads below.
 _KEY_COLS = ("entity_id", "as_of_date")
 _LABEL_COLS = ("outcome", "duration", "event_observed")
+
+
+#: The estimators that forecast a quantile, by class name: (the hyperparameter that makes it a
+#: quantile model and the value it must hold, or None when every instance is one; the
+#: hyperparameter that holds the quantile; its default). The backfill in migration 0030 holds
+#: the same table in SQL.
+QUANTILE_ESTIMATORS: dict[
+    str, tuple[Optional[tuple[str, str]], str, Optional[float]]
+] = {
+    "DummyRegressor": (("strategy", "quantile"), "quantile", None),
+    "GradientBoostingRegressor": (("loss", "quantile"), "alpha", 0.9),
+    "HistGradientBoostingRegressor": (("loss", "quantile"), "quantile", None),
+    "QuantileRegressor": (None, "quantile", 0.5),
+    "LGBMRegressor": (("objective", "quantile"), "alpha", 0.9),
+}
+
+
+def quantile_of(class_name: str, params: Mapping[str, Any]) -> Optional[float]:
+    """The quantile an estimator of ``class_name`` with ``params`` forecasts, or None.
+
+    ``DummyRegressor(strategy='median')`` forecasts the 0.5 quantile.
+    """
+    if class_name == "DummyRegressor" and params.get("strategy") == "median":
+        return 0.5
+    entry = QUANTILE_ESTIMATORS.get(class_name)
+    if entry is None:
+        return None
+    switch, key, default = entry
+    if switch is not None and params.get(switch[0]) != switch[1]:
+        return None
+    value = params.get(key, default)
+    return None if value is None else float(value)
+
+
+def declared_quantile(estimator: Any) -> Optional[float]:
+    """The quantile a fitted estimator forecasts, or None for a point forecast.
+
+    An estimator that sets a ``forecast_quantile`` attribute declares it; otherwise the class
+    name and parameters are read against :data:`QUANTILE_ESTIMATORS`.
+    """
+    explicit = getattr(estimator, "forecast_quantile", None)
+    if explicit is not None:
+        return float(explicit)
+    get_params = getattr(estimator, "get_params", None)
+    params = get_params() if callable(get_params) else None
+    return quantile_of(
+        type(estimator).__name__, params if isinstance(params, Mapping) else {}
+    )
 
 
 @dataclass(frozen=True)
@@ -349,6 +397,7 @@ def build_model(
             # recorded geometry is the fitted geometry by construction (#14).
             feature_list=x_columns,
             train_duration_ms=train_duration_ms,
+            forecast_quantile=declared_quantile(estimator),
         )
         _persist_feature_importances(db_engine, model_id, estimator, x_columns)
         mark_built(
@@ -660,6 +709,7 @@ def _insert_model_row(
     random_seed: int,
     feature_list: Sequence[str],
     train_duration_ms: int | None = None,
+    forecast_quantile: float | None = None,
 ) -> int:
     """INSERT (or reclaim) the ``triage.models`` row; return its ``model_id``.
 
@@ -682,18 +732,19 @@ def _insert_model_row(
                 + " (model_group_id, model_hash, run_id, train_matrix_uuid,"
                 + "  train_end_time, training_label_timespan, artifact_uri,"
                 + "  artifact_format, model_size_bytes, random_seed, train_duration_ms,"
-                + "  feature_list)"
+                + "  feature_list, forecast_quantile)"
                 + " values (%(model_group_id)s, %(model_hash)s, %(run_id)s, %(train_matrix_uuid)s,"
                 + "  cast(%(train_end_time)s as date),"
                 + "  cast(%(training_label_timespan)s as interval), %(artifact_uri)s,"
                 + "  'joblib', %(model_size_bytes)s, %(random_seed)s, %(train_duration_ms)s,"
-                + "  %(feature_list)s)"
+                + "  %(feature_list)s, %(forecast_quantile)s)"
                 + " on conflict (model_hash) do update set"
                 + "  run_id = excluded.run_id,"
                 + "  artifact_uri = excluded.artifact_uri,"
                 + "  model_size_bytes = excluded.model_size_bytes,"
                 + "  train_duration_ms = excluded.train_duration_ms,"
-                + "  feature_list = excluded.feature_list"
+                + "  feature_list = excluded.feature_list,"
+                + "  forecast_quantile = excluded.forecast_quantile"
                 + " returning model_id",
                 {
                     "model_group_id": model_group_id,
@@ -707,6 +758,7 @@ def _insert_model_row(
                     "random_seed": random_seed,
                     "train_duration_ms": train_duration_ms,
                     "feature_list": list(feature_list),
+                    "forecast_quantile": forecast_quantile,
                 },
             ).fetchone()
         )["model_id"]

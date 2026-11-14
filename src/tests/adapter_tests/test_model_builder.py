@@ -483,6 +483,44 @@ def test_model_group_reused_across_models(db_pool_greenfield, tmp_path):
     assert n_groups == 1
 
 
+def test_build_model_records_the_quantile_it_forecasts(db_pool_greenfield, tmp_path):
+    """models.forecast_quantile (migration 0030): set for a quantile regressor, NULL for a
+    point forecast."""
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_source(engine)
+    storage = str(tmp_path / "store")
+    cohort, labels = _build_cohort_and_labels(engine, run_id, [TRAIN_AS_OF, TEST_AS_OF])
+    train, _ = _build_matrices(engine, run_id, cohort, labels, storage)
+
+    built = {
+        name: build_model(
+            engine,
+            run_id,
+            train_matrix_result=train,
+            class_path="sklearn.dummy.DummyRegressor",
+            hyperparameters=hp,
+            random_seed=1,
+            storage=LocalStorage(),
+            storage_root=storage,
+            source_pins=_PINS,
+        )
+        for name, hp in (
+            ("q80", {"strategy": "quantile", "quantile": 0.8}),
+            ("mean", {"strategy": "mean"}),
+        )
+    }
+    with engine.connection() as conn:
+        got = {
+            name: conn.execute(
+                "select forecast_quantile from triage.models where model_id = %(m)s",
+                {"m": m.model_id},
+            ).fetchone()["forecast_quantile"]
+            for name, m in built.items()
+        }
+    assert got == {"q80": 0.8, "mean": None}
+
+
 def test_build_model_cache_hit_on_rerun(db_pool_greenfield, tmp_path):
     """A second identical build_model is a cache hit: same artifact, no duplicate model row."""
     engine = db_pool_greenfield

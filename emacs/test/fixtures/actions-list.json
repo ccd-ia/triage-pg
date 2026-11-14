@@ -294,6 +294,13 @@
     "args": "CONFIG"
   },
   {
+    "name": "triage check metrics",
+    "description": "Do the stored metrics match a second implementation?",
+    "source": "cli",
+    "destructive": false,
+    "args": ""
+  },
+  {
     "name": "triage check history",
     "description": "Is the target-history series complete on the calendar?",
     "source": "cli",

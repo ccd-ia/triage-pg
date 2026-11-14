@@ -130,6 +130,10 @@ def natural_number(value: int) -> int:
     return value
 
 
+def _optional_natural(value: Optional[int]) -> Optional[int]:
+    return None if value is None else natural_number(value)
+
+
 def parse_date(value: str | datetime) -> datetime:
     # Handle when typer passes the value directly as datetime
     if isinstance(value, datetime):
@@ -1262,9 +1266,28 @@ def audition_command(
             params,
         ).fetchall()
         if not ranking:
+            undefined = returned_row(
+                conn.execute(
+                    "select count(*) as n from triage.evaluations e"
+                    " join triage.models m on m.model_id = e.model_id"
+                    " join triage.runs r on r.run_id = m.run_id"
+                    " where r.experiment_hash = %(h)s and e.metric = %(m)s"
+                    "   and e.parameter = %(p)s and e.split_kind = 'test'"
+                    "   and e.subset_hash = '' and e.value is null",
+                    params,
+                ).fetchone()  # an aggregate select always yields one row
+            )["n"]
+            why = ""
+            if undefined and str(metric).startswith("pinball@"):
+                why = (
+                    f" All {undefined} stored value(s) are undefined: pinball@τ scores only"
+                    " a model that forecasts the τ quantile, and no model here does."
+                )
+            elif undefined:
+                why = f" All {undefined} stored value(s) are undefined (NULL)."
             console.print(
                 f"[yellow]No audition rows for metric {metric!r}"
-                f" parameter {parameter!r}.[/yellow]"
+                f" parameter {parameter!r}.{why}[/yellow]"
             )
             raise typer.Exit(code=1)
 
@@ -1930,6 +1953,103 @@ def check_leakage_command(
         f" {status} (exit {code})."
     )
     raise typer.Exit(code=code)
+
+
+@check_app.command("metrics")
+def check_metrics_command(
+    ctx: typer.Context,
+    model: Optional[int] = typer.Option(
+        None, "--model", callback=_optional_natural, help="Audit one model."
+    ),
+    group: Optional[int] = typer.Option(
+        None,
+        "--group",
+        callback=_optional_natural,
+        help="Audit a model group's models.",
+    ),
+    experiment: Optional[str] = typer.Option(
+        None,
+        "--experiment",
+        help="Audit an Experiment's models (an experiment_hash or a unique prefix).",
+    ),
+    tolerance: float = typer.Option(
+        1e-9, "--tolerance", help="The largest absolute gap that passes."
+    ),
+    json_path: Optional[pathlib.Path] = typer.Option(
+        None, "--json", metavar="PATH", help="Also write the report to PATH as JSON."
+    ),
+) -> None:
+    """Do the stored metrics match a second implementation?
+
+    Recomputes every stored evaluation of the models with scikit-learn, numpy or
+    scikit-survival, over the rows the in-database metric read, and prints per metric the
+    rows checked, the largest gap and its row. A metric with no second implementation is
+    listed as not audited and never counts as passed.
+
+    Exit codes: 0 every audited row within the tolerance; 1 a gap above it, or nothing
+    could be audited; 2 bad input or the audit could not run.
+    """
+    import psycopg
+
+    from triage.diagnostics.metric_audit import audit, models_in_scope
+
+    if tolerance < 0:
+        console.print("[red]--tolerance must be 0 or more.[/red]")
+        raise typer.Exit(code=2)
+    try:
+        with connection_pool(require_db_url(ctx)) as pool:
+            ids = models_in_scope(pool, model=model, group=group, experiment=experiment)
+            report = audit(pool, ids, tolerance)
+        if json_path is not None:
+            json_path.write_text(json.dumps(report.to_dict(), indent=2, default=str))
+    # ValueError: NotFoundError, no scope or two, an ambiguous prefix
+    except (ValueError, psycopg.Error, OSError) as exc:
+        console.print(f"[red]The metric audit could not run:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        # Exit 1 means "a metric disagrees", so a crash must not fall through to it.
+        logger.exception("triage check metrics failed")
+        console.print(f"[red]The metric audit could not run:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    table = Table(
+        title=f"{len(ids)} model(s), tolerance {tolerance:g}", box=box.SIMPLE_HEAVY
+    )
+    for col in ("metric", "checked", "failed", "largest gap", "worst row"):
+        table.add_column(col)
+    for m in report.metrics:
+        w = m.worst
+        where = (
+            "—"
+            if w is None
+            else f"model {w.model_id} · {w.split_kind} · {w.as_of_date}"
+            + (f" · {w.parameter}" if w.parameter else "")
+            + (f" · subset {w.subset_hash[:8]}" if w.subset_hash else "")
+            + f" · stored {_fmt(w.stored, 6)} vs {_fmt(w.recomputed, 6)}"
+        )
+        table.add_row(
+            m.metric,
+            str(m.checked),
+            f"[red]{m.failed}[/red]" if m.failed else "0",
+            f"{m.max_gap:.3g}",
+            where,
+        )
+    console.print(table)
+    for n in report.not_audited:
+        console.print(
+            f"[dim]not audited: {n.metric} ({n.rows} row(s)) — {n.reason}[/dim]"
+        )
+    if report.checked == 0:
+        console.print("[red]No stored metric could be audited.[/red]")
+    elif report.passed:
+        console.print(f"[green]{report.checked} stored value(s) match.[/green]")
+    else:
+        failed = sum(m.failed for m in report.metrics)
+        console.print(
+            f"[red]{failed} of {report.checked} stored value(s) differ by more than"
+            f" {tolerance:g}.[/red]"
+        )
+    raise typer.Exit(code=0 if report.passed else 1)
 
 
 @check_app.command("history")

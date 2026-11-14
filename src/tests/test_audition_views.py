@@ -305,3 +305,43 @@ def test_cli_leaderboard_windowed_rolls_up_the_test_window(
     assert len(plain_rows) == 6  # 2 models x 3 as_of_dates — the per-date grain
     assert {"as_of_date", "value"} <= set(plain_rows[0])
     assert "n_as_of_dates" not in plain_rows[0]
+
+
+def test_audition_on_pinball_skips_models_that_do_not_forecast_the_quantile(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch
+):
+    """pinball@τ is NULL for every model that does not forecast τ (migration 0030), and
+    audition ranks defined values only: no model forecasts 0.5, so nothing is selected."""
+    from tests.test_metric_audit import _seed_regression
+
+    ids = _seed_regression(db_pool_greenfield)
+    with db_pool_greenfield.connection() as conn:
+        rows = conn.execute(
+            "select model_group_id from triage.audition"
+            " where experiment_hash = 'exp-reg' and metric = 'pinball@0.9'"
+        ).fetchall()
+        assert len(rows) == 1  # the quantile model only
+        assert (
+            conn.execute(
+                "select triage.audition_pick('exp-reg', 'pinball@0.5', '',"
+                " 'best_average_value') as g"
+            ).fetchone()["g"]
+            is None
+        )
+
+    result = _invoke(
+        db_url,
+        tmp_path,
+        monkeypatch,
+        "audition",
+        "exp-reg",
+        "-m",
+        "pinball@0.5",
+        "-p",
+        "",
+    )
+    assert result.exit_code == 1, result.output
+    text = " ".join(result.output.split())
+    assert "No audition rows for metric 'pinball@0.5'" in text
+    assert "no model here does" in text
+    assert len(ids) == 2
