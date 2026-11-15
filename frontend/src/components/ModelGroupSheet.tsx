@@ -5,7 +5,8 @@
  * its per-split models (each opens the model sheet), its metric-over-time line, its
  * threshold curve on every test date (/model-groups/{id}/curves → CurveOverlayChart, one
  * line per (model, date), legend in date order, over everyone or one Subset), and the
- * error rules that recur across its test dates (ErrorRecurrencePanel).
+ * error rules that recur across its test dates (ErrorRecurrencePanel, in the kinds of the
+ * group's problem_type, which /model-groups/{id} returns).
  */
 import { useMemo, useState } from 'react'
 import {
@@ -317,7 +318,11 @@ export function ModelGroupSheet({
 
             <section>
               <h4>error rules · recurrence across test dates</h4>
-              <ErrorRecurrencePanel groupId={groupId} />
+              <ErrorRecurrencePanel
+                key={`${groupId}-${group.data?.problem_type ?? ''}`}
+                groupId={groupId}
+                problemType={group.data?.problem_type ?? null}
+              />
             </section>
           </>
         ) : (
