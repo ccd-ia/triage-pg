@@ -6,7 +6,9 @@ import json
 import shutil
 from pathlib import Path
 
+import click
 import pytest
+import typer
 from lynkeus import Action, ActionSource, RunState
 
 from triage.cli import app as cli_app
@@ -221,6 +223,37 @@ def test_cli_actions_cover_the_typer_tree_and_mark_the_destructive_verbs(
         "triage reset",
     }
     assert verbs["triage analyze-config"].description
+
+
+def _hidden_verbs() -> set[str]:
+    """Every verb ``--help`` leaves out, read from the click tree typer builds."""
+    hidden: set[str] = set()
+
+    def walk(command: click.Command, path: str, parent_hidden: bool) -> None:
+        if parent_hidden or command.hidden:
+            hidden.add(path)
+        if isinstance(command, click.Group):
+            for name, sub in command.commands.items():
+                walk(sub, f"{path} {name}", parent_hidden or command.hidden)
+
+    walk(typer.main.get_command(cli_app), "triage", False)
+    return hidden
+
+
+def test_the_palette_leaves_out_the_verbs_typer_hides(
+    verbs: dict[str, Action],
+) -> None:
+    """A hidden verb is the CLI's contract with an editor, not an action for a user.
+
+    ``triage postmodel kinds --json`` is the table triage.el reads its type gates
+    from. ``--help`` leaves it out, and the palette must too; the hidden set is
+    read from the tree rather than named, so the next hidden verb is covered.
+    """
+    hidden = _hidden_verbs()
+    assert "triage postmodel kinds" in hidden, "the verb that found this is hidden"
+    assert not hidden & verbs.keys()
+    assert "triage postmodel residuals" in verbs
+    assert "triage postmodel compare" in verbs
 
 
 def test_actions_list_and_run_in_a_directory_without_a_justfile(tmp_path: Path) -> None:
