@@ -205,12 +205,12 @@ $ uv run triage query "select * from triage.score_ties(285, 'test', '2016-10-01'
 The table is the same for every problem type except the last column. For a
 regression model the outcome is a quantity, so `Mean outcome` is the mean of
 the outcome in the decile, `Realized` is empty, and the diagonal compares the
-mean forecast with the mean outcome. Model 382, a random forest that forecasts
+mean forecast with the mean outcome. Model 526, a random forest that forecasts
 DirtyDuck's violation counts, gives 30% of its rows one forecast (5.871), so
 its table has six rows:
 
 ```console
-$ uv run triage model show 382
+$ uv run triage model show 526
 …
            Deciles with lift @ 2017-01-01
   Decile   n      Mean score   Mean outcome   Lift

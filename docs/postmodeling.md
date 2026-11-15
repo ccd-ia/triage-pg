@@ -87,11 +87,11 @@ uv run triage postmodel error-tree 42 -p 100_abs --depth 3 --min-leaf 30
 uv run triage postmodel compare 42 57 -p 100_abs
 uv run triage model show 42
 
-# regression and regression_ranking (model 382, its group 49)
-uv run triage postmodel residuals 382
-uv run triage postmodel baseline 49
-uv run triage postmodel error-tree 382 --kind abs-error
-uv run triage plot forecast-actual 382 -o forecast-actual.png
+# regression and regression_ranking (model 526, its group 71)
+uv run triage postmodel residuals 526
+uv run triage postmodel baseline 71
+uv run triage postmodel error-tree 526 --kind abs-error
+uv run triage plot forecast-actual 526 -o forecast-actual.png
 
 # survival (model 413), at a horizon in the label's duration units
 uv run triage postmodel survival 413 --horizon 90

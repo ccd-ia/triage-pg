@@ -87,10 +87,14 @@ columns). They work off the label; no `history_query` needed. Set
 | `…baselines.timeseries.MovingAverage` | `window: [3, 6, 12]` | Mean of the labels that exist among the last `window` label dates. |
 | `…baselines.timeseries.Drift` | — | Last value + the trend from the first to the last value, divided by their distance in label dates. |
 
-**Raw-series family** — forecast the raw periodic series (e.g. monthly counts)
-supplied by a `history_query`. These **require** a `history_query` (enforced at
-run start) and the exponential-smoothing pair needs `statsmodels` (the
-`baselines` extra: `uv sync --extra baselines`).
+**Raw-series family** — forecast the raw periodic series supplied by a
+`history_query`, one `history_period` ahead. These **require** a
+`history_query` (enforced at run start) and the exponential-smoothing pair
+needs `statsmodels` (the `baselines` extra: `uv sync --extra baselines`). Their
+forecast is a floor for the label only when one period of the series holds what
+the label holds, over a window as long as the label's: with a six-month label,
+a six-month `history_period` that sums the label's quantity
+([target history](/triage-pg/concepts/target-history/#shape-2--raw-periodic-series)).
 
 | Estimator | Params | Forecast |
 | --- | --- | --- |
@@ -104,23 +108,26 @@ run start) and the exponential-smoothing pair needs `statsmodels` (the
 problem_type: regression_ranking
 
 # the raw periodic series the raw-series baselines forecast over: per-entity
-# MONTHLY counts, point-in-time correct (only events known before {as_of_date}),
-# one row per month with zeros included, so every value sits at its calendar offset.
+# violations summed over SIX-MONTH periods, the label's quantity over the label's
+# window, point-in-time correct (only events known before {as_of_date}), one row per
+# period with zeros included, so every value sits at its calendar offset.
 target_history_lags: 6
-history_series_width: 24
-history_period: '1 month'
+history_series_width: 8
+history_period: '6 month'
 history_query: |
-  with months as (
-    select f.entity_id, m::date as period
+  with periods as (
+    select f.entity_id, p::date as period
     from (select distinct entity_id from ontology.events) f
-    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
-                               interval '1 month') m
+    cross join generate_series({as_of_date}::date - interval '6 month', date '2014-01-01',
+                               interval '-6 month') p
   )
-  select months.entity_id, months.period, count(e.entity_id) as value
-  from months
+  select periods.entity_id, periods.period,
+         sum(coalesce(jsonb_array_length(e.violations), 0))::double precision as value
+  from periods
   left join ontology.events e
-    on e.entity_id = months.entity_id
-   and date_trunc('month', e.date)::date = months.period
+    on e.entity_id = periods.entity_id
+   and periods.period <= e.date
+   and e.date < periods.period + interval '6 month'
    and e.date < {as_of_date}
   group by 1, 2
 
@@ -130,8 +137,8 @@ grid_config:
   '…baselines.timeseries.Persistence': {}
   '…baselines.timeseries.MovingAverage': { window: [3, 6] }
   '…baselines.timeseries.Drift': {}
-  # raw-series floors (need history_query above)
-  '…baselines.timeseries.SeasonalNaive': { season: [12] }
+  # raw-series floors (need history_query above); 2 six-month periods = one year
+  '…baselines.timeseries.SeasonalNaive': { season: [2] }
   '…baselines.timeseries.HoltWinters': {}
   '…baselines.timeseries.Croston': {}
 ```
@@ -247,9 +254,9 @@ model                        prec@100  AUC     model                    RMSE    
 ScaledLogisticRegression        0.405  0.584   Ridge (alpha 1.0)       4.324  3.070
 BaselineRankMultiFeature        0.376  0.546   DummyRegressor (mean)   4.396  3.132
 DecisionTreeClassifier          0.369  0.561   DummyRegressor (median) 4.527  2.826
-SimpleThresholder               0.364  0.517   Persistence             5.332  3.433
-RandomForestClassifier          0.352  0.568   SeasonalNaive (12)      6.639  4.983
-DummyClassifier (floor)         0.295  0.500
+SimpleThresholder               0.364  0.517   Croston                 5.031  3.319
+RandomForestClassifier          0.352  0.568   Persistence             5.332  3.433
+DummyClassifier (floor)         0.295  0.500   SeasonalNaive (2)       5.826  3.996
 ```
 
 Classification tells the subtler story. Every model clears the constant-prior
@@ -269,7 +276,9 @@ median has the lowest MAE (2.826 against 3.070). The violation count has a long
 right tail, and the median is the constant that minimizes absolute error, so
 on MAE no model here beats a constant. The time-series baselines are *worse*:
 a facility's own past counts predict its next six months less well than its
-features do. Read the lag baselines' numbers with their coverage. They scored
+features do. Croston, the closest, smooths each facility's six-month violation
+totals; seasonal naive repeats the same six months a year earlier, and forecasts
+0 for a facility that was not inspected then. Read the lag baselines' numbers with their coverage. They scored
 66.5% of the labeled rows against 82.5% for the regressors, so their means are
 over different rows until `triage postmodel compare-rows` puts them on the
 same ones.

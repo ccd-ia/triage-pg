@@ -562,7 +562,10 @@ a **raw-series** baseline (`SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`,
 - `history_period` (interval, **required with `history_query`**) — the length of one
   period, e.g. `'1 month'`. Slot `_hist_{width-k}` holds the period that starts
   `k × history_period` before the as_of_date. A `period` that is not on that grid,
-  or that is at or after the as_of_date, is an error.
+  or that is at or after the as_of_date, is an error. The raw-series baselines
+  forecast one period ahead, so for a floor in the label's units one period is one
+  label window: `'6 month'` for a six-month label, each value summing what the
+  label sums.
 - `fill_missing_periods` (`zero` | `null`, default unset) — a period between an
   entity's first returned period and the as_of_date with no row is a *gap*. Unset,
   a gap stops the matrix build when a baseline that needs a complete calendar
@@ -575,21 +578,24 @@ a **raw-series** baseline (`SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`,
 problem_type: regression_ranking
 
 target_history_lags: 6
-history_series_width: 24
-history_period: '1 month'
+history_series_width: 8
+history_period: '6 month'            # one label window (training_label_timespans: 6month)
 history_query: |
-  -- one row per facility and month, zeros included
-  with months as (
-    select f.entity_id, m::date as period
+  -- one row per facility and six-month period, zeros included: the violations
+  -- the label sums, over the label's window
+  with periods as (
+    select f.entity_id, p::date as period
     from (select distinct entity_id from ontology.events) f
-    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
-                               interval '1 month') m
+    cross join generate_series({as_of_date}::date - interval '6 month', date '2014-01-01',
+                               interval '-6 month') p
   )
-  select months.entity_id, months.period, count(e.entity_id) as value
-  from months
+  select periods.entity_id, periods.period,
+         sum(coalesce(jsonb_array_length(e.violations), 0))::double precision as value
+  from periods
   left join ontology.events e
-    on e.entity_id = months.entity_id
-   and date_trunc('month', e.date)::date = months.period
+    on e.entity_id = periods.entity_id
+   and periods.period <= e.date
+   and e.date < periods.period + interval '6 month'
    and e.date < {as_of_date}          -- point-in-time correct
   group by 1, 2
 
@@ -599,7 +605,7 @@ grid_config:
   'triage.component.catwalk.baselines.timeseries.Persistence': {}
   'triage.component.catwalk.baselines.timeseries.MovingAverage': { window: [3, 6] }
   # raw-series floors (need history_query above; HoltWinters needs triage[baselines]):
-  'triage.component.catwalk.baselines.timeseries.SeasonalNaive': { season: [12] }
+  'triage.component.catwalk.baselines.timeseries.SeasonalNaive': { season: [2] }  # a year
   'triage.component.catwalk.baselines.timeseries.HoltWinters': {}
   'triage.component.catwalk.baselines.timeseries.Croston': {}
 

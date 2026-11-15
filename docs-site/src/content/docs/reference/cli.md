@@ -269,7 +269,7 @@ It builds nothing and writes nothing.
 
 ```console
 $ triage check history example/dirtyduck/experiment-regression.yaml
-history_period '1 month', width 24, as_of_date(s) 2017-01-01
+history_period '6 month', width 8, as_of_date(s) 2017-01-01
 
   check                              count
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -280,9 +280,10 @@ history_period '1 month', width 24, as_of_date(s) 2017-01-01
   rows at or after the as_of_date        0
 ```
 
-The tutorial's query returns a row for every month, zeros included. A copy of
-the same config with the query DirtyDuck used before 1.6.0, a `group by` over
-the inspections, has a gap wherever a facility had no inspection that month:
+The tutorial's query returns a row for every six-month period, zeros included.
+A copy of the config with the monthly query DirtyDuck used before 1.6.0, a
+`group by` over the inspections with `history_period: '1 month'` and a width
+of 24, has a gap wherever a facility had no inspection that month:
 
 ```console
 $ triage check history experiment-regression-sparse.yaml
@@ -483,12 +484,12 @@ $ triage check metrics --experiment 396938287f6d
 
   metric         checked   failed   largest gap   worst row
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  mae            60        0        2.1e-13       model 370 · test · 2016-07-01 · stored 3.156516 vs 3.156516
-  pinball@0.5    60        0        0             model 335 · test · 2015-07-01 · stored — vs —
-  pinball@0.8    60        0        0             model 335 · test · 2015-07-01 · stored — vs —
-  pinball@0.95   60        0        0             model 335 · test · 2015-07-01 · stored — vs —
-  r2             60        0        1.11e-13      model 376 · test · 2016-07-01 · stored -1.267380 vs -1.267380
-  rmse           60        0        5.6e-14       model 365 · test · 2016-07-01 · stored 4.347200 vs 4.347200
+  mae            60        0        2.1e-13       model 514 · test · 2016-07-01 · stored 3.156516 vs 3.156516
+  pinball@0.5    60        0        0             model 479 · test · 2015-07-01 · stored — vs —
+  pinball@0.8    60        0        0             model 479 · test · 2015-07-01 · stored — vs —
+  pinball@0.95   60        0        0             model 479 · test · 2015-07-01 · stored — vs —
+  r2             60        0        1.43e-13      model 492 · test · 2015-07-01 · stored -2.184637 vs -2.184637
+  rmse           60        0        5.6e-14       model 509 · test · 2016-07-01 · stored 4.347200 vs 4.347200
 
 360 stored value(s) match.
 ```
@@ -530,23 +531,23 @@ rows. `triage postmodel compare-rows` puts the groups on the rows all of them
 scored. It reads only:
 
 ```console
-$ triage postmodel compare-rows 396938287f6d --groups 50,53,57,59
+$ triage postmodel compare-rows 396938287f6d --groups 72,75,79,81
   Date         Group   Labeled   Scored   Common   MAE own   MAE common   RMSE common   WAPE common   Bias common
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  2015-07-01   50      6755      5033     1271     3.3657    3.7940       4.8931        0.7435        1.6345
-  2015-07-01   53      6755      5033     1271     2.9104    2.9740       4.7100        0.5828        -1.1031
-  2015-07-01   57      6755      1271     1271     3.6585    3.6585       5.7338        0.7169        1.1456
-  2015-07-01   59      6755      5033     1271     5.1345    4.9725       6.7365        0.9744        -4.9614
+  2015-07-01   72      6755      5033     1271     3.3657    3.7940       4.8931        0.7435        1.6345
+  2015-07-01   75      6755      5033     1271     2.9104    2.9740       4.7100        0.5828        -1.1031
+  2015-07-01   79      6755      1271     1271     3.6585    3.6585       5.7338        0.7169        1.1456
+  2015-07-01   81      6755      5033     1271     4.1240    4.5153       6.5370        0.8848        -1.5728
   …
-  2017-01-01   50      7284      6228     6178     2.8892    2.8851       4.2885        0.5695        -0.0808
-  2017-01-01   53      7284      6228     6178     2.7592    2.7588       4.4505        0.5446        -1.0657
-  2017-01-01   57      7284      6178     6178     3.1784    3.1784       4.7981        0.6274        -0.0125
-  2017-01-01   59      7284      6228     6178     4.9133    4.9207       6.5592        0.9714        -4.9155
+  2017-01-01   72      7284      6228     6178     2.8892    2.8851       4.2885        0.5695        -0.0808
+  2017-01-01   75      7284      6228     6178     2.7592    2.7588       4.4505        0.5446        -1.0657
+  2017-01-01   79      7284      6178     6178     3.1784    3.1784       4.7981        0.6274        -0.0125
+  2017-01-01   81      7284      6228     6178     3.8992    3.8983       5.6125        0.7696        -1.2972
 ```
 
-On the first test date the six-month moving average (group 57) scored 1,271
+On the first test date the six-month moving average (group 79) scored 1,271
 of the 6,755 labeled rows, so the common rows are those 1,271; there the
-Ridge regression (group 50) goes from an MAE of 3.37 on its own rows to 3.79.
+Ridge regression (group 72) goes from an MAE of 3.37 on its own rows to 3.79.
 `--groups` takes a comma-separated list (default: every group of the
 Experiment); `--json` prints the rows.
 
@@ -566,8 +567,8 @@ $ triage postmodel sensitivity 396938287f6d --param alpha
 
   alpha   Group   Mean mae   Dates
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  0.1     50      3.0712     4
-  1.0     51      3.0698     4
+  0.1     72      3.0712     4
+  1.0     73      3.0698     4
 ```
 
 `--metric` (default `mae`) and `-p` choose the metric averaged over the
@@ -695,11 +696,11 @@ exits 1 when none of those apply (HistGradientBoosting and LightGBM included).
 
 The examples are the DirtyDuck regression Experiment
 (`example/dirtyduck/experiment-regression.yaml`, `regression_ranking`, the
-count of violations in the next six months). Model 382 is its random forest,
-group 49, on the last test date, 2017-01-01.
+count of violations in the next six months). Model 526 is its random forest,
+group 71, on the last test date, 2017-01-01.
 
 ```console
-$ triage postmodel residuals 382 --top 3
+$ triage postmodel residuals 526 --top 3
                                      Errors per test date
 
   Date         n      Σy        MAE      RMSE     WAPE     Bias     Top 100   Top 1%   y ≤ ŷ
@@ -741,35 +742,37 @@ should have about half the rows at or below it). It reads only.
 group, on the rows both scored:
 
 ```console
-$ triage postmodel baseline 49
-Group 49 against baseline group 55 (chosen: lowest MAE on shared rows): 19122 shared rows on 4 test date(s).
+$ triage postmodel baseline 71
+Group 71 against baseline group 83 (chosen: lowest MAE on shared rows): 23476 shared rows on 4 test date(s).
                                           Model against baseline, per segment
 
                                        MAE      MAE       WAPE     WAPE      Bias                     Excess    Excess
   Cut       Segme…   Rows    Σy        model    base      model    base      model    Closer   Wins   |e|       share
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  band      (0,      17330   82748.0   3.0303   2.7128    0.6346   0.5681    0.8424   43.3%    no     5502.0    100.0%
+  band      no       4354    23007.0   3.1079   3.4753    0.5882   0.6577    0.2537   52.2%    yes    -1599.8   —
+            history
+  band      (0,      17330   82748.0   3.0303   3.1251    0.6346   0.6545    0.8424   48.7%    yes    -1643.9   —
             10]
-  band      (10,     1792    14202.0   4.1643   8.4625    0.5255   1.0678    -1.11…   76.2%    yes    -7702.4   —
+  band      (10,     1792    14202.0   4.1643   4.7139    0.5255   0.5948    -1.11…   57.1%    yes    -984.8    —
             100]
   …
-Segments won: 66.7%
-Entities: 10582 — model wins 50.0%, ties 0.0%; the won ones hold 61.3% of Σy; median error ratio (model / baseline)
-0.952
-Dates won per entity — 307 entities on all 4
+Segments won: 88.9%
+Entities: 11518 — model wins 51.0%, ties 0.0%; the won ones hold 64.1% of Σy; median error ratio (model / baseline)
+0.977
+Dates won per entity — 611 entities on all 4
                     dates
 
   Dates won   Observed   Expected by chance
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  0           54         37.0
-  1           91         103.3
-  2           88         107.9
-  3           59         50.0
-  4           15         8.7
+  0           98         50.6
+  1           140        175.4
+  2           192        227.1
+  3           117        130.1
+  4           64         27.8
 
-chi-square 19.15 on 4 df, p = 0.000733
-P(win last date) 40.4%; P(win last | won all 3 earlier) 37.5% over 40 entities
-Out of time: the 4629 entities the model won before 2017-01-01, on that date — MAE model 3.0603, baseline 3.4625 (2583
+chi-square 105.59 on 4 df, p = 6.33e-22
+P(win last date) 46.2%; P(win last | won all 3 earlier) 63.4% over 101 entities
+Out of time: the 5478 entities the model won before 2017-01-01, on that date — MAE model 3.0474, baseline 3.4888 (2848
 rows)
 ```
 
@@ -785,8 +788,8 @@ out-of-time check: the entities the model won on the earlier dates, scored on
 the last one.
 
 Without `--baseline GROUP`, the command picks the Experiment's baseline group
-with the lowest MAE on the shared rows (here the running mean of the label
-lags, group 55). `--cut band|sbc|cold-start|subset:NAME|all` chooses the
+with the lowest MAE on the shared rows (here Croston over the six-month
+violation totals, group 83). `--cut band|sbc|cold-start|subset:NAME|all` chooses the
 segments (default `all`, which adds each Subset the Experiment's models were
 evaluated on). `--entity-group-query FILE` runs a SQL file returning
 `entity_id, group_key` and repeats the entity table at that coarser level.
@@ -797,15 +800,15 @@ the chance and out-of-time tables need two.
 `triage postmodel structure MODEL` checks the fitted model:
 
 ```console
-$ triage postmodel structure 382
-Model 382: RandomForestRegressor (regression_ranking)
+$ triage postmodel structure 526
+Model 526: RandomForestRegressor (regression_ranking)
 Forecast structure on 2017-01-01: 48 distinct values; 33% of rows at 5.871;
 minimum 3.432, maximum 9.788; 0.0% negative
 10 tree(s), 8–8 leaves each (mean 8.0); 0 leaves fitted on fewer than 2 training
 rows, in 0 tree(s)
 
-$ triage postmodel structure 383
-Model 383: Ridge (regression_ranking)
+$ triage postmodel structure 527
+Model 527: Ridge (regression_ranking)
 Forecast structure on 2017-01-01: 6088 distinct values; 0% of rows at 4.842; minimum 0.2743, maximum 13.39; 0.0%
 negative
 Mean forecast 5.1403 on the train matrix, 4.9591 on the test matrix (stored 4.9591, gap 0.00000000): a shift of -0.1811
@@ -832,19 +835,19 @@ gives each feature family's share of the group's importance per train end, and
 how stable the top features are:
 
 ```console
-$ triage postmodel importance 49
-                                         Importance share by family — group 49
+$ triage postmodel importance 71
+                                         Importance share by family — group 71
 
   Model   Train end    inspections.…   facilities.f…   inspections.d…   facilities.z…   inspections.t…   inspections.…
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  337     2015-01-01   32.2%           27.1%           23.7%            12.2%           2.6%             2.2%
-  352     2015-07-01   39.5%           20.8%           15.6%            23.9%           0.0%             0.1%
-  367     2016-01-01   44.3%           20.5%           14.2%            17.8%           0.6%             2.6%
-  382     2016-07-01   49.8%           22.9%           7.1%             20.2%           0.0%             0.0%
+  481     2015-01-01   32.2%           27.1%           23.7%            12.2%           2.6%             2.2%
+  496     2015-07-01   39.5%           20.8%           15.6%            23.9%           0.0%             0.1%
+  511     2016-01-01   44.3%           20.5%           14.2%            17.8%           0.6%             2.6%
+  526     2016-07-01   49.8%           22.9%           7.1%             20.2%           0.0%             0.0%
 
-top-5 Jaccard, model 337 → 352: 0.43
-top-5 Jaccard, model 352 → 367: 0.67
-top-5 Jaccard, model 367 → 382: 0.67
+top-5 Jaccard, model 481 → 496: 0.43
+top-5 Jaccard, model 496 → 511: 0.67
+top-5 Jaccard, model 511 → 526: 0.67
 ```
 
 A family is the source column a feature is built from: every aggregation and
@@ -858,9 +861,9 @@ say where the forecast is far off. A leaf's rate is its mean |e| over the
 date's MAE:
 
 ```console
-$ triage postmodel error-tree 382 --kind abs-error
+$ triage postmodel error-tree 526 --kind abs-error
 7 error rule(s) persisted.
-                                                   abs_error leaves — model 382
+                                                   abs_error leaves — model 526
 
   As-of        Rule                                                                 n      Mean |e|   × MAE   Bias     |e| share
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -877,16 +880,16 @@ leaf's win share on the training rows and on the model's own date, so a leaf
 that wins only in training shows it:
 
 ```console
-$ triage postmodel error-tree 382 --kind beats-baseline
+$ triage postmodel error-tree 526 --kind beats-baseline
 8 error rule(s) persisted.
-                                                beats_baseline leaves — model 382
+                                                beats_baseline leaves — model 526
 
   Rule                                                                       Train n   Train wins   Test n   Test wins   Gain
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  NUNIQUE(inspections.result|interval=P6M) <= 1.5 AND                        4377      37.9%        1977     45.7%       -308.81
-  RECENCY(inspections.date) <= 175.5 AND facilities.zip_code=60614 <= 0.5
+  ABS(facilities.TENURE(inspections.date)) > 555.5 AND                       2854      42.9%        1885     46.6%       -216.48
+  NUNIQUE(inspections.date) <= 7.5 AND RECENCY(inspections.date) <= 175.5
   …
-Fitted on 3 date(s) before 2017-01-01 against baseline:55: closer on 45.2% of the training rows and 48.8% of the test rows; …
+Fitted on 3 date(s) before 2017-01-01 against baseline:83: closer on 50.0% of the training rows and 50.1% of the test rows; …
 ```
 
 `error-rules --kind abs-error|beats-baseline` reads those leaves back. With
@@ -900,9 +903,9 @@ largest absolute errors (the top CUT, default `10_pct`) with the rest, and
 persists them at parameter `abs_error_CUT`:
 
 ```console
-$ triage postmodel crosstabs 382 --by abs-error:100_abs
+$ triage postmodel crosstabs 526 --by abs-error:100_abs
 321 crosstab row(s) persisted.
-       Crosstabs — model 382 @ abs_error_100_abs, selected vs rest (top |log ratio| of means)
+       Crosstabs — model 526 @ abs_error_100_abs, selected vs rest (top |log ratio| of means)
 
   As-of        Feature                                                    Selected   Rest     Ratio
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
