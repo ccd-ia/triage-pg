@@ -1128,8 +1128,10 @@ def model_curve(
 
     Reads ``triage.model_threshold_curve`` — the ranks, label pin and horizon the stored
     ``precision@``/``recall@`` come from (ADR-0033), so a row at k agrees with the stored
-    metric at k.
+    metric at k. Classification and regression_ranking models (positive means
+    outcome > 0).
     """
+    from triage import problem_types
     from triage.diagnostics.readers import resolve_subset
 
     date_str = parse_date(as_of_date).date().isoformat() if as_of_date else None
@@ -1143,6 +1145,10 @@ def model_curve(
         ):
             console.print(f"[red]No model with id {model_id}.[/red]")
             raise typer.Exit(code=1)
+        try:
+            problem_types.require(engine, "model curve", model_id)
+        except problem_types.WrongProblemType as exc:
+            _plot_fail(str(exc), 2)
         subset_hash, subset_name = "", None
         if subset:
             # an unknown subset is a NotFoundError, an ambiguous prefix a ValueError
@@ -2813,8 +2819,9 @@ def postmodel_crosstabs(
         "rest",
         "--against",
         help="rest: every row below the cut. near-miss: the next k rows below it (the"
-        " near-miss band of triage postmodel near-miss at its default width). Persisted"
-        " as comparison rest or near_miss.",
+        " near-miss band of triage postmodel near-miss at its default width), for a"
+        " classification or regression_ranking model. Persisted as comparison rest or"
+        " near_miss.",
     ),
 ) -> None:
     """Feature means among the top-k vs the rest — what characterizes the list?
@@ -2836,6 +2843,8 @@ def postmodel_crosstabs(
             " --against near-miss compares a top-k cut. Use one or the other.",
             2,
         )
+    if comparison == "near_miss":
+        _require_type(ctx, "postmodel crosstabs --against near-miss", model_id)
     abs_error_cut: Optional[str] = None
     if by is not None:
         name, _, cut = by.partition(":")
@@ -3154,7 +3163,8 @@ def postmodel_error_rules(
         None,
         "--kind",
         callback=_leaf_kind,
-        help="Only one kind of leaf: fp | fn | confusion | abs-error | beats-baseline.",
+        help="Only one kind of leaf: fp | fn | confusion | abs-error | beats-baseline,"
+        " a kind the model's problem type has.",
     ),
     mae_ratio: float = typer.Option(
         0.1,
@@ -3176,7 +3186,17 @@ def postmodel_error_rules(
     abs-error leaf is suspicious when its mean |e| is at most --mae-ratio of the date's
     population MAE; its lift is the population MAE over its own.
     """
+    from triage import problem_types
+
     engine = get_pool(ctx)
+    if kind is not None:
+        # the type first: "nothing persisted" is no answer to a kind it has no leaves of
+        try:
+            problem_types.require_leaf_kind(
+                engine, model_id, kind, "postmodel error-rules"
+            )
+        except ValueError as exc:  # WrongProblemType, or an unknown model
+            _plot_fail(str(exc), 2)
     with engine.connection() as conn:
         persisted = returned_row(
             conn.execute(
@@ -5238,6 +5258,7 @@ def plot_curve(
 
     One series per population — everyone and each --subset, each ranked among its own
     members — and per model when --compare is given, each with its base rate.
+    Classification and regression_ranking models (positive means outcome > 0).
     """
 
     def draw(pool: DictRowPool) -> PlotResult:
@@ -5305,8 +5326,8 @@ def plot_error_rules(
         None,
         "--kind",
         callback=_leaf_kind,
-        help="fp | fn | confusion | abs-error | beats-baseline. Default: the fp and fn"
-        " trees, else the kind persisted.",
+        help="fp | fn | confusion | abs-error | beats-baseline: a kind the model's"
+        " problem type has. Default: the fp and fn trees, else the kind persisted.",
     ),
     top: int = typer.Option(
         12, "--top", callback=natural_number, help="Leaves drawn per kind."
@@ -5358,7 +5379,9 @@ def plot_leaves(
     """Every fp and confusion leaf of a model group: are any suspiciously right?
 
     Leaves by the share the model gets wrong and by size, with the suspicious zone
-    (--max-error, --min-support) shaded and the count inside it stated.
+    (--max-error, --min-support) shaded and the count inside it stated. Without -p, a
+    regression group's abs-error leaves; a group whose type has none of the kinds the
+    cut reads exits 2.
     """
 
     cut = "" if parameter is None else parameter
@@ -5572,9 +5595,9 @@ def plot_calibration(
 ) -> None:
     """Does the model's score match what its rows realized?
 
-    Mean score against the realized rate (a classifier) or the mean outcome (the other
-    types) per score bucket, on the latest evaluated test date, with the score = outcome
-    diagonal.
+    Mean score against the realized rate (a classifier) or the mean outcome (the
+    regression types) per score bucket, on the latest evaluated test date, with the
+    score = outcome diagonal. A survival model's is triage plot survival-calibration.
     """
 
     def draw(pool: DictRowPool) -> PlotResult:

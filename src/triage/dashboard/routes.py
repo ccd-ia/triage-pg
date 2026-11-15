@@ -768,8 +768,10 @@ def model_curve(
     population, re-ranked inside it. ``base_rate`` is that population's labeled positives over
     its labeled rows — the reference line the panel draws. ``points`` thins the curve to the
     rows nearest that many evenly spaced shares of the population, keeping every configured
-    cut's exact row (``readers.curve``); omitted, every k is returned.
+    cut's exact row (``readers.curve``); omitted, every k is returned. Classification and
+    regression_ranking (positive means outcome > 0); another type answers 422.
     """
+    _require_type(pool, "plot curve", model_id)
     try:
         return readers.curve(
             pool, model_id, as_of_date=as_of_date, subset=subset, points=points
@@ -808,8 +810,10 @@ def model_calibration(
     block of tied scores, which shares one decile.
 
     Defaults: the model's LATEST evaluated test date and its training label timespan —
-    exactly the slice the per-split evaluations describe.
+    exactly the slice the per-split evaluations describe. A survival model answers 422: its
+    calibration is ``/survival``'s, predicted S(H) against Kaplan-Meier.
     """
+    _require_type(pool, "plot calibration", model_id)
     try:
         result = readers.calibration(pool, model_id, split_kind, as_of_date, bins)
     except readers.NotFoundError as exc:
@@ -891,8 +895,11 @@ def model_crosstabs(
     ranks the nonzero rates by |selected − rest|, where a ratio of two rates near zero would
     mislead. ``comparison=near_miss`` compares the selected rows with the next k rows below
     the cut instead of every row below it (migration 0037); ``rest_value`` then holds the
-    near-miss value.
+    near-miss value. The near miss is a classification or regression_ranking model's; another
+    type answers 422.
     """
+    if comparison == "near_miss":
+        _require_type(pool, "postmodel crosstabs --against near-miss", model_id)
     rows = readers.crosstabs(
         pool,
         model_id,
@@ -973,7 +980,18 @@ def model_error_rules(
 
     Every leaf carries ``reference_error_rate``: the population error rate of its kind at its
     date and cut (``readers.error_reference_rates``), the mark its own rate is read against.
+    A kind the model's problem type has no leaves of (``problem_types.leaf_kinds``) answers
+    422 naming the kind to read instead.
     """
+    if error_kind is not None:
+        from triage import problem_types
+
+        try:
+            problem_types.require_leaf_kind(pool, model_id, error_kind)
+        except problem_types.WrongProblemType as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ValueError as exc:  # no model has this id
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     if suspicious:
         return readers.suspicious_leaves(
             pool,
@@ -1055,8 +1073,15 @@ def model_group_curves(
     ``points`` holds the curve rows ``readers.curve`` returns, thinned to that many evenly
     spaced shares of the population plus every configured cut. ``subset`` is a subset_hash
     (each model's curve is then drawn over the subset's members); ``experiment_hash`` keeps
-    one experiment's models of a shared group.
+    one experiment's models of a shared group. A group whose models (in that scope) are all
+    regression or survival answers 422: the curve needs a top-k cut.
     """
+    from triage import problem_types
+
+    types = problem_types.group_problem_types(pool, model_group_id, experiment_hash)
+    refused = problem_types.group_refusal("plot curve-dates", model_group_id, types)
+    if refused is not None:
+        raise HTTPException(status_code=422, detail=refused)
     try:
         series = readers.group_curves(
             pool,

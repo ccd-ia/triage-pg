@@ -160,6 +160,77 @@ def test_every_gated_name_is_a_command_of_the_cli() -> None:
                 assert word in options, name
 
 
+#: The postmodel, plot and model commands no problem type gates, and why each reads
+#: every type. A new command is gated in triage.problem_types (COMMANDS, or the kind of
+#: leaf it reads) or listed here with its reason: the walk below fails until it is one.
+READS_EVERY_TYPE = {
+    "postmodel crosstabs": (
+        "the top k against the rest is a ranking of the scores; --by abs-error and"
+        " --against near-miss are gated in COMMANDS"
+    ),
+    "postmodel compare": "two models' top-k lists and their rank correlation: a ranking",
+    "postmodel compare-rows": "an Experiment's groups on the rows all of them scored",
+    "postmodel structure": "the fitted estimator; it reads the type itself",
+    "postmodel importance": "a group's persisted feature importances",
+    "postmodel sensitivity": "an Experiment's metric by one hyperparameter",
+    "postmodel kinds": "the table itself: it reads no model",
+    "plot crosstabs": "the rows postmodel crosstabs persisted, at whichever cut",
+    "plot crosstabs-dates": "the same rows over a group's test dates",
+    "plot overlap": "two groups' top-k lists and their rank correlation: a ranking",
+    "plot scores": "the score histogram, which reads the type itself",
+    "plot importance": "a group's persisted feature importances",
+    "model show": "the model card, which reads the type itself",
+}
+
+#: The CLI groups whose commands read a model, a model group or an Experiment's models.
+_DIAGNOSTIC_GROUPS = ("postmodel", "plot", "model")
+
+
+def _diagnostic_commands() -> list[str]:
+    root = typer.main.get_command(app)
+    assert isinstance(root, click.Group)
+    names: list[str] = []
+    for group_name in _DIAGNOSTIC_GROUPS:
+        group = root.commands[group_name]
+        assert isinstance(group, click.Group), group_name
+        names += [f"{group_name} {sub}" for sub in group.commands]
+    return names
+
+
+def _kind_gated() -> set[str]:
+    """The commands gated by the kind of error-tree leaf they read, not in COMMANDS."""
+    return {
+        "postmodel error-tree",  # error_tree_refusal
+        *problem_types.RECURRENCE_COMMANDS,
+        *problem_types.LEAF_COMMANDS,
+    }
+
+
+def test_every_diagnostic_command_is_gated_or_reads_every_type() -> None:
+    """The guard against an ungated command: each one is in COMMANDS, gates the kind of
+    leaf it reads, or is listed in READS_EVERY_TYPE with its reason. A command with a
+    gated option (``postmodel crosstabs --by abs-error``) reads every type without it,
+    so it is listed too."""
+    gated = {name for name in problem_types.COMMANDS if " --" not in name}
+    gated |= _kind_gated()
+    commands = _diagnostic_commands()
+    assert len(commands) > 30
+    unclassified = [c for c in commands if c not in gated and c not in READS_EVERY_TYPE]
+    assert unclassified == [], (
+        "gate these by problem type (triage.problem_types.COMMANDS, or a kind table) or"
+        f" list them in READS_EVERY_TYPE with why they read every type: {unclassified}"
+    )
+
+
+def test_the_allow_list_names_ungated_commands_only() -> None:
+    commands = set(_diagnostic_commands())
+    assert set(READS_EVERY_TYPE) <= commands, set(READS_EVERY_TYPE) - commands
+    assert _kind_gated() <= commands, _kind_gated() - commands
+    whole = {name for name in problem_types.COMMANDS if " --" not in name}
+    assert not set(READS_EVERY_TYPE) & (whole | _kind_gated())
+    assert not whole & _kind_gated()
+
+
 def test_the_verb_is_hidden_from_the_help() -> None:
     result = runner.invoke(app, ["postmodel", "--help"])
     assert result.exit_code == 0

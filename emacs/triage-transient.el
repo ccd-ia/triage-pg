@@ -603,17 +603,18 @@ With no type at point, or no table, every kind."
 The candidates are the kinds the problem type at point has."
   (completing-read prompt (triage-transient--leaf-kinds-at-point) nil t initial-input history))
 
-(defun triage-transient--check-recurrence-kind (group args)
-  "Signal a `user-error' when GROUP's type has no leaf of the --kind in ARGS.
-GROUP is a model group whose problem type is the one at point.  With
-no --kind, no type or no table the CLI decides: without --kind it
-reads the type's first kind."
+(defun triage-transient--check-leaf-kind (noun target args)
+  "Signal a `user-error' when TARGET's type has no leaf of the --kind in ARGS.
+TARGET is a model or a model group, as NOUN says (\"Model\" or
+\"Model group\"), whose problem type is the one at point.  With no
+--kind, no type or no table the CLI decides: without --kind it reads
+the type's first kind, or every kind persisted."
   (when-let* ((kind (triage-transient--flag-value args "--kind"))
               (type (triage--at-point :type))
               (kinds (triage--recurrence-kinds type))
               ((not (member kind kinds))))
-    (user-error "Model group %s is %s: its error trees have %s leaves"
-                group type (string-join kinds ", "))))
+    (user-error "%s %s is %s: its error trees have %s leaves"
+                noun target type (string-join kinds ", "))))
 
 ;;;###autoload (autoload 'triage-plot-menu "triage-transient" nil t)
 (transient-define-prefix triage-plot-menu ()
@@ -673,13 +674,15 @@ at point has."
 
 (defun triage-plot (subcommand targets args)
   "Draw triage plot SUBCOMMAND of TARGETS with the flags ARGS.
-Only the flags SUBCOMMAND accepts are passed.  The recurrence
-figure refuses a --kind the type at point has no leaves of.  When
-SUBCOMMAND needs one of its required flags and none is given, the
-first is read from the minibuffer; an empty answer leaves it out.
-The figure goes to a temporary SVG that opens in an image buffer."
-  (when (equal subcommand "recurrence")
-    (triage-transient--check-recurrence-kind (car targets) args))
+Only the flags SUBCOMMAND accepts are passed.  The recurrence and
+error-rules figures refuse a --kind the type at point has no leaves
+of.  When SUBCOMMAND needs one of its required flags and none is
+given, the first is read from the minibuffer; an empty answer leaves
+it out.  The figure goes to a temporary SVG that opens in an image
+buffer."
+  (pcase subcommand
+    ("recurrence" (triage-transient--check-leaf-kind "Model group" (car targets) args))
+    ("error-rules" (triage-transient--check-leaf-kind "Model" (car targets) args)))
   (pcase-let* ((`(,_target ,flags ,required) (cdr (assoc subcommand triage-plot-subcommands)))
                (required (ensure-list required))
                (args (triage-transient--only args flags))

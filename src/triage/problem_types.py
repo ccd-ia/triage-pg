@@ -8,6 +8,12 @@ classification) and refuses a type the command does not read, naming the command
 answers the same question for that type. :func:`require_group` does the same for a model
 group's command, over the types of the group's models.
 
+The commands that read persisted error-tree leaves gate the kind of leaf instead
+(:func:`error_tree_refusal`, :data:`RECURRENCE_COMMANDS`, :data:`LEAF_COMMANDS`, all
+derived from :func:`leaf_kinds`). Every other postmodel, plot and model command reads
+every type; the test suite walks the CLI and fails on a command that is neither gated
+here nor listed, with its reason, as reading every type.
+
 The table is data, so the CLI, the dashboard and an editor front end can read one copy:
 :func:`kinds_table` is what the hidden ``triage postmodel kinds --json`` prints for
 triage.el, which greys out a menu entry the model or Experiment at point would refuse.
@@ -16,7 +22,7 @@ triage.el, which greys out a menu entry the model or Experiment at point would r
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from triage.util.db import DictRowPool
 
@@ -63,6 +69,15 @@ _BASELINE_COMPARISON = CommandTypes(
         "classification": "triage plot overlap GROUP_A GROUP_B",
         "survival": _FOR_SURVIVAL,
     },
+)
+
+#: Precision and recall at each cut of one test date: a positive class split at the cut.
+#: A regression model's labeled rows are all positive (outcome > 0), so its precision
+#: reads 1, and a survival label has no outcome to count. The plot and the printed
+#: points share the entry.
+_THRESHOLD_CURVE = CommandTypes(
+    CUT_CLASS_TYPES,
+    {"regression": "triage plot gains MODEL", "survival": "triage plot km MODEL"},
 )
 
 #: Command → the problem types it reads.
@@ -131,6 +146,22 @@ COMMANDS: dict[str, CommandTypes] = {
             "regression": "triage plot bias MODEL or triage plot forecast-time MODEL",
             "survival": "triage plot km MODEL",
         },
+    ),
+    "plot curve": _THRESHOLD_CURVE,
+    "model curve": _THRESHOLD_CURVE,
+    # The near-miss band of postmodel near-miss, which reads the same cut types.
+    "postmodel crosstabs --against near-miss": CommandTypes(
+        CUT_CLASS_TYPES,
+        {
+            "regression": "triage postmodel crosstabs MODEL --by abs-error",
+            "survival": "triage postmodel crosstabs MODEL -p 10_pct",
+        },
+    ),
+    # A score bucket's mean score against what its rows realized: a survival label has
+    # no outcome to average; its calibration is predicted S(H) against Kaplan-Meier.
+    "plot calibration": CommandTypes(
+        ("classification", *REGRESSION_TYPES),
+        {"survival": "triage plot survival-calibration MODEL"},
     ),
 }
 
@@ -349,6 +380,11 @@ def require_group(
     return problem_types
 
 
+def _spelled(kinds: Sequence[str]) -> str:
+    """Kinds of leaf as ``--kind`` takes them, comma-separated (``abs-error``)."""
+    return ", ".join(k.replace("_", "-") for k in kinds)
+
+
 #: The commands that read one kind of a model group's persisted leaves, and whether a
 #: classification kind needs its cut passed (``postmodel error-recurrence`` defaults to
 #: 100_abs; ``plot recurrence`` takes no default).
@@ -383,10 +419,96 @@ def recurrence_refusal(
             cut = " -p CUT"
     return (
         f"model group {model_group_id} is {' and '.join(problem_types)}: its error"
-        f" trees have {', '.join(k.replace('_', '-') for k in kinds)} leaves, not"
+        f" trees have {_spelled(kinds)} leaves, not"
         f" {kind.replace('_', '-')}. Use triage {command}"
         f" {model_group_id} --kind {first.replace('_', '-')}{cut}."
     )
+
+
+#: The commands that read one model's persisted leaves of one ``--kind``
+#: (:func:`leaf_refusal`), and the figure whose cut picks the kinds of a group's leaves
+#: (:func:`leaves_refusal`). With :data:`RECURRENCE_COMMANDS` and ``postmodel
+#: error-tree`` (:func:`error_tree_refusal`) they are the commands gated by the kind of
+#: leaf they read rather than by :data:`COMMANDS`.
+LEAF_COMMANDS = ("postmodel error-rules", "plot error-rules", "plot leaves")
+
+
+def leaf_refusal(
+    model_id: int, problem_type: str, kind: str, command: str = "postmodel error-rules"
+) -> str | None:
+    """Why a model's error trees have no ``kind`` leaves, or None.
+
+    ``command`` is the one asked (``postmodel error-rules`` or ``plot error-rules``); the
+    message names it with the first kind the type has.
+    """
+    kinds = leaf_kinds(problem_type)
+    if kind in kinds:
+        return None
+    return (
+        f"model {model_id} is {problem_type}: its error trees have"
+        f" {_spelled(kinds)} leaves, not"
+        f" {kind.replace('_', '-')}. Use triage {command} {model_id} --kind"
+        f" {kinds[0].replace('_', '-')}."
+    )
+
+
+def require_leaf_kind(
+    pool: DictRowPool, model_id: int, kind: str, command: str = "postmodel error-rules"
+) -> str:
+    """The model's problem type, when its error trees can have ``kind`` leaves.
+
+    Raises:
+        WrongProblemType: the type has no ``kind`` leaves; the message names the kind
+            to read instead.
+        ValueError: no model has this id.
+    """
+    problem_type = model_problem_type(pool, model_id)
+    message = leaf_refusal(model_id, problem_type, kind, command)
+    if message is not None:
+        raise WrongProblemType(message)
+    return problem_type
+
+
+def leaves_refusal(
+    model_group_id: int, problem_types: tuple[str, ...], parameter: str
+) -> str | None:
+    """Why ``plot leaves GROUP [-p CUT]`` finds no leaves the group's types have, or None.
+
+    Without a cut (``parameter == ''``) the figure reads abs_error leaves, which have
+    none; with one, the fp and confusion leaves fitted at it. A group of several types is
+    read when any of them has the kinds. A group with no model is not refused here.
+    """
+    kind = "abs_error" if parameter == "" else "fp"
+    if not problem_types or any(kind in leaf_kinds(t) for t in problem_types):
+        return None
+    kinds = [k for k in LEAF_KINDS if any(k in leaf_kinds(t) for t in problem_types)]
+    if kind == "fp":
+        use = f"triage plot leaves {model_group_id} with no -p (abs-error has no cut)"
+    elif "survival" in problem_types:
+        use = f"triage plot leaves {model_group_id} -p 'CUT|horizon=H'"
+    else:
+        use = f"triage plot leaves {model_group_id} -p CUT"
+    read = "fp and confusion" if kind == "fp" else "abs-error"
+    return (
+        f"model group {model_group_id} is {' and '.join(problem_types)}: its error"
+        f" trees have {_spelled(kinds)} leaves, not"
+        f" {read}. Use {use}."
+    )
+
+
+def require_leaves(
+    pool: DictRowPool, model_group_id: int, parameter: str
+) -> tuple[str, ...]:
+    """The group's problem types, when ``plot leaves`` at ``parameter`` reads them.
+
+    Raises:
+        WrongProblemType: none of the group's types has the kinds the cut reads.
+    """
+    problem_types = group_problem_types(pool, model_group_id)
+    message = leaves_refusal(model_group_id, problem_types, parameter)
+    if message is not None:
+        raise WrongProblemType(message)
+    return problem_types
 
 
 def recurrence_kind(
@@ -431,8 +553,9 @@ def kinds_table() -> dict[str, Any]:
         ``accepts`` and, for a type it refuses, the command to run ``instead``;
         ``error_tree`` from :func:`error_tree_table`; and ``error_recurrence`` from
         :func:`recurrence_table`, the kinds of leaf ``postmodel error-recurrence`` and
-        ``plot recurrence`` read per type. A command missing from ``commands`` reads
-        every problem type.
+        ``plot recurrence`` read per type, which the :data:`LEAF_COMMANDS` read too. A
+        command missing from ``commands`` reads every problem type, but for the kind of
+        leaf it is asked for.
     """
     return {
         "problem_types": list(PROBLEM_TYPES),
