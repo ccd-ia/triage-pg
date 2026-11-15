@@ -120,6 +120,18 @@ _Avoid_: error model (implies stacking), boosting, residual model
 The `triage check leakage` test that an Experiment's Cohort, labels and features stay the same when data known after each as_of_date is removed.
 _Avoid_: leak test, leakage audit
 
+**History period**:
+The length of one slot of an entity's raw target-history series (`history_period`, e.g. `1 month`), required with `history_query`. Slot `_hist_{width−k}` holds the period starting k history periods before the as_of_date; a period with no row is a gap, never filled by an older value.
+_Avoid_: lag (a lag is a label at an earlier label date), window, bucket, frequency
+
+**Common rows**:
+The rows every compared model group scored on a test date, labeled; a reserved Subset (`common:<md5>`) on which `postmodel compare-rows` and `audition --common-rows` compare groups.
+_Avoid_: intersection set, shared sample, aligned rows
+
+**Coverage**:
+A model's scored labeled rows over the labeled rows of its test date, averaged per model group; below 1 when a model abstains (a baseline without history) or the label covers entities outside the Cohort.
+_Avoid_: recall, support, completeness
+
 ## Relationships
 
 - A **Registry** tracks many **Projects**; each **Project** is one database with many collaborating users.
@@ -131,6 +143,7 @@ _Avoid_: leak test, leakage audit
 - A **Submission** records that a **Principal** asked a **Project** to run an **Experiment**; the resulting Run and **Predictions** live in the **Project** database — the **Registry** keeps only the audit row.
 - **Forward scores** append **Predictions** over time; monitoring compares each scoring window against the model group's **Reference window** (drift) and re-evaluates once labels arrive (realized outcomes). Survival experiments are evaluated by **C-index** on the same ranking spine.
 - Fairness reads **Predictions** grouped by **Protected group** (with τ verdicts); the **Fairness tree** routes attention to the disparity that matters for the intervention. A **Subset** re-runs every metric with the slice as the population. **Crosstabs** and **Error trees** are persisted diagnostics computed once from the Matrix (`triage postmodel`), read by CLI and dashboard alike.
+- A **History period** belongs to an **Experiment**'s target history. **Common rows** are a **Subset** built from the model groups of one **Experiment**. **Coverage** is reported beside every group comparison and decides whether **Common rows** are needed.
 
 ## Flagged ambiguities
 
