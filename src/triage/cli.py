@@ -2927,6 +2927,19 @@ def _error_tree_gate(
     return problem_type
 
 
+def _recurrence_kind(
+    pool: DictRowPool, model_group_id: int, kind: Optional[str], command: str
+) -> str:
+    """The kind of leaf ``command`` reads for the group, or exit 2 when its problem type
+    has no such leaves (``problem_types.recurrence_kind``)."""
+    from triage import problem_types
+
+    try:
+        return problem_types.recurrence_kind(pool, model_group_id, kind, command)
+    except problem_types.WrongProblemType as exc:
+        _plot_fail(str(exc), 2)
+
+
 def _tree_flags(kind: str, parameter: Optional[str]) -> str:
     """The ``error-tree`` flags that fit a kind of leaf at a cut."""
     if kind == "abs_error":
@@ -3269,11 +3282,13 @@ def postmodel_error_recurrence(
         " classification kinds, no cut for abs-error, the latest baseline for"
         " beats-baseline.",
     ),
-    kind: str = typer.Option(
-        "fp",
+    kind: Optional[str] = typer.Option(
+        None,
         "--kind",
         callback=_leaf_kind,
-        help="fp | fn | confusion | abs-error | beats-baseline.",
+        help="fp | fn | confusion | abs-error | beats-baseline: a kind the group's"
+        " problem type has. Default: its first (fp, or abs-error for a regression"
+        " group).",
     ),
     top: int = typer.Option(20, "--top", "-n", help="Rows to print."),
 ) -> None:
@@ -3285,6 +3300,7 @@ def postmodel_error_recurrence(
     `triage postmodel error-tree` on the group's models first.
     """
     engine = get_pool(ctx)
+    kind = _recurrence_kind(engine, model_group_id, kind, "postmodel error-recurrence")
     parameter = _leaf_parameter(engine, model_group_id, kind, parameter)
     with engine.connection() as conn:
         rows = conn.execute(
@@ -4477,9 +4493,9 @@ def postmodel_kinds(
 
     The table the commands' own gates read (triage.problem_types): each gated command
     with the problem types it reads and what to run instead for the others, then the
-    error-tree kinds and the --horizon rule of each type. A command not listed reads
-    every type. triage.el reads it once a session to grey out what would exit 2. Needs
-    no database.
+    error-tree kinds and the --horizon rule of each type, then the kinds of leaf the
+    recurrence commands read per type. A command not listed reads every type. triage.el
+    reads it once a session to grey out what would exit 2. Needs no database.
     """
     from triage import problem_types
     from triage.overview import CONTRACT
@@ -4504,6 +4520,15 @@ def postmodel_kinds(
     for problem_type, rule in table["error_tree"].items():
         trees.add_row(problem_type, ", ".join(rule["kinds"]), rule["horizon"])
     console.print(trees)
+    recurrence = Table(
+        title="triage postmodel error-recurrence, triage plot recurrence",
+        box=box.SIMPLE_HEAVY,
+    )
+    for col in ("Problem type", "--kind"):
+        recurrence.add_column(col)
+    for problem_type, rule in table["error_recurrence"].items():
+        recurrence.add_row(problem_type, ", ".join(rule["kinds"]))
+    console.print(recurrence)
 
 
 @app.command("archive")
@@ -5249,6 +5274,7 @@ def plot_curve_dates(
     """A model group's curve on each test date: is the ranking stable over time?
 
     One precision curve per test date, and each date's base rate beside them.
+    Classification and regression_ranking groups (positive means outcome > 0).
     """
 
     def draw(pool: DictRowPool) -> PlotResult:
@@ -5357,11 +5383,13 @@ def plot_recurrence(
         help="The cut the trees were fitted at. Default: no cut for abs-error, the"
         " latest baseline for beats-baseline; required for the classification kinds.",
     ),
-    kind: str = typer.Option(
-        "fp",
+    kind: Optional[str] = typer.Option(
+        None,
         "--kind",
         callback=_leaf_kind,
-        help="fp | fn | confusion | abs-error | beats-baseline.",
+        help="fp | fn | confusion | abs-error | beats-baseline: a kind the group's"
+        " problem type has. Default: its first (fp, or abs-error for a regression"
+        " group).",
     ),
     output: Optional[pathlib.Path] = typer.Option(
         None, "--output", "-o", help=_OUTPUT_HELP.format("recurrence-GROUP.svg")
@@ -5373,14 +5401,17 @@ def plot_recurrence(
     column per test date.
     """
 
-    if parameter is None and kind in ("fp", "fn", "confusion"):
-        _plot_fail(f"--kind {kind} needs the cut its trees were fitted at: pass -p", 2)
-
     def draw(pool: DictRowPool) -> PlotResult:
         from triage import plots
 
-        cut = "" if parameter is None and kind == "abs_error" else parameter
-        return plots.recurrence(pool, model_group_id, cut, kind)
+        # the group's type first: a cut is no help for a kind it has no leaves of
+        read = _recurrence_kind(pool, model_group_id, kind, "plot recurrence")
+        if parameter is None and read in ("fp", "fn", "confusion"):
+            _plot_fail(
+                f"--kind {read} needs the cut its trees were fitted at: pass -p", 2
+            )
+        cut = "" if parameter is None and read == "abs_error" else parameter
+        return plots.recurrence(pool, model_group_id, cut, read)
 
     _write_plot(ctx, output, f"recurrence-{model_group_id}.svg", draw)
 

@@ -5,7 +5,8 @@ needs a continuous forecast, a confusion leaf needs a positive class. :data:`COM
 holds that table, one entry per command. :func:`require` reads a model's problem type from
 the database (``triage.model_problem_type``, which reads a model with no run lineage as
 classification) and refuses a type the command does not read, naming the command that
-answers the same question for that type.
+answers the same question for that type. :func:`require_group` does the same for a model
+group's command, over the types of the group's models.
 
 The table is data, so the CLI, the dashboard and an editor front end can read one copy:
 :func:`kinds_table` is what the hidden ``triage postmodel kinds --json`` prints for
@@ -121,6 +122,16 @@ COMMANDS: dict[str, CommandTypes] = {
     "postmodel baseline": _BASELINE_COMPARISON,
     "plot segments": _BASELINE_COMPARISON,
     "plot win-consistency": _BASELINE_COMPARISON,
+    # A model group's precision at each cut of each test date: a regression group's
+    # labeled rows are all positive (outcome > 0), so its precision reads a flat 1. The
+    # gate reads the group's types (group_refusal); MODEL is one of the group's models.
+    "plot curve-dates": CommandTypes(
+        CUT_CLASS_TYPES,
+        {
+            "regression": "triage plot bias MODEL or triage plot forecast-time MODEL",
+            "survival": "triage plot km MODEL",
+        },
+    ),
 }
 
 
@@ -293,25 +304,121 @@ def group_problem_types(
     return tuple(t for t in PROBLEM_TYPES if t in found)
 
 
+def group_refusal(
+    command: str, model_group_id: int, problem_types: tuple[str, ...]
+) -> str | None:
+    """The message refusing a model group for ``command``, or None when it is read.
+
+    ``problem_types`` are the group's (:func:`group_problem_types`). A group of several
+    types is read when any of them is. A group with no model is not refused here: the
+    reader answers it.
+    """
+    entry = COMMANDS[command]
+    if not problem_types or any(t in entry.accepts for t in problem_types):
+        return None
+    message = (
+        f"triage {command} reads {' and '.join(entry.accepts)} model groups; model"
+        f" group {model_group_id} is {' and '.join(problem_types)}."
+    )
+    for problem_type in problem_types:
+        instead = entry.instead.get(problem_type)
+        if instead:
+            message += f" For a {problem_type} model group use {instead}"
+            if "MODEL" in instead:
+                message += (
+                    " on one of its models (list them with: triage models <experiment>"
+                    f" --group {model_group_id})"
+                )
+            return message + "."
+    return message
+
+
+def require_group(
+    pool: DictRowPool, command: str, model_group_id: int
+) -> tuple[str, ...]:
+    """The model group's problem types, when ``command`` reads one of them.
+
+    Raises:
+        WrongProblemType: the command reads none of them; the message names the command
+            to run instead.
+    """
+    problem_types = group_problem_types(pool, model_group_id)
+    message = group_refusal(command, model_group_id, problem_types)
+    if message is not None:
+        raise WrongProblemType(message)
+    return problem_types
+
+
+#: The commands that read one kind of a model group's persisted leaves, and whether a
+#: classification kind needs its cut passed (``postmodel error-recurrence`` defaults to
+#: 100_abs; ``plot recurrence`` takes no default).
+RECURRENCE_COMMANDS: dict[str, bool] = {
+    "postmodel error-recurrence": False,
+    "plot recurrence": True,
+}
+
+
 def recurrence_refusal(
-    model_group_id: int, problem_types: tuple[str, ...], kind: str
+    model_group_id: int,
+    problem_types: tuple[str, ...],
+    kind: str,
+    command: str = "postmodel error-recurrence",
 ) -> str | None:
     """Why a model group's error trees have no ``kind`` leaves, or None.
 
     A group of several types reads a kind any of them reads. A group with no model is
-    not refused here: the reader answers it.
+    not refused here: the reader answers it. The message names ``command``, one of
+    :data:`RECURRENCE_COMMANDS`, with the kind to read instead.
     """
+    needs_cut = RECURRENCE_COMMANDS[command]
     if not problem_types or any(kind in leaf_kinds(t) for t in problem_types):
         return None
     kinds = [k for k in LEAF_KINDS if any(k in leaf_kinds(t) for t in problem_types)]
     first = kinds[0]
-    cut = " -p 'CUT|horizon=H'" if first == "fp" and "survival" in problem_types else ""
+    cut = ""
+    if first not in REGRESSION_TREE_KINDS:
+        if "survival" in problem_types:
+            cut = " -p 'CUT|horizon=H'"
+        elif needs_cut:
+            cut = " -p CUT"
     return (
         f"model group {model_group_id} is {' and '.join(problem_types)}: its error"
         f" trees have {', '.join(k.replace('_', '-') for k in kinds)} leaves, not"
-        f" {kind.replace('_', '-')}. Use triage postmodel error-recurrence"
+        f" {kind.replace('_', '-')}. Use triage {command}"
         f" {model_group_id} --kind {first.replace('_', '-')}{cut}."
     )
+
+
+def recurrence_kind(
+    pool: DictRowPool,
+    model_group_id: int,
+    kind: str | None,
+    command: str = "postmodel error-recurrence",
+) -> str:
+    """The kind of leaf ``command`` reads for a model group: ``kind`` when the group's
+    problem type has it; with no ``kind``, the first kind the type has (fp, or
+    abs_error for a regression group), as the dashboard's recurrence route reads it.
+
+    Raises:
+        WrongProblemType: none of the group's types has ``kind`` leaves; the message
+            names the kind to read instead.
+    """
+    problem_types = group_problem_types(pool, model_group_id)
+    if kind is None:
+        return leaf_kinds(problem_types[0])[0] if problem_types else "fp"
+    message = recurrence_refusal(model_group_id, problem_types, kind, command)
+    if message is not None:
+        raise WrongProblemType(message)
+    return kind
+
+
+def recurrence_table() -> dict[str, dict[str, list[str]]]:
+    """The kinds of leaf the recurrence commands read for each problem type, spelled as
+    ``--kind`` takes them: :func:`leaf_kinds`, which the gate reads."""
+    return {
+        t: {"kinds": [k.replace("_", "-") for k in leaf_kinds(t)]}
+        for t in PROBLEM_TYPES
+    }
 
 
 def kinds_table() -> dict[str, Any]:
@@ -321,9 +428,11 @@ def kinds_table() -> dict[str, Any]:
     Returns:
         ``problem_types``; ``commands``, each gated command (as :data:`COMMANDS` names it,
         an option included where the option is what is gated) with the types it
-        ``accepts`` and, for a type it refuses, the command to run ``instead``; and
-        ``error_tree`` from :func:`error_tree_table`. A command missing from
-        ``commands`` reads every problem type.
+        ``accepts`` and, for a type it refuses, the command to run ``instead``;
+        ``error_tree`` from :func:`error_tree_table`; and ``error_recurrence`` from
+        :func:`recurrence_table`, the kinds of leaf ``postmodel error-recurrence`` and
+        ``plot recurrence`` read per type. A command missing from ``commands`` reads
+        every problem type.
     """
     return {
         "problem_types": list(PROBLEM_TYPES),
@@ -332,4 +441,5 @@ def kinds_table() -> dict[str, Any]:
             for name, entry in COMMANDS.items()
         },
         "error_tree": error_tree_table(),
+        "error_recurrence": recurrence_table(),
     }

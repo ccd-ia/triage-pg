@@ -26,7 +26,8 @@ import { useAsync } from '../hooks/useAsync'
 import { fmtNum, fmtPct } from '../api/format'
 import { prettyFeature } from '../api/transforms'
 import { useExperiment } from '../hooks/useExperiment'
-import { isEmpty, type FeatureImportanceRow, type ProblemType } from '../api/types'
+import { isEmpty, type FeatureImportanceRow } from '../api/types'
+import { CUT_TYPES, REGRESSION_TYPES } from '../api/problemTypes'
 import { CalibrationChart } from './CalibrationChart'
 import { CrosstabsPanel } from './CrosstabsPanel'
 import { ErrorRulesPanel } from './ErrorRulesPanel'
@@ -50,11 +51,6 @@ const MAX_SUBSETS = 4
 const NO_PICKS: (string | null)[] = Array(MAX_SUBSETS).fill(null)
 /** An overlay draws thinned curves: 101 evenly spaced shares plus every configured cut. */
 const OVERLAY_POINTS = 101
-
-/** The problem types whose rows split at a top-k cut (problem_types.CUT_CLASS_TYPES). */
-const CUT_TYPES: ProblemType[] = ['classification', 'regression_ranking']
-/** The problem types with a continuous forecast (problem_types.REGRESSION_TYPES). */
-const REGRESSION_TYPES: ProblemType[] = ['regression', 'regression_ranking']
 
 interface Props {
   modelId: number

@@ -588,15 +588,43 @@ name and flag against the CLI's own command tree, and the problem
 types each one reads come from the table of `triage--refuses-p',
 under the name \"plot SUBCOMMAND\"."))
 
+(defconst triage-transient--leaf-kinds '("fp" "fn" "confusion" "abs-error" "beats-baseline")
+  "Every kind of persisted error-tree leaf, as --kind takes it.")
+
+(defun triage-transient--leaf-kinds-at-point ()
+  "Return the kinds of leaf the problem type at point has.
+With no type at point, or no table, every kind."
+  (with-current-buffer (triage-transient--buffer)
+    (or (triage--recurrence-kinds (triage--at-point :type))
+        triage-transient--leaf-kinds)))
+
+(defun triage-transient--read-leaf-kind (prompt initial-input history)
+  "Read a kind of leaf with PROMPT, INITIAL-INPUT and HISTORY.
+The candidates are the kinds the problem type at point has."
+  (completing-read prompt (triage-transient--leaf-kinds-at-point) nil t initial-input history))
+
+(defun triage-transient--check-recurrence-kind (group args)
+  "Signal a `user-error' when GROUP's type has no leaf of the --kind in ARGS.
+GROUP is a model group whose problem type is the one at point.  With
+no --kind, no type or no table the CLI decides: without --kind it
+reads the type's first kind."
+  (when-let* ((kind (triage-transient--flag-value args "--kind"))
+              (type (triage--at-point :type))
+              (kinds (triage--recurrence-kinds type))
+              ((not (member kind kinds))))
+    (user-error "Model group %s is %s: its error trees have %s leaves"
+                group type (string-join kinds ", "))))
+
 ;;;###autoload (autoload 'triage-plot-menu "triage-transient" nil t)
 (transient-define-prefix triage-plot-menu ()
   "Draw a model's or a model group's figures with triage plot.
 An entry is greyed out when the problem type at point is one its
-figure does not read."
+figure does not read.  The kinds of leaf offered are those the type
+at point has."
   ["Arguments"
    [("-d" "Test date (YYYY-MM-DD)" "--date=")
     ("-p" "Cut (parameter)" "--parameter=")
-    ("-k" "Kind" "--kind=" :choices ("fp" "fn" "confusion" "abs-error" "beats-baseline"))
+    ("-k" "Kind of leaf" "--kind=" :reader triage-transient--read-leaf-kind)
     ("-s" "Statistic" "--stat=" :choices ("mean" "nonzero"))
     ("-t" "Top" "--top=" :reader transient-read-number-N+)
     ("-c" "Compare with model" "--compare=" :reader transient-read-number-N+)
@@ -645,10 +673,13 @@ figure does not read."
 
 (defun triage-plot (subcommand targets args)
   "Draw triage plot SUBCOMMAND of TARGETS with the flags ARGS.
-Only the flags SUBCOMMAND accepts are passed.  When it needs one of
-its required flags and none is given, the first is read from the
-minibuffer; an empty answer leaves it out.  The figure goes to a
-temporary SVG that opens in an image buffer."
+Only the flags SUBCOMMAND accepts are passed.  The recurrence
+figure refuses a --kind the type at point has no leaves of.  When
+SUBCOMMAND needs one of its required flags and none is given, the
+first is read from the minibuffer; an empty answer leaves it out.
+The figure goes to a temporary SVG that opens in an image buffer."
+  (when (equal subcommand "recurrence")
+    (triage-transient--check-recurrence-kind (car targets) args))
   (pcase-let* ((`(,_target ,flags ,required) (cdr (assoc subcommand triage-plot-subcommands)))
                (required (ensure-list required))
                (args (triage-transient--only args flags))

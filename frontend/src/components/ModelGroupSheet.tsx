@@ -6,7 +6,8 @@
  * threshold curve on every test date (/model-groups/{id}/curves → CurveOverlayChart, one
  * line per (model, date), legend in date order, over everyone or one Subset), and the
  * error rules that recur across its test dates (ErrorRecurrencePanel, in the kinds of the
- * group's problem_type, which /model-groups/{id} returns).
+ * group's problem_type, which /model-groups/{id} returns). The curve needs a top-k cut,
+ * as on the model card (CUT_TYPES): a regression or survival group has none.
  */
 import { useMemo, useState } from 'react'
 import {
@@ -26,6 +27,7 @@ import { tooltipFormatter } from '../api/format'
 import { abbrevAlgo } from '../api/transforms'
 import type { ExpEvaluationRow, MetricCatalogRow } from '../api/types'
 import { isEmpty } from '../api/types'
+import { CUT_TYPES } from '../api/problemTypes'
 import { CurveOverlayChart } from './CurveOverlayChart'
 import { ErrorRecurrencePanel } from './ErrorRecurrencePanel'
 
@@ -116,6 +118,12 @@ export function ModelGroupSheet({
   )
   // a stale response (another group or population) is never drawn
   const curvesNow = curves.data?.key === curveKey ? curves.data.body : undefined
+
+  // The curve reads a top-k cut, as the model card's does. A group whose models span
+  // several types has no single problem_type (null) and keeps its curve: the cut types
+  // among them draw one.
+  const problemType = group.data?.problem_type ?? null
+  const hasCut = problemType == null || CUT_TYPES.includes(problemType)
 
   const heading = label ?? (s ? `${shortType(s.model_type)} · g${groupId}` : `group ${groupId}`)
 
@@ -267,6 +275,7 @@ export function ModelGroupSheet({
               )}
             </section>
 
+            {hasCut ? (
             <section>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <h4 style={{ margin: 0 }}>curve across test dates</h4>
@@ -315,13 +324,14 @@ export function ModelGroupSheet({
                 </>
               )}
             </section>
+            ) : null}
 
             <section>
               <h4>error rules · recurrence across test dates</h4>
               <ErrorRecurrencePanel
-                key={`${groupId}-${group.data?.problem_type ?? ''}`}
+                key={`${groupId}-${problemType ?? ''}`}
                 groupId={groupId}
-                problemType={group.data?.problem_type ?? null}
+                problemType={problemType}
               />
             </section>
           </>

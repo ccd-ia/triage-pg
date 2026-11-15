@@ -981,7 +981,8 @@ pytest side, so a new plot kind fails there first and here next."
   "The entries of survival models only.")
 
 (defconst triage-test--cut-class-only
-  '(triage-postmodel-near-miss--inapt-p triage-postmodel-prototypes--inapt-p)
+  '(triage-postmodel-near-miss--inapt-p triage-postmodel-prototypes--inapt-p
+    triage-plot-curve-dates--inapt-p)
   "The entries of classification and regression_ranking models only.")
 
 (defconst triage-test--not-survival
@@ -991,7 +992,7 @@ pytest side, so a new plot kind fails there first and here next."
 (defconst triage-test--every-type
   '(triage-plot-curve--inapt-p triage-plot-error-rules--inapt-p
     triage-plot-calibration--inapt-p triage-plot-scores--inapt-p
-    triage-plot-curve-dates--inapt-p triage-plot-importance--inapt-p
+    triage-plot-importance--inapt-p
     triage-plot-overlap--inapt-p triage-postmodel-structure--inapt-p
     triage-postmodel-error-tree--inapt-p triage-postmodel-compare--inapt-p
     triage-postmodel-importance--inapt-p triage-postmodel-compare-rows--inapt-p
@@ -1263,6 +1264,30 @@ pytest side, so a new plot kind fails there first and here next."
       (should (equal (triage-postmodel--kinds-at-point)
                      '("fp" "fn" "confusion" "both" "all"))))))
 
+(ert-deftest triage-test-plot-recurrence-kinds-by-type ()
+  (triage-test-at-type "regression"
+    (let (offered)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _) (setq offered collection) "abs-error")))
+        (triage-transient--read-leaf-kind "Kind: " nil nil))
+      (should (equal offered '("abs-error" "beats-baseline"))))
+    ;; a kind the group's type has no leaves of never reaches the CLI
+    (should-error (triage-plot-recurrence '(4) '("--kind=fp" "--parameter=10_pct"))
+                  :type 'user-error)
+    (should-not (seq-some (lambda (c) (member "recurrence" c)) triage-test--calls))
+    (let ((inhibit-message t))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+        (triage-plot-recurrence '(4) '("--kind=abs-error"))))
+    (should (equal (seq-take (cdar triage-test--calls) 5)
+                   '("plot" "recurrence" "4" "--kind=abs-error" "-o"))))
+  (triage-test-at-type "classification"
+    (should-error (triage-plot-recurrence '(4) '("--kind=abs-error")) :type 'user-error))
+  (triage-test-at-type "survival"
+    (should (equal (triage-transient--leaf-kinds-at-point) '("fp" "fn" "confusion"))))
+  ;; with no type at point, every kind, and the CLI decides
+  (triage-test-at-type nil
+    (should (equal (triage-transient--leaf-kinds-at-point) triage-transient--leaf-kinds))))
+
 (ert-deftest triage-test-postmodel-process-commands ()
   (triage-test-with-menus
     (triage-postmodel-crosstabs-abs-error 4 '("--parameter=5_pct" "--by=band"))
@@ -1398,7 +1423,9 @@ Exit 0 and 1 write FIXTURE where --json points."
                                         triage-test--started)))
               missing)
           (dolist (command commands)
-            (when (member (car command) '("plot" "postmodel" "audition"))
+            ;; the problem-type table is read by a hidden verb the command tree leaves out
+            (when (and (member (car command) '("plot" "postmodel" "audition"))
+                       (not (equal (seq-take command 2) '("postmodel" "kinds"))))
               (let* ((audition (equal (car command) "audition"))
                      (spec (if audition
                                (alist-get 'audition (triage-test-payload "cli-commands"))

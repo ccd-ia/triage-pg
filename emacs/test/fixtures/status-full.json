@@ -35,7 +35,7 @@
   ],
   "extra": {
     "size": "9814 kB \u00b7 29 tables \u00b7 19 views",
-    "schema": "0037_near_miss_and_prototypes",
+    "schema": "0038_curve_positive_outcome",
     "artifacts": "11 built"
   },
   "gauges": [

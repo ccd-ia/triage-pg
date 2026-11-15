@@ -87,6 +87,64 @@ def test_the_leaf_kinds_of_each_type() -> None:
     assert problem_types.recurrence_refusal(7, (), "fp") is None
 
 
+def test_the_recurrence_kinds_are_the_leaf_kinds() -> None:
+    """triage.el offers a group's recurrence kinds from this part of the table."""
+    assert _kinds()["error_recurrence"] == {
+        t: {"kinds": [k.replace("_", "-") for k in problem_types.leaf_kinds(t)]}
+        for t in problem_types.PROBLEM_TYPES
+    }
+
+
+@pytest.mark.parametrize(
+    ("command", "types", "kind", "named"),
+    [
+        ("postmodel error-recurrence", ("regression",), "fp", "--kind abs-error."),
+        ("plot recurrence", ("regression",), "fn", "--kind abs-error."),
+        ("postmodel error-recurrence", ("classification",), "abs_error", "--kind fp."),
+        # plot recurrence takes no default cut for the classification kinds
+        ("plot recurrence", ("classification",), "abs_error", "--kind fp -p CUT."),
+        (
+            "plot recurrence",
+            ("survival",),
+            "abs_error",
+            "--kind fp -p 'CUT|horizon=H'.",
+        ),
+    ],
+)
+def test_the_recurrence_refusal_names_the_command_asked(
+    command: str, types: tuple[str, ...], kind: str, named: str
+) -> None:
+    message = problem_types.recurrence_refusal(7, types, kind, command)
+    assert message is not None
+    assert message.endswith(f"Use triage {command} 7 {named}"), message
+
+
+def test_the_curve_across_dates_reads_a_top_k_cut() -> None:
+    entry = problem_types.COMMANDS["plot curve-dates"]
+    assert entry.accepts == problem_types.CUT_CLASS_TYPES
+    assert set(entry.instead) == {"regression", "survival"}
+    assert (
+        problem_types.group_refusal("plot curve-dates", 7, ("classification",)) is None
+    )
+    # a group of several types is read when any of them is; an empty one by the reader
+    assert (
+        problem_types.group_refusal(
+            "plot curve-dates", 7, ("regression_ranking", "regression")
+        )
+        is None
+    )
+    assert problem_types.group_refusal("plot curve-dates", 7, ()) is None
+    message = problem_types.group_refusal("plot curve-dates", 7, ("regression",))
+    assert message is not None
+    assert message.startswith(
+        "triage plot curve-dates reads classification and regression_ranking model"
+        " groups; model group 7 is regression."
+    )
+    assert "triage plot bias MODEL" in message and "--group 7" in message
+    survival = problem_types.group_refusal("plot curve-dates", 7, ("survival",))
+    assert survival is not None and "triage plot km MODEL" in survival
+
+
 def test_every_gated_name_is_a_command_of_the_cli() -> None:
     """``postmodel crosstabs --by abs-error`` names a command and the option it gates."""
     root = typer.main.get_command(app)
