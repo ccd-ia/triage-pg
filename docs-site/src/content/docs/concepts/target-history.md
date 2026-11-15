@@ -43,41 +43,58 @@ the label dates, so a 6-month training frequency gives 6-month lags.
 
 ## Shape 2 — raw periodic series
 
-Seasonal-naive, Holt–Winters/ETS, and Croston need a **fine, evenly-spaced**
-series (e.g. monthly counts), not the coarse windowed label at as_of_date
-cadence. That is a genuinely different quantity, so it gets its own **optional
-`history_query`** — a period-level aggregation with its own knowledge-date
-discipline:
+Seasonal-naive, Holt–Winters/ETS, and Croston need an **evenly-spaced, complete**
+series, with a value for every period back to the start of the data, not the
+windowed label at the Experiment's label dates only. So the series gets its own
+**optional `history_query`** — a period-level aggregation with its own
+knowledge-date discipline:
 
 ```yaml
-history_period: '1 month'
+history_period: '6 month'          # one label window: the label sums six months
+history_series_width: 8            # four years of six-month periods
 history_query: |
-  with months as (
-    select f.entity_id, m::date as period
+  with periods as (
+    select f.entity_id, p::date as period
     from (select distinct entity_id from ontology.events) f
-    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
-                               interval '1 month') m
+    cross join generate_series({as_of_date}::date - interval '6 month', date '2014-01-01',
+                               interval '-6 month') p
   )
-  select months.entity_id, months.period, count(e.entity_id) as value
-  from months
+  select periods.entity_id, periods.period,
+         sum(coalesce(jsonb_array_length(e.violations), 0))::double precision as value
+  from periods
   left join ontology.events e
-    on e.entity_id = months.entity_id
-   and date_trunc('month', e.date)::date = months.period
+    on e.entity_id = periods.entity_id
+   and periods.period <= e.date
+   and e.date < periods.period + interval '6 month'
    and e.date < {as_of_date}      -- the raw-series leakage boundary
   group by 1, 2
 ```
+
+**One period is one label window.** These baselines forecast one
+`history_period` ahead: seasonal naive returns the value one season back,
+Holt–Winters and Croston their one-step forecast. That forecast is scored
+against the label, so one period of the series must hold what the label holds,
+over a window as long as the label's. DirtyDuck's label sums a facility's
+violations over the six months after the as_of_date. The query above sums the
+same violations over six-month periods that step back from the as_of_date, so
+each value is the label the facility would have had at that period's start, and
+a zero where it had no inspection. A season of 2 periods is then one year:
+seasonal naive forecasts the same six months a year earlier. An earlier version
+of this example counted inspections per month. Its seasonal-naive baseline
+forecast the inspections of one month against six months of violations: on
+average 4.9 violations too few, and below the outcome on 98% of the rows.
 
 Only rows with `knowledge_date < as_of_date` may be selected. Each value is
 placed on the calendar in reserved columns `_hist_0` (oldest) …
 `_hist_{width-1}` (newest): slot `_hist_{width-k}` holds the period that starts
 `k × history_period` before the as_of_date, for `history_series_width` slots
-(default 24). A month the query does not return stays empty in its own slot;
+(default 24). A period the query does not return stays empty in its own slot;
 nothing older moves into it. Slots before an entity's first period stay empty
 (the series starts later). An empty slot after the first period is a **gap**:
 with seasonal / Holt–Winters / Croston in the grid, a gap stops the run unless
 `fill_missing_periods` is `zero` (gaps become 0) or `null` (those baselines make
 no prediction for that row). That is why the query above returns a row for
-every month, zeros included. `triage check history CONFIG` reports the gaps
+every period, zeros included. `triage check history CONFIG` reports the gaps
 before a run.
 
 A raw-series baseline in the grid **without** a `history_query` is a hard error
@@ -126,7 +143,7 @@ period as zero. Run `triage check history EXPERIMENT.yaml` to list the gaps.
 ```
 
 The first fix is the query above: a `generate_series` calendar left-joined to
-the counts returns a zero for every month without an inspection. The second,
+the events returns a zero for every period without an inspection. The second,
 `fill_missing_periods: zero`, writes 0 into interior gaps only. It never fills
 slots before the first returned period, because there triage-pg cannot tell "no
 demand" from "did not exist yet"; if you mean zeros there, return them from the

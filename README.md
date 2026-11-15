@@ -103,9 +103,9 @@ tutorial's regression and survival Experiments; the
 and [survival](https://ccd-ia.github.io/triage-pg/guides/reading-survival-diagnostics/)
 guides read them:
 
-| ![Forecast against outcome for a random forest that forecasts violation counts: the forecasts fall in a few columns while the outcomes spread from 1 to 42](docs/images/regression-diagnostics.png) | ![Model group against its baseline group, MAE per segment: the baseline wins in the low-history band and the model wins in the high band](docs/images/regression-segments.png) | ![Kaplan-Meier survival of three risk tertiles, and the probability of a failed inspection within 90 days per risk decile](docs/images/survival-km.png) |
+| ![Forecast against outcome for a random forest that forecasts violation counts: the forecasts fall in a few columns while the outcomes spread from 1 to 42](docs/images/regression-diagnostics.png) | ![Model group against its baseline group, MAE per segment: the model wins in eight of nine segments, by most in the high-history band, and the baseline wins in one](docs/images/regression-segments.png) | ![Kaplan-Meier survival of three risk tertiles, and the probability of a failed inspection within 90 days per risk decile](docs/images/survival-km.png) |
 |---|---|---|
-| `triage plot forecast-actual 382` | `triage plot segments 49` | `triage plot km 413 --horizon 90` |
+| `triage plot forecast-actual 526` | `triage plot segments 71` | `triage plot km 413 --horizon 90` |
 
 The same project from the terminal — `triage tui`, no browser and no port to
 forward. Eight tabs, every number a `SELECT` over the views above; the

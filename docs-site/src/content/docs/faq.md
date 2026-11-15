@@ -88,7 +88,9 @@ row. Fix it one of two ways:
 `triage check history experiment.yaml` lists the gaps before a run, with the
 entities that have the most, and builds nothing. A config written for v1.5.0
 with a `history_query` also needs the new `history_period` key (for example
-`'1 month'`); without it the config is refused at the start of the run. The
+`'1 month'`); without it the config is refused at the start of the run. Make it
+the label's window (`'6 month'` for a six-month label) and sum what the label
+sums, or the raw-series baselines forecast another quantity than the label. The
 numbers of the time-series baselines change where an entity had gaps, and the
 matrices are rebuilt, not reused.
 

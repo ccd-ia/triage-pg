@@ -39,7 +39,12 @@ so a missing value leaves its own slot empty and nothing older moves into it:
   the as_of_date. A row off that grid, or at or after the as_of_date, raises
   `HistoryPeriodMisaligned`. Config: `history_query` (required by the
   raw-series family), `history_period` (required with `history_query`),
-  `history_series_width` (default 24), `fill_missing_periods`.
+  `history_series_width` (default 24), `fill_missing_periods`. The family
+  forecasts one `history_period` ahead, so the forecast is in the label's
+  units only when one period is one label window summing the label's quantity.
+  Nothing checks this: the DirtyDuck regression example sums violations over
+  six-month periods (its label's timespan), with `SeasonalNaive(season=2)`;
+  `src/tests/test_example_regression_history.py` pins it.
 
 **Gaps.** NULL slots before an entity's first returned period are leading (the
 series starts later) and are never filled. NULL slots after it are interior

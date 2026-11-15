@@ -17,26 +17,31 @@ problem_type: regression_ranking
 # target_history_lags: how many windowed-label lags to attach as reserved _target_lag_* columns
 #   (persistence / moving-average / drift / promedio read these).
 # history_query: the RAW periodic series the seasonal / Holt-Winters / Croston baselines forecast
-#   over — per-facility MONTHLY inspection counts, point-in-time correct (only events KNOWN
-#   strictly before {as_of_date}). Each value is placed at its calendar offset in the reserved
-#   _hist_* columns (width below), one slot per history_period. The query returns a row for
-#   EVERY month, zeros included: a month with no inspections is a zero, not a missing row.
+#   over. They forecast ONE history_period ahead, so one period must be one label window: the
+#   violations the label sums, over six months. Each value is the label the facility would have
+#   had at that period's start, a zero where it had no inspection. Periods step back six months
+#   from the as_of_date to 2014-01-01, the first data, and every one closes by the as_of_date
+#   (only events KNOWN strictly before {as_of_date}). Each value is placed at its calendar offset
+#   in the reserved _hist_* columns: eight slots, four years. The query returns a row for EVERY
+#   period, zeros included: a period with no inspection is a zero, not a missing row.
 #   `triage check history experiment-regression.yaml` confirms it before a run.
 target_history_lags: 6
-history_series_width: 24
-history_period: '1 month'
+history_series_width: 8
+history_period: '6 month'
 history_query: |
-  with months as (
-    select f.entity_id, m::date as period
+  with periods as (
+    select f.entity_id, p::date as period
     from (select distinct entity_id from ontology.events) f
-    cross join generate_series(date '2014-01-01', {as_of_date}::date - interval '1 month',
-                               interval '1 month') m
+    cross join generate_series({as_of_date}::date - interval '6 month', date '2014-01-01',
+                               interval '-6 month') p
   )
-  select months.entity_id, months.period, count(e.entity_id) as value
-  from months
+  select periods.entity_id, periods.period,
+         sum(coalesce(jsonb_array_length(e.violations), 0))::double precision as value
+  from periods
   left join ontology.events e
-    on e.entity_id = months.entity_id
-   and date_trunc('month', e.date)::date = months.period
+    on e.entity_id = periods.entity_id
+   and periods.period <= e.date
+   and e.date < periods.period + interval '6 month'
    and e.date < {as_of_date}
   group by 1, 2
 
@@ -221,10 +226,11 @@ grid_config:
     window: [3, 6]
   'triage.component.catwalk.baselines.timeseries.Drift': {}
   # Raw-series baseline floors (v1.0.1, ADR-0030): forecast the next window over the raw
-  # monthly series (history_query above), then rank. These REQUIRE history_query — enforced at
-  # run start. Holt-Winters pulls statsmodels (the `baselines` extra: uv sync --extra baselines).
+  # six-month series (history_query above), then rank. These REQUIRE history_query — enforced
+  # at run start. Holt-Winters pulls statsmodels (the `baselines` extra: uv sync --extra
+  # baselines). A season of 2 six-month periods is one year: the same window a year earlier.
   'triage.component.catwalk.baselines.timeseries.SeasonalNaive':
-    season: [12]
+    season: [2]
   'triage.component.catwalk.baselines.timeseries.HoltWinters': {}
   'triage.component.catwalk.baselines.timeseries.Croston': {}
 
