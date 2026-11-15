@@ -11,9 +11,9 @@
  *   - feature importance (top 20 + "View all" modal), PRETTY + RAW names
  *   - PredictedList (top 20 + "View all" modal); each entity opens the EntityDrawer
  *
- * The card branches on the model's problem_type (/models/{id}): the Rayid curve reads a
- * binary outcome (classification); the near-miss bands and the prototypes need a top-k cut
- * (classification, regression_ranking, positive meaning outcome > 0);
+ * The card branches on the model's problem_type (/models/{id}): the Rayid curve, the
+ * near-miss bands and the prototypes need a top-k cut (classification, regression_ranking,
+ * positive meaning outcome > 0);
  * RegressionPanels (residuals, bias by band, forecast against actual, the baseline table,
  * the fitted structure) read a continuous forecast (regression, regression_ranking);
  * GainsChart and the decile lift table are regression_ranking's; SurvivalPanels replace the
@@ -303,9 +303,14 @@ export function ModelSheet({ modelId, label, modelGroupId, experimentHash, group
           {histo.data ? <ScoreDistributionChart bins={histo.data} /> : <div className="muted" style={{ fontSize: 11 }}>loading histogram…</div>}
         </section>
 
-        {problemType === 'classification' ? (
+        {hasCut ? (
         <section>
           <h4>{overlay ? 'Rayid curve · populations overlaid' : 'Rayid curve · k-slider'}</h4>
+          {problemType === 'regression_ranking' ? (
+            <div className="muted" style={{ fontSize: 10, margin: '-2px 0 6px' }}>
+              a positive is a row with outcome &gt; 0, as precision@ and recall@ count it
+            </div>
+          ) : null}
           {(subsets.data?.length ?? 0) > 0 ? (
             <>
               <div className="popchips" role="group" aria-label="curve populations">
