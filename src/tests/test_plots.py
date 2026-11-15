@@ -185,6 +185,30 @@ def test_every_format_is_written_and_others_are_refused(
     assert not (tmp_path / "c.jpg").exists()
 
 
+@pytest.mark.parametrize(
+    ("ticks", "labels"),
+    [
+        # whole-percent steps read as before, float noise included
+        ([0.0, 0.2, 0.4, 0.6000000000000001, 0.8, 1.0],
+         ["0%", "20%", "40%", "60%", "80%", "100%"]),
+        ([0.0, 0.05, 0.1, 0.15000000000000002], ["0%", "5%", "10%", "15%"]),
+        # a fractional step takes the decimals it needs, on every tick
+        ([0.0, 0.025, 0.05, 0.07500000000000001], ["0.0%", "2.5%", "5.0%", "7.5%"]),
+        ([0.0, 0.0025, 0.005, 0.0075], ["0.00%", "0.25%", "0.50%", "0.75%"]),
+    ],
+)  # fmt: skip
+def test_a_percent_axis_writes_each_tick_exactly(ticks, labels):
+    from triage.plots.style import new_figure, pct_axis, style
+
+    with style():
+        fig, axes = new_figure(4.0, 3.0)
+        ax = axes[0, 0]
+        pct_axis(ax, "y")
+        ax.set_yticks(ticks)
+        fig.draw_without_rendering()
+    assert [t.get_text() for t in ax.get_yticklabels()] == labels
+
+
 # ------------------------------------------------------------------ the same bytes twice
 
 #: Each plot function, as its CLI command draws it on the fixture.
@@ -765,6 +789,27 @@ def test_survival_figure_summaries(db_pool_greenfield, tmp_path):
     calibration = plots.survival_calibration(pool, model_id)
     assert calibration.summary.startswith("10 deciles at 2015-01-01, horizon 30")
     assert f"ICI {ici['ici']:.3f}, E50 {ici['e50']:.3f}" in calibration.summary
+
+
+def test_km_decile_ticks_read_their_true_value_on_a_fractional_step(
+    db_pool_greenfield, tmp_path
+):
+    """At horizon 0.6 the decile panel is ticked every 2.5%: 7.5% reads 7.5%, not 8%."""
+    from tests.test_survival_diagnostics import TIMES, seed_survival
+    from triage.diagnostics.survival import compute_survival_diagnostics
+    from triage.plots.style import style
+
+    pool = db_pool_greenfield
+    model_id = seed_survival(pool, tmp_path)["model_id"]
+    compute_survival_diagnostics(pool, model_id, 0.6, TIMES)
+    result = plots.km(pool, model_id, horizon=0.6)
+    with style():
+        result.figure.draw_without_rendering()
+    bars = result.figure.axes[1]
+    ticks = [float(t) for t in bars.get_yticks()]
+    labels = [t.get_text() for t in bars.get_yticklabels()]
+    assert ticks[1] - ticks[0] == pytest.approx(0.025)  # the fixture's premise
+    assert labels == [f"{100 * t:.1f}%" for t in ticks]
 
 
 def test_survival_figures_name_the_command_and_refuse_other_types(

@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, final, override
 
 import matplotlib
 
@@ -230,10 +230,40 @@ def new_figure(
     return fig, fig.subplots(nrows, ncols, squeeze=False, **kwargs)
 
 
+#: The most decimals a percentage tick is written with.
+PCT_MAX_DECIMALS = 4
+
+
+@final
+class _TickPercent(PercentFormatter):
+    """Percent ticks with the fewest decimals that write every tick exactly.
+
+    The decimals follow the tick step, the same on every tick of the axis: whole-percent
+    ticks read ``0%, 20%, 40%``, a 2.5% step reads ``0.0%, 2.5%, 5.0%``. A fixed
+    ``decimals=0`` would round that step to ``2%, 5%, 8%``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(1.0, decimals=0)
+
+    @override
+    def set_locs(self, locs: list[float]) -> None:
+        super().set_locs(locs)
+        values = [self.convert_to_pct(v) for v in locs]
+        # the tolerance absorbs float noise: 0.075 * 100 is 7.500000000000001
+        self.decimals = next(
+            (
+                d
+                for d in range(PCT_MAX_DECIMALS)
+                if all(abs(v - round(v, d)) < 1e-9 for v in values)
+            ),
+            PCT_MAX_DECIMALS,
+        )
+
+
 def pct_axis(ax: Axes, axis: str = "x") -> None:
-    """Format ``axis`` as a percentage of 1."""
-    fmt = PercentFormatter(1.0, decimals=0)
-    (ax.xaxis if axis == "x" else ax.yaxis).set_major_formatter(fmt)
+    """Format ``axis`` as a percentage of 1, each tick written exactly."""
+    (ax.xaxis if axis == "x" else ax.yaxis).set_major_formatter(_TickPercent())
 
 
 def log_ratio_axis(ax: Axes) -> None:
