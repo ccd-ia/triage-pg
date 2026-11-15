@@ -322,13 +322,6 @@
     "args": "MODEL_ID"
   },
   {
-    "name": "triage postmodel kinds",
-    "description": "Which postmodel and plot commands read which problem types, for a front end.",
-    "source": "cli",
-    "destructive": false,
-    "args": ""
-  },
-  {
     "name": "triage model show",
     "description": "One model's card, headless: identity, windowed evaluations, top importances,",
     "source": "cli",
