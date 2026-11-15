@@ -81,7 +81,96 @@ every month, zeros included. `triage check history CONFIG` reports the gaps
 before a run.
 
 A raw-series baseline in the grid **without** a `history_query` is a hard error
-at run start, and so is a `history_query` without a `history_period`.
+at run start, and so is a `history_query` without a `history_period`. There is
+no default period and no guess from the data: the period grid is a fact about
+your data, and a guess is the silent assumption this layout exists to remove.
+
+## Gaps, and what stops a run
+
+Take one entity with no row for February and an as_of_date in June. Each value
+sits at its own offset, so January is in the slot five months back and
+February's slot is empty:
+
+| slot (months back) | 5 | 4 | 3 | 2 | 1 |
+| --- | --- | --- | --- | --- | --- |
+| period | Jan | Feb | Mar | Apr | May |
+| value | 5 | gap | 7 | 4 | 6 |
+
+Up to 1.5.0 the series was packed by rank, so January slid into February's slot
+and a read of "four months back" got a value from five months back. Seasonal
+naive then read the wrong month, and Croston, which counts the periods between
+demands, saw every interval shrink and forecast too high.
+
+Two kinds of empty slot are treated differently:
+
+| empty slot | example | what triage-pg does |
+| --- | --- | --- |
+| **leading**: older than the entity's first returned period | a facility that opened in March | stays empty in every mode; never an error |
+| **interior**: between the first returned period and last month | a month with no row in the query result | a **gap**: decided by `fill_missing_periods` |
+
+With `fill_missing_periods` unset, a gap stops the run while the matrix is
+built, before featurizer runs and before any model is fitted, when the grid
+holds a baseline that needs a complete calendar (seasonal naive, ETS,
+Holt–Winters, Croston, Croston-SBA). The DirtyDuck regression example used a
+`group by` over inspections up to 1.5.0, so a month with no inspection had no
+row. Run on DirtyDuck with that query, the regression example fails like this:
+
+```console
+HistoryGapsError: 10778 of 11369 target-history series have missing periods
+inside their history (for example entity 1 at as_of_date 2015-01-01: no row for
+period 2014-02-01). Croston, HoltWinters, SeasonalNaive need a complete calendar
+and would forecast from the wrong months. Fix one of two ways: return a row for
+every period from the history_query, zeros included (a generate_series calendar
+left-joined to the counts), or set fill_missing_periods: zero to treat a missing
+period as zero. Run `triage check history EXPERIMENT.yaml` to list the gaps.
+```
+
+The first fix is the query above: a `generate_series` calendar left-joined to
+the counts returns a zero for every month without an inspection. The second,
+`fill_missing_periods: zero`, writes 0 into interior gaps only. It never fills
+slots before the first returned period, because there triage-pg cannot tell "no
+demand" from "did not exist yet"; if you mean zeros there, return them from the
+query. `fill_missing_periods: null` keeps the gaps: the complete-calendar
+baselines make no prediction for a row with a gap (a WARNING gives the count,
+and the row shows in the [coverage](/triage-pg/reference/evaluation/) of that
+model group), and the lag-family baselines compute on the calendar positions
+they have. The lags themselves never fail a run: a missing label means the
+entity was outside the Cohort that date, not a zero.
+
+`triage check history` runs the same placement without building anything. It
+renders the `history_query` at the last test as_of_date (or at each
+`--as-of DATE`) and counts the gaps. On the sparse query:
+
+```console
+$ triage check history experiment-regression-sparse.yaml
+history_period '1 month', width 24, as_of_date(s) 2017-01-01
+
+  check                               count
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  series (entity × as_of_date)       14,537
+  series with missing periods        14,320
+  missing periods in all            208,804
+  rows off the period grid                0
+  rows at or after the as_of_date         0
+
+ entities with the most missing
+             periods
+
+  entity_id   missing   present
+ ───────────────────────────────
+          7        23         1
+         41        23         1
+  …
+Return a row for every period, zeros included, or set fill_missing_periods:
+zero.
+```
+
+It exits 1 there, and 0 on `example/dirtyduck/experiment-regression.yaml`,
+whose 18,909 series have no gap. A row whose period is not on the grid (the
+15th of a month on a monthly grid) or not before the as_of_date is also
+reported, and fails a run with `HistoryPeriodMisaligned`. The
+[CLI reference](/triage-pg/reference/cli/#triage-check-history--gaps-in-the-target-history)
+lists the options.
 
 ## Why reserved columns
 
@@ -109,4 +198,6 @@ so the baseline sees the history and nothing else sees the label's lags.
 | `fill_missing_periods` | unset | Shape 2 — `zero` or `null` for gaps; unset stops the run on a gap. |
 
 All five enter the matrix's content-addressed identity, so changing them
-rebuilds the matrix rather than silently reusing a mismatched one.
+rebuilds the matrix rather than silently reusing a mismatched one. A matrix
+with history also records its calendar layout in its identity, so no matrix
+built by 1.5.0, whose history was packed by rank, is reused after an upgrade.

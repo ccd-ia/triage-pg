@@ -61,7 +61,7 @@ erDiagram
 | Matrices & models | `matrices`, `models` |
 | Predictions | `predictions` — append-only, range-partitioned on `scored_at` |
 | Evaluation & bias | `evaluations`, `bias_metrics`, `subsets` / `subset_members` |
-| Postmodeling & importances | `feature_importances`, `individual_importances`, crosstabs / error-tree tables |
+| Postmodeling & importances | `feature_importances`, `individual_importances`, crosstabs / error-tree tables, `prototypes`, `survival_diagnostics` |
 
 `problem_type` (`classification` · `regression_ranking` · `regression` · `survival`) and `artifact_kind` (`cohort` · `labels` · `feature_group` · `matrix` · `model`) are Postgres enums. The full ERD — every foreign-key edge with its `ON DELETE` behavior (CASCADE / RESTRICT to enforce append-only history / SET NULL) — is in [`docs/erd.md`](docs/erd.md); the design rationale (registry + per-project split, resolved decisions) is in [`docs/schema-design.md`](docs/schema-design.md).
 
@@ -83,12 +83,12 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 |---|---|
 | **Problem types** | classification · regression-as-ranking · regression · **survival** (scikit-survival + an in-PG C-index matching `concordance_index_censored` to 1e-9) — one `problem_type` switch |
 | **Features** | [`featurizer`](https://github.com/ccd-ia/featurizer): PostgreSQL-native Deep Feature Synthesis, point-in-time-correct via as-of joins |
-| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, Brier/log loss/ECE, RMSE/MAE/R², C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices. A top-k cut ranks every scored row and the metric counts the labeled ones, as DSSG did — so selective-labels problems (inspections) read correctly |
+| **Evaluation** | PL/pgSQL over the predictions table — precision@k/recall@k/AUC/AP, Brier/log loss/ECE, RMSE/MAE/R²/WAPE, pinball@τ for quantile forecasts, lift@k/captured@k/AUCC/Spearman for regression-as-ranking, C-index; per-date rows + windowed rollups; **subset evaluations** on named cohort slices. A top-k cut ranks every scored row and the metric counts the labeled ones, as DSSG did — so selective-labels problems (inspections) read correctly; `triage check metrics` recomputes every stored value with scikit-learn and numpy |
 | **Fairness** | SQL group-bys over `protected_groups`: 8 per-group metrics with disparity + τ verdicts, config-driven ingestion, and the Aequitas **fairness tree** as a guidance wizard ([`docs/fairness.md`](docs/fairness.md)) |
 | **Model selection** | in-PG audition: distance-from-best, max regret, regret-next-time, all 8 DSSG selection rules — dashboard tab + `triage audition` |
-| **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration, list overlap, per-entity contributions — CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)); `triage plot` draws the guides' eight diagnostic figures from your own project database as SVG, PNG or PDF |
+| **Postmodeling** | crosstabs, error trees ("where does it fail?"), calibration with tied scores kept in one decile, list overlap, per-entity contributions, and a set per problem type — near-miss bands and prototypes for classification; residuals, bias by history band and wins against a baseline for regression; lift and cumulative gains for regression-as-ranking; Kaplan-Meier by risk decile, Uno's C and Brier(t) for survival — with model groups compared on the rows all of them scored (`postmodel compare-rows`, `audition --common-rows`). CLI computes, PG persists, dashboard reads ([`docs/postmodeling.md`](docs/postmodeling.md)); `triage plot` draws 21 figures from your own project database as SVG, PNG or PDF |
 | **Monitoring** | scheduled `triage score` + drift (PSI/KS at scipy parity), volume, calibration, realized-outcome tracking — SQL over append-only predictions, no daemon ([`docs/monitoring.md`](docs/monitoring.md)) |
-| **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates; `triage check leakage` tests whether the cohort, label and feature queries read data from after the as-of date |
+| **Pre-flight** | `triage analyze-config`: matrices, model groups and models-to-be-trained before anything runs, the feature-group fan-out expanded, and a refusal when a name-pinned baseline cannot survive it — all config-only; `--estimate` adds cohort/label counts and base rates; `triage check leakage` tests whether the cohort, label and feature queries read data from after the as-of date; target history is placed on the calendar, and `triage check history` lists the missing periods of a `history_query` that would stop a run |
 | **Multi-tenancy** | one database per project + a registry control plane; project switcher in the dashboard; `triage project create/drop`; `triage reset` clears a project's results after a data reload and keeps its source registry, also when the `triage` schema lives inside a host database |
 | **UIs** | read dashboard (experiments ▸ model groups ▸ models) + write webapp (validated submissions) + OIDC auth, and `triage tui` — a terminal cockpit over the same views, on the [lynkeus](https://github.com/nanounanue/lynkeus) shell, with a headless twin per screen (`--json`) for agents, and `triage.el`, an Emacs front end that draws the CLI's JSON — all business-logic-free |
 | **Deployment** | `local` (standalone PostgreSQL) and `cloud` (RDS IAM + S3 + AWS Batch; Terraform in [`infra/terraform/`](infra/terraform/)) behind one profile seam |
@@ -96,6 +96,16 @@ Full detail: the [Configuration reference](https://ccd-ia.github.io/triage-pg/re
 | ![Experiment overview — model groups × splits heatmap](docs/images/experiment-overview.png) | ![Model card — curves, calibration, diagnostics](docs/images/model-sheet.png) | ![Production monitoring — drift, volume, outcomes](docs/images/monitoring-view.png) |
 |---|---|---|
 | the experiment overview | one model's card | production monitoring |
+
+The same diagnostics as files, drawn by `triage plot` from the DirtyDuck
+tutorial's regression and survival Experiments; the
+[regression](https://ccd-ia.github.io/triage-pg/guides/reading-regression-diagnostics/)
+and [survival](https://ccd-ia.github.io/triage-pg/guides/reading-survival-diagnostics/)
+guides read them:
+
+| ![Forecast against outcome for a random forest that forecasts violation counts: the forecasts fall in a few columns while the outcomes spread from 1 to 42](docs/images/regression-diagnostics.png) | ![Model group against its baseline group, MAE per segment: the baseline wins in the low-history band and the model wins in the high band](docs/images/regression-segments.png) | ![Kaplan-Meier survival of three risk tertiles, and the probability of a failed inspection within 90 days per risk decile](docs/images/survival-km.png) |
+|---|---|---|
+| `triage plot forecast-actual 382` | `triage plot segments 49` | `triage plot km 413 --horizon 90` |
 
 The same project from the terminal — `triage tui`, no browser and no port to
 forward. Eight tabs, every number a `SELECT` over the views above; the
@@ -111,7 +121,7 @@ Experiment's plan and history, and `?` opens a menu for every CLI action. The
 [Emacs page](https://ccd-ia.github.io/triage-pg/reference/emacs/) covers
 installation and keys:
 
-| ![Status buffer — the database header, Experiments matched to their config files, recent runs](docs/images/emacs-status.png) | ![Experiment view — identity, validation, the plan the config implies, the history in the database](docs/images/emacs-experiment.png) | ![Dispatch menu — run, check, analyze, results, score, plot, maintain, serve](docs/images/emacs-dispatch.png) |
+| ![Status buffer — the database header, Experiments matched to their config files, recent runs](docs/images/emacs-status.png) | ![Experiment view — identity, validation, the plan the config implies, the history in the database](docs/images/emacs-experiment.png) | ![Dispatch menu — run, check, analyze, results, score, plot, postmodel, maintain, serve](docs/images/emacs-dispatch.png) |
 |---|---|---|
 | the status buffer | one Experiment: plan and history | a menu for every CLI action |
 

@@ -23,9 +23,11 @@ cut); no id is written in this file, except the crosstabs features and Subsets t
 guides name. The script never runs an experiment; when something is missing it prints
 the command to run.
 
-The ``worked-chicago311-*`` and ``worked-donorschoose-*`` figures are not drawn here:
-each is the output of the ``triage plot`` command printed under it in the guide, run
-against that tutorial's database.
+The ``worked-chicago311-*``, ``worked-donorschoose-*``, ``worked-regression-*``,
+``worked-survival-*`` and ``worked-calibration-ties`` figures are not drawn here: each
+is the output of the ``triage plot`` command printed under it in the guide, run against
+that tutorial's database (the regression and survival ones against DirtyDuck after a
+run of ``experiment-regression.yaml`` and ``experiment-survival.yaml``).
 
 Output: ``docs-site/src/assets/guides/*.svg``, on a transparent background, in mid-tone
 colours that read on the site's light and dark themes. Text is laid out with the

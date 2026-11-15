@@ -120,7 +120,7 @@ files.
 | `TAB`, `M-1`…`M-4` | sections | fold and unfold, as in Magit |
 | `A` | anywhere | show or hide archived Experiments |
 | `?` or `h` | anywhere | the menu of menus |
-| `r` `c` `a` `l` `f` `p` `m` `s` | anywhere | the run, check, analyze, results, score, plot, maintain and serve menus |
+| `r` `c` `a` `l` `f` `p` `P` `m` `s` | anywhere | the run, check, analyze, results, score, plot, postmodel, maintain and serve menus |
 | `:` | anywhere | a read-only SQL query, shown as a table |
 | `!` | anywhere | any action from `triage actions list` |
 | `T` | anywhere | the [terminal cockpit](/triage-pg/reference/tui/) in vterm, or in `ansi-term` |
@@ -167,27 +167,116 @@ query in a read-only transaction. `triage-table-limit` sets how many rows it rea
 
 ## The menus
 
-![The dispatch menu under the status buffer. It greys out Forward score and Plot, since no model is at point](../../../assets/reference/emacs-dispatch.svg)
+![The dispatch menu under the status buffer, with point on an Experiment. It greys out Forward score and Plot, since no model or model group is at point, and offers Postmodel diagnostics, since an Experiment is](../../../assets/reference/emacs-dispatch.svg)
 
 Each menu entry builds the arguments of one CLI verb. The Experiment, Run,
 model or model group at point fills the target; otherwise the entry asks for
 one. The menu greys out an entry that needs a target when there is none at point
-and none to choose from.
+and none to choose from. It also greys out an entry whose command refuses the
+problem type at point; [type gating](#type-gating) below says how.
 
 | Menu | CLI verb | Output |
 |---|---|---|
 | run `r` | `triage run CONFIG` with `--profile`, `--random-seed`, `--cache-policy`, `--project-path` | a process buffer; the status buffer refreshes when the run ends. With `--profile=cloud` the CLI only submits the job to AWS Batch. |
-| check `c` | `triage check leakage CONFIG --json FILE` with `--dates` | exit 0: a message that nothing differs; exit 1: the report; any other exit: the error |
+| check `c` | `triage check leakage CONFIG` with `--dates`, `triage check history CONFIG` with `--as-of`, and `triage check metrics` of the model, model group or Experiment with `--tolerance`, each with `--json FILE` | leakage and history: exit 0 says the check is clean, exit 1 opens the report. Metrics: the report opens on exit 0 and 1. Any other exit: the error |
 | analyze `a` | `triage analyze-config CONFIG` with `--estimate`, `--estimate-dates`, `--features`, `--plot` | a process buffer; with `--plot`, the splits figure opens when it ends |
-| results `l` | `triage leaderboard`, `triage leaderboard --refresh`, `triage audition`, `triage models` with `--metric`, `--parameter`, `--windowed` | table views |
+| results `l` | `triage leaderboard`, `triage leaderboard --refresh`, `triage audition`, `triage models` with `--metric`, `--parameter`, `--windowed`; audition also takes `--common-rows` and `--groups` | table views |
 | score `f` | `triage score MODEL [DATE]` with `--cohort-query`, `--project-path` | a process buffer |
-| plot `p` | `triage plot curve`, `error-rules`, `crosstabs` (a model) and `curve-dates`, `leaves`, `recurrence`, `crosstabs-dates`, `overlap` (a model group) | the figure, in an image buffer |
+| plot `p` | `triage plot`: 21 figures, listed below | the figure, in an image buffer |
+| postmodel `P` | `triage postmodel`: 13 diagnostics, listed below | a table view, or a process buffer for the commands without `--json` |
 | maintain `m` | `triage archive HASH`, `triage gc`, `triage gc --delete`, `triage db upgrade` | a process buffer; archive and delete ask first |
 | serve `s` | `triage serve` with `--port` | a process buffer; the browser opens when the dashboard listens |
 
-The plot menu passes each subcommand only the flags it accepts, and asks for
-the cut when `leaves`, `recurrence` or `overlap` needs one. It writes each
-figure to a temporary file and deletes the file with its buffer.
+### The check reports
+
+`triage check history` renders the config's `history_query` and reports the
+series with missing periods. On exit 0 the echo area says the history is
+complete on the calendar. On exit 1 a buffer opens with the counts (series,
+series with gaps, missing periods, rows off the grid, rows at or after the
+as_of_date), the entities with the most missing periods, and the rows that
+cannot be placed.
+
+`triage check metrics` recomputes the stored metrics of a model, a model
+group or an Experiment and compares them with the stored values. Its report
+opens on exit 0 and on exit 1, because the per-metric table is the result
+either way: values checked, values that failed, the largest gap and the
+worst row, then the metrics it did not audit and why.
+
+### The plot menu
+
+The plot menu groups its figures by what they draw on:
+
+| Group | Figures |
+|---|---|
+| Model | `curve`, `error-rules`, `crosstabs`, `calibration`, `scores`, `gains` |
+| Regression model | `forecast-actual`, `residuals`, `bias`, `forecast-time` |
+| Survival model | `km`, `brier`, `survival-calibration` |
+| Model group | `curve-dates`, `leaves`, `recurrence`, `crosstabs-dates`, `overlap`, `segments`, `win-consistency`, `importance` |
+
+The menu passes each subcommand only the flags it accepts, and asks for
+a required flag when none is set, such as the cut of `leaves`, `recurrence` or
+`overlap`. An empty answer leaves the flag out, which is what a regression
+group's `leaves` wants, since its error leaves have no cut. The arguments
+include `--by` and `--cut` (date, band, sbc, cold-start, all or
+`subset:NAME`), `--baseline`, `--horizon`, `--bins` and `--sweep`. The menu
+writes each figure to a temporary file and deletes the file with its buffer.
+
+### The postmodel menu
+
+`P` runs the `triage postmodel` diagnostics on the model, model group or
+Experiment at point:
+
+| Target | Entry | CLI command | Output |
+|---|---|---|---|
+| model | Residuals `r` | `postmodel residuals` with `--by`, `--top`, `--quantiles` | errors per test date, by segment, and the largest errors |
+| model | Structure `s` | `postmodel structure` with `--min-rows` | forecast structure, leaf support or the mean-shift split; drawn on exit 1 too, with the reason |
+| model | Survival diagnostics `S` | `postmodel survival` with `--horizon`, `--times` | one section per test date: risk deciles, log-rank, Uno's C, AUC(t) and Brier(t), calibration |
+| model | Near miss `n` | `postmodel near-miss` with `-p`, `--width`, `--date` | the selected, near-miss and rest bands per date |
+| model | Prototypes `o` | `postmodel prototypes` with `-p`, `--n`, `--date` | each class's prototypes and their largest deviations |
+| model | Error tree `e` | `postmodel error-tree` with `-p`, `--kind`, `--depth`, `--min-leaf`, `--baseline`, `--horizon` | a process buffer |
+| model | Crosstabs of the largest errors `x` | `postmodel crosstabs --by abs-error:CUT` | a process buffer |
+| model | Crosstabs against the near miss `X` | `postmodel crosstabs --against near-miss` with `-p` | a process buffer |
+| model | Compare with another model `c` | `postmodel compare` with `-p` or `--sweep` | a process buffer |
+| model group | Against the baseline `b` | `postmodel baseline` with `--baseline`, `--cut`, `--experiment` | segments, entity wins, the chance test and the out-of-time check; drawn on exit 1 too |
+| model group | Importance by family `i` | `postmodel importance` with `--top` | each family's share per model, and its stability between train ends |
+| Experiment | Own rows and common rows `w` | `postmodel compare-rows` with `--groups` | one row per model group; `RET` opens the model |
+| Experiment | Sensitivity to a hyperparameter `v` | `postmodel sensitivity` with `--param`, `--metric`, `-p`, `--model-type`, `--common-rows` | the metric for each value of the hyperparameter |
+
+The table views are drawn from the command's `--json` output, one table per
+part of the result, and `RET` on a model or model group row opens it. The
+error tree offers only the kinds the problem type at point reads: `fp`, `fn`,
+`confusion`, `both` and `all` for a classifier, `abs-error` and
+`beats-baseline` for a regression model, and both families for
+`regression_ranking`. For a survival model it asks for `--horizon`; for the
+other types it drops one. Crosstabs of the largest errors turn the cut `-p`
+into `--by abs-error:CUT`. Compare with `--sweep` drops `-p`, since the CLI
+takes one or the other. Against the baseline passes the Experiment at point as
+`--experiment`. Survival diagnostics ask for the horizon when `-H` is not set.
+
+### Type gating
+
+Many postmodel diagnostics and plots read some problem types only: a residual
+needs a continuous forecast, a near-miss band needs a positive class, and a
+Kaplan-Meier curve needs a survival label. The CLI refuses a wrong type with
+exit 2 and names the command to use instead. The menus grey out such an entry
+before you choose it.
+
+The table comes from the CLI. On the first menu that needs it in a session,
+`triage.el` runs the hidden command `triage postmodel kinds --json` once per
+Project and caches the result. That table lists each gated command with the
+problem types it reads, and the error-tree kinds of each type with its rule
+for `--horizon` (required, refused or optional). The menus hold no copy of it,
+so a new CLI release brings its own table. The problem type at point comes
+from the Experiment line in the status buffer, the model view, or the row of a
+leaderboard, model group or compare-rows table.
+
+The first menu waits up to `triage-kinds-timeout` seconds (default 10) for the
+table. When the table has not arrived in time, or the call fails, the menus
+grey out nothing by type: the entry runs, and the CLI's own refusal appears as
+an error. They also grey out nothing by type when there is no problem type at
+point, or for a command the table does not list. `M-x triage-clear-caches`
+forgets the table with the cached roots and executables, as `C-u M-x
+triage-status` does.
 
 `triage reset` is in no menu. It deletes results, so it is reachable only
 through `!`, where the CLI's own confirmation applies.
@@ -196,7 +285,11 @@ through `!`, where the CLI's own confirmation applies.
 
 A failed call puts its last line in the echo area (or in the header of the
 buffer that made it) and appends the command, its exit code and its full error
-output to the `*triage-errors*` buffer.
+output to the `*triage-errors*` buffer. When the CLI refuses an item, such as
+a model of a problem type the command does not read, it prints the refusal on
+standard output after its log lines on standard error. `triage.el` puts that
+output last, so the line you see is the CLI's message and the command it
+names.
 
 The CLI marks its JSON with a contract number. If triage-pg is newer than
 `triage.el`, the status buffer says `triage-pg is newer than triage.el; update

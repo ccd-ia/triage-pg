@@ -1,6 +1,6 @@
 ---
 title: Reading the error trees
-description: Three shallow trees fitted on a model's mistakes at its cut, what rows each one sees, how to read a leaf, and how to use the rules to improve the model and to check it, each step worked on DirtyDuck.
+description: Three shallow trees fitted on a model's mistakes at its cut, what rows each one sees, how to read a leaf, how to use the rules to improve the model and to check it, and the trees for a regression or survival model, each step worked on DirtyDuck.
 sidebar:
   order: 2
 ---
@@ -777,6 +777,104 @@ suite plants a rule that does (`test_a_rule_on_every_date_recurs_on_every_date`)
 the function reports it on 3 of 3 dates. Read recurrence next to the threshold curve
 and the crosstabs across the same dates.
 
+## Trees for a regression or survival model
+
+A regression model has no list of right and wrong flags, so fp, fn and confusion
+do not apply to it: `error-tree --kind fp` on a `regression` model exits with code 2
+and names the kinds that do. Two other trees take their place. A
+`regression_ranking` model reads both families, with a positive meaning an outcome
+above 0. The examples are model 382 of the DirtyDuck regression Experiment
+(`example/dirtyduck/experiment-regression.yaml`), a random forest that forecasts how
+many violations a facility will have in the next six months, at its test date
+2017-01-01.
+
+| Tree | Rows it is fitted on | What a leaf reports |
+|---|---|---|
+| `abs-error` | every labeled row of the test date | its mean absolute error, and that mean over the date's MAE (`× MAE`) |
+| `beats-baseline` | the labeled rows of the group's earlier test dates | the share of rows where the model's error is smaller than a baseline group's |
+
+### The largest errors
+
+```console
+$ uv run triage postmodel error-tree 382 --kind abs-error
+7 error rule(s) persisted.
+  As-of        Rule                                                                 n      Mean |e|   × MAE   Bias     |e| share
+  2017-01-01   facilities.zip_code=60639 > 0.5 AND RECENCY(inspections.date) <=     77     8.477      2.81    -8.351   3.5%
+               207.5 AND ABS(facilities.RECENCY(inspections.date|interval=P3M))
+               <= 28.5
+  …
+  2017-01-01   facilities.zip_code=60639 <= 0.5 AND                                 3992   3.147      1.04    0.699    66.9%
+               ABS(facilities.NUNIQUE(inspections.result)) > 1.5 AND
+               ABS(facilities.NUNIQUE(inspections.date)) <= 10.5
+  …
+```
+
+The tree regresses the absolute error on the Matrix's features, so a leaf is a
+group whose forecasts miss by more, or less, than the rest. Read `× MAE` as the
+error rate of a classification leaf against its tree: the first leaf, 77
+facilities in zip 60639 inspected within the last 208 days, misses by 8.48
+violations on average, 2.81 times the date's MAE of 3.01. Its bias of −8.35
+says the misses are all in one direction: the model forecasts far fewer
+violations than these facilities had. `|e| share` weighs the leaf by size. The
+3,992-row leaf is close to the average (1.04) but holds 66.9% of the total
+absolute error, and a leaf at 3.5% matters less to the total than to the 77
+facilities in it. The stored rule's `n_errors` counts the rows above the date's
+MAE, so `error-rules` prints the ratio in its `Rate` column.
+
+`triage postmodel crosstabs 382 --by abs-error:100_abs` compares the 100 rows
+with the largest errors with the rest, one feature at a time. On this model
+zip 60639 is 25% of the 100 largest errors against 2.4% of the rest (ratio
+10.5), the same signal as the first leaf.
+
+### Wins against a baseline
+
+```console
+$ uv run triage postmodel error-tree 382 --kind beats-baseline
+8 error rule(s) persisted.
+  Rule                                                                       Train n   Train wins   Test n   Test wins   Gain
+  NUNIQUE(inspections.result|interval=P6M) <= 1.5 AND                        4377      37.9%        1977     45.7%       -308.81
+  RECENCY(inspections.date) <= 175.5 AND facilities.zip_code=60614 <= 0.5
+  …
+  NUNIQUE(inspections.result|interval=P6M) > 1.5 AND                         163       76.7%        77       71.4%       187.49
+  ABS(facilities.COUNT(inspections.result|interval=P6M)) > 2.5 AND
+  NUNIQUE(inspections.result) <= 2.5
+
+Fitted on 3 date(s) before 2017-01-01 against baseline:55: closer on 45.2% of the
+training rows and 48.8% of the test rows; AUC on …
+```
+
+The baseline is the Experiment's baseline group with the lowest MAE on the rows it
+shares with the model's group, here group 55 (`PromedioDisponible`, the mean of
+each facility's earlier labels); `--baseline GROUP` picks another. The tree is
+fitted on the group's three earlier test dates and read on 2017-01-01, so a leaf
+that holds on the test date is a rule found before that date. `Gain` is the
+leaf's summed reduction in absolute error against the baseline on the test date;
+a negative gain means the baseline did better there. The largest leaf, 1,977
+facilities with at most one distinct result in the last six months and
+inspected in the last 176 days, is where the model loses: it is closer on 45.7%
+of them and adds 309 violations of absolute error. The leaves with several
+distinct recent results are where it wins (71% to 72% on the test date). A rule
+with a high win share on the earlier dates and a low one on the test date (the
+zip 60614 leaf: 62.6% before, 44.2% after) did not hold.
+
+`--suspicious` reads both kinds: an `abs_error` leaf is suspicious when its mean
+absolute error is at most `--mae-ratio` (default 0.1) of the date's MAE on at least
+`--min-support` rows. Model 382 has none. The
+[regression guide](/triage-pg/guides/reading-regression-diagnostics/) reads the
+same model's residuals and its baseline comparison per segment.
+
+### A survival tree at a horizon
+
+A survival label is a duration and an event flag, so it has no positive class
+until you pick a horizon. `error-tree --kind confusion --horizon 90` reads a row as
+positive when its event is observed at a duration of 90 or less, drops the rows
+censored before 90, and fits the classification trees on that binary label. The
+leaves are stored at the parameter `<cut>|horizon=90`, so two horizons do not
+replace each other. A survival model refuses every tree without `--horizon`, and
+a model of any other type refuses `--horizon`. The
+[survival guide](/triage-pg/guides/reading-survival-diagnostics/) reads the
+censoring-aware diagnostics that come before a tree.
+
 ## Caveats
 
 - **The trees describe; they do not explain.** A leaf says where the errors of one
@@ -815,3 +913,5 @@ and the crosstabs across the same dates.
   histogram, calibration, list overlap and Subset metrics.
 - [How to find leakage](/triage-pg/guides/finding-leakage/): `triage check leakage`,
   and how the three diagnostics point at what it cannot see.
+- [Reading regression diagnostics](/triage-pg/guides/reading-regression-diagnostics/):
+  residuals, bias by history band, and where a forecast beats its baseline.

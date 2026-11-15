@@ -12,7 +12,7 @@ its own guide. This page covers the other four panels.
 | Panel | What it tells you | Where it comes from |
 |---|---|---|
 | Score histogram | how spread out the scores are, and how many entities share one score | `triage.model_score_histogram(model_id, bins)` |
-| Calibration deciles | whether a score can be read as a probability | `triage.monitoring_calibration(...)`, `triage model show` |
+| Calibration deciles | whether a score can be read as a probability, or a forecast as a quantity | `triage.monitoring_calibration(...)`, `triage model show`, `triage plot calibration` |
 | List overlap | whether two models flag the same entities | `triage postmodel compare`, `triage.list_overlap(...)` |
 | Subset metrics | how the model ranks inside one slice of the Cohort | `evaluation.subsets`, `triage.evaluations` by `subset_hash` |
 
@@ -144,45 +144,91 @@ capacity falls inside a block, you have two options:
 
 `triage.monitoring_calibration(model_id, 'test', as_of_date, label_timespan)`
 takes the labeled rows of one test date, sorts them by score and cuts them into
-ten deciles of equal count. For each decile it returns the mean score and the
-observed failure rate (the `Realized` column). `triage model show <id>` prints
-it for the model's latest test date, and the card plots it against the
-diagonal.
+ten deciles. For each decile it returns the mean score, the mean outcome, the
+lift (the decile's mean outcome over the mean outcome of all labeled rows) and,
+for a classifier, the observed failure rate (the `Realized` column, equal to
+the mean outcome when the label is 0 or 1). Rows with the same score always
+fall in the same decile: a block of tied scores takes the decile of its last
+row, and the deciles it covers are missing from the table. `triage model show
+<id>` prints it for the model's latest test date, `triage plot calibration <id>`
+draws it, and the card plots it against the diagonal.
 
 ```console
 $ uv run triage model show 285
 …
-        Calibration @ 2016-10-01
-  Decile   n     Mean score   Realized
-  1        568   0.4551       0.3979
-  2        568   0.3557       0.3433
-  3        568   0.3127       0.3292
-  4        568   0.2819       0.2940
-  5        568   0.2590       0.2623
-  6        567   0.2406       0.2275
-  7        567   0.2075       0.1975
-  8        567   0.2054       0.1728
-  9        567   0.2054       0.1887
-  10       567   0.2018       0.2134
+                   Calibration @ 2016-10-01
+  Decile   n      Mean score   Mean outcome   Lift   Realized
+  1        567    0.4552       0.3986         1.52   0.3986
+  2        568    0.3558       0.3433         1.31   0.3433
+  3        565    0.3129       0.3292         1.25   0.3292
+  4        510    0.2837       0.3059         1.16   0.3059
+  5        531    0.2614       0.2486         0.95   0.2486
+  6        657    0.2426       0.2390         0.91   0.2390
+  7        114    0.2174       0.2544         0.97   0.2544
+  10       2163   0.2044       0.1896         0.72   0.1896
+
+44% of rows share score 0.2054 — tied rows are kept in one decile
 ```
 
-![Calibration deciles of model 285 (logistic regression) and model 283 (random forest) at 2016-10-01: both lines run close to the diagonal from about 0.2 to 0.45](../../../assets/guides/worked-calibration.svg)
+![Calibration buckets of model 285 at 2016-10-01: eight points close to the diagonal from 0.20 to 0.45, the lowest one (decile 10) holding the tied block](../../../assets/guides/worked-calibration-ties.svg)
+
+Reproduce on your data: `uv run triage plot calibration 285`, with your model
+in its place. The figure shows the latest test date, as `model show` does.
 
 ### How to read it
 
 A point on the diagonal means that among the facilities scored around 0.3,
 about 30% failed. Model 285 sits close to it. Decile 5 has a mean score of
-0.259 and an observed rate of 0.262; decile 10 has 0.202 and 0.213. The top
-decile is the farthest off, at 0.455 against 0.398, so the model overstates
+0.261 and an observed rate of 0.249; decile 10 has 0.204 and 0.190. The top
+decile is the farthest off, at 0.455 against 0.399, so the model overstates
 the risk of its highest-scored facilities by about 0.06. The runner-up group's
 random forest (model 283) is about as close: its top decile is 0.417 against
 0.405.
 
-Deciles 8 and 9 of model 285 have the same mean score, 0.2054, the tied score
-from the histogram: both lie inside the tie block. The model gives every
-facility in them the same score, and the split of the block between the two
-deciles is arbitrary, so the gap between their observed rates, 0.173 and
-0.189, is chance.
+Deciles 8 and 9 are missing. 6,160 of the 14,053 facilities scored at
+2016-10-01 (44%) share the score 0.2054, the tied block from the histogram,
+and 2,051 of them have a label. They all go to decile 10, with the 112
+labeled facilities scored below them, so decile 10 holds 2,163 rows and its
+mean score is close to 0.2054. Up to triage-pg 1.5.0 the deciles had equal
+counts and the block was split over deciles 8, 9 and 10 in `entity_id` order,
+so the gap between their observed rates was chance. One point for the block is
+what the model can tell apart. The deciles around a block also change size:
+decile 7 holds 114 rows because the block starts right after it.
+`triage.score_ties` gives the largest block of a model and date:
+
+```console
+$ uv run triage query "select * from triage.score_ties(285, 'test', '2016-10-01')"
+│ n     │ n_distinct │ largest_tie_n │ largest_tie_score   │ largest_tie_share  │
+│ 14053 │ 2484       │ 6160          │ 0.20539558976458647 │ 0.4383405678502811 │
+```
+
+The table is the same for every problem type except the last column. For a
+regression model the outcome is a quantity, so `Mean outcome` is the mean of
+the outcome in the decile, `Realized` is empty, and the diagonal compares the
+mean forecast with the mean outcome. Model 382, a random forest that forecasts
+DirtyDuck's violation counts, gives 30% of its rows one forecast (5.871), so
+its table has six rows:
+
+```console
+$ uv run triage model show 382
+…
+           Deciles with lift @ 2017-01-01
+  Decile   n      Mean score   Mean outcome   Lift
+  1        558    7.1266       6.8387         1.35
+  2        72     6.1007       4.2917         0.85
+  3        1128   6.0029       6.2278         1.23
+  7        2580   5.7137       4.9655         0.98
+  8        532    4.8694       4.4944         0.89
+  10       1358   4.1122       3.7879         0.75
+
+30% of rows share score 5.871 — tied rows are kept in one decile
+```
+
+The top decile's forecast of 7.13 violations is 0.29 above its mean outcome of
+6.84, and decile 2 (72 rows) forecasts 6.10 against 4.29. A decile's lift is
+the ranking question: the 558 facilities in decile 1 had 1.35 times the mean
+number of violations. [Reading regression diagnostics](/triage-pg/guides/reading-regression-diagnostics/)
+reads this model further.
 
 `ece@10` summarizes calibration in one number: the expected calibration error
 over ten equal-width score bins (equal-width bins of [0, 1], not the deciles of

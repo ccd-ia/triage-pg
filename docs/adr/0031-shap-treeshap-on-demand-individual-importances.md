@@ -86,3 +86,8 @@ Renumbered a third time on 2026-11-05: the milestone is now **v1.6.0**. v1.4.0 s
 the leakage check and the error-tree and subset-curve diagnostics, and v1.5.0 carries
 `triage plot`, four dashboard additions and `triage reset`. The scope above is unchanged.
 Where the body names an earlier milestone, read v1.6.0.
+
+Renumbered a fourth time on 2026-11-12: the milestone is now **v1.7.0**. v1.6.0 carries
+triage.el and, since 2026-11-14, the calendar target history (ADR-0036) and the postmodel
+diagnostics for every problem type. The scope above is unchanged. Where the body names an
+earlier milestone, read v1.7.0.
