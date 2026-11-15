@@ -718,6 +718,9 @@ export interface GroupAuditionRow {
 
 export interface ModelGroupDetailResponse {
   summary: ModelGroupSummaryRow
+  /** The type the group's models (in the experiment scope) were trained for; null when
+   *  they span several types or none is in scope. The recurrence panel's kinds follow it. */
+  problem_type: ProblemType | null
   models: ModelGroupModelRow[]
   /** evals for this group's models (long format, for metric-over-time). */
   metric_over_time: ExpEvaluationRow[]

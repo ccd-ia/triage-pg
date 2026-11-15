@@ -719,6 +719,7 @@ export function modelGroupDetail(id: number): ModelGroupDetailResponse {
   const allEvals = evalRows(EXP_FAILED).filter((r) => r.model_group_id === g.id)
   return {
     summary: modelGroupsFor(EXP_FAILED).find((m) => m.model_group_id === g.id)!,
+    problem_type: 'classification',
     models: SPLITS.map((d, i) => ({
       model_id: mid + i,
       train_end_time: d,

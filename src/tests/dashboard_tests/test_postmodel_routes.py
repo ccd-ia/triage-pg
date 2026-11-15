@@ -23,6 +23,7 @@ from tests.test_baseline_compare import EXP as BASELINE_EXP
 from tests.test_baseline_compare import _seed as seed_baseline
 from tests.test_common_rows import EXP as COMMON_EXP
 from tests.test_common_rows import _seed as seed_common_rows
+from tests.test_diagnostics import REG_DATES, _seed_regression_trees
 from tests.test_near_miss_prototypes import seed_model as seed_near_miss
 from tests.test_regression_diagnostics import _seed as seed_regression
 from tests.test_structure import _ridge_design
@@ -277,6 +278,100 @@ def test_error_rules_read_the_regression_kinds(client, db_pool_greenfield):
     assert [r["error_kind"] for r in rows] == ["abs_error"]
     assert rows[0]["reference_error_rate"] == 1.0
     assert rows[0]["leaf_stats"]["population_mae"] == 2.0
+
+
+def _group_of(pool, model_id: int) -> int:
+    with pool.connection() as conn:
+        return conn.execute(
+            "select model_group_id from triage.models where model_id = %(m)s",
+            {"m": model_id},
+        ).fetchone()["model_group_id"]
+
+
+def test_the_group_sheet_names_its_problem_type(client, seeded, db_pool_greenfield):
+    mg1 = seeded.group_ids["mg1"]
+    assert client.get(f"/api/model-groups/{mg1}").json()["problem_type"] == (
+        "classification"
+    )
+    regression = _group_of(db_pool_greenfield, seed_regression(db_pool_greenfield))
+    body = client.get(f"/api/model-groups/{regression}").json()
+    assert body["problem_type"] == "regression"
+    # scoped to an Experiment the group has no model in, it has no type
+    scoped = client.get(
+        f"/api/model-groups/{regression}", params={"experiment_hash": "elsewhere"}
+    ).json()
+    assert scoped["problem_type"] is None
+
+
+def test_a_regression_groups_recurrence_reads_its_leaves(
+    client, db_pool_greenfield, tmp_path
+):
+    from triage.diagnostics import compute_error_analysis
+
+    pool = db_pool_greenfield
+    seeded = _seed_regression_trees(pool, tmp_path)
+    gid = seeded["group"]
+    route = f"/api/model-groups/{gid}/error-recurrence"
+    before = client.get(route, params={"error_kind": "abs_error"}).json()
+    assert before["empty"] is True and "--kind abs-error" in before["hint"]
+
+    for kind in ("abs_error", "beats_baseline"):
+        compute_error_analysis(
+            pool, seeded["model"], kind=kind, max_depth=2, min_samples_leaf=20
+        )
+    abs_error = client.get(route, params={"error_kind": "abs_error"}).json()
+    _same(abs_error, readers.error_recurrence(pool, gid, error_kind="abs_error"))
+    assert abs_error["parameters"] == [""] and abs_error["parameter"] == ""
+    worst = max(abs_error["rules"], key=lambda r: r["mean_error_rate"])
+    assert worst["example_rule"].startswith("x1 > 5")
+    assert worst["n_dates"] == worst["n_dates_total"] == len(REG_DATES)
+    # without a kind, the route reads the first kind the group's type has
+    assert client.get(route).json()["error_kind"] == "abs_error"
+
+    beats = client.get(route, params={"error_kind": "beats_baseline"}).json()
+    assert beats["parameters"] == [f"baseline:{seeded['baseline']}"]
+    assert beats["rules"] and {r["n_dates_total"] for r in beats["rules"]} == {1}
+
+
+@pytest.mark.parametrize(
+    ("seed", "kind", "named"),
+    [
+        ("regression", "fp", "error-recurrence {g} --kind abs-error"),
+        ("regression", "confusion", "error-recurrence {g} --kind abs-error"),
+        ("classification", "abs_error", "error-recurrence {g} --kind fp"),
+        ("survival", "beats_baseline", "--kind fp -p 'CUT|horizon=H'"),
+    ],
+)
+def test_a_groups_recurrence_refuses_a_kind_its_type_lacks(
+    client, db_pool_greenfield, tmp_path, seed, kind, named
+):
+    pool = db_pool_greenfield
+    if seed == "classification":
+        model_id = seed_near_miss(pool, tmp_path, tag="gate")
+    elif seed == "regression":
+        model_id = seed_regression(pool)
+    else:
+        model_id = seed_survival(pool, tmp_path)["model_id"]
+    gid = _group_of(pool, model_id)
+    response = client.get(
+        f"/api/model-groups/{gid}/error-recurrence", params={"error_kind": kind}
+    )
+    assert response.status_code == 422, response.text
+    assert named.format(g=gid) in response.json()["detail"]
+
+
+def test_a_regression_ranking_groups_recurrence_reads_both_families(
+    client, db_pool_greenfield, tmp_path
+):
+    pool = db_pool_greenfield
+    gid = _seed_regression_trees(pool, tmp_path, problem_type="regression_ranking")[
+        "group"
+    ]
+    route = f"/api/model-groups/{gid}/error-recurrence"
+    for kind in ("fp", "fn", "confusion", "abs_error", "beats_baseline"):
+        response = client.get(route, params={"error_kind": kind})
+        assert response.status_code == 200, (kind, response.text)
+        assert response.json()["empty"] is True
 
 
 # ------------------------------------------------------------- regression_ranking

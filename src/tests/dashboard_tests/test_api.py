@@ -342,6 +342,7 @@ def test_model_group_detail(client, seeded):
     body = resp.json()
     assert set(body) == {
         "summary",
+        "problem_type",
         "models",
         "metric_over_time",
         "per_split",

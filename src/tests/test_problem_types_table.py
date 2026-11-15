@@ -68,6 +68,25 @@ def test_the_error_tree_table_follows_the_refusal(problem_type: str) -> None:
         assert (refused is None) == (kind.replace("_", "-") in rule["kinds"]), kind
 
 
+def test_the_leaf_kinds_of_each_type() -> None:
+    """The kinds the dashboard's error panels offer (frontend/src/api/errorKinds.ts)."""
+    cut = ("fp", "fn", "confusion")
+    regression = ("abs_error", "beats_baseline")
+    assert {t: problem_types.leaf_kinds(t) for t in problem_types.PROBLEM_TYPES} == {
+        "classification": cut,
+        "regression_ranking": (*cut, *regression),
+        "regression": regression,
+        "survival": cut,
+    }
+    # a group of several types reads the kinds of any of them
+    assert problem_types.recurrence_refusal(7, ("regression",), "fp") is not None
+    assert (
+        problem_types.recurrence_refusal(7, ("classification", "regression"), "fp")
+        is None
+    )
+    assert problem_types.recurrence_refusal(7, (), "fp") is None
+
+
 def test_every_gated_name_is_a_command_of_the_cli() -> None:
     """``postmodel crosstabs --by abs-error`` names a command and the option it gates."""
     root = typer.main.get_command(app)

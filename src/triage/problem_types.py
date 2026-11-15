@@ -252,6 +252,68 @@ def error_tree_table() -> dict[str, dict[str, Any]]:
     return table
 
 
+#: The kinds of leaf an error tree persists (``triage.error_analysis.error_kind``).
+LEAF_KINDS = ("fp", "fn", "confusion", *REGRESSION_TREE_KINDS)
+
+
+def leaf_kinds(problem_type: str) -> tuple[str, ...]:
+    """The kinds of leaf a model of ``problem_type`` can persist, in :data:`LEAF_KINDS`
+    order. Derived from :func:`error_tree_refusal`, with or without a horizon."""
+    return tuple(
+        k
+        for k in LEAF_KINDS
+        if error_tree_refusal(0, problem_type, k) is None
+        or error_tree_refusal(0, problem_type, k, 1.0) is None
+    )
+
+
+def group_problem_types(
+    pool: DictRowPool, model_group_id: int, experiment_hash: str | None = None
+) -> tuple[str, ...]:
+    """The problem types a model group's models were trained for, in
+    :data:`PROBLEM_TYPES` order.
+
+    A group is shared by every Experiment whose grid fits the same estimator,
+    hyperparameters and features, so it can span types. ``experiment_hash`` keeps the
+    models of that Experiment. Empty when the group has no model (in it).
+    """
+    with pool.connection() as conn:
+        found = {
+            r["problem_type"]
+            for r in conn.execute(
+                "select distinct triage.model_problem_type(m.model_id)::text"
+                "       as problem_type"
+                " from triage.models as m"
+                " left join triage.runs as r on r.run_id = m.run_id"
+                " where m.model_group_id = %(g)s"
+                "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)",
+                {"g": model_group_id, "exp": experiment_hash},
+            ).fetchall()
+        }
+    return tuple(t for t in PROBLEM_TYPES if t in found)
+
+
+def recurrence_refusal(
+    model_group_id: int, problem_types: tuple[str, ...], kind: str
+) -> str | None:
+    """Why a model group's error trees have no ``kind`` leaves, or None.
+
+    A group of several types reads a kind any of them reads. A group with no model is
+    not refused here: the reader answers it.
+    """
+    if not problem_types or any(kind in leaf_kinds(t) for t in problem_types):
+        return None
+    kinds = [k for k in LEAF_KINDS if any(k in leaf_kinds(t) for t in problem_types)]
+    first = kinds[0]
+    cut = " -p 'CUT|horizon=H'" if first == "fp" and "survival" in problem_types else ""
+    return (
+        f"model group {model_group_id} is {' and '.join(problem_types)}: its error"
+        f" trees have {', '.join(k.replace('_', '-') for k in kinds)} leaves, not"
+        f" {kind.replace('_', '-')}. Use triage postmodel error-recurrence"
+        f" {model_group_id} --kind {first.replace('_', '-')}{cut}."
+    )
+
+
 def kinds_table() -> dict[str, Any]:
     """Which commands read which problem types, as ``triage postmodel kinds --json``
     prints it.

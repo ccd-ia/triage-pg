@@ -620,7 +620,13 @@ def model_group_detail(
     hyperparameters + feature_list ⇒ same model_group_id). Pass ``experiment_hash`` to scope
     the models/evals to one experiment's runs — otherwise the panel shows every experiment's
     models of this group (e.g. 8 models across two experiments for a 4-split group).
+
+    ``problem_type`` is the type the group's models (in that scope) were trained for, the
+    one the sheet's error-recurrence kinds follow; ``None`` when they span several types
+    or none is in scope.
     """
+    from triage import problem_types
+
     summary = _one(
         pool,
         "select experiment_hash, model_group_id, model_group_hash, model_type,"
@@ -684,8 +690,10 @@ def model_group_detail(
         if experiment_hash
         else []
     )
+    types = problem_types.group_problem_types(pool, model_group_id, experiment_hash)
     return {
         "summary": summary,
+        "problem_type": types[0] if len(types) == 1 else None,
         "models": models,
         "metric_over_time": metric_over_time,
         "per_split": per_split,
@@ -922,17 +930,20 @@ def model_crosstabs(
 ErrorKind = Literal["fp", "fn", "confusion", "abs_error", "beats_baseline"]
 
 
+def _error_tree_option(problem_type: str, kind: Optional[str]) -> str:
+    """The ``triage postmodel error-tree`` options that fit ``kind`` leaves for a type."""
+    if kind == "beats_baseline":
+        return "--kind beats-baseline"
+    if kind == "abs_error" or problem_type == "regression":
+        return "--kind abs-error"
+    if problem_type == "survival":
+        return "--kind all --horizon H"
+    return "--kind all"
+
+
 def _error_tree_hint(pool: DictRowPool, model_id: int, kind: Optional[str]) -> str:
     """The ``triage postmodel error-tree`` command that fills an empty error-rules panel."""
-    problem_type = _problem_type(pool, model_id)
-    if kind == "beats_baseline":
-        option = "--kind beats-baseline"
-    elif kind == "abs_error" or problem_type == "regression":
-        option = "--kind abs-error"
-    elif problem_type == "survival":
-        option = "--kind all --horizon H"
-    else:
-        option = "--kind all"
+    option = _error_tree_option(_problem_type(pool, model_id), kind)
     return (
         f"run `triage postmodel error-tree {model_id} {option}` — the CLI fits the error"
         " trees from the matrix and persists the rules here."
@@ -986,31 +997,46 @@ def model_error_rules(
 def model_group_error_recurrence(
     model_group_id: int,
     parameter: Optional[str] = None,
-    error_kind: ErrorKind = "fp",
+    error_kind: Optional[ErrorKind] = None,
     limit: int = 20,
     pool: DictRowPool = Depends(_pool),
 ) -> Any:
     """On how many of the group's test dates each error rule recurs — thin read over
     ``triage.error_rule_recurrence`` (migration 0027).
 
-    ``parameters`` lists the cuts the group's error trees were fitted at; without
-    ``parameter`` the most recently analysed cut is read.
+    ``error_kind`` defaults to the first kind of leaf the group's problem type has
+    (``problem_types.leaf_kinds``): fp, or abs_error for a regression group. A kind the
+    type has no leaves of answers 422 naming the kind to read instead. ``parameters``
+    lists the cuts the group's error trees of that kind were fitted at (``''`` for
+    abs_error, ``baseline:<group>`` for beats_baseline); without ``parameter`` the most
+    recently analysed one is read.
     """
+    from triage import problem_types
+
+    types = problem_types.group_problem_types(pool, model_group_id)
+    kind = error_kind or (problem_types.leaf_kinds(types[0])[0] if types else "fp")
+    refused = problem_types.recurrence_refusal(model_group_id, types, kind)
+    if refused is not None:
+        raise HTTPException(status_code=422, detail=refused)
     try:
         recurrence = readers.error_recurrence(
             pool,
             model_group_id,
             parameter=parameter,
-            error_kind=error_kind,
+            error_kind=kind,
             limit=limit,
         )
     except readers.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="model group not found") from exc
     if not recurrence["parameters"]:
+        reads = next(
+            (t for t in types if kind in problem_types.leaf_kinds(t)), "classification"
+        )
         return _empty(
-            "no error analysis persisted for this model group",
-            "run `triage postmodel error-tree <model_id> --kind all` on the group's"
-            " models — recurrence counts each rule across their test dates.",
+            f"no error analysis persisted for this model group ({kind} leaves)",
+            f"run `triage postmodel error-tree <model_id> {_error_tree_option(reads, kind)}`"
+            " on the group's models — recurrence counts each rule across their test"
+            " dates.",
         )
     return recurrence
 

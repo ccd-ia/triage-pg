@@ -3,7 +3,8 @@
  * triage.error_analysis (persisted by `triage postmodel error-tree`): each row is a
  * leaf of a shallow tree — a human-readable rule with its support and error rate.
  *
- * The kinds offered follow the model's problem type (the route reads every kind):
+ * The kinds offered follow the model's problem type (api/errorKinds.ts, shared with the
+ * group sheet's recurrence panel; the route reads every kind):
  *   - a top-k cut (classification, regression_ranking): fp = wrong flags within the top-k;
  *     fn = missed positives among the passed-over; confusion = TP/FP/FN/TN over every
  *     labeled row (migration 0027).
@@ -30,43 +31,7 @@ import { useAsync } from '../hooks/useAsync'
 import type { ErrorKind, ErrorRuleRow, ProblemType } from '../api/types'
 import { isEmpty } from '../api/types'
 import { fmtNum } from '../api/format'
-
-interface KindTab {
-  kind: ErrorKind
-  label: string
-  title: string
-}
-
-const CUT_KINDS: KindTab[] = [
-  { kind: 'fp', label: 'FP · wrong flags', title: 'within the top-k: where the model over-selects' },
-  { kind: 'fn', label: 'FN · missed need', title: 'among the passed-over: where the model misses positives' },
-  {
-    kind: 'confusion',
-    label: 'Confusion · all four',
-    title: 'every labeled row, TP/FP/FN/TN: the first splits mostly redraw the cut itself',
-  },
-]
-
-const REGRESSION_KINDS: KindTab[] = [
-  {
-    kind: 'abs_error',
-    label: '|error| · large misses',
-    title: 'where the absolute error is large: each leaf’s mean |e| over the population MAE',
-  },
-  {
-    kind: 'beats_baseline',
-    label: 'vs baseline · not closer',
-    title: 'where the model is not closer than its baseline, fitted on the earlier test dates',
-  },
-]
-
-/** The kinds a model of each problem type has (problem_types.error_tree_refusal). */
-const KINDS_OF: Record<ProblemType, KindTab[]> = {
-  classification: CUT_KINDS,
-  regression_ranking: [...CUT_KINDS, ...REGRESSION_KINDS],
-  regression: REGRESSION_KINDS,
-  survival: CUT_KINDS,
-}
+import { KINDS_OF } from '../api/errorKinds'
 
 /** What each kind's reference_error_rate is the share of — the route computes it at the
  *  leaf's cut; the confusion tab reads the confusion rate. */
