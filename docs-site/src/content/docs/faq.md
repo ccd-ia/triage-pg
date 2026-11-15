@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: The questions users actually hit — 0-entity matrices, precision@k against DSSG, unlabeled entities, stale scores, adding an estimator, ignored feature groups, and the editable-install estimator error.
+description: The questions users actually hit — 0-entity matrices, precision@k against DSSG, missing history periods, unlabeled entities, stale scores, adding an estimator, ignored feature groups, and the editable-install estimator error.
 sidebar:
   order: 2
 ---
@@ -58,6 +58,39 @@ those rows as 0 (or 1), set `label_config.include_missing_labels_in_train_as`.
 It is DSSG's key with DSSG's meaning, and it never touches the test labels. Any
 other unknown key in `label_config` or `cohort_config` is an error. See
 [configuration](/triage-pg/reference/configuration/#entities-with-no-label-include_missing_labels_in_train_as).
+
+---
+
+## My run fails with missing history periods.
+
+The message starts `HistoryGapsError: N of M target-history series have missing
+periods inside their history`. Since v1.6.0 the raw series of a
+`history_query` is placed on the calendar: each period sits in the slot
+`k × history_period` before the as_of_date, and a period the query does not
+return is a gap. Seasonal naive, ETS, Holt–Winters, Croston and Croston-SBA
+need every period to forecast from the right months, so with one of them in the
+grid the run stops while the first matrix is built, before any model is
+fitted.
+
+The usual cause is a `group by` over events: a month with no event returns no
+row. Fix it one of two ways:
+
+- **Return every period.** Build a calendar with `generate_series` and
+  left-join the counts to it, so a month with no event is a 0. The DirtyDuck
+  regression example does this; its query is on
+  [target history](/triage-pg/concepts/target-history/).
+- **Say how to fill.** `fill_missing_periods: zero` treats a missing period as
+  0, inside each series only. `fill_missing_periods: null` keeps the gaps, and
+  those five baselines make no prediction for a row with one (the
+  [coverage](/triage-pg/reference/evaluation/) of their model group shows how
+  many).
+
+`triage check history experiment.yaml` lists the gaps before a run, with the
+entities that have the most, and builds nothing. A config written for v1.5.0
+with a `history_query` also needs the new `history_period` key (for example
+`'1 month'`); without it the config is refused at the start of the run. The
+numbers of the time-series baselines change where an entity had gaps, and the
+matrices are rebuilt, not reused.
 
 ---
 

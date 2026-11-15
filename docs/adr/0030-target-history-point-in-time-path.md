@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-20
 - Deciders: Adolfo (scope), Claude (recommendation per the v1.0.1 baselines plan)
+- Status update (2026-11-14): Amended by 0036 — both shapes are placed by calendar offset, `history_query` needs `history_period`, and interior gaps stop the matrix build unless `fill_missing_periods` says how to fill them.
 
 The v1.0.1 time-series baselines (persistence, moving-average, drift, promedio, seasonal-naive,
 Holt–Winters/ETS, Croston/SBA) need each entity's **own prior target values**. The cross-sectional

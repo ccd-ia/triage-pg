@@ -146,6 +146,126 @@ one row per latest score in that split, labeled from the scored matrix's labels
 artifact. A date whose predictions have no matrix lineage falls back to the
 training horizon and the run's labels artifact.
 
+## The default metrics per problem type
+
+Without an `evaluation` block, each `problem_type` gets its own set:
+
+| `problem_type` | Default metrics |
+|---|---|
+| `classification` | `precision@`, `recall@` at `100_abs` and `10_pct`; `auc_roc`, `average_precision` |
+| `regression` | `rmse`, `mae`, `r2`, `wape`, `pinball@0.5`, `pinball@0.8`, `pinball@0.95` |
+| `regression_ranking` | the regression set, plus `lift@` and `captured@` at `100_abs` and `10_pct`, `aucc` and `spearman` |
+| `survival` | `c_index` |
+
+An `evaluation` block replaces the set for its Experiment
+([Configuration](/triage-pg/reference/configuration/)). Audition defaults to
+the metric the Experiment evaluated most, with ties broken by name, so a
+regression_ranking Experiment on the default set auditions on `aucc`.
+
+### Forecast errors
+
+`rmse`, `mae` and `r2` score a point forecast over the labeled rows.
+`wape` is the weighted absolute percentage error, Σ|ŷ − y| ÷ Σ|y|: the
+absolute error as a share of the total outcome, so a WAPE of 0.6 means the
+errors add up to 60% of what happened. It is NULL when Σ|y| is 0. Lower is
+better for all three losses, and audition ranks them that way.
+
+### pinball@τ only for a model that forecasts τ
+
+`pinball@τ` is the loss a τ-quantile forecast minimizes:
+
+```
+pinball@τ = mean( τ·(y − ŷ) when y ≥ ŷ,  (1 − τ)·(ŷ − y) when y < ŷ )
+```
+
+A point forecast (a mean, a tree, a ridge regression) does not aim at any
+quantile, so its pinball loss ranks it on a target it never had. Since 1.6.0,
+`triage.models.forecast_quantile` records the quantile a model forecasts, and
+`pinball@τ` is computed only where it equals τ. For every other model the row
+is stored with its `num_labeled` and a NULL value, the way `ece@` is NULL for a
+score outside [0, 1]; a heatmap then shows "not applicable" rather than a
+missing cell.
+
+Training reads the quantile from the estimator: an estimator that sets a
+`forecast_quantile` attribute declares it, and the class name and parameters
+are read for these:
+
+| Estimator | Forecasts the quantile |
+|---|---|
+| `DummyRegressor` | `quantile` with `strategy: quantile`; 0.5 with `strategy: median` |
+| `GradientBoostingRegressor`, `LGBMRegressor` | `alpha` with a quantile loss (default 0.9) |
+| `HistGradientBoostingRegressor` | `quantile` with `loss: quantile` |
+| `QuantileRegressor` | `quantile` (default 0.5) |
+
+On the DirtyDuck regression Experiment, only the median `DummyRegressor`
+gets a `pinball@0.5`, 1.413 averaged over the four test dates, half its MAE of
+2.826. The ridge regressions, the trees and the time-series baselines get
+NULL. Stored pinball values from before 1.6.0 change only when the model is
+evaluated again; `triage check metrics` shows the difference.
+`triage postmodel residuals MODEL --quantiles` prints, for a quantile model,
+the share of rows at or below its forecast against τ.
+
+### Allocation metrics for regression_ranking
+
+A regression_ranking model ranks entities so a budget of k goes where the
+outcome is largest. The forecast errors score the forecast, not that
+allocation. Four metrics score the allocation:
+
+| Metric | Value | Reads |
+|---|---|---|
+| `lift@k` | the mean outcome of the labeled rows in the top k over the mean outcome of every labeled row | the population ranking at the `precision@` thresholds |
+| `captured@k` | the outcome in the top k over the total outcome | the same cut |
+| `aucc` | the area under the cumulative-gains curve: x the share of rows selected, y the share of the outcome captured | the whole ranking |
+| `spearman` | the rank correlation of score and outcome over the labeled rows, ties at their average rank | the labeled rows |
+
+`lift@` and `captured@` cut the population ranking as `precision@` does: every
+scored row is ranked, ties broken by `entity_id`, and the sums run over the
+labeled rows in the cut. `num_labeled_above_threshold` holds those rows.
+`aucc` treats a block of tied scores as one segment of the curve, the average
+over every order of the block, so a constant score gives exactly 0.5 and a
+random ranking about 0.5. All four are higher is better. `lift`, `captured`
+and `aucc` are shares of a total, so they are NULL when a labeled outcome is
+negative or the total is 0; `spearman` is NULL when the score or the outcome
+is constant. The rows are written with their `num_labeled` either way.
+
+`triage.gains_curve(model_id, split_kind, as_of_date, points)` returns the
+curve itself, from k = 0 to the whole population, with the share captured, the
+lift and the mean outcome in the top k. `triage plot gains MODEL` draws it.
+
+## Coverage, and comparing on common rows
+
+A time-series baseline with no history for a row makes no prediction for it,
+so the row is missing from that model's evaluation. Each model group is then
+evaluated on its own rows, and a group that skipped the hard rows can rank
+above one that scored them all.
+
+**Coverage** is the share of a date's labeled rows that a model scored. The
+audition table, the model-groups table and `triage audition` show each group's
+mean coverage over its test dates. On the DirtyDuck regression Experiment
+the regressors cover 82.5% of the labeled rows and the lag baselines 66.5%.
+
+Two commands put groups on the same rows, the labeled rows every listed group
+scored on that date:
+
+- `triage postmodel compare-rows <hash>` reads only. Per date and group it
+  prints the labeled, scored and common row counts, the MAE on the group's own
+  rows, and MAE, RMSE, WAPE and bias on the common rows.
+- `triage audition <hash> --common-rows` registers the common rows as a Subset
+  named `common:<md5>`, evaluates every model on it, and selects on it. The
+  hash covers the sorted group ids, so another set of groups makes another
+  Subset and never changes an earlier one.
+
+Without `--common-rows`, audition selects as it always did. The
+[CLI tour](/triage-pg/reference/cli/) shows both on DirtyDuck.
+
+## The metric audit
+
+`triage check metrics --experiment <hash>` (or `--model`, `--group`)
+recomputes every stored evaluation with scikit-learn, numpy or
+scikit-survival over the rows the SQL function read, and reports the largest
+gap per metric. On the three DirtyDuck tutorial Experiments the largest gap
+over 7,296 stored values is 2.21e-14, against a tolerance of 1e-9.
+
 ## Two surfaces, two grains
 
 The CLI serves both grains, and they answer different questions:

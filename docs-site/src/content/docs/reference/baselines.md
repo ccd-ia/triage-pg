@@ -55,7 +55,8 @@ above it, the features aren't separating the classes.
 
 The target is continuous (a count, a duration, a demand). `regression_ranking`
 (the primary continuous path) ranks entities by the predicted value;
-`regression` scores it directly with **rmse / mae / r2 / [pinball@τ](#pinball--quantile-loss)**.
+`regression` scores it directly with **rmse / mae / r2 / wape /
+[pinball@τ](#pinball--quantile-loss)**.
 There are two families of regression baseline, split by *which* history they
 read.
 
@@ -81,10 +82,10 @@ columns). They work off the label; no `history_query` needed. Set
 
 | Estimator | Params | Forecast |
 | --- | --- | --- |
-| `…baselines.timeseries.Persistence` | — | Last observed value (`y_{t-1}`). |
-| `…baselines.timeseries.PromedioDisponible` | — | Mean of available history. |
-| `…baselines.timeseries.MovingAverage` | `window: [3, 6, 12]` | Mean of the last `window` values. |
-| `…baselines.timeseries.Drift` | — | Last value + the average per-step trend. |
+| `…baselines.timeseries.Persistence` | — | The most recent label that exists, however many label dates back. |
+| `…baselines.timeseries.PromedioDisponible` | — | Mean of every label that exists. |
+| `…baselines.timeseries.MovingAverage` | `window: [3, 6, 12]` | Mean of the labels that exist among the last `window` label dates. |
+| `…baselines.timeseries.Drift` | — | Last value + the trend from the first to the last value, divided by their distance in label dates. |
 
 **Raw-series family** — forecast the raw periodic series (e.g. monthly counts)
 supplied by a `history_query`. These **require** a `history_query` (enforced at
@@ -135,11 +136,50 @@ grid_config:
   '…baselines.timeseries.Croston': {}
 ```
 
-**Cold start.** An entity with no usable history (e.g. the earliest as_of_dates,
-before any label window has closed) can't be forecast — the baseline **abstains**:
-it emits no prediction for that entity, so the metric is computed over the rows it
-*could* score (a baseline never fabricates a future value). This is why a baseline's
-`num_labeled` on the leaderboard can be slightly below a real model's.
+### Layout and gaps
+
+Both history shapes are placed on the calendar. Slot `_target_lag_k` holds the
+entity's label at the k-th most recent label date of the Experiment whose
+window has closed, and slot `_hist_{width−k}` holds the period that starts
+k × `history_period` before the as_of_date. A slot with no value is empty, and
+nothing older moves into it. Empty slots before an entity's first value mean
+the series starts later; every baseline ignores them. An empty slot after the
+first value is a **gap**, and each class declares what it does with one:
+
+| Class | Reads | Needs a complete calendar | On an interior gap |
+| --- | --- | --- | --- |
+| `Persistence` | `_target_lag_*` | no | skips it: the newest slot with a value |
+| `PromedioDisponible` | `_target_lag_*` | no | skips it: the mean of the slots with a value |
+| `MovingAverage` | `_target_lag_*` | no | skips it inside the window, which never reaches past `window` slots; no prediction when the whole window is empty |
+| `Drift` | `_target_lag_*` | no | divides the trend by the calendar distance between the first and last values |
+| `SeasonalNaive` | `_hist_*` | yes | no prediction when the slot one season back is a gap; a series shorter than one season gives its last value |
+| `ETS` | `_hist_*` | yes | no prediction |
+| `HoltWinters` | `_hist_*` | yes | no prediction |
+| `Croston` | `_hist_*` | yes | no prediction; a zero is a period with no demand |
+| `CrostonSBA` | `_hist_*` | yes | no prediction; a zero is a period with no demand |
+
+A gap in the lags is not an error: a missing label means the entity was not in
+the Cohort that date. A gap in the raw series is. When a class that needs a
+complete calendar is in the grid, the matrix build stops before any model is
+fitted and gives the number of series with gaps, an example and the two fixes,
+unless
+`fill_missing_periods` says what a gap is: `zero` writes 0 into each gap (a
+period with no events), `null` leaves it empty, and the five classes above
+make no prediction for that row. `triage check history CONFIG` lists the gaps
+before a run ([target history](/triage-pg/concepts/target-history/)).
+
+**Cold start and coverage.** An entity with no usable history (e.g. the earliest
+as_of_dates, before any label window has closed) can't be forecast — the
+baseline **abstains** (Croston and SBA forecast 0 for an empty history
+instead): it emits no prediction for that entity, so the metric is
+computed over the rows it *could* score (a baseline never fabricates a future
+value). A row with a gap under `fill_missing_periods: null` is the same case,
+and the run logs a warning with the count. A baseline's `num_labeled` on the
+leaderboard can therefore be below a real model's, and audition shows each
+group's **coverage**, the share of the labeled rows it scored. To
+compare groups on the rows all of them scored, use
+`triage postmodel compare-rows` or `triage audition --common-rows`
+([Evaluation](/triage-pg/reference/evaluation/)).
 
 ## Survival
 
@@ -157,25 +197,33 @@ extra (`uv sync --extra survival`).
 
 ## Pinball / quantile loss
 
-RMSE and MAE score a *point* forecast. A **quantile** forecaster
-(`DummyRegressor(strategy=quantile)`, Croston, ETS intervals) is judged by
-**pinball loss** at the quantile τ it targets:
+RMSE and MAE score a *point* forecast. A **quantile** forecaster, such as
+`DummyRegressor(strategy=quantile)` or a gradient-boosting model with a
+quantile loss, is judged by **pinball loss** at the quantile τ it targets:
 
 ```
 pinball@τ = mean( τ·(y − ŷ)   when y ≥ ŷ,   (1 − τ)·(ŷ − y)   when y < ŷ )
 ```
 
-It is a **loss** (lower is better) and computed in-Postgres.
-The default regression metric set includes
-`pinball@0.5`, `pinball@0.8`, `pinball@0.95` (median + two upper tails for
-resource-prioritization); `pinball@0.5` is exactly half the MAE. Because
-`triage.higher_is_better` knows `pinball@%` is a loss, audition ranks quantile
-forecasters correctly with no extra wiring. Select a non-default set in the
-`evaluation` block:
+It is a **loss** (lower is better) and computed in-Postgres. The default
+regression metric set includes `pinball@0.5`, `pinball@0.8` and
+`pinball@0.95` (the median and two upper tails for resource prioritization).
+Each is computed only for a model that forecasts that quantile: training
+records the quantile on the model (`DummyRegressor` with `strategy: median`
+forecasts 0.5), and every other model gets the row with a NULL value. A point
+forecast, and every time-series baseline here, is therefore never ranked on a
+pinball loss. For the median dummy, `pinball@0.5` is exactly half its MAE.
+Because `triage.higher_is_better` knows `pinball@%` is a loss, audition ranks
+quantile forecasters correctly with no extra wiring. Select a non-default set
+in the `evaluation` block:
 
 ```yaml
 evaluation:
   regression_metrics: [rmse, mae, r2, pinball@0.5, pinball@0.9]
+grid_config:
+  'sklearn.dummy.DummyRegressor':
+    strategy: ['quantile']
+    quantile: [0.9]      # the trivial 0.9-quantile floor, scored by pinball@0.9
 ```
 
 ## Does the ML earn its complexity?
@@ -195,12 +243,12 @@ two opposite — and equally useful — verdicts:
 
 ```
 classification (experiment.yaml)              regression (experiment-regression.yaml)
-model                        prec@100  AUC     model            RMSE  pinball@0.95
-ScaledLogisticRegression        0.405  0.584   Ridge            4.325     1.358
-BaselineRankMultiFeature        0.376  0.546   DummyRegressor   4.462     1.675
-DecisionTreeClassifier          0.369  0.561   Persistence      5.332     1.585
-SimpleThresholder               0.364  0.517
-RandomForestClassifier          0.352  0.568
+model                        prec@100  AUC     model                    RMSE    MAE
+ScaledLogisticRegression        0.405  0.584   Ridge (alpha 1.0)       4.324  3.070
+BaselineRankMultiFeature        0.376  0.546   DummyRegressor (mean)   4.396  3.132
+DecisionTreeClassifier          0.369  0.561   DummyRegressor (median) 4.527  2.826
+SimpleThresholder               0.364  0.517   Persistence             5.332  3.433
+RandomForestClassifier          0.352  0.568   SeasonalNaive (12)      6.639  4.983
 DummyClassifier (floor)         0.295  0.500
 ```
 
@@ -212,11 +260,19 @@ precision@100** (0.376 vs 0.369 and 0.352). Only the logistic regression clears
 it on both metrics (0.405 vs 0.376, AUC 0.584 vs 0.546). That is exactly the
 humility these heuristic floors are for. (Precision@k ranks every facility and
 counts the inspected ones in the cut; before v1.3.0 this table ranked
-only inspected facilities and put the heuristic first.) Regression's Ridge barely beats the constant floor (4.325 vs
-4.462) and the time-series baselines are *worse* — the target's own history isn't
-predictive here, so the ML earns very little. Note the quantile nuance: at the
-0.95 tail Ridge (1.358) beats the `DummyRegressor` (1.675), even though the dummy
-wins at the median.
+only inspected facilities and put the heuristic first.)
+
+The regression column is the mean over the four test dates of a 1.6.0 run of
+`experiment-regression.yaml`. The ridge regression has the lowest RMSE, but
+only just below the constant mean (4.324 against 4.396), and the constant
+median has the lowest MAE (2.826 against 3.070). The violation count has a long
+right tail, and the median is the constant that minimizes absolute error, so
+on MAE no model here beats a constant. The time-series baselines are *worse*:
+a facility's own past counts predict its next six months less well than its
+features do. Read the lag baselines' numbers with their coverage. They scored
+66.5% of the labeled rows against 82.5% for the regressors, so their means are
+over different rows until `triage postmodel compare-rows` puts them on the
+same ones.
 
 Baselines are **opt-in** — you add them to `grid_config` deliberately (there is
 no auto-injection). See the [configuration reference](/triage-pg/reference/configuration/)
