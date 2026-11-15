@@ -267,7 +267,8 @@ Project and caches the result. That table lists each gated command with the
 problem types it reads, the error-tree kinds of each type with its rule
 for `--horizon` (required, refused or optional), and the kinds of leaf a
 model group of each type has. The plot menu's kind offers those kinds, and
-the recurrence figure refuses a kind the type at point has no leaves of. The menus hold no copy of it,
+the recurrence and error-rules figures refuse a kind the type at point has no
+leaves of. The menus hold no copy of it,
 so a new CLI release brings its own table. The problem type at point comes
 from the Experiment line in the status buffer, the model view, or the row of a
 leaderboard, model group or compare-rows table.

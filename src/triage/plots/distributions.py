@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from triage import problem_types
 from triage.diagnostics import readers
 from triage.plots.style import (
     AQUA,
@@ -46,11 +47,14 @@ def calibration(
         ``'ties'`` (its tie summary).
 
     Raises:
+        WrongProblemType: the model is survival: its label has no outcome to average
+            (``problem_types.COMMANDS["plot calibration"]``).
         NotFoundError: no model has this id.
         ValueError: ``bins`` is below 1.
         NothingToDraw: the model has no evaluated test date, or no labeled row on it.
     """
-    result = readers.calibration(pool, model_id, bins=bins)
+    result = readers.calibration(pool, model_id, bins=bins)  # an unknown id: NotFound
+    problem_types.require(pool, "plot calibration", model_id)
     if result is None or not result["deciles"]:
         raise NothingToDraw(
             f"Model {model_id} has no labeled test rows on an evaluated date — calibration"

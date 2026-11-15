@@ -946,14 +946,20 @@ pytest side, so a new plot kind fails there first and here next."
         (push (list (car sub) 'no-such-subcommand) missing)))
     (should (equal missing nil))))
 
+(defconst triage-test--not-offered '("model curve")
+  "Gated CLI commands triage.el has no entry for, so nothing to grey out.")
+
 (ert-deftest triage-test-every-gated-command-has-a-menu-entry ()
-  ;; A command the CLI gates by problem type, with no entry here, fails.
+  ;; A command the CLI gates by problem type, with no entry here, fails, unless
+  ;; triage.el offers no entry for it at all.
   (let ((gated (mapcar (lambda (c) (symbol-name (car c)))
                        (alist-get 'commands (triage-test-payload "postmodel-kinds"))))
         (entries nil))
     (mapatoms (lambda (s) (when-let* ((c (get s 'triage-command))) (push c entries))))
     (should (> (length gated) 10))
-    (should (equal (seq-difference gated entries) nil))))
+    (should (equal (seq-difference gated (append entries triage-test--not-offered)) nil))
+    (should (equal (seq-intersection triage-test--not-offered entries) nil))
+    (should (equal (seq-difference triage-test--not-offered gated) nil))))
 
 (defmacro triage-test-at-type (type &rest body)
   "Run BODY in a project buffer whose context is model 4 of an Experiment of TYPE."
@@ -982,21 +988,21 @@ pytest side, so a new plot kind fails there first and here next."
 
 (defconst triage-test--cut-class-only
   '(triage-postmodel-near-miss--inapt-p triage-postmodel-prototypes--inapt-p
-    triage-plot-curve-dates--inapt-p)
+    triage-plot-curve-dates--inapt-p triage-plot-curve--inapt-p
+    triage-postmodel-crosstabs-near-miss--inapt-p)
   "The entries of classification and regression_ranking models only.")
 
 (defconst triage-test--not-survival
-  '(triage-plot-gains--inapt-p)
+  '(triage-plot-gains--inapt-p triage-plot-calibration--inapt-p)
   "The entries of every type but survival.")
 
 (defconst triage-test--every-type
-  '(triage-plot-curve--inapt-p triage-plot-error-rules--inapt-p
-    triage-plot-calibration--inapt-p triage-plot-scores--inapt-p
+  '(triage-plot-error-rules--inapt-p triage-plot-scores--inapt-p
     triage-plot-importance--inapt-p
     triage-plot-overlap--inapt-p triage-postmodel-structure--inapt-p
     triage-postmodel-error-tree--inapt-p triage-postmodel-compare--inapt-p
     triage-postmodel-importance--inapt-p triage-postmodel-compare-rows--inapt-p
-    triage-postmodel-sensitivity--inapt-p triage-postmodel-crosstabs-near-miss--inapt-p)
+    triage-postmodel-sensitivity--inapt-p)
   "The entries the table gates for no type.")
 
 (defun triage-test-inapt-here (&rest refused)
@@ -1281,7 +1287,16 @@ pytest side, so a new plot kind fails there first and here next."
     (should (equal (seq-take (cdar triage-test--calls) 5)
                    '("plot" "recurrence" "4" "--kind=abs-error" "-o"))))
   (triage-test-at-type "classification"
-    (should-error (triage-plot-recurrence '(4) '("--kind=abs-error")) :type 'user-error))
+    (should-error (triage-plot-recurrence '(4) '("--kind=abs-error")) :type 'user-error)
+    ;; the model's error rules read the same kinds of leaf
+    (let ((err (should-error (triage-plot-error-rules '(4) '("--kind=beats-baseline"))
+                             :type 'user-error)))
+      (should (string-prefix-p "Model 4 is classification" (cadr err))))
+    (should-not (seq-some (lambda (c) (member "error-rules" c)) triage-test--calls))
+    (let ((inhibit-message t))
+      (triage-plot-error-rules '(4) '("--kind=fn")))
+    (should (equal (seq-take (cdar triage-test--calls) 5)
+                   '("plot" "error-rules" "4" "--kind=fn" "-o"))))
   (triage-test-at-type "survival"
     (should (equal (triage-transient--leaf-kinds-at-point) '("fp" "fn" "confusion"))))
   ;; with no type at point, every kind, and the CLI decides

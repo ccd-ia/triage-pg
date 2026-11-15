@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from matplotlib.patches import Rectangle
 
+from triage import problem_types
 from triage.diagnostics import readers
 from triage.plots.style import (
     AQUA,
@@ -105,7 +106,9 @@ def error_rules(
         model_id: the model.
         as_of_date: the test date; ``None`` reads the latest date with leaves.
         parameter: the cut; ``None`` reads the only cut persisted.
-        kind: ``fp``, ``fn`` or ``confusion``; ``None`` draws the fp and fn trees.
+        kind: a kind of leaf the model's problem type has
+            (``problem_types.leaf_kinds``); ``None`` draws the fp and fn trees, else
+            the kind persisted.
         top: the leaves drawn per kind.
         title: replaces the default title.
 
@@ -114,10 +117,13 @@ def error_rules(
         errors first.
 
     Raises:
+        WrongProblemType: the model's problem type has no ``kind`` leaves.
         ValueError: ``kind`` is not a leaf kind, or several cuts are persisted and
             ``parameter`` is ``None``.
         NothingToDraw: no leaf is persisted for the model (at the cut and date).
     """
+    if kind is not None:
+        problem_types.require_leaf_kind(pool, model_id, kind, "plot error-rules")
     rows = readers.error_rules(pool, model_id, error_kind=kind, limit=_ALL)
     of_kind = f"{kind} " if kind else ""
     if not rows:
@@ -280,9 +286,12 @@ def leaves(
         rows.
 
     Raises:
+        WrongProblemType: the group's problem types have none of the kinds the cut
+            reads: fp and confusion at a cut, abs_error at none (``''``).
         NotFoundError: the model group is unknown.
         NothingToDraw: no fp or confusion leaf is persisted for the group at the cut.
     """
+    problem_types.require_leaves(pool, model_group_id, parameter)
     # a regression group's leaves are abs_error ones, at no cut ('')
     kinds: tuple[str, ...] = ("abs_error",) if parameter == "" else ("fp", "confusion")
     rows = readers.group_leaves(pool, model_group_id, parameter, kinds)

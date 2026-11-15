@@ -78,6 +78,8 @@ def curve(
         ``data`` maps each series label to its :func:`readers.curve` rows.
 
     Raises:
+        WrongProblemType: a model is regression or survival: precision needs a positive
+            class at a top-k cut (``problem_types.COMMANDS["plot curve"]``).
         NotFoundError: a Subset matches nothing.
         ValueError: an ambiguous Subset prefix, more than eight series, or ``points``
             below 2.
@@ -87,6 +89,8 @@ def curve(
         raise ValueError(
             f"compare={compare} is model {model_id} itself — compare it with another model"
         )
+    for m in (model_id,) if compare is None else (model_id, compare):
+        problem_types.require(pool, "plot curve", m)
     populations: list[tuple[str, str]] = [("everyone", "")]
     for value in subsets:
         subset_hash, name = readers.resolve_subset(pool, value)

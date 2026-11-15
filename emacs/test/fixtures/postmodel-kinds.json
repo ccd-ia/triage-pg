@@ -176,6 +176,46 @@
         "regression": "triage plot bias MODEL or triage plot forecast-time MODEL",
         "survival": "triage plot km MODEL"
       }
+    },
+    "plot curve": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage plot gains MODEL",
+        "survival": "triage plot km MODEL"
+      }
+    },
+    "model curve": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage plot gains MODEL",
+        "survival": "triage plot km MODEL"
+      }
+    },
+    "postmodel crosstabs --against near-miss": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage postmodel crosstabs MODEL --by abs-error",
+        "survival": "triage postmodel crosstabs MODEL -p 10_pct"
+      }
+    },
+    "plot calibration": {
+      "accepts": [
+        "classification",
+        "regression",
+        "regression_ranking"
+      ],
+      "instead": {
+        "survival": "triage plot survival-calibration MODEL"
+      }
     }
   },
   "error_tree": {
