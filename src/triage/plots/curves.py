@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any, Optional
 
+from triage import problem_types
 from triage.diagnostics import readers
 from triage.plots.style import (
     BASE_DASH,
@@ -193,11 +194,14 @@ def curve_dates(
         ``points``).
 
     Raises:
+        WrongProblemType: the group is regression or survival: precision needs a top-k
+            cut (``problem_types.COMMANDS["plot curve-dates"]``).
         NotFoundError: the model group, or the Subset, is unknown.
         ValueError: more than eight test dates, an ambiguous Subset prefix, or
             ``points`` below 2.
         NothingToDraw: the group has no test predictions (in the Subset).
     """
+    problem_types.require_group(pool, "plot curve-dates", model_group_id)
     subset_hash, subset_name = ("", None)
     if subset:
         subset_hash, subset_name = readers.resolve_subset(pool, subset)

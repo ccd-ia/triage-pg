@@ -166,6 +166,16 @@
         "classification": "triage plot overlap GROUP_A GROUP_B",
         "survival": "triage postmodel survival MODEL --horizon H"
       }
+    },
+    "plot curve-dates": {
+      "accepts": [
+        "classification",
+        "regression_ranking"
+      ],
+      "instead": {
+        "regression": "triage plot bias MODEL or triage plot forecast-time MODEL",
+        "survival": "triage plot km MODEL"
+      }
     }
   },
   "error_tree": {
@@ -207,6 +217,37 @@
         "all"
       ],
       "horizon": "required"
+    }
+  },
+  "error_recurrence": {
+    "classification": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion"
+      ]
+    },
+    "regression_ranking": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion",
+        "abs-error",
+        "beats-baseline"
+      ]
+    },
+    "regression": {
+      "kinds": [
+        "abs-error",
+        "beats-baseline"
+      ]
+    },
+    "survival": {
+      "kinds": [
+        "fp",
+        "fn",
+        "confusion"
+      ]
     }
   }
 }

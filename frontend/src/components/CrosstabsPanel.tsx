@@ -24,6 +24,7 @@ import { api } from '../api/client'
 import { useAsync } from '../hooks/useAsync'
 import type { CrosstabComparison, CrosstabRow, CrosstabStat, ProblemType } from '../api/types'
 import { isEmpty } from '../api/types'
+import { CUT_TYPES } from '../api/problemTypes'
 import { prettyFeature } from '../api/transforms'
 
 const STATS: { stat: CrosstabStat; label: string; title: string }[] = [
@@ -43,9 +44,6 @@ const COMPARISONS: { comparison: CrosstabComparison; label: string; title: strin
     title: 'the next k rows below the cut: what the cut itself separates',
   },
 ]
-
-/** The types whose rows have a top-k cut, and so a near-miss band. */
-const CUT_TYPES: ProblemType[] = ['classification', 'regression_ranking']
 
 function pct(v: number | null): string {
   return v == null ? '—' : `${(v * 100).toFixed(0)}%`

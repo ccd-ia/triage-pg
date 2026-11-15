@@ -640,8 +640,9 @@ No suspiciously-right leaves for model 285 at error ≤ 0.02 and support ≥ 30.
 `triage postmodel error-recurrence <group>` counts on how many of a model
 group's test dates each rule recurs. Rules are matched by signature, which keeps
 each split's feature and direction and drops its threshold. Run `error-tree` on
-the group's models first and pass the same `-p` cut; `--kind` defaults to `fp`
-and `--top` to 20.
+the group's models first and pass the same `-p` cut. `--kind` defaults to the
+first kind of leaf the group's problem type has (`fp`, or `abs-error` for a
+regression group) and `--top` to 20.
 
 ```console
 $ triage postmodel error-recurrence 41 -p 10_pct --kind fn --top 3
@@ -675,14 +676,17 @@ For a classification model use triage plot calibration 285 or triage postmodel e
 | Command | classification | regression_ranking | regression | survival |
 |---|---|---|---|---|
 | `postmodel error-tree` | `fp`, `fn`, `confusion` | every kind | `abs-error`, `beats-baseline` | the classification kinds, with `--horizon H` |
+| `postmodel error-recurrence`, `plot recurrence` (a group's `--kind`) | `fp`, `fn`, `confusion` | every kind | `abs-error`, `beats-baseline` | `fp`, `fn`, `confusion`, at `-p 'CUT\|horizon=H'` |
+| `plot curve-dates` (a group) | yes | yes | — | — |
 | `postmodel residuals`, `crosstabs --by abs-error` | — | yes | yes | — |
 | `postmodel baseline` (and `plot segments`, `plot win-consistency`) | — | yes | yes | — |
 | `postmodel near-miss`, `postmodel prototypes` | yes | yes | — | — |
 | `postmodel survival` | — | — | — | yes |
 
-The other postmodel commands (`crosstabs` at a top-k cut, `error-rules`,
-`error-recurrence`, `compare`, `compare-rows`, `structure`, `importance`,
-`sensitivity`) are not gated. `error-tree --kind` takes `fp`, `fn`,
+A model group's command reads the types of the group's models, and refuses a
+group only when it reads none of them. The other postmodel commands
+(`crosstabs` at a top-k cut, `error-rules`, `compare`, `compare-rows`,
+`structure`, `importance`, `sensitivity`) are not gated. `error-tree --kind` takes `fp`, `fn`,
 `confusion`, `both` and `all` for a classifier and `abs-error` and
 `beats-baseline` for a regression model. A regression_ranking model reads both
 families, and like `near-miss` and `prototypes` it reads positive as
@@ -1095,10 +1099,10 @@ the same rows write the same SVG bytes. Without `-o` the file is
 | Command | Draws | Options |
 |---|---|---|
 | `curve MODEL` | precision and recall against the share of the population, one line per series, each with its base rate | `--date D`, `--subset S` (repeat for several), `--compare MODEL2`, `--points N` (default 101) |
-| `curve-dates GROUP` | the group's precision curve on each test date, and the base rate of each date | `--subset S`, `--points N` |
+| `curve-dates GROUP` | the group's precision curve on each test date, and the base rate of each date (classification and regression_ranking groups) | `--subset S`, `--points N` |
 | `error-rules MODEL` | the leaves with the most errors, each against the population error rate at the cut | `--date D`, `-p CUT`, `--kind fp\|fn\|confusion` (default: fp and fn), `--top N` (default 12) |
 | `leaves GROUP -p CUT` | every fp and confusion leaf of the group by size and wrong share, with the suspicious zone | `--max-error` (default 0.02), `--min-support` (default 30) |
-| `recurrence GROUP -p CUT` | the error-rule signatures by test date | `--kind fp\|fn\|confusion` (default fp) |
+| `recurrence GROUP -p CUT` | the error-rule signatures by test date | `--kind`, a kind of leaf the group's type has (default: its first, `fp`, or `abs-error` for a regression group, which takes no `-p`) |
 | `crosstabs MODEL` | the features that most separate the list from the rest | `-p CUT`, `--date D`, `--stat mean\|nonzero`, `--compare MODEL2`, `--top N` (default 15), `--feature F` (repeat; replaces `--top`) |
 | `crosstabs-dates GROUP` | the top features' statistic on every test date of the group | `-p CUT`, `--stat mean\|nonzero`, `--top N` (default 4, at most 8) |
 | `overlap GROUP_A GROUP_B -p CUT` | Jaccard and rank correlation of the two groups' lists on each shared test date | `--sweep CUTS` instead of `-p`: the Jaccard index against k, one line per pair of models and date |

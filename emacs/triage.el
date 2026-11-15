@@ -474,7 +474,8 @@ The call runs from the current buffer, whose environment it uses."
 (defun triage--kinds ()
   "Return the problem-type table of this buffer's project, or nil.
 The table is the payload of triage postmodel kinds --json: the
-commands gated by problem type and the error-tree rule of each type.
+commands gated by problem type, the error-tree rule of each type and
+the kinds of leaf the recurrence commands read for each type.
 The first call of a session reads it and waits up to
 `triage-kinds-timeout' seconds; later calls use the cache, and
 `triage-clear-caches' forgets it."
@@ -508,6 +509,13 @@ the CLI decides then."
 It is an alist of `kinds', the kinds --kind takes for TYPE, and
 `horizon', one of \"required\", \"refused\" or \"optional\"."
   (and type (alist-get (intern type) (alist-get 'error_tree (triage--kinds)))))
+
+(defun triage--recurrence-kinds (type)
+  "Return the kinds of leaf a model group of the problem TYPE has, or nil.
+They are the kinds --kind takes for triage postmodel error-recurrence
+and triage plot recurrence on a group of TYPE."
+  (and type (alist-get 'kinds (alist-get (intern type)
+                                         (alist-get 'error_recurrence (triage--kinds))))))
 
 ;;;; Long-running verbs
 
