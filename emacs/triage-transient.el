@@ -136,6 +136,18 @@ FLAGS are flag names such as \"--date\"; an element matches as
   (when (and triage--temp-file (file-exists-p triage--temp-file))
     (delete-file triage--temp-file)))
 
+(defun triage--image-mode (file)
+  "Turn on `image-mode' for FILE's bytes in this buffer.
+An Emacs built with ImageMagick hands it every image of a buffer with
+no file name, and SVG is not in `imagemagick-types-inhibit' by
+default, so an ImageMagick that cannot rasterize SVG shows a blank.
+When Emacs reads FILE's type natively, ImageMagick is turned off for
+this buffer, so a later zoom or resize renders natively too."
+  (if (not (image-type-available-p (image-type file)))
+      (image-mode)
+    (let ((imagemagick-types-inhibit t)) (image-mode))
+    (setq-local imagemagick-types-inhibit t)))
+
 (defun triage--show-image (file title)
   "Show the image FILE in the buffer *triage: TITLE*.
 FILE is deleted when the buffer is killed or shows another image."
@@ -148,7 +160,8 @@ FILE is deleted when the buffer is killed or shows another image."
           (erase-buffer)
           (set-buffer-multibyte nil)
           (insert-file-contents-literally file))
-        (if (display-images-p) (image-mode) (special-mode))
+        (set-buffer-modified-p nil)
+        (if (display-images-p) (triage--image-mode file) (special-mode))
         (setq triage--temp-file file)
         (add-hook 'kill-buffer-hook #'triage--delete-temp-file nil t))
       (pop-to-buffer buffer))))
