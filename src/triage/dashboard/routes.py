@@ -501,7 +501,9 @@ def leaderboard(
         "       metric, parameter, as_of_date, value, value_expected, value_std,"
         "       model_id, train_end_time"
         " from triage.leaderboard where experiment_hash = %(hash)s"
-        " order by metric, parameter, as_of_date, value desc",
+        " order by metric, parameter, as_of_date,"
+        " case when triage.higher_is_better(metric) then value else -value end"
+        " desc nulls last",
         {"hash": experiment_hash},
     )
 

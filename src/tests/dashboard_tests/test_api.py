@@ -878,3 +878,27 @@ def test_model_predictions_read_labels_at_the_scored_horizon(
     ).json()
     assert forward["total"] == 1
     assert [(r["entity_id"], r["rank_abs"]) for r in forward["rows"]] == [(99, 1)]
+
+
+def test_experiment_leaderboard_ranks_a_loss_lowest_first(
+    client, seeded, db_pool_greenfield
+):
+    """Within a date, a loss reads lowest first and a score highest first."""
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "insert into triage.evaluations"
+            " (model_id, split_kind, as_of_date, metric, parameter, value)"
+            " select model_id, split_kind, as_of_date, 'mae', parameter, value"
+            " from triage.evaluations where metric = 'auc_roc'"
+        )
+        conn.execute("refresh materialized view triage.leaderboard")
+    rows = client.get(f"/api/experiments/{seeded.experiment_hash}/leaderboard").json()
+    blocks: dict[tuple, list[float]] = {}
+    for r in rows:
+        if r["metric"] in ("auc_roc", "mae"):
+            key = (r["metric"], r["parameter"], r["as_of_date"])
+            blocks.setdefault(key, []).append(r["value"])
+    assert {k[0] for k in blocks} == {"auc_roc", "mae"}
+    for (metric, _, _), values in blocks.items():
+        expected = sorted(values, reverse=metric == "auc_roc")
+        assert values == expected, (metric, values)
