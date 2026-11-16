@@ -37,6 +37,7 @@
 (require 'subr-x)
 (require 'ansi-color)
 (require 'compile)
+(require 'parse-time)
 (require 'magit-section)
 (require 'tabulated-list)
 
@@ -643,10 +644,14 @@ group of REGEXP, when the output first matches.  Return the buffer."
   (if (and (stringp hash) (> (length hash) 12)) (substring hash 0 12) (or hash "")))
 
 (defun triage--time (timestamp)
-  "Return TIMESTAMP as YYYY-MM-DD HH:MM, as the CLI wrote it."
-  (if (and (stringp timestamp) (>= (length timestamp) 16))
-      (string-replace "T" " " (substring timestamp 0 16))
-    (or timestamp "")))
+  "Return TIMESTAMP as YYYY-MM-DD HH:MM in local time.
+The CLI writes a run's times in UTC with their offset, so a time with
+an offset is converted; one without is shown as written."
+  (cond
+   ((not (and (stringp timestamp) (>= (length timestamp) 16))) (or timestamp ""))
+   ((string-match-p "\\(?:[zZ]\\|[+-][0-9][0-9]:?[0-9][0-9]\\)\\'" timestamp)
+    (format-time-string "%F %R" (parse-iso8601-time-string timestamp)))
+   (t (string-replace "T" " " (substring timestamp 0 16)))))
 
 (defun triage--pad (text width)
   "Return TEXT truncated or padded to WIDTH columns."

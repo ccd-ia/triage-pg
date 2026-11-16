@@ -1494,6 +1494,19 @@ before the temporary file was registered for deletion."
       (kill-buffer "*triage: test svg*"))
     (should-not (file-exists-p file))))
 
+(ert-deftest triage-test-time-shows-a-utc-stamp-in-local-time ()
+  "A run started at 10:29 in Mexico City reads 10:29, not the 16:29 UTC the CLI sends."
+  (let ((tz (getenv "TZ")))
+    (unwind-protect
+        (progn
+          (setenv "TZ" "America/Mexico_City")
+          (should (equal (triage--time "2026-11-16T16:29:22.302350+00:00") "2026-11-16 10:29"))
+          (should (equal (triage--time "2026-11-16T16:29:22Z") "2026-11-16 10:29"))
+          (should (equal (triage--time "2026-11-16T16:29:22") "2026-11-16 16:29"))
+          (should (equal (triage--time "2016-12-01") "2016-12-01"))
+          (should (equal (triage--time nil) "")))
+      (setenv "TZ" tz))))
+
 (provide 'triage-test)
 
 ;;; triage-test.el ends here
