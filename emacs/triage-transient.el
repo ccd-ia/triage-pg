@@ -143,7 +143,7 @@ no file name, and SVG is not in `imagemagick-types-inhibit' by
 default, so an ImageMagick that cannot rasterize SVG shows a blank.
 When Emacs reads FILE's type natively, ImageMagick is turned off for
 this buffer, so a later zoom or resize renders natively too."
-  (if (not (image-type-available-p (image-type file)))
+  (if (not (image-supported-file-p file))
       (image-mode)
     (let ((imagemagick-types-inhibit t)) (image-mode))
     (setq-local imagemagick-types-inhibit t)))
