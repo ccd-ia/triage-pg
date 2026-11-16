@@ -1155,10 +1155,20 @@ def leaderboard(
     if parameter is not None:
         sql += " and " + t + ".parameter = %(parameter)s"
         params["parameter"] = parameter
+    # Best first: a score descending, a loss ascending, as triage.higher_is_better
+    # (and a project's triage.metric_directions rows) says.
     if windowed:
-        sql += " order by w.metric, w.parameter, w.value_mean desc nulls last"
+        sql += (
+            " order by w.metric, w.parameter,"
+            " case when triage.higher_is_better(w.metric) then w.value_mean"
+            " else -w.value_mean end desc nulls last"
+        )
     else:
-        sql += " order by l.metric, l.parameter, l.as_of_date desc, l.value desc nulls last"
+        sql += (
+            " order by l.metric, l.parameter, l.as_of_date desc,"
+            " case when triage.higher_is_better(l.metric) then l.value"
+            " else -l.value end desc nulls last"
+        )
     sql += " limit %(limit)s"
     return _rows(pool, sql, params)
 

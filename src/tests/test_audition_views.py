@@ -345,3 +345,42 @@ def test_audition_on_pinball_skips_models_that_do_not_forecast_the_quantile(
     assert "No audition rows for metric 'pinball@0.5'" in text
     assert "no model here does" in text
     assert len(ids) == 2
+
+
+@pytest.mark.parametrize("windowed", [False, True])
+def test_leaderboard_puts_the_best_first_whatever_the_metric_direction(
+    db_url, db_pool_greenfield, tmp_path, monkeypatch, windowed
+):
+    """A loss ranks lowest first, a score highest first, as ``triage.higher_is_better`` says.
+
+    The same values are stored as ``auc_roc`` and as ``mae``. On the newest date g1 holds
+    0.60 and g2 0.90, and across the window g1 averages 0.70 and g2 0.80: g2 leads the
+    auc_roc board and g1 the mae board. DirtyDuck's regression Experiment showed Drift,
+    its worst group, at the top of the mae leaderboard.
+    """
+    ids = _seed_audition_fixture(db_pool_greenfield)
+    g1, _ = ids["g1"]
+    g2, _ = ids["g2"]
+    with db_pool_greenfield.connection() as conn:
+        conn.execute(
+            "insert into triage.evaluations"
+            " (model_id, split_kind, as_of_date, metric, parameter, value)"
+            " select model_id, split_kind, as_of_date, 'mae', parameter, value"
+            " from triage.evaluations where metric = 'auc_roc'"
+        )
+    flags = ["--windowed"] if windowed else []
+    for metric, best in (("auc_roc", g2), ("mae", g1)):
+        result = _invoke(
+            db_url,
+            tmp_path,
+            monkeypatch,
+            "leaderboard",
+            EXP,
+            "--json",
+            "--metric",
+            metric,
+            *flags,
+        )
+        assert result.exit_code == 0, result.output
+        rows = _json_payload(result.output)
+        assert rows[0]["model_group_id"] == best, (metric, rows)
