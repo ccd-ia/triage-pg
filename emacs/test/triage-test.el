@@ -1475,6 +1475,25 @@ showed a 30x30 blank."
       (kill-buffer "*triage: test svg*")
       (should-not (file-exists-p file)))))
 
+(ert-deftest triage-test-show-image-without-native-svg-leaves-image-mode-alone ()
+  "An Emacs that cannot read SVG natively still opens the image buffer.
+CI's Emacs has no SVG support; asking `image-type' there signalled
+before the temporary file was registered for deletion."
+  (let* ((file (make-temp-file "triage-" nil ".svg" "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"))
+         (seen 'unset))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
+                  ((symbol-function 'image-type-available-p) #'ignore)
+                  ((symbol-function 'image-mode)
+                   (lambda () (setq seen imagemagick-types-inhibit)))
+                  ((symbol-function 'pop-to-buffer) #'ignore))
+          (triage--show-image file "test svg")
+          (should-not (eq seen t))
+          (with-current-buffer "*triage: test svg*"
+            (should (equal triage--temp-file file))))
+      (kill-buffer "*triage: test svg*"))
+    (should-not (file-exists-p file))))
+
 (provide 'triage-test)
 
 ;;; triage-test.el ends here
