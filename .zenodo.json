@@ -32,6 +32,7 @@
     { "name": "Potash, Eric", "type": "ProjectMember" },
     { "name": "Rodolfa, Kit", "type": "ProjectMember" },
     { "name": "Salomon, Erika", "type": "ProjectMember" },
+    { "name": "Sobrino, Fernanda", "type": "ProjectMember" },
     { "name": "Walsh, Joe", "type": "ProjectMember" }
   ],
   "related_identifiers": [
@@ -46,7 +47,7 @@
       "resource_type": "publication-softwaredocumentation"
     }
   ],
-  "version": "1.5.0",
+  "version": "1.6.0",
   "license": "mit",
   "access_right": "open",
   "language": "eng",
