@@ -19,7 +19,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, LiteralString
 
-import click
 import psycopg
 import typer
 import typer.main
@@ -606,42 +605,15 @@ class TriageActions(SubprocessActions):
     def list(self) -> list[Action]:
         """Recipes first (when ``just`` and a justfile are present), then the CLI.
 
-        The CLI half leaves out every verb typer hides. lynkeus enumerates the
-        whole tree, hidden or not, so ``triage postmodel kinds`` — the table
-        triage.el reads, never a user's action — reached the palette.
+        ``typer_actions`` leaves out every verb typer hides, so ``triage
+        postmodel kinds`` (the table triage.el reads) stays off the palette.
         """
         actions = just_actions(self.cwd, self.is_destructive)
         if self.cli_app is not None:
-            hidden = hidden_verbs(self.cli_app, self.prefix)
             actions.extend(
-                action
-                for action in typer_actions(
-                    self.cli_app, self.prefix, self.is_destructive
-                )
-                if action.name not in hidden
+                typer_actions(self.cli_app, self.prefix, self.is_destructive)
             )
         return actions
-
-
-def hidden_verbs(cli_app: typer.Typer, prefix: str) -> frozenset[str]:
-    """Every verb ``--help`` leaves out, named the way the palette names it.
-
-    Read from the click tree typer builds, where ``hidden=True`` lands on the
-    command or on the group it is mounted under. A hidden group hides each of
-    its verbs.
-    """
-    hidden: set[str] = set()
-
-    def walk(command: click.Command, path: str, under_hidden: bool) -> None:
-        is_hidden = under_hidden or command.hidden
-        if is_hidden:
-            hidden.add(path)
-        if isinstance(command, click.Group):
-            for name, sub in command.commands.items():
-                walk(sub, f"{path} {name}", is_hidden)
-
-    walk(typer.main.get_command(cli_app), prefix, False)
-    return frozenset(hidden)
 
 
 def stale_after() -> timedelta:
