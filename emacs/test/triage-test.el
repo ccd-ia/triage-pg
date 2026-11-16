@@ -1454,6 +1454,27 @@ Exit 0 and 1 write FIXTURE where --json points."
           (should (> (length commands) 30))
           (should (equal missing nil)))))))
 
+(ert-deftest triage-test-show-image-keeps-imagemagick-off-a-native-svg ()
+  "An SVG Emacs renders natively is shown without ImageMagick.
+On Emacs 30 built with ImageMagick, `image-mode' on a buffer with no
+file name chose ImageMagick, which could not rasterize the SVG and
+showed a 30x30 blank."
+  (let* ((file (make-temp-file "triage-" nil ".svg" "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"))
+         (seen 'unset))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
+                  ((symbol-function 'image-type-available-p) (lambda (type) (eq type 'svg)))
+                  ((symbol-function 'image-mode)
+                   (lambda () (setq seen imagemagick-types-inhibit)))
+                  ((symbol-function 'pop-to-buffer) #'ignore))
+          (triage--show-image file "test svg")
+          (should (eq seen t))
+          (with-current-buffer "*triage: test svg*"
+            (should (eq imagemagick-types-inhibit t))
+            (should-not buffer-file-name)))
+      (kill-buffer "*triage: test svg*")
+      (should-not (file-exists-p file)))))
+
 (provide 'triage-test)
 
 ;;; triage-test.el ends here
