@@ -207,10 +207,18 @@ package to its installed distribution. It does that via
 as in CI) frequently omits those, so triage-pg's own `triage.*` estimators
 resolve to nothing even though the distribution *is* installed.
 
-Current triage-pg handles this: when the reverse-map is empty it **falls back to
-the module name** as the distribution name (which holds for `triage`, `sklearn`,
-`sksurv`, …), producing the same `(name, version)` a populated reverse-map would.
-If you hit this error, you're on an older build — update and re-run `uv sync`. See
+Current triage-pg handles this in two more steps. When the reverse-map is empty
+it **falls back to the module name** as the distribution name (which holds for
+`triage`, `sklearn`, `sksurv`, …). When that fails too, it looks for the
+editable install whose project directory holds the module, through the install's
+`direct_url.json` or `.pth` file. So an estimator from your own project resolves
+even when the distribution is named differently from its packages (distribution
+`med-supply`, package `forecasting`).
+
+If you still hit this error, the message names where the module was found. The
+project that provides it is not installed in the environment that runs triage:
+install it (`uv sync`, `pip install -e .`) rather than adding it to
+`PYTHONPATH`. See
 [identity and caching](/triage-pg/concepts/identity-and-caching/).
 
 ---

@@ -206,3 +206,65 @@ def test_engine_versions_for_model_still_raises_for_a_missing_module(monkeypatch
     monkeypatch.setattr(importlib.metadata, "packages_distributions", lambda: {})
     with pytest.raises(ValueError, match="Cannot resolve a distribution"):
         engine_versions_for("model", "totally_absent_pkg.Estimator")
+
+
+def _editable_project(tmp_path, monkeypatch, *, pth: bool, direct_url: bool) -> str:
+    """A project installed editable as distribution ``med-supply-fake`` whose package is
+    ``fakecast``: the names differ, as in issue #89. Returns the estimator class path."""
+    import json
+    import sys
+
+    src = tmp_path / "project" / "src"
+    (src / "fakecast").mkdir(parents=True)
+    (src / "fakecast" / "__init__.py").write_text("")
+    (src / "fakecast" / "estimators.py").write_text("class Log1pTree:\n    pass\n")
+    site = tmp_path / "site"
+    info = site / "med_supply_fake-1.2.3.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: med-supply-fake\nVersion: 1.2.3\n"
+    )
+    record = ["med_supply_fake-1.2.3.dist-info/METADATA,,"]
+    if pth:
+        (site / "_med_supply_fake.pth").write_text(f"{src}\n")
+        record.append("_med_supply_fake.pth,,")
+    if direct_url:
+        url = {"url": (tmp_path / "project").as_uri(), "dir_info": {"editable": True}}
+        (info / "direct_url.json").write_text(json.dumps(url))
+    (info / "RECORD").write_text("\n".join(record) + "\n")
+    # site.py processes a .pth only at start-up; the import path it would add goes first
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.syspath_prepend(str(src))
+    for name in [
+        m for m in sys.modules if m == "fakecast" or m.startswith("fakecast.")
+    ]:
+        monkeypatch.delitem(sys.modules, name)
+    importlib.invalidate_caches()
+    return "fakecast.estimators.Log1pTree"
+
+
+@pytest.mark.parametrize(
+    "pth, direct_url", [(True, False), (False, True), (True, True)]
+)
+def test_an_editable_project_named_unlike_its_package_resolves(
+    tmp_path, monkeypatch, pth, direct_url
+):
+    """Issue #89: packages_distributions() has no entry for an editable install, and the
+    module name is not the distribution name; where the module lives finds it."""
+    class_path = _editable_project(
+        tmp_path, monkeypatch, pth=pth, direct_url=direct_url
+    )
+    assert "fakecast" not in importlib.metadata.packages_distributions()
+
+    versions = engine_versions_for("model", class_path)
+
+    assert versions["med-supply-fake"] == "1.2.3"
+
+
+def test_an_estimator_no_distribution_provides_names_its_location(
+    tmp_path, monkeypatch
+):
+    class_path = _editable_project(tmp_path, monkeypatch, pth=False, direct_url=False)
+
+    with pytest.raises(ValueError, match="fakecast.*at .*project/src/fakecast"):
+        engine_versions_for("model", class_path)
