@@ -39,6 +39,10 @@ from triage.adapters.labels import build_labels
 from triage.adapters.lineage import latest_model_in_group, reconstruct_model_lineage
 from triage.adapters.matrix import build_matrix
 from triage.adapters.model import build_model
+from triage.adapters.target_history import (
+    is_reserved_history_column,
+    lag_label_dates,
+)
 from triage.adapters.temporal import TemporalConfig
 from triage.logging import get_logger
 from triage.profiles.storage import parent_root, storage_for_root
@@ -113,6 +117,17 @@ def retrain(
             storage_dir,
         )
     train_as_of = prediction_date - convert_str_to_relativedelta(label_timespan)
+    temporal_config = TemporalConfig.model_validate(lineage.temporal_config)
+    # A lag baseline reads labels at earlier, closed windows; compute those too (#93).
+    label_dates = [
+        train_as_of,
+        *lag_label_dates(
+            train_as_of,
+            label_timespan,
+            temporal_config.training_as_of_date_frequencies,
+            lineage.target_history.n_lags,
+        ),
+    ]
 
     run_id = open_run(
         db_engine,
@@ -137,7 +152,7 @@ def retrain(
             run_id,
             cohort_artifact_id=cohort_artifact_id,
             label_query_template=lineage.label_config["query"],
-            as_of_dates=[train_as_of],
+            as_of_dates=label_dates,
             label_timespans=[label_timespan],
             problem_type=lineage.problem_type,
             config=dated_config(lineage.label_config, train_as_of),
@@ -150,7 +165,7 @@ def retrain(
             featurizer_config=lineage.featurizer_config,
             cohort_artifact_id=cohort_artifact_id,
             labels_artifact_id=labels_artifact_id,
-            temporal_config=TemporalConfig.model_validate(lineage.temporal_config),
+            temporal_config=temporal_config,
             imputation_policy=ImputationPolicy.model_validate(
                 lineage.imputation_config
             ),
@@ -163,6 +178,8 @@ def retrain(
             policy=cache_policy,
             # Same training target as the model being retrained (#21).
             missing_label_fill=lineage.missing_label_fill,
+            # The reserved history columns the group was fitted on (#93).
+            target_history=lineage.target_history,
         )
         # Project onto the group's fit geometry before fitting (#14). build_matrix returns every
         # column in BUILD order; without this the retrained estimator is fitted on a different
@@ -170,7 +187,10 @@ def retrain(
         # different order — then rejoins its group anyway, because _model_group_hash sorts the
         # list before hashing. The group's spec is what a retrain is supposed to reproduce.
         train_matrix = replace(
-            train_matrix, feature_names=list(lineage.fit_feature_list)
+            train_matrix,
+            feature_names=_group_projection(
+                db_engine, model_group_id, lineage.fit_feature_list
+            ),
         )
         model_result = build_model(
             db_engine,
@@ -205,6 +225,33 @@ def retrain(
         run_id=run_id,
         cache_hit=model_result.cache_hit,
     )
+
+
+def _group_projection(
+    db_engine: DictRowPool, model_group_id: int, fit_feature_list: list[str]
+) -> list[str]:
+    """The feature columns a retrain projects its train matrix onto, so it rejoins its group.
+
+    Usually the fitted columns. A target-history baseline (ADR-0030) is fitted on the reserved
+    ``_target_lag_*`` / ``_hist_*`` columns, but ``triage run`` keys its model group, and its
+    model identity, on the matrix's feature columns; projecting onto the reserved names would
+    mint a new group. For that model the group's own list is the projection (#93).
+    """
+    if not fit_feature_list or not all(
+        is_reserved_history_column(c) for c in fit_feature_list
+    ):
+        return list(fit_feature_list)
+    with db_engine.connection() as conn:
+        row = conn.execute(
+            "select feature_list from triage.model_groups where model_group_id = %(g)s",
+            {"g": model_group_id},
+        ).fetchone()
+    if row is None or row["feature_list"] is None:
+        raise ValueError(
+            f"model group {model_group_id} has no feature_list — a target-history baseline"
+            + " cannot be retrained into it"
+        )
+    return list(row["feature_list"])
 
 
 def retrain_and_predict(

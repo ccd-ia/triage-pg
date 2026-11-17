@@ -9,8 +9,11 @@ Asserts the production predictions, the production matrix + its train-matrix lea
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from tests.adapter_tests.test_run_orchestration import (
     _experiment_config,
+    _history_config,
     _seed_source,
 )
 from triage.adapters.forward import predict_forward
@@ -153,3 +156,41 @@ def test_predict_forward_is_append_only_across_calls(db_pool_greenfield, tmp_pat
             "select count(*) as n from triage.predictions where split_kind = 'production'"
         ).fetchone()["n"]
     assert prod == 12  # two append-only batches of 6
+
+
+@pytest.mark.parametrize(
+    ("class_name", "n_scored"),
+    [
+        # Customer 6 has no orders, so it has no series and SeasonalNaive abstains on it.
+        ("SeasonalNaive", 5),
+        # Every customer has a label in the windows at 2014-06-01 and 2013-12-01.
+        ("Persistence", 6),
+    ],
+)
+def test_predict_forward_scores_a_target_history_baseline(
+    db_pool_greenfield, tmp_path, class_name, n_scored
+):
+    """``triage score`` on a target-history baseline attaches the ``_hist_*`` or
+    ``_target_lag_*`` columns it was fitted on, instead of failing on a train/score geometry
+    mismatch, and fills the lags from earlier closed label windows (#93)."""
+    engine = db_pool_greenfield
+    _seed_source(engine)
+    storage = str(tmp_path / "store")
+    config = _history_config("zero")
+    # 36 monthly slots reach back from 2014-12 to the fixture's 2012 orders.
+    config["history_series_width"] = 36
+    run_experiment(
+        engine, config, storage=LocalStorage(), storage_root=storage, random_seed=42
+    )
+    with engine.connection() as conn:
+        model_id = conn.execute(
+            "select m.model_id from triage.models m"
+            + " join triage.model_groups g using (model_group_id)"
+            + " where g.model_type like %(t)s"
+            + " order by m.train_end_time desc limit 1",
+            {"t": f"%.{class_name}"},
+        ).fetchone()["model_id"]
+
+    result = predict_forward(engine, model_id, FORWARD_DATE, storage_dir=storage)
+
+    assert result.num_predictions == n_scored
