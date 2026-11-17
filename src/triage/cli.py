@@ -884,7 +884,7 @@ def models_command(
         ).get("avg_value")
         rows = conn.execute(
             "select m.model_id, m.train_end_time, m.train_duration_ms, w.value_mean"
-            " from triage.models m"
+            " from triage.current_models m"
             " join triage.runs r on r.run_id = m.run_id"
             " left join triage.evaluations_windowed w"
             "        on w.model_id = m.model_id and w.split_kind = 'test'"
@@ -1384,7 +1384,7 @@ def audition_command(
             undefined = returned_row(
                 conn.execute(
                     "select count(*) as n from triage.evaluations e"
-                    " join triage.models m on m.model_id = e.model_id"
+                    " join triage.current_models m on m.model_id = e.model_id"
                     " join triage.runs r on r.run_id = m.run_id"
                     " where r.experiment_hash = %(h)s and e.metric = %(m)s"
                     "   and e.parameter = %(p)s and e.split_kind = 'test'"

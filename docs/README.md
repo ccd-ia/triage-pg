@@ -98,3 +98,4 @@ The accepted, durable decisions ([`adr/`](adr/)). Read these before making archi
 - [0034](adr/0034-leakage-check-as-of-invariance-delete-and-rollback.md) The leakage check tests as-of invariance by delete and rollback
 - [0035](adr/0035-plots-are-a-cli-surface-over-shared-readers.md) Plots are a CLI surface over one query layer shared with the dashboard
 - [0036](adr/0036-target-history-on-the-calendar.md) Target history is placed on the calendar; gaps stop the matrix build unless filled
+- [0037](adr/0037-group-reads-take-the-latest-runs-model.md) Group-level reads take the latest Run's model on each split, so two Runs of one Experiment never put two models of a group on one date

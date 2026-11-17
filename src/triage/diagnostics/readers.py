@@ -289,7 +289,7 @@ def group_curves(
         pool,
         "select distinct p.model_id, p.as_of_date"
         " from triage.predictions p"
-        " join triage.models m on m.model_id = p.model_id"
+        " join triage.current_models m on m.model_id = p.model_id"
         " where m.model_group_id = %(g)s and p.split_kind = 'test'"
         "   and (%(exp)s::text is null or exists ("
         "        select 1 from triage.runs r"
@@ -651,7 +651,7 @@ def error_recurrence(
         pool,
         "select ea.parameter"
         " from triage.error_analysis ea"
-        " join triage.models m using (model_id)"
+        " join triage.current_models m using (model_id)"
         " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
         "   and ea.error_kind = %(k)s"
         " group by ea.parameter"
@@ -727,7 +727,7 @@ def group_leaves(
         "            else ea.error_rate end as wrong_share,"
         "       ea.depth, ea.class_counts, ea.signature, ea.leaf_stats"
         " from triage.error_analysis ea"
-        " join triage.models m on m.model_id = ea.model_id"
+        " join triage.current_models m on m.model_id = ea.model_id"
         " where m.model_group_id = %(g)s and ea.split_kind = 'test'"
         "   and ea.parameter = %(p)s and ea.error_kind = any(%(kinds)s)"
         " order by ea.as_of_date, ea.model_id, ea.error_kind, ea.rule_id",
@@ -760,7 +760,7 @@ def group_models(
         "       (select min(e.as_of_date) from triage.evaluations e"
         "          where e.model_id = m.model_id and e.split_kind = 'test'"
         "            and e.subset_hash = '') as test_as_of"
-        " from triage.models m"
+        " from triage.current_models m"
         " join triage.runs r on r.run_id = m.run_id"
         " where m.model_group_id = %(g)s"
         "   and (%(exp)s::text is null or r.experiment_hash = %(exp)s)"
@@ -1130,7 +1130,7 @@ def leaderboard(
             "       w.parameter, w.n_as_of_dates, w.value_mean, w.value_stddev,"
             "       w.value_min, w.model_id, m.train_end_time, c.coverage"
             " from triage.evaluations_windowed w"
-            " join triage.models m on m.model_id = w.model_id"
+            " join triage.current_models m on m.model_id = w.model_id"
             " join triage.model_groups mg on mg.model_group_id = m.model_group_id"
             " join triage.runs r on r.run_id = m.run_id"
             " left join triage.model_group_coverage(%(hash)s) c"
@@ -1278,7 +1278,7 @@ def model_groups(
         pool,
         "select mgs.model_group_id, mgs.model_type, mgs.n_models,"
         "       a.avg_value, a.stddev_value, a.max_regret,"
-        "       (select avg(mm.train_duration_ms)::bigint from triage.models mm"
+        "       (select avg(mm.train_duration_ms)::bigint from triage.current_models mm"
         "          join triage.runs rr on rr.run_id = mm.run_id"
         "         where mm.model_group_id = mgs.model_group_id"
         "           and rr.experiment_hash = %(h)s) as avg_duration_ms,"
