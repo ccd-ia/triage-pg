@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -208,11 +209,83 @@ def engine_versions_for(
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
-            raise ValueError(
-                f"Cannot resolve a distribution for estimator module {top_module!r}"
-                + f" (from {estimator_class_path!r}); is it installed?"
-            ) from None
+            # A project installed editable under a distribution named differently from
+            # its packages (distribution `med-supply`, package `forecasting`): neither
+            # lookup above sees it, so find the distribution by where the module lives (#89).
+            dist = _editable_distribution(top_module)
+            if dist is None:
+                raise ValueError(
+                    f"Cannot resolve a distribution for estimator module {top_module!r}"
+                    + f" (from {estimator_class_path!r}, at {_module_location(top_module)})"
+                    + "; install the project that provides it (`uv sync`,"
+                    + " `pip install -e .`) so its version can enter model identity"
+                ) from None
+            versions[dist.metadata["Name"]] = dist.version
     return versions
+
+
+def _module_dirs(top_module: str) -> list[Path]:
+    """The directories an importable top module lives in; empty when it is not importable."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec(top_module)
+    except (ImportError, ValueError):
+        return []
+    if spec is None:
+        return []
+    if spec.submodule_search_locations:
+        return [Path(p).resolve() for p in spec.submodule_search_locations]
+    return [Path(spec.origin).resolve().parent] if spec.origin else []
+
+
+def _module_location(top_module: str) -> str:
+    """Where an importable top module lives, or a note that it is not found."""
+    dirs = _module_dirs(top_module)
+    return str(dirs[0]) if dirs else "no importable module of that name"
+
+
+def _editable_distribution(
+    top_module: str,
+) -> importlib.metadata.Distribution | None:
+    """The installed distribution whose editable install provides ``top_module``.
+
+    An editable install records where the project's sources are in two places: the
+    ``url`` of ``direct_url.json`` (``dir_info.editable``) and the paths listed in the
+    ``.pth`` files of its ``RECORD``. The module's directory must sit under one of them.
+    """
+    from urllib.parse import unquote, urlparse
+
+    where = _module_dirs(top_module)
+    if not where:
+        return None
+
+    def roots(dist: importlib.metadata.Distribution) -> list[Path]:
+        found: list[Path] = []
+        direct = dist.read_text("direct_url.json")
+        if direct:
+            info = json.loads(direct)
+            url = urlparse(info.get("url", ""))
+            if info.get("dir_info", {}).get("editable") and url.scheme == "file":
+                found.append(Path(unquote(url.path)).resolve())
+        for file in dist.files or ():
+            if file.suffix != ".pth":
+                continue
+            text = file.read_text() if Path(file.locate()).is_file() else ""
+            for line in text.splitlines():
+                line = line.strip()
+                if line and not line.startswith(("#", "import ")):
+                    found.append(Path(line).resolve())
+        return found
+
+    # the deepest root wins: an editable project nested inside another editable checkout
+    best: tuple[int, importlib.metadata.Distribution] | None = None
+    for dist in importlib.metadata.distributions():
+        for root in roots(dist):
+            if any(w == root or root in w.parents for w in where):
+                if best is None or len(root.parts) > best[0]:
+                    best = (len(root.parts), dist)
+    return None if best is None else best[1]
 
 
 def _distribution_version(*candidates: str) -> str:

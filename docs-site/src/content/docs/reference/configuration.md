@@ -406,6 +406,16 @@ grid_config:
   comparable and persisted as signed β / odds ratios), or, for `survival`, the
   scikit-survival wrappers such as
   `triage.component.catwalk.estimators.survival.ScaledCoxPHSurvivalAnalysis`.
+- The version of the distribution that provides the estimator enters model
+  identity, so a new version of it fits new models instead of reusing the old
+  ones. triage-pg finds the distribution from the class path's top module:
+  first from the package metadata, then by the module's name, then, for an
+  editable install (`uv sync`, `pip install -e .`), by the project directory
+  the module lives in. An estimator from your own project therefore works when
+  the distribution is named differently from its packages (distribution
+  `med-supply`, package `forecasting`). The project must be installed; a module
+  that is only on `PYTHONPATH` stops the run with the module's location in the
+  error.
 
 ## `imputation_config`
 
