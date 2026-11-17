@@ -32,6 +32,10 @@ from typing import Literal
 import numpy as np
 from sklearn.base import BaseEstimator
 
+from triage.logging import get_logger
+
+logger = get_logger(__name__)
+
 __all__ = [
     "Persistence",
     "PromedioDisponible",
@@ -221,11 +225,27 @@ class SeasonalNaive(_TSBaseline):
         return float(self._observed(h)[-1])  # shorter than a season: last value
 
 
+def _ses_level(series: np.ndarray, alpha: float) -> float:
+    """Simple exponential smoothing with a fixed ``alpha``, started at the first value.
+
+    ``level = alpha * x + (1 - alpha) * level`` over the series; the last level is the
+    one-step forecast. Closed form, so it runs on a series of any length (#94).
+    """
+    level = float(series[0])
+    for value in series[1:]:
+        level = alpha * float(value) + (1.0 - alpha) * level
+    return level
+
+
 class ETS(_TSBaseline):
-    """Simple exponential smoothing (level only) — statsmodels, ``baselines`` extra.
+    """Simple exponential smoothing (level only).
 
     Layout: ``_hist_*`` placed by calendar offset.
     Gaps: abstains on any interior gap; otherwise fits the series from its first value on.
+    A fixed ``alpha`` is the closed form started at the first value and needs no statsmodels.
+    ``alpha=None`` fits alpha and the initial level with statsmodels (``baselines`` extra,
+    ``initialization_method="estimated"``, which works from two values on). A series it cannot
+    fit abstains with a warning instead of failing the whole scoring step (#94).
     """
 
     history_kind = "series"
@@ -241,20 +261,25 @@ class ETS(_TSBaseline):
         clean = self._trim_leading(hist)
         if clean.size < 2:
             return float(clean[-1]) if clean.size else float("nan")
+        if self.alpha is not None:
+            return _ses_level(clean, float(self.alpha))
         try:
             from statsmodels.tsa.holtwinters import SimpleExpSmoothing
         except (
             ImportError
         ) as exc:  # pragma: no cover - exercised only without the extra
             raise ImportError(
-                "ETS/HoltWinters need statsmodels — install triage[baselines]"
+                "ETS with a fitted alpha needs statsmodels — install triage[baselines],"
+                + " or set a fixed alpha"
             ) from exc
-        kw = (
-            {}
-            if self.alpha is None
-            else {"smoothing_level": self.alpha, "optimized": False}
-        )
-        fit = SimpleExpSmoothing(clean, initialization_method="heuristic").fit(**kw)
+        try:
+            fit = SimpleExpSmoothing(clean, initialization_method="estimated").fit()
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            logger.warning(
+                f"ETS could not fit a {clean.size}-period series ({exc}); abstaining on"
+                + " that row"
+            )
+            return float("nan")
         return float(np.asarray(fit.forecast(1))[0])
 
 

@@ -19,7 +19,7 @@ This file is the implementation index.
 | classification | `SimpleThresholder` | `catwalk/baselines/thresholders.py` | Threshold-rule flagging (inherited). |
 | regression | `DummyRegressor` | `sklearn.dummy` | `mean`/`median` (point) or `quantile` (τ-quantile → pinball@τ). |
 | regression | `Persistence`, `PromedioDisponible`, `MovingAverage`, `Drift` | `catwalk/baselines/timeseries.py` | **Lag family** — read reserved `_target_lag_*` (windowed-label lags on the Experiment's label-date grid). No `history_query`. `gap_policy = "calendar_positions"`. |
-| regression | `SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`, `CrostonSBA` | `catwalk/baselines/timeseries.py` | **Raw-series family** — read reserved `_hist_*` (the `history_query` placed by calendar offset). `requires_complete_calendar = True`, `gap_policy = "abstain"`. ETS/HoltWinters need `triage[baselines]` (statsmodels). |
+| regression | `SeasonalNaive`, `ETS`, `HoltWinters`, `Croston`, `CrostonSBA` | `catwalk/baselines/timeseries.py` | **Raw-series family** — read reserved `_hist_*` (the `history_query` placed by calendar offset). `requires_complete_calendar = True`, `gap_policy = "abstain"`. HoltWinters, and ETS without a fixed `alpha`, need `triage[baselines]` (statsmodels). |
 | survival | `KaplanMeierBaseline`, `NelsonAalenBaseline`, `MarginalHazardBaseline`, `SingleFeatureCox` | `catwalk/baselines/survival.py` | Marginal floors → in-PG C-index ≈ 0.5. Need `triage[survival]` (sksurv). |
 
 ## Target history (ADR-0030, amended by ADR-0036)
