@@ -10,7 +10,10 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL
 
-from triage.component.version_table import prepare_version_table
+from triage.component.version_table import (
+    create_schema_if_absent_sql,
+    prepare_version_table,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -101,7 +104,7 @@ def run_migrations_offline():
     with context.begin_transaction():
         # The emitted script has to create the schema itself: alembic writes
         # ``CREATE TABLE registry.<version>`` before migration 0001 runs.
-        context.execute(f"create schema if not exists {VERSION_TABLE_SCHEMA};")
+        context.execute(create_schema_if_absent_sql(VERSION_TABLE_SCHEMA))
         context.run_migrations()
 
 
