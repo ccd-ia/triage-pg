@@ -493,3 +493,103 @@ def test_migration_0033_round_trips(db_pool_greenfield, db_url):
         )
     upgrade_db(dburl=db_url, revision="head")
     assert readers.residual_summary(db_pool_greenfield, model_id) == before
+
+
+def _entity_source(
+    pool,
+    model_id: int,
+    *,
+    name: str,
+    table: str,
+    key: str,
+    column: str,
+    pin: bool = True,
+    feature_config: dict | None = None,
+) -> None:
+    """An entity relation keyed by ``key`` with a display ``column``, registered as an
+    entity source and pinned by the model's Run (or only named by its feature_config)."""
+    with pool.connection() as conn:
+        conn.execute(f"create table {table} ({key} bigint, {column} text)")
+        conn.execute(
+            f"insert into {table} select e, %(n)s || e from unnest(%(es)s::bigint[]) e",
+            {"n": f"{name}-", "es": list(ENTITIES)},
+        )
+        run_id = conn.execute(
+            "select run_id from triage.models where model_id = %(m)s", {"m": model_id}
+        ).fetchone()["run_id"]
+        if pin:
+            conn.execute(
+                "insert into triage.sources (source_name, relation, role)"
+                " values (%(s)s, %(t)s, 'entity')",
+                {"s": name, "t": table},
+            )
+            conn.execute(
+                "insert into triage.run_source_pins (run_id, source_name)"
+                " values (%(r)s, %(s)s)",
+                {"r": run_id, "s": name},
+            )
+        if feature_config is not None:
+            conn.execute(
+                "update triage.runs set plan = jsonb_build_object('attempt',"
+                " jsonb_build_object('feature_config', %(fc)s::jsonb))"
+                " where run_id = %(r)s",
+                {"fc": json.dumps(feature_config), "r": run_id},
+            )  # fmt: skip
+
+
+def _target(alias: str, table: str, key: str) -> dict:
+    return {"target": alias, "entities": [{"alias": alias, "id": key, "table": table}]}
+
+
+def test_largest_errors_label_each_entity_from_its_own_experiment(db_pool_greenfield):
+    """Issue #88: two Experiments, two entity sources, one keyed by pair_id."""
+    pool = db_pool_greenfield
+    pairs_model = _seed(pool, exp="exp-pairs")
+    sites_model = _seed(pool, exp="exp-sites")
+    _entity_source(
+        pool, pairs_model, name="pairs", table="public.pairs", key="pair_id",
+        column="name", feature_config=_target("pairs", "public.pairs", "pair_id"),
+    )  # fmt: skip
+    _entity_source(
+        pool, sites_model, name="sites", table="public.sites", key="entity_id",
+        column="title",
+    )  # fmt: skip
+
+    for model_id, prefix in ((pairs_model, "pairs-"), (sites_model, "sites-")):
+        got = readers.largest_errors(pool, model_id, n=5)
+        assert got and all(r["label"] == f"{prefix}{r['entity_id']}" for r in got)
+
+
+def test_largest_errors_read_the_target_table_when_no_source_is_pinned(
+    db_pool_greenfield,
+):
+    pool = db_pool_greenfield
+    model_id = _seed(pool)
+    _entity_source(
+        pool, model_id, name="pairs", table="public.pairs", key="pair_id",
+        column="name", pin=False,
+        feature_config=_target("pairs", "public.pairs", "pair_id"),
+    )  # fmt: skip
+
+    got = readers.largest_errors(pool, model_id, n=5)
+    assert all(r["label"] == f"pairs-{r['entity_id']}" for r in got)
+
+
+def test_largest_errors_print_without_labels_when_no_relation_has_the_key(
+    db_pool_greenfield,
+):
+    """An entity source keyed by a column no config names: no label, and no error."""
+    pool = db_pool_greenfield
+    model_id = _seed(pool)
+    _entity_source(
+        pool, model_id, name="pairs", table="public.pairs", key="pair_id",
+        column="name",
+    )  # fmt: skip
+
+    got = readers.largest_errors(pool, model_id, n=5)
+    assert len(got) == 5 and all(r["label"] is None for r in got)
+    with pool.connection() as conn:
+        legacy = conn.execute(
+            "select triage.entity_attributes(%(e)s) as a", {"e": got[0]["entity_id"]}
+        ).fetchone()["a"]
+    assert legacy is None
