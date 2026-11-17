@@ -90,6 +90,16 @@ cadence means "of the 100 we can actually inspect this week". Evaluating at a
 monthly k while acting weekly is the old pooled-metric category error relocated
 into your config — the number is computed correctly and answers nothing.
 
+**One model per group and split.** Running an Experiment again with the same
+features and grid fits a new model in each group, on the same splits, whenever
+something else changed: the triage-pg version, a `history_query`, an
+imputation strategy, the data. Audition, the leaderboard, the coverage and
+common-rows commands and the group pages then read one model per group and
+split, the one from the latest Run that built or reused it. A completed Run
+outranks one still running or failed. The view `triage.current_models` lists
+those models. The earlier ones stay in the database, and every command that
+takes a model id still reads them.
+
 ## Top-k cuts the whole population, metrics count the labeled rows
 
 A threshold metric (`precision@`, `recall@`, the bias audit, the dashboard's
