@@ -46,6 +46,7 @@ __all__ = [
     "RAW_SERIES_BASELINE_CLASSES",
     "LAG_BASELINE_CLASSES",
     "build_target_history_lags",
+    "lag_label_dates",
     "build_target_history_series",
     "pivot_series_to_history_columns",
     "history_columns_in_order",
@@ -283,6 +284,39 @@ def build_target_history_lags(
         label_hash[:12],
     )
     return frame
+
+
+def lag_label_dates(
+    as_of_date: date,
+    label_timespan: str,
+    frequencies: Sequence[str],
+    n_lags: int,
+) -> list[date]:
+    """The earlier label dates a one-date build needs to fill its ``n_lags`` lags (#93).
+
+    In ``triage run`` the lag grid is the Experiment's own label dates, because its labels span
+    every split. A forward or retrain build computes labels at one date, whose window has not
+    closed, so :func:`build_target_history_lags` would find no admissible date and every lag
+    would be NULL. Such a build adds these dates to its labels: the latest window closed by
+    ``as_of_date`` (``as_of_date - label_timespan``), then one training frequency earlier per
+    further lag. The shortest of ``frequencies`` (``training_as_of_date_frequencies``) sets the
+    spacing, as the densest grid the Experiment trained on.
+    """
+    from triage.util.conf import convert_str_to_relativedelta
+
+    if n_lags < 1:
+        return []
+    if not frequencies:
+        raise ValueError(
+            "lag_label_dates needs at least one training_as_of_date_frequency to space the"
+            + " lag dates"
+        )
+    step = min(
+        (convert_str_to_relativedelta(f) for f in frequencies),
+        key=lambda delta: as_of_date + delta,
+    )
+    latest = as_of_date - convert_str_to_relativedelta(label_timespan)
+    return [latest - step * k for k in range(n_lags)]
 
 
 # ---------------------------------------------------------------- raw periodic series (b)

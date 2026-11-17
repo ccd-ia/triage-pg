@@ -23,6 +23,7 @@ from typing import Any
 from triage.util.db import DictRowPool
 
 from triage.adapters.matrix import MatrixResult
+from triage.adapters.target_history import TargetHistory, complete_calendar_baselines
 from triage.artifacts import get_artifact
 from triage.logging import get_logger
 
@@ -69,6 +70,9 @@ class ModelLineage:
     # include_missing_labels_in_train_as as the train matrix applied it (#21): 0, 1, or None
     # (unlabeled rows dropped). Read from the matrix, because the labels config never has it.
     missing_label_fill: int | None = None
+    # The target-history knobs the train matrix was built with (ADR-0030, #93), so a forward
+    # matrix carries the same reserved _target_lag_* / _hist_* columns the model was fitted on.
+    target_history: TargetHistory = TargetHistory()
 
 
 def matrix_result_from_uuid(db_engine: DictRowPool, matrix_uuid: Any) -> MatrixResult:
@@ -301,4 +305,22 @@ def reconstruct_model_lineage(
         problem_type=problem_type,
         source_pins=source_pins,
         missing_label_fill=matrix_cfg.get("missing_label_fill"),
+        target_history=_target_history(matrix_cfg, model_cfg["class_path"]),
+    )
+
+
+def _target_history(matrix_cfg: Mapping[str, Any], class_path: str) -> TargetHistory:
+    """The :class:`TargetHistory` a train matrix was built with, read from its identity config.
+
+    The knobs enter matrix identity (:meth:`TargetHistory.identity`), so the train matrix's
+    config is where they are recorded; a matrix built without history has zero/None there. The
+    strict gap check names only this model's class, the one grid entry a forward build serves.
+    """
+    return TargetHistory(
+        n_lags=int(matrix_cfg.get("target_history_lags") or 0),
+        history_query=matrix_cfg.get("history_query") or None,
+        series_width=int(matrix_cfg.get("history_series_width") or 0),
+        history_period=matrix_cfg.get("history_period"),
+        fill_missing_periods=matrix_cfg.get("fill_missing_periods"),
+        complete_calendar_baselines=complete_calendar_baselines({class_path: {}}),
     )

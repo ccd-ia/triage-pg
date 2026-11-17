@@ -38,6 +38,7 @@ from triage.adapters.labels import build_labels
 from triage.adapters.lineage import reconstruct_model_lineage
 from triage.adapters.matrix import build_matrix
 from triage.adapters.model import _load_estimator, score_matrix
+from triage.adapters.target_history import lag_label_dates
 from triage.adapters.temporal import TemporalConfig
 from triage.component.catwalk.prediction_ranking import record_predictions
 from triage.derivation import as_uuid
@@ -205,6 +206,17 @@ def predict_forward(
         )
     pins = dict(source_pins) if source_pins is not None else lineage.source_pins
     label_timespan = lineage.label_timespan
+    temporal_config = TemporalConfig.model_validate(lineage.temporal_config)
+    # A lag baseline reads labels at earlier, closed windows; compute those too (#93).
+    label_dates = [
+        as_of_date,
+        *lag_label_dates(
+            as_of_date,
+            label_timespan,
+            temporal_config.training_as_of_date_frequencies,
+            lineage.target_history.n_lags,
+        ),
+    ]
     if storage_dir is None:
         storage_dir = parent_root(lineage.artifact_uri)
         logger.info(
@@ -239,7 +251,7 @@ def predict_forward(
             run_id,
             cohort_artifact_id=cohort_artifact_id,
             label_query_template=lineage.label_config["query"],
-            as_of_dates=[as_of_date],
+            as_of_dates=label_dates,
             label_timespans=[label_timespan],
             problem_type=lineage.problem_type,
             config=dated_config(lineage.label_config, as_of_date),
@@ -252,7 +264,7 @@ def predict_forward(
             featurizer_config=lineage.featurizer_config,
             cohort_artifact_id=cohort_artifact_id,
             labels_artifact_id=labels_artifact_id,
-            temporal_config=TemporalConfig.model_validate(lineage.temporal_config),
+            temporal_config=temporal_config,
             imputation_policy=ImputationPolicy.model_validate(
                 lineage.imputation_config
             ),
@@ -264,6 +276,8 @@ def predict_forward(
             train_matrix_artifact_id=lineage.train_matrix_artifact_id,
             source_pins=pins,
             policy=cache_policy,
+            # The reserved history columns the model was fitted on (#93).
+            target_history=lineage.target_history,
         )
 
         estimator = _load_estimator(lineage.artifact_uri)

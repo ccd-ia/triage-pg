@@ -414,3 +414,18 @@ def test_validator_reports_history_keys_with_their_path():
     )
     paths = {e["path"] for e in report["errors"]}
     assert {"history_period", "fill_missing_periods"} <= paths
+
+
+def test_lag_label_dates_step_back_from_the_latest_closed_window():
+    """A one-date build asks for the windows its lags read (#93): the latest one closed by
+    the as_of_date, then one (shortest) training frequency earlier per further lag."""
+    from triage.adapters.target_history import lag_label_dates
+
+    assert lag_label_dates(date(2014, 10, 1), "6 months", ["6 months"], 2) == [
+        date(2014, 4, 1),
+        date(2013, 10, 1),
+    ]
+    assert lag_label_dates(
+        date(2014, 10, 1), "3 months", ["6 months", "1 month"], 3
+    ) == [date(2014, 7, 1), date(2014, 6, 1), date(2014, 5, 1)]
+    assert lag_label_dates(date(2014, 10, 1), "6 months", ["6 months"], 0) == []
