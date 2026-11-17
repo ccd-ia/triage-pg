@@ -88,3 +88,59 @@ def test_ets_and_holtwinters_forecast_trend():
     hw = HoltWinters(trend="add")._forecast_one(series)
     assert hw == pytest.approx(13.0, abs=1.5)  # continues the trend
     assert np.isfinite(ETS()._forecast_one(series))
+
+
+# ------------------------------------------------------------ ETS on short series (#94)
+
+
+@pytest.mark.parametrize("n", [2, 5, 9])
+def test_ets_fixed_alpha_forecasts_a_short_series(n):
+    """A fixed alpha is the closed form started at the first value: no 10-point minimum."""
+    from triage.component.catwalk.baselines.timeseries import ETS
+
+    series = np.array([np.nan] * 4 + [5.0, 0.0, 7.0, 3.0, 4.0, 6.0, 2.0, 8.0, 1.0][:n])
+    level = series[4]
+    for value in series[5:]:
+        level = 0.5 * value + 0.5 * level
+    assert ETS(alpha=0.5)._forecast_one(series) == pytest.approx(level)
+
+
+@pytest.mark.parametrize("n", [2, 5, 9])
+def test_ets_fitted_alpha_forecasts_a_short_series(n):
+    pytest.importorskip("statsmodels")
+    from triage.component.catwalk.baselines.timeseries import ETS
+
+    series = np.array([5.0, 0.0, 7.0, 3.0, 4.0, 6.0, 2.0, 8.0, 1.0][:n])
+    assert np.isfinite(ETS()._forecast_one(series))
+
+
+def test_ets_issue_94_reproduction_no_longer_raises():
+    from triage.component.catwalk.baselines.timeseries import ETS
+
+    hist = np.array([np.nan] * 19 + [5, 0, 7, 3, 4], dtype=float)
+    assert np.isfinite(ETS(alpha=0.5)._forecast_one(hist))
+
+
+def test_ets_abstains_on_an_interior_gap():
+    from triage.component.catwalk.baselines.timeseries import ETS
+
+    hist = np.array([np.nan, 5.0, np.nan, 7.0, 3.0])
+    assert np.isnan(ETS(alpha=0.5)._forecast_one(hist))
+    assert np.isnan(ETS()._forecast_one(hist))
+
+
+def test_ets_predict_scores_every_short_row():
+    """One short series no longer fails the whole scoring step."""
+    from triage.component.catwalk.baselines.timeseries import ETS
+
+    x = np.array(
+        [
+            [np.nan, np.nan, 3.0, 4.0],
+            [1.0, 2.0, 3.0, 4.0],
+            [np.nan, np.nan, np.nan, 6.0],
+            [np.nan, 1.0, np.nan, 2.0],
+        ]
+    )
+    scores = ETS(alpha=0.3).predict(x)
+    assert np.isfinite(scores[:3]).all()
+    assert np.isnan(scores[3])
