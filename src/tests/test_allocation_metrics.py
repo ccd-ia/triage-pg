@@ -200,6 +200,17 @@ def ref_aucc_rows(order_outcomes: np.ndarray) -> float:
     return float(np.sum((gains[1:] + gains[:-1]) / 2) / len(y))
 
 
+def ref_ndcg(scores, outcomes, parameter) -> float:
+    """DCG over the population order (an unlabeled row adds nothing at its position)
+    over the DCG of the labeled outcomes sorted largest first (#83)."""
+    k = _k(parameter, len(scores))
+    gain = np.nan_to_num(_ranked(scores, outcomes))[:k]
+    ideal = np.sort(outcomes[~np.isnan(outcomes)])[::-1][:k]
+    dcg = float(np.sum(gain / np.log2(np.arange(2, len(gain) + 2))))
+    idcg = float(np.sum(ideal / np.log2(np.arange(2, len(ideal) + 2))))
+    return dcg / idcg
+
+
 # --------------------------------------------------------------------------- the values
 
 
@@ -220,6 +231,60 @@ def test_lift_and_captured_match_numpy(db_pool_greenfield, models, name, paramet
         k = min(_k(parameter, N), N)
         expected_m = int((~np.isnan(_ranked(scores, outcomes)[:k])).sum())
         assert row["num_labeled_above_threshold"] == expected_m
+
+
+@pytest.mark.parametrize("name", ["perfect", "reversed", "noisy", "constant"])
+@pytest.mark.parametrize("parameter", THRESHOLDS)
+def test_ndcg_matches_its_definition(db_pool_greenfield, models, name, parameter):
+    pool, scores = db_pool_greenfield, _scores(name)
+    row = _stored(pool, models[name], "ndcg@", parameter)
+    expected = ref_ndcg(scores, _outcomes(OUTCOME), parameter)
+    assert row["value"] == pytest.approx(expected, abs=1e-9)
+    assert row["num_labeled"] == N_LABELED
+    if name == "perfect":
+        assert row["value"] == pytest.approx(1.0)
+
+
+def test_ndcg_tells_apart_two_orders_of_one_top_k(db_pool_greenfield, models):
+    """lift@ and captured@ see the top k as a set; ndcg@ sees its order (#83)."""
+    pool = db_pool_greenfield
+    for parameter in THRESHOLDS:
+        assert (
+            _stored(pool, models["perfect"], "ndcg@", parameter)["value"]
+            > _stored(pool, models["reversed"], "ndcg@", parameter)["value"]
+        )
+
+
+def test_ndcg_is_undefined_for_a_signed_or_all_zero_target(db_pool_greenfield, models):
+    pool = db_pool_greenfield
+    for as_of in (R2, R0):
+        for parameter in THRESHOLDS:
+            row = _stored(pool, models["noisy"], "ndcg@", parameter, as_of=as_of)
+            assert row["value"] is None
+
+
+def test_ndcg_scores_a_classifier_on_its_0_1_label(db_pool_greenfield, models):
+    """Any problem type may list ndcg@; on a 0/1 label the gain is the label."""
+    pool = db_pool_greenfield
+    binary = (OUTCOME > 20).astype(float)
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.labels set outcome = (outcome > 20)::int"
+            " where as_of_date = %(d)s",
+            {"d": R1},
+        )
+        conn.execute("delete from triage.evaluations where metric = 'ndcg@'")
+    evaluate_in_db(
+        pool,
+        models["noisy"],
+        R1,
+        LABEL_TIMESPAN,
+        metric_config={"metrics": ["ndcg@"], "thresholds": ["10_pct"]},
+    )
+    row = _stored(pool, models["noisy"], "ndcg@", "10_pct")
+    assert row["value"] == pytest.approx(
+        ref_ndcg(_scores("noisy"), _outcomes(binary), "10_pct"), abs=1e-9
+    )
 
 
 def test_the_cut_ranks_the_whole_population(db_pool_greenfield, models):
@@ -288,7 +353,7 @@ def test_a_signed_or_zero_target_has_no_share(db_pool_greenfield, models):
 
 def test_the_four_metrics_are_higher_is_better(db_pool_greenfield):
     with db_pool_greenfield.connection() as conn:
-        for metric in ("lift@", "captured@", "aucc", "spearman"):
+        for metric in ("lift@", "captured@", "ndcg@", "aucc", "spearman"):
             assert (
                 conn.execute(
                     "select triage.higher_is_better(%(m)s) as h", {"m": metric}
@@ -351,9 +416,10 @@ def test_the_audit_recomputes_the_allocation_metrics(db_pool_greenfield, models)
     report = metric_audit.audit(db_pool_greenfield, list(models.values()))
     assert report.passed, json.dumps(report.to_dict(), default=str)
     by_name = {m.metric: m for m in report.metrics}
-    assert {"lift@", "captured@", "aucc", "spearman"} <= set(by_name)
+    assert {"lift@", "captured@", "ndcg@", "aucc", "spearman"} <= set(by_name)
     # 4 models × 3 dates × 4 thresholds
     assert by_name["lift@"].checked == 48
+    assert by_name["ndcg@"].checked == 48
     assert all(m.max_gap <= 1e-9 for m in report.metrics)
 
 

@@ -257,6 +257,26 @@ def _lift_at(pop: Rows, parameter: str) -> Optional[float]:
     return float(top.mean() / (total / n_labeled))
 
 
+def _ndcg_at(pop: Rows, parameter: str) -> Optional[float]:
+    """sklearn's ``ndcg_score`` over the population order (migration 0040).
+
+    sklearn is handed each row's position as its score, so the order is the population
+    ranking (score descending, entity_id ascending) and no tie is left to break. An
+    unlabeled row keeps its position with a gain of zero, which is what the SQL sum does.
+    """
+    from sklearn.metrics import ndcg_score
+
+    if _allocation_total(pop) is None:
+        return None
+    k = _resolve_k(parameter, len(pop["score"]))
+    if k == 0:
+        return None
+    order = np.lexsort((pop["entity_id"], -pop["score"]))
+    gains = np.nan_to_num(pop["outcome"][order], nan=0.0)
+    position = -np.arange(len(gains), dtype=float)
+    return float(ndcg_score([gains], [position], k=k, ignore_ties=True))
+
+
 def _aucc(pop: Rows) -> Optional[float]:
     """The area under the cumulative-gains curve by the trapezoid rule; a block of tied
     scores is one segment, from the gains before it to the gains after it."""
@@ -371,6 +391,7 @@ _TOP_K: dict[str, Any] = {
     "recall@": _recall_at,
     "lift@": _lift_at,
     "captured@": _captured_at,
+    "ndcg@": _ndcg_at,
 }
 
 

@@ -27,7 +27,7 @@ flowchart LR
 | `problem_type` | ① score is… | ② rank by… | ③ primary metrics | label columns |
 |---|---|---|---|---|
 | `classification` | `P(y=1)` | descending probability | AUC-ROC, precision@k, recall@k, AP | `outcome` (0/1) |
-| `regression_ranking` | predicted value | descending predicted value | lift@k, captured@k, AUCC, Spearman + RMSE/MAE/R²/WAPE | `outcome` (continuous) |
+| `regression_ranking` | predicted value | descending predicted value | lift@k, captured@k, NDCG@k, AUCC, Spearman + RMSE/MAE/R²/WAPE | `outcome` (continuous) |
 | `regression` (pure) | predicted value | (ranking incidental) | RMSE, MAE, R², WAPE (pinball@τ for a τ-quantile model) | `outcome` (continuous) |
 | `survival` | predicted risk / hazard | descending risk | C-index (Uno's C, AUC(t), Brier(t) persisted by `triage postmodel survival`) | `duration`, `event_observed` |
 
@@ -55,7 +55,7 @@ label_config:
 ### regression_ranking — the primary mode for continuous targets
 When the target is a continuous quantity (dollars at risk, days-to-resolution, demand units) but the
 **decision is still "act on the top *k*"**, rank by the predicted value. The default metrics score the
-allocation (lift@k and captured@k at the `precision@` cuts, the area under the gains curve, the
+allocation (lift@k, captured@k and NDCG@k at the `precision@` cuts, the area under the gains curve, the
 score–outcome Spearman correlation) **and** the forecast errors, so you get a usable priority list and
 a sense of magnitude. Prefer this over pure regression whenever the output drives a prioritized
 action.
