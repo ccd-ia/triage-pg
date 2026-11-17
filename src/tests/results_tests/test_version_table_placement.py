@@ -14,6 +14,8 @@ search_path, a database stamped before the fix, and offline (``--sql``) mode.
 ``downgrade base`` cases, plus the search_path case at the bottom of this file.
 """
 
+import uuid
+
 import psycopg
 import pytest
 from alembic import script
@@ -173,6 +175,54 @@ def test_downgrade_base_keeps_the_stamp_and_drops_everything_else(db_url, db_poo
     assert _stamped_revision(db_pool) == _head(db_url)
 
 
+@pytest.fixture
+def schema_owner_url(postgresql):
+    """A login role that owns ``triage`` and holds CREATE on the database, plus its URL.
+
+    The role is cluster-wide while the database is per-test, so the teardown hands its
+    objects back and drops it, or the next test's ``create role`` would collide.
+    """
+    info = postgresql.info
+    role = f"triage_owner_{uuid.uuid4().hex[:8]}"
+    admin = f"postgresql://{info.user}@{info.host}:{info.port}/{info.dbname}"
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(f"create role {role} login")
+        conn.execute(f"grant create on database {info.dbname} to {role}")
+    yield role, f"postgresql+psycopg://{role}@{info.host}:{info.port}/{info.dbname}"
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(f"reassign owned by {role} to {info.user}")
+        conn.execute(f"drop owned by {role}")
+        conn.execute(f"drop role {role}")
+
+
+def test_schema_owner_upgrades_without_create_on_the_database(
+    postgresql, db_pool, schema_owner_url
+):
+    """Issue #82: an upgrade by the schema's owner needs no database-level CREATE.
+
+    The field case: the application role owns ``triage`` and every table in it, and has
+    no CREATE on the database by design. PostgreSQL checks that privilege before it
+    reads ``if not exists``, so an unconditional ``create schema if not exists`` failed
+    every upgrade with "permission denied for database".
+    """
+    role, url = schema_owner_url
+    results_schema.upgrade_db(dburl=url, revision="0028_subset_threshold_curve")
+    with db_pool.connection() as conn:
+        conn.execute(f"revoke create on database {postgresql.info.dbname} from {role}")
+
+    results_schema.upgrade_db(dburl=url, revision="head")
+
+    assert _stamped_revision(db_pool) == _head(url)
+    with db_pool.connection() as conn:
+        owners = {
+            row["tableowner"]
+            for row in conn.execute(
+                "select tableowner from pg_tables where schemaname = 'triage'"
+            ).fetchall()
+        }
+    assert owners == {role}
+
+
 def test_offline_mode_emits_a_schema_qualified_version_table(db_url, capsys):
     """``--sql`` writes a script that creates the schema before it writes the stamp."""
     from alembic import command
@@ -185,7 +235,11 @@ def test_offline_mode_emits_a_schema_qualified_version_table(db_url, capsys):
     assert "INSERT INTO triage.results_schema_versions" in emitted
     # Ordering matters: alembic writes the version table before migration 0001 (which
     # is what would otherwise create the schema), so the script must open with it.
-    assert emitted.index("create schema if not exists triage") < emitted.index(
+    # It creates the schema only when pg_namespace lacks it, so the schema's owner can
+    # run the script without CREATE on the database (issue #82).
+    guard = "if not exists (select 1 from pg_namespace where nspname = 'triage')"
+    assert emitted.index(guard) < emitted.index('create schema "triage"')
+    assert emitted.index('create schema "triage"') < emitted.index(
         "CREATE TABLE triage.results_schema_versions"
     )
 

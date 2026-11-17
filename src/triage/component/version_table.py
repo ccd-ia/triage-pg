@@ -37,7 +37,21 @@ from triage.logging import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ("prepare_version_table",)
+__all__ = ("create_schema_if_absent_sql", "prepare_version_table")
+
+
+def create_schema_if_absent_sql(schema: str) -> str:
+    """SQL that creates ``schema`` only when ``pg_namespace`` has no row for it.
+
+    The online path runs it too, and the offline (``--sql``) script emits it. A plain
+    ``create schema if not exists`` still needs CREATE on the database (issue #82).
+    """
+    return (
+        "do $$ begin "
+        f"if not exists (select 1 from pg_namespace where nspname = '{schema}') then "
+        f'create schema "{schema}"; '
+        "end if; end $$;"
+    )
 
 
 def prepare_version_table(
@@ -45,13 +59,16 @@ def prepare_version_table(
 ) -> None:
     """Make ``schema.version_table`` the alembic stamp location, and commit.
 
-    Creates ``schema`` when absent, then moves a pre-fix stamp table into it if
+    Creates ``schema`` when ``pg_namespace`` has no row for it, then moves a pre-fix stamp table into it if
     one is found in the search_path-resolved location. Committed before
     ``context.configure`` so alembic's own version-table bootstrap sees the
     finished state — a fresh database ends with an empty schema if the
     migrations then fail, which is harmless.
     """
-    connection.execute(text(f'create schema if not exists "{schema}"'))
+    # Not ``create schema if not exists``: PostgreSQL checks CREATE on the database
+    # before it reads ``if not exists``, so the schema's owner could not upgrade without
+    # a database-level privilege it has no other use for (issue #82).
+    connection.execute(text(create_schema_if_absent_sql(schema)))
 
     legacy_schema = _legacy_stamp_schema(
         connection, schema=schema, version_table=version_table
