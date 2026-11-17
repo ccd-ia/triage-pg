@@ -748,6 +748,14 @@ sets the largest errors listed. `--quantiles` adds, for a model that forecasts
 a quantile τ, the gap between its point coverage and τ (a median forecast
 should have about half the rows at or below it). It reads only.
 
+Each of the largest errors carries the entity's display label, its `name`,
+`label`, `display_name` or `title` column, read from the model's own
+Experiment. The relation is the entity source (`role: entity`) a Run of the
+Experiment pinned, or else the table of the target entity in the Run's
+`feature_config`. The row is found by the target's `id` column (such as
+`pair_id`), or by `entity_id` when the config names none. When no relation
+has that column, the table prints without labels.
+
 `triage postmodel baseline GROUP` asks where a model group beats a baseline
 group, on the rows both scored:
 
