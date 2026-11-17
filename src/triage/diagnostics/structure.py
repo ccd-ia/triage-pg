@@ -394,7 +394,7 @@ def importance_by_family(
         rows = conn.execute(
             "select m.model_id, m.train_end_time, fi.feature,"
             "       abs(fi.feature_importance) as importance"
-            " from triage.models m"
+            " from triage.current_models m"
             " join triage.feature_importances fi on fi.model_id = m.model_id"
             " where m.model_group_id = %(g)s and fi.feature_importance is not null"
             " order by m.train_end_time, m.model_id, fi.feature",
@@ -512,7 +512,7 @@ def sensitivity(
                 "select m.model_group_id, avg(e.value) as mean_value,"
                 "       count(distinct e.as_of_date) as n_dates"
                 " from triage.evaluations e"
-                " join triage.models m on m.model_id = e.model_id"
+                " join triage.current_models m on m.model_id = e.model_id"
                 " join triage.runs r on r.run_id = m.run_id"
                 " where r.experiment_hash = %(h)s and m.model_group_id = any(%(g)s)"
                 "   and e.split_kind = 'test' and e.metric = %(metric)s"

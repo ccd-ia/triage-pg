@@ -177,6 +177,26 @@ and become a `GROUP BY` later, with no migration. See
 
 ---
 
+## I ran an Experiment again. Which models does audition read?
+
+The latest Run's. A model group is the estimator, its hyperparameters and its
+feature list. A second Run with the same features and grid fits a new model in
+each group, on the same splits, whenever something else changed: the triage-pg
+version, a `history_query`, an imputation strategy, the data. The group then
+has two models per split.
+
+Audition, the leaderboard, the coverage and common-rows commands,
+`triage postmodel` on a group and the dashboard's group pages read one model
+per group and split: the one from the latest Run that built or reused it. A
+Run that completed outranks one that is still running or failed, so a long
+re-run does not replace the previous attempt until it finishes.
+
+The earlier models and their predictions stay in the database, and the
+commands that take a model id still read them. The view `triage.current_models` lists the models the group
+commands read.
+
+---
+
 ## I get `ValueError: Cannot resolve a distribution for estimator module 'triage'`
 
 The estimator library's version enters **model identity**, so

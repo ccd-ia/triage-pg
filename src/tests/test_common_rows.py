@@ -128,7 +128,8 @@ def _seed(pool) -> dict[str, int]:
 def _model(pool, group_id: int) -> int:
     with pool.connection() as conn:
         return conn.execute(
-            "select model_id from triage.models where model_group_id = %(g)s",
+            "select model_id from triage.models where model_group_id = %(g)s"
+            " order by model_id limit 1",
             {"g": group_id},
         ).fetchone()["model_id"]
 
@@ -213,7 +214,133 @@ def test_audition_on_common_rows_picks_another_group(db_pool_greenfield):
     assert _pick(pool) == groups["C"]  # the full-cohort pick is untouched
 
 
+def _rerun(pool, group_id: int, *, status: str, started: str, offset: float) -> int:
+    """A later Run of the Experiment refits the group on the same split; its model's id.
+
+    The refit scores the group's rows ``offset`` above the original on both dates.
+    """
+    original = _model(pool, group_id)
+    with pool.connection() as conn:
+        run_id = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status, started_at)"
+            " values (%(h)s, 'local', %(s)s, %(t)s::timestamptz) returning run_id",
+            {"h": EXP, "s": status, "t": started},
+        ).fetchone()["run_id"]
+        artifact = f"cr-rerun-{run_id}"
+        conn.execute(
+            "insert into triage.artifacts (artifact_id, logical_id, kind, config)"
+            " values (%(a)s, %(a)s, 'model', '{}'::jsonb)",
+            {"a": artifact},
+        )
+        model_id = conn.execute(
+            "insert into triage.models (model_group_id, model_hash, run_id,"
+            " train_end_time, training_label_timespan)"
+            " select model_group_id, %(a)s, %(r)s, train_end_time, training_label_timespan"
+            " from triage.models where model_id = %(m)s returning model_id",
+            {"a": artifact, "r": run_id, "m": original},
+        ).fetchone()["model_id"]
+        conn.execute(
+            "insert into triage.predictions (model_id, entity_id, as_of_date,"
+            " split_kind, score, matrix_uuid)"
+            " select %(m)s, entity_id, as_of_date, split_kind, score + %(o)s, matrix_uuid"
+            " from triage.predictions where model_id = %(orig)s",
+            {"m": model_id, "o": offset, "orig": original},
+        )
+    for d in DATES:
+        evaluate_in_db(pool, model_id, d, TS, metric_config=METRICS)
+    return model_id
+
+
+def _current(pool, group_id: int) -> list[int]:
+    with pool.connection() as conn:
+        return [
+            r["model_id"]
+            for r in conn.execute(
+                "select model_id from triage.current_models"
+                " where model_group_id = %(g)s order by model_id",
+                {"g": group_id},
+            ).fetchall()
+        ]
+
+
+def test_a_later_run_replaces_the_group_model_on_its_split(db_pool_greenfield):
+    """Issue #69: two Runs on one split leave one model per group and date to compare."""
+    pool = db_pool_greenfield
+    groups = _seed(pool)
+    original = _model(pool, groups["A"])
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.runs set started_at = '2026-01-01', status = 'completed'"
+        )
+    refit = _rerun(
+        pool, groups["A"], status="completed", started="2026-02-01", offset=2.0
+    )
+
+    assert _current(pool, groups["A"]) == [refit]
+    rows = [
+        r
+        for r in readers.common_rows(pool, groups.values())
+        if r["model_group_id"] == groups["A"]
+    ]
+    assert {r["model_id"] for r in rows} == {refit}
+    assert rows[0]["mae_common"] == pytest.approx(0.5 + 2.0)
+    with pool.connection() as conn:
+        audition = conn.execute(
+            "select n_splits_evaluated from triage.audition"
+            " where experiment_hash = %(h)s and model_group_id = %(g)s"
+            "   and metric = 'mae' and parameter = ''",
+            {"h": EXP, "g": groups["A"]},
+        ).fetchone()
+    assert audition["n_splits_evaluated"] == len(DATES)
+    assert original not in _current(pool, groups["A"])
+
+
+def test_a_run_that_did_not_complete_does_not_replace_a_completed_one(
+    db_pool_greenfield,
+):
+    pool = db_pool_greenfield
+    groups = _seed(pool)
+    original = _model(pool, groups["A"])
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.runs set started_at = '2026-01-01', status = 'completed'"
+        )
+    _rerun(pool, groups["A"], status="started", started="2026-02-01", offset=2.0)
+    _rerun(pool, groups["A"], status="failed", started="2026-03-01", offset=3.0)
+
+    assert _current(pool, groups["A"]) == [original]
+
+
+def test_a_run_that_reuses_a_model_makes_it_current_again(db_pool_greenfield):
+    """A cache hit is a use: the latest attempt's model is the one it reused."""
+    pool = db_pool_greenfield
+    groups = _seed(pool)
+    original = _model(pool, groups["A"])
+    with pool.connection() as conn:
+        conn.execute(
+            "update triage.runs set started_at = '2026-01-01', status = 'completed'"
+        )
+    _rerun(pool, groups["A"], status="completed", started="2026-02-01", offset=2.0)
+    with pool.connection() as conn:
+        reuse = conn.execute(
+            "insert into triage.runs (experiment_hash, profile, status, started_at)"
+            " values (%(h)s, 'local', 'completed', '2026-03-01') returning run_id",
+            {"h": EXP},
+        ).fetchone()["run_id"]
+        conn.execute(
+            "insert into triage.run_artifacts (run_id, artifact_id)"
+            " values (%(r)s, 'cr-model-A')",
+            {"r": reuse},
+        )
+
+    assert _current(pool, groups["A"]) == [original]
+
+
 def test_a_group_with_two_models_on_a_date_is_refused(db_pool_greenfield):
+    """Two current models of one group still may not score one date.
+
+    Here they are two splits whose test dates overlap, so neither replaces the other.
+    """
     pool = db_pool_greenfield
     groups = _seed(pool)
     with pool.connection() as conn:
@@ -222,8 +349,10 @@ def test_a_group_with_two_models_on_a_date_is_refused(db_pool_greenfield):
             " values ('cr-twin', 'cr-twin', 'model', '{}'::jsonb)"
         )
         twin = conn.execute(
-            "insert into triage.models (model_group_id, model_hash, run_id, train_end_time)"
-            " select model_group_id, 'cr-twin', run_id, train_end_time from triage.models"
+            "insert into triage.models (model_group_id, model_hash, run_id,"
+            " train_end_time, training_label_timespan)"
+            " select model_group_id, 'cr-twin', run_id, date '2014-11-01',"
+            " training_label_timespan from triage.models"
             " where model_id = %(m)s returning model_id",
             {"m": _model(pool, groups["A"])},
         ).fetchone()["model_id"]

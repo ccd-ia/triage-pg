@@ -120,7 +120,7 @@ def evaluate_on_common_rows(
         # each model's scored dates that hold common rows, at that date's label horizon
         targets = conn.execute(
             "select m.model_id, ls.as_of_date, ls.label_timespan::text as label_timespan"
-            " from triage.models m"
+            " from triage.current_models m"
             " join triage.runs r on r.run_id = m.run_id"
             " cross join lateral triage.label_source(m.model_id, 'test') ls"
             " where r.experiment_hash = %(h)s and m.model_group_id = any(%(g)s)"

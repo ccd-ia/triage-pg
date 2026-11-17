@@ -248,7 +248,7 @@ def _group_models(
             )
         dates = conn.execute(
             "select distinct p.model_id, p.as_of_date from triage.predictions p"
-            " join triage.models m on m.model_id = p.model_id"
+            " join triage.current_models m on m.model_id = p.model_id"
             " join triage.runs r on r.run_id = m.run_id"
             " where m.model_group_id = %(g)s and r.experiment_hash = %(h)s"
             "   and p.split_kind = 'test' order by p.as_of_date, p.model_id",

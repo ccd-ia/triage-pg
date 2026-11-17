@@ -181,7 +181,7 @@ def _scored(pool: DictRowPool, experiment_hash: str, group_id: int) -> pl.DataFr
         rows = conn.execute(
             # each set-returning function runs once per model, not once per row
             "with ms as materialized ("
-            "    select m.model_id from triage.models m"
+            "    select m.model_id from triage.current_models m"
             "    join triage.runs r on r.run_id = m.run_id"
             "    where m.model_group_id = %(g)s and r.experiment_hash = %(h)s),"
             " s as materialized ("
