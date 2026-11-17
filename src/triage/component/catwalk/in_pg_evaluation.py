@@ -43,9 +43,10 @@ DEFAULT_REGRESSION_CONFIG = {
     ],
 }
 # regression_ranking scores the same forecasts and the allocation they rank (0035): lift@k and
-# captured@k at the precision@ thresholds, the area under the gains curve and Spearman's rho.
+# captured@k at the precision@ thresholds, the area under the gains curve and Spearman's rho,
+# and the order inside the cut, ndcg@k (0040).
 DEFAULT_REGRESSION_RANKING_CONFIG = {
-    "metrics": ["lift@", "captured@"],
+    "metrics": ["lift@", "captured@", "ndcg@"],
     "thresholds": ["100_abs", "10_pct"],
     "regression_metrics": [
         *DEFAULT_REGRESSION_CONFIG["regression_metrics"],

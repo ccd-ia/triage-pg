@@ -164,7 +164,7 @@ Without an `evaluation` block, each `problem_type` gets its own set:
 |---|---|
 | `classification` | `precision@`, `recall@` at `100_abs` and `10_pct`; `auc_roc`, `average_precision` |
 | `regression` | `rmse`, `mae`, `r2`, `wape`, `pinball@0.5`, `pinball@0.8`, `pinball@0.95` |
-| `regression_ranking` | the regression set, plus `lift@` and `captured@` at `100_abs` and `10_pct`, `aucc` and `spearman` |
+| `regression_ranking` | the regression set, plus `lift@`, `captured@` and `ndcg@` at `100_abs` and `10_pct`, `aucc` and `spearman` |
 | `survival` | `c_index` |
 
 An `evaluation` block replaces the set for its Experiment
@@ -219,12 +219,13 @@ the share of rows at or below its forecast against τ.
 
 A regression_ranking model ranks entities so a budget of k goes where the
 outcome is largest. The forecast errors score the forecast, not that
-allocation. Four metrics score the allocation:
+allocation. Five metrics score the allocation:
 
 | Metric | Value | Reads |
 |---|---|---|
 | `lift@k` | the mean outcome of the labeled rows in the top k over the mean outcome of every labeled row | the population ranking at the `precision@` thresholds |
 | `captured@k` | the outcome in the top k over the total outcome | the same cut |
+| `ndcg@k` | the order inside the top k: the sum of each labeled outcome over log2(rank + 1), over the same sum for the labeled outcomes sorted largest first | the same cut |
 | `aucc` | the area under the cumulative-gains curve: x the share of rows selected, y the share of the outcome captured | the whole ranking |
 | `spearman` | the rank correlation of score and outcome over the labeled rows, ties at their average rank | the labeled rows |
 
@@ -233,10 +234,21 @@ scored row is ranked, ties broken by `entity_id`, and the sums run over the
 labeled rows in the cut. `num_labeled_above_threshold` holds those rows.
 `aucc` treats a block of tied scores as one segment of the curve, the average
 over every order of the block, so a constant score gives exactly 0.5 and a
-random ranking about 0.5. All four are higher is better. `lift`, `captured`
-and `aucc` are shares of a total, so they are NULL when a labeled outcome is
+random ranking about 0.5. All five are higher is better. `lift`, `captured`,
+`ndcg` and `aucc` are shares of a total, so they are NULL when a labeled outcome is
 negative or the total is 0; `spearman` is NULL when the score or the outcome
 is constant. The rows are written with their `num_labeled` either way.
+
+`lift@` and `captured@` treat the top k as a set, so two models that select
+the same k rows score the same whatever their order. `ndcg@` scores the order:
+with k = 3 and outcomes 10, 5 and 1, the order 10, 5, 1 scores 1.00 and the
+order 1, 5, 10 scores 0.67. Use it when the list is worked from the top and
+the work may stop before k, such as inspectors who visit in rank order until
+the week ends. The gain is the outcome itself, not 2^outcome - 1, which
+overflows for counts and amounts. An unlabeled row keeps its position in the
+ranking and adds no gain. On a classifier the gain is the 0/1 label; list
+`ndcg@` in a classification Experiment's `metrics` to store it there.
+`triage check metrics` recomputes it with scikit-learn's `ndcg_score`.
 
 `triage.gains_curve(model_id, split_kind, as_of_date, points)` returns the
 curve itself, from k = 0 to the whole population, with the share captured, the

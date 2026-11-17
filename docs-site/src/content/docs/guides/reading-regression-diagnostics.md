@@ -18,7 +18,7 @@ question for that type.
 | How large are the errors, and which way do they lean? | `triage postmodel residuals MODEL` | `triage plot forecast-actual`, `plot residuals`, `plot bias` |
 | Do my model groups compare on the same rows? | `triage postmodel compare-rows EXPERIMENT` | none |
 | Where does the model beat its baseline? | `triage postmodel baseline GROUP` | `triage plot segments`, `plot win-consistency` |
-| How much of the outcome does the top of the list hold? | stored `lift@`, `captured@`, `aucc`, `spearman` | `triage plot gains` |
+| How much of the outcome does the top of the list hold? | stored `lift@`, `captured@`, `ndcg@`, `aucc`, `spearman` | `triage plot gains` |
 | What did the fitted model learn? | `triage postmodel structure MODEL` | `triage plot importance` |
 
 ## The worked example
@@ -299,9 +299,9 @@ A `regression_ranking` model is judged by its list. `triage plot gains MODEL`
 draws the cumulative gains curve: for each share of the scored rows taken from
 the top, the share of the total outcome those rows hold (`captured`), and the
 lift, the mean outcome of the labeled rows in the top k over the mean of all
-labeled rows. The stored metrics `captured@`, `lift@`, `aucc` (the area under
-the gains curve) and `spearman` (the rank correlation of forecast and outcome)
-summarize it. They are in the `regression_ranking` default metric set; the
+labeled rows. The stored metrics `captured@`, `lift@`, `ndcg@` (the order
+inside the top k), `aucc` (the area under the gains curve) and `spearman` (the
+rank correlation of forecast and outcome) summarize it. They are in the `regression_ranking` default metric set; the
 example's `evaluation` block lists `rmse`, `mae`, `r2` and `pinball@τ` only,
 so add them there to store them for every model.
 
