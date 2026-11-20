@@ -877,7 +877,7 @@ def _format_baseline_refusal(issues: Sequence[Any]) -> str:
 
 def _blocking_baseline_issues(
     grid_config: Mapping[str, Any],
-    feature_config: Mapping[str, Any],
+    subsets: Sequence[FeatureSubset],
     columns: Sequence[str],
 ) -> list[Any]:
     """Baseline issues that make a run certainly fail, dropping the advisory ones.
@@ -887,9 +887,6 @@ def _blocking_baseline_issues(
     """
     if not grid_config:
         return []
-    subsets = _feature_subsets(
-        feature_config, columns, featurizer_config=_featurizer_only(feature_config)
-    )
     return [
         issue
         for issue in baseline_issues(_grid_specs(grid_config), subsets, columns)
@@ -897,8 +894,8 @@ def _blocking_baseline_issues(
     ]
 
 
-def _check_baselines_before_building(experiment_config: Mapping[str, Any]) -> None:
-    """Refuse a config whose name-pinned baselines cannot survive its own fan-out.
+def _check_fanout_before_building(experiment_config: Mapping[str, Any]) -> None:
+    """Refuse a config whose fan-out cannot be resolved, or breaks an estimator's column.
 
     Runs in the fail-fast block, before cohort/labels/features/matrices exist, using the
     DB-free feature manifest. That manifest is *exactly* the built matrix's column set — the
@@ -907,19 +904,30 @@ def _check_baselines_before_building(experiment_config: Mapping[str, Any]) -> No
     always declares one-hot vocabularies), verified column-for-column across the example
     configs. So this cannot refuse a run that would have succeeded.
 
+    The fan-out itself is resolved here without a guard. An unknown ``always`` group, an
+    unknown strategy or a glob that matches no column is the error the fan-out step would
+    raise from the same columns after the matrices are built (#98), so it is raised now.
+
     Anything the manifest cannot answer — an unplannable ``feature_config``, an estimator that
     will not construct — is left to the code that raises on it properly; a pre-flight must
     never turn someone else's error into its own.
     """
     feature_config = experiment_config.get("feature_config")
-    grid_config = experiment_config.get("grid_config")
-    if not isinstance(feature_config, Mapping) or not grid_config:
+    if not isinstance(feature_config, Mapping):
         return
+    featurizer_config = _featurizer_only(feature_config)
     try:
-        columns = list(feature_labels(_featurizer_only(feature_config)))
-        blocking = _blocking_baseline_issues(grid_config, feature_config, columns)
+        columns = list(feature_labels(featurizer_config))
     except Exception as exc:  # noqa: BLE001 — never mask the real failure with a guard's
-        logger.debug(f"baseline pre-flight skipped (config not plannable yet): {exc}")
+        logger.debug(f"fan-out pre-flight skipped (config not plannable yet): {exc}")
+        return
+    subsets = _feature_subsets(feature_config, columns, featurizer_config)
+    try:
+        blocking = _blocking_baseline_issues(
+            experiment_config.get("grid_config") or {}, subsets, columns
+        )
+    except Exception as exc:  # noqa: BLE001 — a grid that cannot expand is the run's error
+        logger.debug(f"baseline pre-flight skipped (grid not plannable yet): {exc}")
         return
     if blocking:
         raise BaselinePreflightError(_format_baseline_refusal(blocking))
@@ -1189,8 +1197,9 @@ def run_experiment(
         raise ValueError(
             f"unknown task_framing {task_framing!r} — expected one of {list(_TASK_FRAMINGS)}"
         )
-    # Name-pinned baselines vs the feature-group fan-out: refuse before anything is built.
-    _check_baselines_before_building(experiment_config)
+    # The feature-group fan-out, and the estimators that select their own columns under
+    # it: refuse before anything is built.
+    _check_fanout_before_building(experiment_config)
 
     temporal_config = TemporalConfig.model_validate(
         _require(experiment_config, "temporal_config")
@@ -1308,7 +1317,7 @@ def run_experiment(
         # the manifest and the built matrix disagreed — a bug worth failing loudly on, and
         # still cheaper than discovering it mid-training.
         late_issues = _blocking_baseline_issues(
-            experiment_config.get("grid_config") or {}, feature_config, feature_names
+            experiment_config.get("grid_config") or {}, subsets, feature_names
         )
         if late_issues:
             raise BaselinePreflightError(_format_baseline_refusal(late_issues))
