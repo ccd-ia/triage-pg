@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from triage.adapters.baseline_check import _pinned_feature_names
 from triage.adapters.cohort import build_cohort
 from triage.adapters.labels import build_labels
 from triage.adapters.preflight import (
     _count_projection,
-    _pinned_feature_names,
     check_baseline_features,
     estimate_data,
     plan_experiment,

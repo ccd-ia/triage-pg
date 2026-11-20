@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import getpass
 import pathlib
+from typing import Any
 
 import yaml
 
@@ -293,7 +294,7 @@ _DIRTYDUCK_CONFIG = (
 )
 
 
-def _dirtyduck() -> dict:
+def _dirtyduck() -> dict[str, Any]:
     return yaml.safe_load(_DIRTYDUCK_CONFIG.read_text(encoding="utf-8"))
 
 

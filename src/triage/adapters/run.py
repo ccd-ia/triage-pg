@@ -54,6 +54,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from triage.adapters.baseline_check import baseline_issues
 from triage.adapters.bias import (
     INTERVENTION_PRIMARY_METRIC,
     ingest_protected_groups,
@@ -880,14 +881,16 @@ def _blocking_baseline_issues(
     """Baseline issues that make a run certainly fail, dropping the advisory ones.
 
     An estimator that will not construct is excluded: ``build_model`` raises on it with the
-    real traceback, and a guard that pre-empts that would only obscure it. Imported lazily —
-    ``preflight`` reaches back into this module.
+    real traceback, and a guard that pre-empts that would only obscure it.
     """
-    from triage.adapters.preflight import check_baseline_features
-
+    if not grid_config:
+        return []
+    subsets = _feature_subsets(
+        feature_config, columns, featurizer_config=_featurizer_only(feature_config)
+    )
     return [
         issue
-        for issue in check_baseline_features(grid_config, feature_config, columns)
+        for issue in baseline_issues(_grid_specs(grid_config), subsets, columns)
         if issue.detail is None
     ]
 

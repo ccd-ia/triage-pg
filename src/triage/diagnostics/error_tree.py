@@ -253,10 +253,13 @@ def compute_error_analysis(
                 f"--kind {kind.replace('_', '-')} reads a continuous outcome; a horizon"
                 " binarizes a survival label for fp, fn and confusion"
             )
-        from triage.diagnostics import regression_trees
+        from triage.diagnostics.regression_trees import (
+            abs_error_trees,
+            beats_baseline_tree,
+        )
 
         if kind == "abs_error":
-            return regression_trees.abs_error_trees(
+            return abs_error_trees(
                 db_engine,
                 model_id,
                 split_kind,
@@ -264,7 +267,7 @@ def compute_error_analysis(
                 min_samples_leaf,
                 random_seed,
             )
-        return regression_trees.beats_baseline_tree(
+        return beats_baseline_tree(
             db_engine,
             model_id,
             baseline_group_id,

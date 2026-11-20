@@ -17,6 +17,7 @@ search_path, a database stamped before the fix, and offline (``--sql``) mode.
 import uuid
 
 import psycopg
+from psycopg import sql
 import pytest
 from alembic import script
 
@@ -185,14 +186,21 @@ def schema_owner_url(postgresql):
     info = postgresql.info
     role = f"triage_owner_{uuid.uuid4().hex[:8]}"
     admin = f"postgresql://{info.user}@{info.host}:{info.port}/{info.dbname}"
+    owner, database = sql.Identifier(role), sql.Identifier(info.dbname)
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute(f"create role {role} login")
-        conn.execute(f"grant create on database {info.dbname} to {role}")
+        conn.execute(sql.SQL("create role {} login").format(owner))
+        conn.execute(
+            sql.SQL("grant create on database {} to {}").format(database, owner)
+        )
     yield role, f"postgresql+psycopg://{role}@{info.host}:{info.port}/{info.dbname}"
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute(f"reassign owned by {role} to {info.user}")
-        conn.execute(f"drop owned by {role}")
-        conn.execute(f"drop role {role}")
+        conn.execute(
+            sql.SQL("reassign owned by {} to {}").format(
+                owner, sql.Identifier(info.user)
+            )
+        )
+        conn.execute(sql.SQL("drop owned by {}").format(owner))
+        conn.execute(sql.SQL("drop role {}").format(owner))
 
 
 def test_schema_owner_upgrades_without_create_on_the_database(
