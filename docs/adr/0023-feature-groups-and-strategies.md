@@ -86,3 +86,18 @@ runs. `group_by='source_entity'` is unchanged and unaffected: head-keeping trunc
 preserves the leading `<alias>.` token, so that path is immune by construction.
 `triage analyze-config --features GLOB` reports what a glob resolves to, through the same
 predicate partitioning uses.
+
+## Status note (2026-11-19, issue #98)
+
+`feature_groups.always` lists groups that every subset keeps; the four strategies vary the
+other groups only, and the `always` groups do not count toward `all_combinations_max_groups`.
+The reason is the grid: an estimator that selects its own column (the name-pinned baselines,
+`SingleFeatureCox`) cannot run in a subset that drops that column, so without `always` a config
+could not hold both its floors and a `leave-one-out` ablation. A subset's label still names
+only the varied group (`leave-one-out:facilities`); its `group_names` and columns hold the
+`always` groups too, so Run and model-group identity follow the real column set as before.
+
+The pre-flight now also covers selection by position. Each subset projects the matrix to its
+own sorted columns, so one `feature_index` is a different column in a run that dropped a group
+sorting before it, and nothing raised. `triage run` refuses such a grid when the column at the
+index is not the same in every run; `SingleFeatureCox` takes a `feature` name for that case.

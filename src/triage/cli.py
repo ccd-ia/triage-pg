@@ -1736,8 +1736,8 @@ def _print_plan_notes(plan) -> None:
         lines = []
         for issue in plan.baseline_issues:
             name = issue.class_path.rsplit(".", 1)[-1]
-            if issue.detail:
-                lines.append(f"[red]{name}[/red] {issue.detail}")
+            if issue.detail or issue.positional:
+                lines.append(f"[red]{name}[/red] {issue.detail or issue.positional}")
             else:
                 lines.append(
                     f"[red]{name}[/red] pins {', '.join(issue.missing)} —"
@@ -1746,10 +1746,12 @@ def _print_plan_notes(plan) -> None:
         console.print(
             Panel.fit(
                 "\n".join(lines)
-                + "\n\n[dim]These estimators select feature columns by name, so a fan-out that"
-                " drops the group holding the column fails that run with"
-                " BaselineFeatureNotInMatrix — after its matrix is built. Pin the baseline to a"
-                " column present in every run, or narrow the strategies.[/dim]",
+                + "\n\n[dim]These estimators select their own feature columns. A fan-out that"
+                " drops the group holding a column selected by name fails that run with"
+                " BaselineFeatureNotInMatrix, after its matrix is built. A column selected by"
+                " position becomes another column, with no error. Keep the column in every"
+                " run: list its group in feature_groups.always, or narrow the"
+                " strategies.[/dim]",
                 title="[red]Baseline pre-flight[/red]",
             )
         )

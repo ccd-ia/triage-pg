@@ -678,6 +678,42 @@ def test_run_refuses_a_baseline_pinned_to_a_column_that_does_not_exist(
     assert message.count("COUNT(orders.does_not_exist)") == 1
 
 
+def test_run_keeps_an_always_group_in_every_run_of_the_fanout(
+    db_pool_greenfield, tmp_path
+):
+    """#98: the pinned baseline and a leave-one-out ablation run from one config.
+
+    ``orders`` holds the column the baseline ranks on. Listed in ``always``, it is never the
+    group left out, so no run loses the column and nothing is refused.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    config = _experiment_config()
+    config["grid_config"] = _baseline_grid()
+    config["feature_config"]["feature_groups"] = {
+        "strategies": ["all", "leave-one-out"],
+        "group_by": "source_entity",
+        "always": ["orders"],
+    }
+
+    experiment = run_experiment(
+        engine,
+        config,
+        storage=LocalStorage(),
+        storage_root=str(tmp_path / "store"),
+        random_seed=42,
+    )
+
+    assert [run.feature_group for run in experiment.runs] == [
+        "all",
+        "leave-one-out:customers",
+    ]
+    for run in experiment.runs:
+        assert _PINNED in run.splits[0].train_matrix.feature_names
+    assert experiment.num_predictions > 0
+
+
 @pytest.mark.parametrize(
     ("block", "key"),
     [

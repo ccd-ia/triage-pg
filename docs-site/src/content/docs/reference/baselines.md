@@ -200,7 +200,7 @@ extra (`uv sync --extra survival`).
 | `…baselines.survival.KaplanMeierBaseline` | — | Population cumulative incidence `1 − S(t*)` (constant → C-index ≈ 0.5). |
 | `…baselines.survival.NelsonAalenBaseline` | — | Population cumulative hazard `H(t*)` (constant). |
 | `…baselines.survival.MarginalHazardBaseline` | — | Base rate — the marginal event fraction (constant). |
-| `…baselines.survival.SingleFeatureCox` | `feature_index`, `alpha` | Cox proportional hazards on a **single** covariate — the survival analog of rank-by-one-feature. |
+| `…baselines.survival.SingleFeatureCox` | `feature` or `feature_index`, `alpha` | Cox proportional hazards on a **single** covariate — the survival analog of rank-by-one-feature. `feature` selects the column by name; `feature_index` selects it by position in the matrix's sorted columns. Under a `feature_groups` fan-out use `feature`: each run has its own columns, and `triage run` refuses a `feature_index` that would read a different column in each run. |
 
 ## Pinball / quantile loss
 

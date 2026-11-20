@@ -25,6 +25,10 @@ Grouping:
 
 Strategies (ported verbatim from triage's mixer): ``all``, ``leave-one-out``, ``leave-one-in``,
 ``all-combinations`` (2^N − 1, guarded by ``all_combinations_max_groups``).
+
+``always`` names groups that every subset keeps (#98). The strategies then vary the other
+groups only, so an estimator that pins a column of an ``always`` group survives a
+``leave-one-out`` sweep.
 """
 
 from __future__ import annotations
@@ -286,19 +290,27 @@ def _strategy_combos(
     group_names: Sequence[str],
     strategy: str,
     *,
+    always: Sequence[str] = (),
     all_combinations_max_groups: int,
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """Return ``[(label_suffix, group_name_tuple)]`` for one strategy over the group names."""
-    names = sorted(group_names)
+    """Return ``[(label_suffix, group_name_tuple)]`` for one strategy over the group names.
+
+    The ``always`` groups are in every tuple. Only the other groups are varied, named in
+    the label and counted against ``all_combinations_max_groups``.
+    """
+    fixed = tuple(sorted(always))
+    names = sorted(g for g in group_names if g not in fixed)
     n = len(names)
     if strategy == "all":
-        return [("all", tuple(names))]
+        return [("all", tuple(sorted(group_names)))]
     if strategy == "leave-one-in":
-        return [(f"leave-one-in:{g}", (g,)) for g in names]
+        return [(f"leave-one-in:{g}", (*fixed, g)) for g in names]
     if strategy == "leave-one-out":
-        # all groups except one; with a single group this is the empty set → dropped upstream.
+        # all groups except one; with a single group and no always group this is the empty
+        # set → dropped upstream.
         return [
-            (f"leave-one-out:{g}", tuple(x for x in names if x != g)) for g in names
+            (f"leave-one-out:{g}", (*fixed, *(x for x in names if x != g)))
+            for g in names
         ]
     if strategy == "all-combinations":
         if n > all_combinations_max_groups:
@@ -311,7 +323,7 @@ def _strategy_combos(
         out: list[tuple[str, tuple[str, ...]]] = []
         for k in range(1, n + 1):
             for combo in combinations(names, k):
-                out.append((f"all-combinations:{'+'.join(combo)}", combo))
+                out.append((f"all-combinations:{'+'.join(combo)}", (*fixed, *combo)))
         return out
     raise ValueError(
         f"unknown feature-group strategy {strategy!r} (expected one of {STRATEGIES})"
@@ -322,6 +334,7 @@ def mix_strategies(
     groups: Mapping[str, Sequence[str]],
     strategies: Sequence[str],
     *,
+    always: Sequence[str] = (),
     all_combinations_max_groups: int = DEFAULT_ALL_COMBINATIONS_MAX_GROUPS,
 ) -> list[FeatureSubset]:
     """Expand ``strategies`` over ``groups`` into the deduped list of :class:`FeatureSubset`.
@@ -329,10 +342,31 @@ def mix_strategies(
     Empty subsets (``leave-one-out`` of a single group) are dropped with a warning; subsets that
     repeat across strategies (same set of groups) are deduped, keeping the first label seen, so
     e.g. ``all`` and a single-group ``leave-one-in`` don't build the same matrix twice.
+
+    ``always`` names the groups every subset keeps; the strategies vary the others. A name
+    that is not a group, or a list that leaves a varying strategy nothing to vary, is a
+    ``ValueError``.
     """
     if not groups:
         raise ValueError(
             "feature_groups: no groups to mix (partition produced nothing)"
+        )
+    if isinstance(always, str):
+        raise ValueError(
+            f"feature_groups.always must be a list of group names, got the string {always!r}"
+        )
+    unknown = sorted(set(always) - set(groups))
+    if unknown:
+        raise ValueError(
+            f"feature_groups.always names {unknown!r}, which is not a feature group"
+            f" (the groups are {sorted(groups)!r})"
+        )
+    varying = [s for s in strategies if s != "all"]
+    if varying and set(always) >= set(groups):
+        raise ValueError(
+            f"feature_groups.always names every group {sorted(groups)!r}, so strategies"
+            f" {varying!r} have nothing left to vary. Remove a group from always, or keep"
+            " only the 'all' strategy."
         )
     seen: dict[frozenset[str], FeatureSubset] = {}
     ordered: list[FeatureSubset] = []
@@ -340,6 +374,7 @@ def mix_strategies(
         for label, names in _strategy_combos(
             list(groups),
             strategy,
+            always=always,
             all_combinations_max_groups=all_combinations_max_groups,
         ):
             if not names:
