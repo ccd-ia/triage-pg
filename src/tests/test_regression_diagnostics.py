@@ -504,7 +504,7 @@ def _entity_source(
     key: str,
     column: str,
     pin: bool = True,
-    feature_config: dict | None = None,
+    feature_config: dict[str, Any] | None = None,
 ) -> None:
     """An entity relation keyed by ``key`` with a display ``column``, registered as an
     entity source and pinned by the model's Run (or only named by its feature_config)."""
@@ -537,7 +537,7 @@ def _entity_source(
             )  # fmt: skip
 
 
-def _target(alias: str, table: str, key: str) -> dict:
+def _target(alias: str, table: str, key: str) -> dict[str, Any]:
     return {"target": alias, "entities": [{"alias": alias, "id": key, "table": table}]}
 
 

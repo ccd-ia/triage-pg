@@ -893,7 +893,7 @@ def test_experiment_leaderboard_ranks_a_loss_lowest_first(
         )
         conn.execute("refresh materialized view triage.leaderboard")
     rows = client.get(f"/api/experiments/{seeded.experiment_hash}/leaderboard").json()
-    blocks: dict[tuple, list[float]] = {}
+    blocks: dict[tuple[str, str, str], list[float]] = {}
     for r in rows:
         if r["metric"] in ("auc_roc", "mae"):
             key = (r["metric"], r["parameter"], r["as_of_date"])
