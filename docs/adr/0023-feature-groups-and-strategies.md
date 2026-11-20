@@ -101,3 +101,8 @@ The pre-flight now also covers selection by position. Each subset projects the m
 own sorted columns, so one `feature_index` is a different column in a run that dropped a group
 sorting before it, and nothing raised. `triage run` refuses such a grid when the column at the
 index is not the same in every run; `SingleFeatureCox` takes a `feature` name for that case.
+
+`run_experiment` resolves the fan-out from the feature manifest in its fail-fast block. An
+unknown `always` group, an unknown strategy or a `definitions` glob that matches no column
+used to surface at the fan-out step, after the matrices were built and with a failed Run
+recorded; the same error is now raised before the Experiment row exists.

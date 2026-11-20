@@ -715,6 +715,50 @@ def test_run_keeps_an_always_group_in_every_run_of_the_fanout(
 
 
 @pytest.mark.parametrize(
+    ("feature_groups", "message"),
+    [
+        (
+            {"strategies": ["all", "leave-one-out"], "always": ["nope"]},
+            "feature_groups.always",
+        ),
+        ({"strategies": ["leave-one-uot"]}, "unknown feature-group strategy"),
+    ],
+)
+def test_run_refuses_a_fanout_it_cannot_resolve_before_anything_is_built(
+    db_pool_greenfield, tmp_path, feature_groups, message
+):
+    """A fan-out error stops the run in the fail-fast block, not after the matrices.
+
+    The fan-out is resolved from the feature manifest, which needs no database, so a group
+    name or a strategy that does not exist is known before the cohort is built.
+    """
+    engine = db_pool_greenfield
+    _seed_source(engine)
+
+    config = _experiment_config()
+    config["feature_config"]["feature_groups"] = {
+        "group_by": "source_entity",
+        **feature_groups,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        run_experiment(
+            engine,
+            config,
+            storage=LocalStorage(),
+            storage_root=str(tmp_path / "store"),
+            random_seed=42,
+        )
+
+    with engine.connection() as conn:
+        for table in ("experiments", "runs", "cohorts", "labels", "matrices", "models"):
+            n = conn.execute(f"select count(*) as n from triage.{table}").fetchone()[
+                "n"
+            ]
+            assert n == 0, f"triage.{table} was written before the refusal"
+
+
+@pytest.mark.parametrize(
     ("block", "key"),
     [
         ("label_config", "include_missing_label_in_train_as"),  # a typo of the DSSG key

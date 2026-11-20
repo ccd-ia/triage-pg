@@ -350,7 +350,8 @@ feature_config:
   when an estimator in the grid selects a column of that group, so the baseline
   and the ablation fit in one config. A name that is not a group is an error, and
   so is a list that names every group while a strategy other than `all` is
-  declared.
+  declared. `triage run` raises either one, like an unknown strategy, before it
+  builds anything.
 - **Write `definitions` globs against the feature's label.** A generated feature
   name longer than PostgreSQL's 63-byte identifier limit is hash-truncated from
   the tail (`AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5`),
