@@ -818,6 +818,7 @@ def _feature_subsets(
     return mix_strategies(
         groups,
         fg.get("strategies") or ["all"],
+        always=fg.get("always") or (),
         all_combinations_max_groups=fg.get(
             "all_combinations_max_groups", DEFAULT_ALL_COMBINATIONS_MAX_GROUPS
         ),
@@ -856,19 +857,20 @@ def _resolve_fanout(
 
 
 class BaselinePreflightError(ValueError):
-    """A name-pinned baseline cannot survive the fan-out this config declares."""
+    """An estimator that selects its own columns cannot survive the declared fan-out."""
 
 
 def _format_baseline_refusal(issues: Sequence[Any]) -> str:
     """The refusal message: what breaks, in which run, and the two ways out."""
     lines = "\n".join(f"  - {issue.describe()}" for issue in issues)
     return (
-        "grid_config declares baseline(s) that select feature columns BY NAME, and the"
-        " feature_groups fan-out removes those columns from at least one run:\n"
+        "grid_config declares estimator(s) that select their own feature columns, and the"
+        " feature_groups fan-out removes or moves those columns in at least one run:\n"
         f"{lines}\n"
-        "Each such run would raise BaselineFeatureNotInMatrix partway through training —"
-        " after its matrices are already built. Either pin the baseline to a column present"
-        " in every run, or narrow feature_groups.strategies so no run drops it."
+        "A column selected by name would raise BaselineFeatureNotInMatrix partway through"
+        " training, after the matrices are built. A column selected by position would train"
+        " on another column with no error. Keep the column in every run: list its group in"
+        " feature_groups.always, select it by name, or narrow feature_groups.strategies."
         " Run `triage analyze-config <config>` to see the full fan-out."
     )
 

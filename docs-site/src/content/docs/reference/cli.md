@@ -130,16 +130,22 @@ The DSSG baselines (`BaselineRankMultiFeature`, `SimpleThresholder`,
 `PercentileRankOneFeature`, `LinearRanker`) select their feature columns **by
 name**, while a `leave-one-out` sweep exists precisely to *remove* groups. Drop
 the group holding the pinned column and that run dies with
-`BaselineFeatureNotInMatrix` — after its matrix is already built. Pin the
-baseline to a column present in every run, or narrow the strategies.
+`BaselineFeatureNotInMatrix` — after its matrix is already built. Keep the
+column in every run: list its group in `feature_groups.always`, pin the baseline
+to a column present in every run, or narrow the strategies.
+
+An estimator that selects a column by position (`SingleFeatureCox` with
+`feature_index`) gets the same panel when the runs would read different columns
+at that position. Nothing would fail there: the model would train on another
+column. Select the column by name (`feature`) instead.
 
 **`triage run` refuses such a config outright**, before building anything:
 
 ```console
 $ triage run experiment-fanout.yaml
-BaselinePreflightError: grid_config declares baseline(s) that select feature
-columns BY NAME, and the feature_groups fan-out removes those columns from at
-least one run:
+BaselinePreflightError: grid_config declares estimator(s) that select their own
+feature columns, and the feature_groups fan-out removes or moves those columns
+in at least one run:
   - BaselineRankMultiFeature pins COUNT(inspections.result) — absent from run
 'leave-one-out:inspection_history'
 ```

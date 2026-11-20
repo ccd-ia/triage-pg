@@ -438,3 +438,99 @@ def test_plan_warns_when_a_split_would_produce_several_test_matrices():
 
     assert any("more than one test matrix" in w for w in plan.warnings), plan.warnings
     assert plan.n_test_matrices == 2 * plan.n_splits
+
+
+# ---------------------------------------------------------------------------
+# #98 — always groups, and estimators that select a column by position
+# ---------------------------------------------------------------------------
+
+_COX = "triage.component.catwalk.baselines.survival.SingleFeatureCox"
+
+
+def test_an_always_group_keeps_the_pinned_baselines_and_the_ablation_in_one_config(
+    fanout_config,
+):
+    """The group holding the pinned column is never dropped, so nothing is refused."""
+    fanout_config["feature_config"]["feature_groups"]["always"] = ["inspection_history"]
+
+    plan = plan_experiment(fanout_config)
+
+    assert plan.baseline_issues == ()
+    assert [(s.label, s.group_names) for s in plan.subsets] == [
+        ("all", ("facility_attrs", "inspection_history")),
+        ("leave-one-out:facility_attrs", ("inspection_history",)),
+    ]
+
+
+def test_preflight_refuses_a_feature_index_that_reads_a_different_column_per_run(
+    fanout_config,
+):
+    """Each run projects to its own sorted columns, so one index is several columns."""
+    pytest.importorskip("sksurv")
+    feature_config = fanout_config["feature_config"]
+    columns = list(_plan_columns(feature_config))
+
+    issues = check_baseline_features(
+        {_COX: {"feature_index": [0]}}, feature_config, columns
+    )
+
+    assert len(issues) == 1
+    assert issues[0].detail is None, "it must block the run, not only advise"
+    assert issues[0].positional is not None
+    assert "feature_index=0" in issues[0].describe()
+    assert sorted(columns)[0] in issues[0].describe()
+
+
+def test_preflight_accepts_a_feature_index_when_there_is_one_run(dirtyduck_config):
+    pytest.importorskip("sksurv")
+    feature_config = dirtyduck_config["feature_config"]
+
+    issues = check_baseline_features(
+        {_COX: {"feature_index": [0]}},
+        feature_config,
+        list(_plan_columns(feature_config)),
+    )
+
+    assert issues == []
+
+
+def test_preflight_accepts_a_feature_index_that_every_run_reads_the_same(
+    fanout_config,
+):
+    """With the first column's group kept in every run, index 0 is one column."""
+    pytest.importorskip("sksurv")
+    feature_config = fanout_config["feature_config"]
+    columns = sorted(_plan_columns(feature_config))
+    first_group = (
+        "facility_attrs"
+        if columns[0].startswith("facilities.")
+        else "inspection_history"
+    )
+    feature_config["feature_groups"]["always"] = [first_group]
+
+    issues = check_baseline_features(
+        {_COX: {"feature_index": [0]}}, feature_config, columns
+    )
+
+    assert issues == []
+
+
+def test_preflight_treats_single_feature_cox_by_name_as_pinned(fanout_config):
+    pytest.importorskip("sksurv")
+    feature_config = fanout_config["feature_config"]
+
+    issues = check_baseline_features(
+        {_COX: {"feature": ["COUNT(inspections.result)"]}},
+        feature_config,
+        list(_plan_columns(feature_config)),
+    )
+
+    assert [(i.subset_label, i.missing) for i in issues] == [
+        ("leave-one-out:inspection_history", ("COUNT(inspections.result)",))
+    ]
+
+
+def _plan_columns(feature_config):
+    from triage.adapters.preflight import _plan_features
+
+    return _plan_features(feature_config)[0]

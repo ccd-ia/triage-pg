@@ -72,3 +72,46 @@ def test_single_feature_cox_discriminates():
     assert risk.shape == (6,)
     # entity 0 (x=5, t=1) must out-risk entity 5 (x=0, t=9).
     assert risk[0] > risk[5]
+
+
+def test_single_feature_cox_selects_its_column_by_name():
+    """``feature`` picks the column by name, wherever it sits in the frame (#98)."""
+    import pandas as pd
+
+    frame = pd.DataFrame({"noise": X[:, 1], "signal": X[:, 0]})
+    by_name = SingleFeatureCox(feature="signal").fit(frame, Y)
+    by_index = SingleFeatureCox(feature_index=0).fit(X, Y)
+
+    assert np.allclose(by_name.predict(frame), by_index.predict(X))
+    # A frame without the dropped column keeps reading the same feature.
+    assert np.allclose(by_name.predict(frame[["signal"]]), by_index.predict(X))
+
+
+def test_single_feature_cox_by_name_raises_when_the_column_is_absent():
+    import pandas as pd
+
+    from triage.component.catwalk.exceptions import BaselineFeatureNotInMatrix
+
+    frame = pd.DataFrame({"noise": X[:, 1]})
+    with pytest.raises(BaselineFeatureNotInMatrix, match="signal"):
+        SingleFeatureCox(feature="signal").fit(frame, Y)
+
+
+def test_single_feature_cox_refuses_a_name_and_an_index_together():
+    import pandas as pd
+
+    frame = pd.DataFrame({"noise": X[:, 1], "signal": X[:, 0]})
+    with pytest.raises(ValueError, match="feature_index"):
+        SingleFeatureCox(feature="signal", feature_index=1).fit(frame, Y)
+
+
+def test_single_feature_cox_by_index_reads_a_frame_by_position():
+    """The adapter hands named-feature estimators a DataFrame; the index still works."""
+    import pandas as pd
+
+    frame = pd.DataFrame({"signal": X[:, 0], "noise": X[:, 1]})
+    est = SingleFeatureCox(feature_index=0).fit(frame, Y)
+
+    assert np.allclose(
+        est.predict(frame), SingleFeatureCox(feature_index=0).fit(X, Y).predict(X)
+    )

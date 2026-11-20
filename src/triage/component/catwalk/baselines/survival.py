@@ -24,6 +24,8 @@ from __future__ import annotations
 import numpy as np
 from sklearn.base import BaseEstimator
 
+from triage.component.catwalk.exceptions import BaselineFeatureNotInMatrix
+
 
 def _split_structured_y(y):
     """Return ``(event: bool array, time: float array)`` from the sksurv structured survival y.
@@ -90,28 +92,48 @@ class SingleFeatureCox(BaseEstimator):
     """Cox proportional hazards on a SINGLE covariate — the survival analog of
     rank-by-one-feature (``LinearRanker``).
 
-    Selects column ``feature_index`` from the design matrix (the adapter hands the estimator a
-    plain numpy matrix, so selection is positional), then fits the house
+    Selects one column of the design matrix, then fits the house
     :class:`~triage.component.catwalk.estimators.survival.ScaledCoxPHSurvivalAnalysis` (MinMax-
     scaled to avoid the ``exp(Xβ)`` overflow, ADR-0026). ``predict`` returns the risk score.
+
+    ``feature`` selects the column by name and is the form to use under a feature-group
+    fan-out: each run projects the matrix to its own columns, so a position does not name
+    the same column in every run. ``feature_index`` selects by position in the matrix's
+    column order. Give one of the two.
     """
 
     is_survival_estimator = True
+    # The model adapter hands a DataFrame with named columns, which ``feature`` needs.
+    consumes_named_features = True
 
-    def __init__(self, feature_index=0, alpha=0.1):
+    def __init__(self, feature_index=0, alpha=0.1, feature=None):
         self.feature_index = feature_index
         self.alpha = alpha
+        self.feature = feature
+
+    def _column(self, x):
+        if self.feature is None:
+            return np.asarray(x)[:, [self.feature_index]]
+        if self.feature_index != 0:
+            raise ValueError(
+                f"SingleFeatureCox got feature={self.feature!r} and"
+                f" feature_index={self.feature_index!r}; give one of the two"
+            )
+        if self.feature not in getattr(x, "columns", ()):
+            raise BaselineFeatureNotInMatrix(
+                f"SingleFeatureCox selects the feature {self.feature!r} by name, and the"
+                " matrix has no column with that name"
+            )
+        return x[[self.feature]].to_numpy()
 
     def fit(self, x, y):
         from triage.component.catwalk.estimators.survival import (
             ScaledCoxPHSurvivalAnalysis,
         )
 
-        col = np.asarray(x)[:, [self.feature_index]]
         self._cox = ScaledCoxPHSurvivalAnalysis(alpha=self.alpha)
-        self._cox.fit(col, y)
+        self._cox.fit(self._column(x), y)
         return self
 
     def predict(self, x):
-        col = np.asarray(x)[:, [self.feature_index]]
-        return self._cox.predict(col)
+        return self._cox.predict(self._column(x))

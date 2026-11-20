@@ -405,3 +405,62 @@ def test_a_qualifier_nothing_declares_still_falls_back_but_says_so(monkeypatch):
     assert groups == {"games": ["NEAREST(arenas_within_5km.capacity)", "attendance"]}
     assert len(warnings) == 1
     assert "['arenas_within_5km']" in warnings[0]
+
+
+# ---------------------------------------------------------------- always (#98)
+
+_THREE = {"a": ["a.x"], "b": ["b.x"], "own": ["own.x"]}
+
+
+def test_always_groups_stay_in_every_leave_one_out_subset():
+    subsets = mix_strategies(_THREE, ["all", "leave-one-out"], always=["own"])
+    assert [(s.label, s.group_names) for s in subsets] == [
+        ("all", ("a", "b", "own")),
+        ("leave-one-out:a", ("b", "own")),
+        ("leave-one-out:b", ("a", "own")),
+    ]
+    assert all("own.x" in s.columns for s in subsets)
+
+
+def test_always_groups_join_each_leave_one_in_subset():
+    subsets = mix_strategies(_THREE, ["leave-one-in"], always=["own"])
+    assert [(s.label, s.group_names) for s in subsets] == [
+        ("leave-one-in:a", ("a", "own")),
+        ("leave-one-in:b", ("b", "own")),
+    ]
+
+
+def test_always_groups_join_each_combination_and_do_not_count_toward_the_cap():
+    subsets = mix_strategies(
+        _THREE, ["all-combinations"], always=["own"], all_combinations_max_groups=2
+    )
+    assert [(s.label, s.group_names) for s in subsets] == [
+        ("all-combinations:a", ("a", "own")),
+        ("all-combinations:b", ("b", "own")),
+        ("all-combinations:a+b", ("a", "b", "own")),
+    ]
+
+
+def test_leave_one_out_of_the_only_varied_group_keeps_the_always_groups():
+    subsets = mix_strategies(
+        {"a": ["a.x"], "own": ["own.x"]}, ["all", "leave-one-out"], always=["own"]
+    )
+    assert [(s.label, s.columns) for s in subsets] == [
+        ("all", ("a.x", "own.x")),
+        ("leave-one-out:a", ("own.x",)),
+    ]
+
+
+def test_always_naming_an_unknown_group_is_loud():
+    with pytest.raises(ValueError, match="feature_groups.always.*'nope'"):
+        mix_strategies(_THREE, ["leave-one-out"], always=["nope"])
+
+
+def test_always_naming_every_group_leaves_nothing_to_vary():
+    with pytest.raises(ValueError, match="nothing left to vary"):
+        mix_strategies(_THREE, ["all", "leave-one-out"], always=["a", "b", "own"])
+
+
+def test_always_naming_every_group_is_fine_for_all_alone():
+    subsets = mix_strategies(_THREE, ["all"], always=["a", "b", "own"])
+    assert [s.label for s in subsets] == ["all"]

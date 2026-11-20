@@ -171,8 +171,9 @@ by the size of their ask (`COUNT(resources.date)`) and the plausible story —
 "bigger asks are harder to fully fund" — turns out **anti-predictive** on this
 subset: AUC **0.442**, *below* the coin-flip floor. A rule can be worse than
 nothing, and you only find out by scoring it. (It ranks on a `resources` column,
-so don't pair it with a `feature_groups` leave-one-out that drops that group — its
-feature must be in the matrix.) The full catalog (every `problem_type`, the
+so a `feature_groups` leave-one-out that drops that group is refused — its
+feature must be in the matrix. List the group in `feature_groups.always` to keep it
+in every run.) The full catalog (every `problem_type`, the
 time-series and survival floors) is the
 [**Baselines reference**](/triage-pg/reference/baselines/).
 

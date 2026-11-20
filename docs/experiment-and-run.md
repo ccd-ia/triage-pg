@@ -180,6 +180,10 @@ Subsets that repeat across strategies are de-duplicated; an empty subset (leave-
 group) is skipped. `all-combinations` is guarded by `all_combinations_max_groups` so a fat entity
 graph can't silently explode.
 
+`feature_groups.always: [group, …]` lists groups that every subset keeps. The strategies then vary
+the other groups only, so N in the table counts the groups outside `always`. An estimator that
+selects a column of an `always` group keeps that column in every Run.
+
 **Under the hood (efficient + correct):** featurizer runs **once per split** (the full matrix).
 Each subset is a *column projection* of that one Parquet — the feature subset enters the model's
 identity (its `feature_list` + model-group), so subsets mint distinct, separately-grouped models

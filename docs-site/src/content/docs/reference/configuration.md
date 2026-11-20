@@ -331,6 +331,7 @@ feature_config:
   feature_groups:
     group_by: source_entity
     strategies: [all, leave-one-out, leave-one-in, all-combinations]
+    always: [facilities]         # optional: groups every run keeps
     all_combinations_max_groups: 6
 ```
 
@@ -342,6 +343,14 @@ feature_config:
   Both `definitions` and `group_by` partitions are resolved at validate time —
   the feature manifest is derived from `feature_config` with no database — so
   `n_feature_groups` and `n_runs` are known before anything runs.
+- **`always` lists the groups every run keeps.** The strategies vary the other
+  groups only: `leave-one-out` and `leave-one-in` make one run per group that is
+  not in `always`, and `all-combinations` adds the `always` groups to each
+  combination (they do not count toward `all_combinations_max_groups`). Use it
+  when an estimator in the grid selects a column of that group, so the baseline
+  and the ablation fit in one config. A name that is not a group is an error, and
+  so is a list that names every group while a strategy other than `all` is
+  declared.
 - **Write `definitions` globs against the feature's label.** A generated feature
   name longer than PostgreSQL's 63-byte identifier limit is hash-truncated from
   the tail (`AVG(consultas.frecuencia_cardiaca_en_reposo|interval=P~67a3dcf5`),
