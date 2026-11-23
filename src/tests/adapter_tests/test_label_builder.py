@@ -161,6 +161,40 @@ def test_build_labels_lifecycle_and_edge(db_pool_greenfield):
     assert used == 1
 
 
+def test_build_labels_refreshes_planner_statistics(db_pool_greenfield):
+    """A built labels artifact is analyzed before anything evaluates on it (#102).
+
+    Until then the planner treats its label_hash and label_timespan as almost absent, and
+    the evaluation joins can scan the whole artifact once per prediction."""
+    engine = db_pool_greenfield
+    run_id = _seed_lineage(engine)
+    _seed_outcomes(engine)
+    with engine.connection() as conn:
+        conn.execute("alter table triage.labels set (autovacuum_enabled = false)")
+    cohort_hash = _build_cohort(engine, run_id)
+
+    build_labels(
+        engine,
+        run_id,
+        cohort_artifact_id=cohort_hash,
+        label_query_template=CLASSIFICATION_LABEL_QUERY,
+        as_of_dates=AS_OF_DATES,
+        label_timespans=LABEL_TIMESPANS,
+        problem_type="classification",
+        config={"query": CLASSIFICATION_LABEL_QUERY},
+        source_pins={"outcomes_src": "v1"},
+    )
+
+    with engine.connection() as conn:
+        stats = conn.execute(
+            "select most_common_vals::text as mcv from pg_stats"
+            " where schemaname = 'triage' and tablename = 'labels'"
+            " and attname = 'label_timespan'"
+        ).fetchone()
+    assert stats is not None, "triage.labels was not analyzed after the build"
+    assert "6 mons" in stats["mcv"]
+
+
 def test_build_labels_is_cache_hit_on_rebuild(db_pool_greenfield):
     engine = db_pool_greenfield
     run_id = _seed_lineage(engine)
