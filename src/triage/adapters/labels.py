@@ -242,6 +242,13 @@ def build_labels(
                             "label_timespan": label_timespan,
                         },
                     )
+        # Refresh the planner's statistics before anything reads these rows (#102). Until
+        # autoanalyze runs, the new label_hash and any new label_timespan look almost
+        # absent, and every evaluation query that joins the labels plans for one row.
+        # ANALYZE samples a fixed number of rows, so this costs well under a second
+        # on a table of tens of millions of rows.
+        with db_engine.connection() as conn:
+            conn.execute("analyze triage.labels")
         mark_built(
             db_engine,
             artifact_id,
