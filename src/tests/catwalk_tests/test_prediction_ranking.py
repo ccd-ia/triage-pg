@@ -83,6 +83,27 @@ def test_record_predictions_inserts_rows(greenfield_engine):
     assert _row_count(engine, model_id) == 3
 
 
+def test_record_predictions_refreshes_planner_statistics(greenfield_engine):
+    """The partition that received the rows is analyzed before evaluation reads it (#102)."""
+    engine = greenfield_engine
+    model_id = _seed_model(engine)
+    with engine.connection() as conn:
+        conn.execute(
+            "alter table triage.predictions_default set (autovacuum_enabled = false)"
+        )
+    scores = [
+        {"entity_id": e, "as_of_date": AS_OF_DATE, "score": e / 10} for e in range(1, 6)
+    ]
+    record_predictions(engine, model_id, "test", scores)
+
+    with engine.connection() as conn:
+        reltuples = conn.execute(
+            "select reltuples from pg_class"
+            " where oid = 'triage.predictions_default'::regclass"
+        ).fetchone()["reltuples"]
+    assert reltuples == 5, "triage.predictions_default was not analyzed after the write"
+
+
 def test_record_predictions_is_append_only(greenfield_engine):
     """Re-scoring the SAME (model, entity, as_of_date) APPENDS rows; it never
     overwrites. The history accumulates and the new row has a later

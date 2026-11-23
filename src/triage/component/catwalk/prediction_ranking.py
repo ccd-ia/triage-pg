@@ -46,6 +46,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
+from psycopg import sql
+
 from triage.util.db import DictRowPool
 
 
@@ -149,11 +151,36 @@ def record_predictions(
     )
     with db_engine.connection() as conn, conn.cursor() as cur:
         cur.executemany(insert, rows)
+    _analyze_partitions(db_engine, int(model_id))
 
     logger.debug(
         f"Appended {len(rows)} prediction rows for model {model_id} ({split_kind})"
     )
     return len(rows)
+
+
+def _analyze_partitions(db_engine: DictRowPool, model_id: int) -> None:
+    """ANALYZE the partitions that hold this model's predictions (#102).
+
+    Until autoanalyze reaches a large partition, a new model and a new as_of_date look like
+    one row to the planner. ANALYZE samples a fixed number of rows (under a second on a
+    79-million-row partition), and only the partitions holding this model are analyzed, not
+    every quarter of the table.
+    """
+    with db_engine.connection() as conn:
+        partitions = conn.execute(
+            "select n.nspname, c.relname from pg_class c"
+            " join pg_namespace n on n.oid = c.relnamespace"
+            " where c.oid in (select distinct p.tableoid from triage.predictions p"
+            " where p.model_id = %(m)s)",
+            {"m": model_id},
+        ).fetchall()
+        for part in partitions:
+            conn.execute(
+                sql.SQL("analyze {}").format(
+                    sql.Identifier(part["nspname"], part["relname"])
+                )
+            )
 
 
 def fetch_ranks(
