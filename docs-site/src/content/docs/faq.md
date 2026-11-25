@@ -96,6 +96,23 @@ matrices are rebuilt, not reused.
 
 ---
 
+## My first run after upgrading to v1.6.5 rebuilt every matrix.
+
+triage-pg v1.6.5 runs on featurizer v1.6.0. The engine version is part of every
+artifact's identity, so the first run after the upgrade builds features,
+matrices and models again instead of reusing them. Later runs reuse them as
+before.
+
+No feature changes name or value. featurizer v1.6.0 changes only how it reads
+the feature query: it runs the query once instead of twice, and it decodes the
+result in bounded batches. Before, featurizer held the whole decoded result in
+memory at once, so its peak memory grew with rows × columns. A matrix of
+millions of rows and hundreds of columns could exhaust the machine's memory.
+On the DirtyDuck tutorial, the eight matrices and every evaluation came out
+identical on both versions, and featurizer took 1.9 s in place of 3.5 s.
+
+---
+
 ## My features changed after upgrading to v1.5.0.
 
 triage-pg v1.5.0 runs on featurizer v1.5.0, which changes the values of some
