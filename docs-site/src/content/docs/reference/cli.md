@@ -24,7 +24,7 @@ Two ergonomics used throughout:
 
 ```console
 $ uv run triage --version
-triage-pg 1.6.4
+triage-pg 1.6.5
 ```
 
 ## Set up a project database
@@ -445,7 +445,7 @@ schema's tables and views, each with a row estimate) and `warnings`:
 $ triage status --json --full
 {
   "contract": 1,
-  "triage_version": "1.6.4",
+  "triage_version": "1.6.5",
   "project_root": "/…/example/dirtyduck",
   "project": "food",
   "database": { "connected": true, "detail": "pg 16" },
@@ -1184,7 +1184,7 @@ experiment), `triage gc` (collect artifacts unreachable from any root),
 `triage runs status` (AWS Batch backfill in the cloud profile).
 
 `triage serve` starts the dashboard from any project that has the `dashboard`
-extra (`uv add 'triage[dashboard] @ git+https://github.com/ccd-ia/triage-pg.git@v1.6.4'`). It finds the database the same way
+extra (`uv add 'triage[dashboard] @ git+https://github.com/ccd-ia/triage-pg.git@v1.6.5'`). It finds the database the same way
 every command does: `database.yaml`, then `DATABASE_URL`, then `PG*`. It
 refuses the global `--dbfile` (exit code 2), because the dashboard would not
 read that file. It passes `--host` (default `127.0.0.1`), `--port` (default
