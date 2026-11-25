@@ -32,7 +32,7 @@
     { "name": "Potash, Eric", "type": "ProjectMember" },
     { "name": "Rodolfa, Kit", "type": "ProjectMember" },
     { "name": "Salomon, Erika", "type": "ProjectMember" },
-    { "name": "Sobrino, Fernanda", "type": "ProjectMember" },
+    { "name": "Sobrino, Fernanda", "type": "ProjectMember", "orcid": "0000-0001-8901-6022" },
     { "name": "Walsh, Joe", "type": "ProjectMember" }
   ],
   "related_identifiers": [
