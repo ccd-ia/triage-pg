@@ -6,7 +6,7 @@
 # .zenodo.json's `contributors`, which is what the DOI record carries.
 __author__ = """Adolfo De Unánue"""
 __email__ = "adolfo+git@unanue.mx"
-__version__ = "1.6.4"
+__version__ = "1.6.5"
 
 from .logging import configure_logging
 
